@@ -10,6 +10,11 @@ export const hexOf = (buf: ArrayBuffer | Uint8Array): string =>
   [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 export const hex = async (bytes: BufferSource): Promise<string> => hexOf(await crypto.subtle.digest('SHA-256', bytes));
 export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+/** An answer of 503 because the object stopped before it answered (a deploy resets the objects it moves to a new
+ * version): logged, so the deploy's telemetry gate can tell it from a fault (scripts/telemetry.ts). */
+export const stopped = (e: unknown): void => {
+  console.warn(JSON.stringify({ 'tape.stopped': messageOf(e).slice(0, 300) }));
+};
 export const randomHex = (bytes: number): string => hexOf(crypto.getRandomValues(new Uint8Array(bytes)));
 
 const TRACE_TTL = 7 * 24 * 3600; // seconds a signed trace URL lasts

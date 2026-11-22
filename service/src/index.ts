@@ -49,6 +49,7 @@ import { manifest, mcp, policyOf, refusal } from './tools.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
 import {
   PUBLISHED,
+  stopped,
   SEGMENT,
   SOURCE_MAX,
   authorized,
@@ -344,6 +345,17 @@ const tracePage = async (url: URL, env: Env, ctx: ExecutionContext, m: RegExpMat
 const PUBLIC = /^\/p\/([^/]+)\/([^/]+)(\/.*)?$/;
 const PUBLIC_BODY = 64 * 1024;
 const TOO_LARGE = `a public request's body is at most ${PUBLIC_BODY} bytes`;
+// During a split deployment an object runs the version its id was given, whatever version the Worker is (the
+// version-override header pins the Worker only): the list's object may be the version before the list, which has no
+// isPublished. Nothing was published to a list that version does not keep, so the name is not published.
+const isPublished = async (ctx: ExecutionContext, key: string): Promise<boolean> => {
+  try {
+    return await ctx.exports.Name.getByName(PUBLISHED).isPublished(key);
+  } catch (e) {
+    if (messageOf(e).includes('does not implement the method')) return false;
+    throw e;
+  }
+};
 const publicRoute = async (
   request: Request,
   env: Env,
@@ -359,8 +371,7 @@ const publicRoute = async (
   if (Number(request.headers.get('content-length') ?? 0) > PUBLIC_BODY) return reply({ error: TOO_LARGE }, 413);
   // only a published name's own object is asked anything: for any other name, the one object that lists the
   // published names answers, and no object of the account is made
-  if (!(await ctx.exports.Name.getByName(PUBLISHED).isPublished(`${account}/${name}`)))
-    return reply({ error: 'no such page' }, 404);
+  if (!(await isPublished(ctx, `${account}/${name}`))) return reply({ error: 'no such page' }, 404);
   const stub = ctx.exports.Name.getByName(`${account}/${name}`),
     p = await stub.publication();
   if (!p.published || p.latest === null) return reply({ error: 'no such page' }, 404);
@@ -376,7 +387,8 @@ const publicRoute = async (
       { request: again, stub, account, name, url, token: env.TOKEN, ctx },
       { version: p.latest, path, via: 'public' },
     );
-  } catch {
+  } catch (e) {
+    stopped(e);
     return reply({ error: STOPPED }, 503);
   }
 };
@@ -487,6 +499,7 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
       const stub = ctx.exports.Name.getByName(`${account}/${name}`);
       return await handle({ request, m, account, name, url, token: env.TOKEN, origin: url.origin, ctx, stub });
     } catch (e) {
+      stopped(e);
       return reply({ error: STOPPED, reason: messageOf(e) }, 503);
     }
   }

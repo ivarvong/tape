@@ -4,7 +4,7 @@ import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
 import type { Name } from './name.ts';
 import { RouterTrace, store } from './spans.ts';
-import { BODY_MAX, SOURCE_MAX, bodyOf, hex, messageOf, reply, signed, tapeRequest, tooLarge } from './web.ts';
+import { BODY_MAX, SOURCE_MAX, bodyOf, hex, messageOf, reply, signed, stopped, tapeRequest, tooLarge } from './web.ts';
 
 export type Args = {
   request: Request;
@@ -173,6 +173,7 @@ export async function run(
       },
       messageOf(e),
     );
+    stopped(e);
     out = reply({ error: STOPPED, outcome: 'unknown', reason: messageOf(e) }, 503);
   }
   rt.finish(out.status);
