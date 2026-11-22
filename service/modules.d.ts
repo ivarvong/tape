@@ -23,6 +23,8 @@ declare namespace Cloudflare {
     TOKEN: string;
     // the version this is (cloudflare.config.ts); the tests have none
     VERSION?: WorkerVersionMetadata;
+    // tape-mcp, the hosted compiler and runner (cloudflare.config.ts); in the tests, an echo (vitest.config.ts)
+    MCP: Fetcher;
     // the tests' seeds and switches (vitest.config.ts)
     JEPSEN_SEEDS: string;
     KV_SEEDS: string;

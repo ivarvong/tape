@@ -28,6 +28,10 @@
 //   POST /tools/:account/:name/:fn  body: the JSON message -> { ok, output | error, trace_url, otlp_url }
 //   POST /mcp/:account              MCP (streamable HTTP, JSON responses): initialize, tools/list, tools/call
 //
+// The hosted compiler and runner, with no token: tape-mcp (mcp/, docs/mcp.md), through the MCP service binding.
+//   POST /mcp                       MCP: the tools compile and run, over any program posted
+//   POST /v1/compile, POST /v1/run  the same two tools as plain JSON
+//
 // One Durable Object per account/name (Name). Each upload is a row in its SQLite: source, the plain and traced
 // Wasm, the trace sites, the hash, its migration chain and the time; the row id is the version. The data is per
 // name: one facet, loaded through the Worker Loader with every live version's builds, holds the program's tables.
@@ -511,9 +515,17 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
   return reply({ error: 'no such route' }, 404);
 };
 
+// The hosted compiler and runner (docs/mcp.md) is tape-mcp, a Worker of its own, reached through the MCP service
+// binding. Its routes need no token, so they are passed before the token check, and the request is passed as it came:
+// tape-mcp keys its rate limit and log on the client's address (cf-connecting-ip) and refuses a request with an
+// Origin. /mcp/:account is not one of them: it is an account's tools.
+const HOSTED: ReadonlySet<string> = new Set(['/mcp', '/v1/compile', '/v1/run']);
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return secured(await route(request, env, ctx), new URL(request.url).pathname, env.VERSION?.id);
+    const path = new URL(request.url).pathname;
+    if (HOSTED.has(path)) return secured(await env.MCP.fetch(request), path, env.VERSION?.id);
+    return secured(await route(request, env, ctx), path, env.VERSION?.id);
   },
 } satisfies ExportedHandler<Env>;
 

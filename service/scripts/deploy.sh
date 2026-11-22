@@ -9,14 +9,15 @@
 #  3. build (the site and the Worker, tape-version = the commit) and upload NEW (cf workers versions create): in no
 #     deployment yet; NEW must have the TOKEN secret
 #  4. route PREV 100% / NEW 0%
-#  5. pinned smoke (scripts/smoke.ts --pin NEW --sha <commit>): the Worker and its static assets as NEW serves them.
+#  5. pinned smoke (scripts/smoke.ts --pin NEW --sha <commit>): the Worker and its static assets as NEW serves them;
+#     and scripts/mcp-smoke.ts: /mcp through NEW's service binding to tape-mcp (deploy tape-mcp first: mcp/scripts/deploy.sh).
 #     The Durable Objects still run PREV: an object runs the version the deployment gave its id, whatever version
 #     the override header pins the Worker to, so this smoke is NEW's Worker against PREV's objects, as in the ramp.
 #  6. telemetry gate on NEW (scripts/telemetry.ts): no invocation not ok, no 5xx but the 503s a deploy's object reset
 #     gives (logged tape.stopped), no error logs; and which version the objects ran
 #  7. ramp 10% -> 50% -> 100% (PREV first in every split, so an object given NEW keeps it): at each step a dwell of
 #     DWELL seconds under the probe (scripts/probe.ts, unpinned, PROBE_RPS a second), then the telemetry gate on NEW
-#  8. at 100%: wait until unpinned requests answer from NEW, the prod smoke unpinned, the telemetry gate over the run
+#  8. at 100%: wait until unpinned requests answer from NEW, the prod smokes unpinned, the telemetry gate over the run
 # A failure in 4-8 routes 100% back to PREV, but only while the deployment is still the one this run last wrote (no
 # one else's deployment is touched), and nothing but PREV is restored. Each run appends to $DEPLOY_LOG.
 # Rollback by hand (to the PREV a run recorded):
@@ -137,6 +138,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ $ok = 1 ] || back "pinned requests never reached $NEW"
 node scripts/smoke.ts "$BASE" --pin "$NEW" --sha "$SHA" || back "pinned smoke"
+node scripts/mcp-smoke.ts "$BASE/mcp" --pin "$WORKER=$NEW" || back "pinned MCP smoke (/mcp through the binding to tape-mcp)"
 
 # ---- 6. telemetry on NEW
 say "telemetry gate (0%)"
@@ -167,6 +169,9 @@ say "prod smoke"
 node scripts/smoke.ts "$BASE" --sha "$SHA" > "$STATE/smoke.out" 2>&1 || { cat "$STATE/smoke.out"; back "prod smoke"; }
 cat "$STATE/smoke.out"
 note "prod smoke: $(tail -1 "$STATE/smoke.out")"
+node scripts/mcp-smoke.ts "$BASE/mcp" > "$STATE/smoke.out" 2>&1 || { cat "$STATE/smoke.out"; back "prod MCP smoke"; }
+cat "$STATE/smoke.out"
+note "prod MCP smoke: $(tail -1 "$STATE/smoke.out")"
 node scripts/telemetry.ts "$NEW" "$T0" --min 10 --prev "$PREV" > "$STATE/telemetry.out" 2>&1 || { cat "$STATE/telemetry.out"; back "telemetry over the run"; }
 cat "$STATE/telemetry.out"
 note "run: $(grep '^telemetry ' "$STATE/telemetry.out"); $(grep 'durable object' "$STATE/telemetry.out" | sed 's/^ *//')"

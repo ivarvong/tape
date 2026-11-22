@@ -15,6 +15,19 @@ const miniflare = {
     PARITY_SEEDS: process.env.PARITY_SEEDS ?? '',
   },
   durableObjects: { NAMES: { className: 'Name', useSQLite: true } },
+  // tape-mcp stands in as an echo of the request it is given (test/mcp-route.test.ts)
+  serviceBindings: {
+    MCP: async (request: Request): Promise<Response> =>
+      Response.json(
+        {
+          method: request.method,
+          url: request.url,
+          headers: Object.fromEntries(request.headers),
+          body: await request.text(),
+        },
+        { status: 299, headers: { 'tape-mcp-version': 'echo' } },
+      ),
+  },
 };
 // Files run one at a time: some tests give a call a 50 ms budget, which a cold Durable Object meets only when another
 // test file is not loading the machine at the same time.
