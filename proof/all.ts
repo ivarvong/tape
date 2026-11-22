@@ -1,6 +1,6 @@
 // proof/all.ts: every check in the repository, one after another, and one table at the end.
 //   node proof/all.ts            everything (about twenty minutes on two cores)
-//   node proof/all.ts --quick    without the service suite, the all-programs simulation and the planted bugs
+//   node proof/all.ts --quick    without the service and mcp suites, the all-programs simulation and the planted bugs
 //                                (the apps' planted bugs too)
 //   node proof/all.ts --only sim a part whose name contains the word
 // Exit 0 only when every row passed. A row passes when its command exits 0 and, where a number is recorded below
@@ -30,6 +30,15 @@ type Part = readonly [name: string, cmd: string[] | null, expect?: Expect, cwd?:
 const service: Part = existsSync(`${root}service/node_modules`)
   ? ['service suite (workerd)', ['npx', 'vitest', 'run'], /Tests\s+\d+ passed/, 'service']
   : ['service suite (workerd): SKIPPED, run npm ci in service/ first', null];
+const mcpReady = existsSync(`${root}mcp/node_modules`);
+const mcpSuite: Part = mcpReady
+  ? [
+      'mcp suite (workerd): tape-mcp with the real Loader and rate limiter',
+      ['npx', 'vitest', 'run'],
+      /Tests\s+\d+ passed/,
+      'mcp',
+    ]
+  : ['mcp suite (workerd): SKIPPED, run npm ci in mcp/ first', null];
 /** What --quick leaves out. */
 const slow: Part[] = [
   // sim-all exits 1 on any finding but the one it expects (trap.tape); the number of programs is free to grow
@@ -63,12 +72,24 @@ const slow: Part[] = [
     [node, 'apps/playground/test.ts', '--plants'],
     /^all 18 plants caught$/m,
   ],
+  [
+    'mcp/test.ts --plants: 28 bugs planted in tape-mcp, each caught by its test',
+    [node, 'mcp/test.ts', '--plants'],
+    /^all 28 plants caught$/m,
+  ],
   service,
+  mcpSuite,
 ];
 const all: Part[] = [
   ['format: the toolchain is as prettier writes it', ['npx', 'prettier', '--check', '.']],
   ['types: every file not on proof/untyped.txt passes tsc under strict', ['npx', 'tsc', '--noEmit']],
   ['types: the service, against the Workers runtime types', ['npx', 'tsc', '--noEmit', '-p', 'service/tsconfig.json']],
+  ...(mcpReady
+    ? ([
+        ["types: tape-mcp's Node side (its test, and the tools it runs)", ['npx', 'tsc', '--noEmit', '-p', 'mcp']],
+        ['types: tape-mcp, against the Workers runtime types', ['npx', 'tsc', '--noEmit', '-p', 'mcp/test']],
+      ] satisfies Part[])
+    : [['types: tape-mcp: SKIPPED, run npm ci in mcp/ first', null] satisfies Part]),
   ["types: the playground, with the browser's types", ['npx', 'tsc', '--noEmit', '-p', 'apps/playground']],
   ["types: the service's build and deploy scripts", ['npx', 'tsc', '--noEmit', '-p', 'service/scripts']],
   ["types: the highlighter's page, with the browser's types", ['npx', 'tsc', '--noEmit', '-p', 'apps/highlight']],
@@ -160,6 +181,11 @@ const all: Part[] = [
     /^all 6 gates pass$/m,
   ],
   [
+    "mcp/test.ts: tape-mcp's tools and HTTP face, in Node, against README.md and the playground's traces",
+    [node, 'mcp/test.ts'],
+    /^all 15 tests pass$/m,
+  ],
+  [
     'apps/trace/test.ts: trace.tape against what the OTLP alone says the picture should show',
     [node, 'apps/trace/test.ts'],
   ],
@@ -232,7 +258,7 @@ function runPart([name, cmd, expect, cwd]: Part): Row {
 const rows = parts.map(runPart);
 const bad = rows.filter(r => !r.ok);
 console.log(
-  `\n${rows.length} parts, ${rows.length - bad.length} passed, ${bad.length} failed, ${rows.reduce((n, r) => n + r.s, 0)} s${quick ? ' (quick: the service suite, sim-all, sim-plants and the --plants runs of the apps were not run)' : ''}`,
+  `\n${rows.length} parts, ${rows.length - bad.length} passed, ${bad.length} failed, ${rows.reduce((n, r) => n + r.s, 0)} s${quick ? ' (quick: the service and mcp suites, sim-all, sim-plants and the --plants runs of the apps were not run)' : ''}`,
 );
 for (const r of bad) console.log(`  FAILED: ${r.name}`);
 process.exit(bad.length > 0 ? 1 : 0);
