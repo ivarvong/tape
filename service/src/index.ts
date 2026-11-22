@@ -478,18 +478,45 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
   return reply({ error: 'no such route' }, 404);
 };
 
+// ---- The headers on every response the Worker gives (the site's pages and files are the static assets', with the
+// headers in their _headers, and only they may be indexed). Nothing the Worker answers is sniffed, framed or indexed, and nothing runs script: the API's JSON and text
+// are sandboxed with nothing allowed; a trace page may use its own inline style; a program's own HTML or SVG (its
+// operator route and its public route) may use inline style and data: images and post its forms to itself, and
+// runs sandboxed, so it has no origin and runs no script.
+export const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
+export const TRACE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox";
+export const PROGRAM_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms";
+const PROGRAM_PATH = /^\/p\/|^\/[^/]+\/[^/]+\/v\/\d+(\/|$)/;
+export const secured = (res: Response, path: string): Response => {
+  const out = new Response(res.body, res),
+    h = out.headers,
+    type = h.get('content-type') ?? '',
+    active = /^(text\/html|image\/svg\+xml)\b/.test(type);
+  h.set('x-content-type-options', 'nosniff');
+  h.set('x-frame-options', 'DENY');
+  h.set('referrer-policy', 'no-referrer');
+  h.set('x-robots-tag', 'noindex');
+  h.set('content-security-policy', !active ? API_CSP : PROGRAM_PATH.test(path) ? PROGRAM_CSP : TRACE_CSP);
+  return out;
+};
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (env.TOKEN === '') return reply({ error: 'unauthorized' }, 401);
-    const url = new URL(request.url),
-      page = request.method === 'GET' ? TRACE_PAGE.exec(url.pathname) : null;
-    if (page) return tracePage(url, env, ctx, page);
-    const operator = authorized(request, env.TOKEN);
-    const tool = await toolRoute(request, env, ctx, url, operator);
-    if (tool) return tool;
-    const open = PUBLIC.exec(url.pathname);
-    if (open) return publicRoute(request, env, ctx, url, open);
-    if (!operator) return reply({ error: 'unauthorized' }, 401);
-    return (await operatorRoute(request, env, ctx, url)) ?? programRoute(request, env, ctx, url);
+    return secured(await route(request, env, ctx), new URL(request.url).pathname);
   },
 } satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  if (env.TOKEN === '') return reply({ error: 'unauthorized' }, 401);
+  const url = new URL(request.url),
+    page = request.method === 'GET' ? TRACE_PAGE.exec(url.pathname) : null;
+  if (page) return tracePage(url, env, ctx, page);
+  const operator = authorized(request, env.TOKEN);
+  const tool = await toolRoute(request, env, ctx, url, operator);
+  if (tool) return tool;
+  const open = PUBLIC.exec(url.pathname);
+  if (open) return publicRoute(request, env, ctx, url, open);
+  if (!operator) return reply({ error: 'unauthorized' }, 401);
+  return (await operatorRoute(request, env, ctx, url)) ?? programRoute(request, env, ctx, url);
+}
