@@ -1,0 +1,101 @@
+// Runs in workerd: content types from the status line (host.ts responseOf), and a published name's public route
+// (/p/:account/:name/…): no token, the latest live version, `public` on the request line (std/http caller Anyone).
+import { describe, expect, it } from 'vitest';
+import page from './fixtures/page.tape?raw';
+import hello from '../../examples/hello.tape?raw';
+import { responseOf } from '../../host.ts';
+import { anyone, at, call, got } from './help.ts';
+
+const enc = new TextEncoder(),
+  dec = new TextDecoder();
+const head = (s: string): [number, string | undefined, string] => {
+  const r = responseOf(enc.encode(s));
+  return [r.status, r.type, dec.decode(r.body)];
+};
+
+describe('content types', () => {
+  it('reads STATUS, or STATUS SP TYPE from a closed list, from the first line', () => {
+    expect(head('201\n{}')).toEqual([201, 'text/plain; charset=utf-8', '{}']);
+    expect(head('200 text/html\n<p>')).toEqual([200, 'text/html; charset=utf-8', '<p>']);
+    expect(head('404 application/json\n{}')).toEqual([404, 'application/json', '{}']);
+    // anything else is all body, as before: an unknown type, a header smuggled into the type, no status line
+    expect(head('200 text/javascript\nx')).toEqual([200, 'text/plain; charset=utf-8', '200 text/javascript\nx']);
+    expect(head('200 text/html; x: y\nx')).toEqual([200, 'text/plain; charset=utf-8', '200 text/html; x: y\nx']);
+    expect(head('hello')).toEqual([200, 'text/plain; charset=utf-8', 'hello']);
+    expect(head('99\nx')).toEqual([200, 'text/plain; charset=utf-8', '99\nx']);
+  });
+
+  it('serves the type the program chose', async () => {
+    const v = await got('/ivar/page', { method: 'POST', body: page });
+    expect(at(v, 'version')).toBe(1);
+    const r = await call('/ivar/page/v/1/');
+    expect([r.status, r.headers.get('content-type'), await r.text()]).toEqual([
+      200,
+      'text/html; charset=utf-8',
+      '<p>operator 0</p>',
+    ]);
+    const j = await call('/ivar/page/v/1/n.json');
+    expect([j.headers.get('content-type'), await j.json()]).toEqual(['application/json', { n: 0 }]);
+    // an older program's plain status line is still text/plain
+    await call('/ivar/hello', { method: 'POST', body: hello });
+    expect((await call('/ivar/hello/v/1/hello/ada')).headers.get('content-type')).toBe('text/plain; charset=utf-8');
+  });
+});
+
+describe('public route', () => {
+  it('answers 404 until the operator publishes the name, and only with a token may it be published', async () => {
+    await call('/ivar/pub', { method: 'POST', body: page });
+    expect((await anyone('/p/ivar/pub/')).status).toBe(404);
+    expect((await anyone('/p/ivar/nothing/')).status).toBe(404);
+    expect((await anyone('/_public/ivar/pub', { method: 'PUT', body: '{"published":true}' })).status).toBe(401);
+    expect((await call('/_public/ivar/nothing', { method: 'PUT', body: '{"published":true}' })).status).toBe(404);
+    expect((await call('/_public/ivar/pub', { method: 'PUT', body: '{"published":"yes"}' })).status).toBe(400);
+    const p = await got('/_public/ivar/pub', { method: 'PUT', body: '{"published":true}' });
+    expect([at(p, 'published'), at(p, 'latest'), at(p, 'url')]).toEqual([true, 1, 'http://tape/p/ivar/pub/']);
+    const r = await anyone('/p/ivar/pub/');
+    expect([r.status, r.headers.get('content-type'), await r.text()]).toEqual([
+      200,
+      'text/html; charset=utf-8',
+      '<p>anyone 0</p>',
+    ]);
+    // no trace link: a trace is the operator's
+    expect([
+      r.headers.get('tape-trace-url'),
+      r.headers.get('tape-request-id'),
+      r.headers.get('tape-supervisor-span'),
+    ]).toEqual([null, null, null]);
+  });
+
+  it("runs the latest version, tells the program the caller, and keeps the operator's routes the operator's", async () => {
+    await call('/ivar/pub2', { method: 'POST', body: page });
+    await call('/_public/ivar/pub2', { method: 'PUT', body: '{"published":true}' });
+    expect((await anyone('/p/ivar/pub2/visit', { method: 'POST', body: 'ada' })).status).toBe(201);
+    expect(await (await anyone('/p/ivar/pub2/')).text()).toBe('<p>anyone 1</p>');
+    expect((await anyone('/p/ivar/pub2/reset', { method: 'POST' })).status).toBe(403);
+    expect((await call('/ivar/pub2/v/1/reset', { method: 'POST' })).status).toBe(200);
+    // the operator's view of the same data
+    expect(await (await call('/ivar/pub2/v/1/')).text()).toBe('<p>operator 1</p>');
+    // a second version is what the public route runs next
+    await call('/ivar/pub2', {
+      method: 'POST',
+      body: page.replace('\\(who(caller)) \\(n)', '\\(who(caller)) n=\\(n)'),
+    });
+    expect(await (await anyone('/p/ivar/pub2/')).text()).toBe('<p>anyone n=1</p>');
+    // the request line cannot be forged from the path: a space in it arrives percent-encoded
+    expect((await anyone('/p/ivar/pub2/reset%20x', { method: 'POST' })).status).toBe(404);
+    expect((await anyone('/p/ivar/pub2/', { method: 'DELETE' })).status).toBe(405);
+    expect((await anyone('/p/ivar/pub2/visit', { method: 'POST', body: 'x'.repeat(64 * 1024 + 1) })).status).toBe(413);
+    // unpublished: 404 again, and the operator's route still runs
+    expect(at(await got('/_public/ivar/pub2', { method: 'PUT', body: '{"published":false}' }), 'published')).toBe(
+      false,
+    );
+    expect((await anyone('/p/ivar/pub2/')).status).toBe(404);
+    expect((await call('/ivar/pub2/v/2/')).status).toBe(200);
+  });
+
+  it('never publishes a KV shard or a tool, and needs a token for every other route', async () => {
+    expect((await call('/_public/ivar/kv-x', { method: 'PUT', body: '{"published":true}' })).status).toBe(400);
+    expect((await anyone('/p/ivar/tool-x/')).status).toBe(404);
+    expect((await anyone('/ivar/pub/v/1/')).status).toBe(401);
+  });
+});

@@ -1,0 +1,825 @@
+{
+ "made_by": "node proof/sim-transcript.ts",
+ "sources": "e9723d8c41248500",
+ "requests": [
+  {
+   "method": "POST",
+   "path": "/events",
+   "body": "{\"key\":\"k1\",\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\"}",
+   "status": 201,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"onsale\",\"tiers\":[]}"
+  },
+  {
+   "method": "POST",
+   "path": "/ann",
+   "body": "{\"key\":\"k2\",\"tier\":3,\"buyer\":\"balcony\",\"qty\":1,\"seconds\":3000}",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k3\",\"name\":\"front row\",\"price\":2,\"capacity\":1}",
+   "status": 201,
+   "answer": "{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"onsale\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/1/release",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"onsale\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/audit",
+   "body": "",
+   "status": 200,
+   "answer": "{\"tiers\":[{\"id\":1,\"event\":1,\"capacity\":20,\"left\":20},{\"id\":2,\"event\":1,\"capacity\":50,\"left\":50},{\"id\":3,\"event\":2,\"capacity\":4,\"left\":4},{\"id\":4,\"event\":2,\"capacity\":100,\"left\":100},{\"id\":5,\"event\":3,\"capacity\":1,\"left\":1}],\"holds\":[],\"tickets\":[],\"waitlist\":[]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"onsale\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/me?ann",
+   "body": "",
+   "status": 200,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Tickets of </title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>Tickets of </h1><table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr></table><h2>Holds</h2><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 202,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k4\",\"name\":\"floor\",\"price\":2,\"capacity\":2}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k4\",\"name\":\"floor\",\"price\":2,\"capacity\":2}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k3\",\"name\":\"general\",\"price\":1,\"capacity\":5}",
+   "status": 200,
+   "answer": "{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}"
+  },
+  {
+   "method": "GET",
+   "path": "/hold?bob",
+   "body": "",
+   "status": 404,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>No such hold</title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>No such hold</h1><p class=bad>There is no hold with that id.</p><p><a href=\"./\">Back to the events</a></p><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/1/release",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/holds/5/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/4/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events",
+   "body": "",
+   "status": 200,
+   "answer": "[{\"id\":1,\"name\":\"Tape Live: The Retry Tour\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":1,\"event\":1,\"name\":\"floor\",\"price\":8500,\"capacity\":20,\"left\":20},{\"id\":2,\"event\":1,\"name\":\"balcony\",\"price\":4500,\"capacity\":50,\"left\":50}]},{\"id\":2,\"name\":\"Idempotency Unplugged\",\"starts\":\"2026-12-12T19:30\",\"state\":\"onsale\",\"tiers\":[{\"id\":3,\"event\":2,\"name\":\"front row\",\"price\":12000,\"capacity\":4,\"left\":4},{\"id\":4,\"event\":2,\"name\":\"general\",\"price\":3000,\"capacity\":100,\"left\":100}]},{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}]"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/1/release",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/1/release",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/users/bob/tickets",
+   "body": "",
+   "status": 200,
+   "answer": "[]"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/5/checkout",
+   "body": "{\"card\":\"visa-4242\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/3/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k5\",\"name\":\"balcony\",\"price\":2,\"capacity\":1}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/2/transfer",
+   "body": "{\"from\":\"general\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/2/transfer",
+   "body": "{\"from\":\"general\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/audit",
+   "body": "",
+   "status": 200,
+   "answer": "{\"tiers\":[{\"id\":1,\"event\":1,\"capacity\":20,\"left\":20},{\"id\":2,\"event\":1,\"capacity\":50,\"left\":50},{\"id\":3,\"event\":2,\"capacity\":4,\"left\":4},{\"id\":4,\"event\":2,\"capacity\":100,\"left\":100},{\"id\":5,\"event\":3,\"capacity\":1,\"left\":1}],\"holds\":[],\"tickets\":[],\"waitlist\":[]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k6\",\"name\":\"general\",\"price\":3,\"capacity\":2}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k4\",\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":3}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/2/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/2/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/4/checkout",
+   "body": "{\"card\":\"visa-4242\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events",
+   "body": "",
+   "status": 200,
+   "answer": "[{\"id\":1,\"name\":\"Tape Live: The Retry Tour\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":1,\"event\":1,\"name\":\"floor\",\"price\":8500,\"capacity\":20,\"left\":20},{\"id\":2,\"event\":1,\"name\":\"balcony\",\"price\":4500,\"capacity\":50,\"left\":50}]},{\"id\":2,\"name\":\"Idempotency Unplugged\",\"starts\":\"2026-12-12T19:30\",\"state\":\"onsale\",\"tiers\":[{\"id\":3,\"event\":2,\"name\":\"front row\",\"price\":12000,\"capacity\":4,\"left\":4},{\"id\":4,\"event\":2,\"name\":\"general\",\"price\":3000,\"capacity\":100,\"left\":100}]},{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}]"
+  },
+  {
+   "method": "POST",
+   "path": "/events/2/tiers",
+   "body": "{\"key\":\"k7\",\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":2}",
+   "status": 201,
+   "answer": "{\"id\":6,\"event\":2,\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":2,\"left\":2}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/2/cancel",
+   "body": "",
+   "status": 202,
+   "answer": "{\"id\":2,\"name\":\"Idempotency Unplugged\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":3,\"event\":2,\"name\":\"front row\",\"price\":12000,\"capacity\":4,\"left\":4},{\"id\":4,\"event\":2,\"name\":\"general\",\"price\":3000,\"capacity\":100,\"left\":100},{\"id\":6,\"event\":2,\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":2,\"left\":2}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/me?ann",
+   "body": "",
+   "status": 200,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Tickets of </title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>Tickets of </h1><table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr></table><h2>Holds</h2><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k8\",\"name\":\"front row\",\"price\":2,\"capacity\":6}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/4/checkout",
+   "body": "{\"card\":\"visa-4242\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/5/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k9\",\"name\":\"Tape Live: The Retry Tour\",\"price\":1}",
+   "status": 400,
+   "answer": "{\"error\":\"missing key \\\"capacity\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k4\",\"name\":\"front row\",\"price\":6,\"capacity\":2}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/me?bob",
+   "body": "",
+   "status": 200,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Tickets of </title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>Tickets of </h1><table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr></table><h2>Holds</h2><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "POST",
+   "path": "/events/1/tiers",
+   "body": "{\"key\":\"k6\",\"name\":\"balcony\",\"price\":4,\"capacity\":1}",
+   "status": 201,
+   "answer": "{\"id\":7,\"event\":1,\"name\":\"balcony\",\"price\":4,\"capacity\":1,\"left\":1}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds/5/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/users/bob/tickets",
+   "body": "",
+   "status": 200,
+   "answer": "[]"
+  },
+  {
+   "method": "GET",
+   "path": "/hold?ann",
+   "body": "",
+   "status": 404,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>No such hold</title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>No such hold</h1><p class=bad>There is no hold with that id.</p><p><a href=\"./\">Back to the events</a></p><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "POST",
+   "path": "/events/2/tiers",
+   "body": "{\"key\":\"k7\",\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":2}",
+   "status": 200,
+   "answer": "{\"id\":6,\"event\":2,\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":2,\"left\":2}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds",
+   "body": "{\"key\":\"k10\",\"tier\":6,\"buyer\":\"balcony\",\"qty\":2}",
+   "status": 409,
+   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/holds/2",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/me?bob",
+   "body": "",
+   "status": 200,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Tickets of </title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>Tickets of </h1><table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr></table><h2>Holds</h2><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds",
+   "body": "{\"key\":\"k10\",\"tier\":6,\"buyer\":\"balcony\",\"qty\":2}",
+   "status": 409,
+   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events",
+   "body": "{\"key\":\"k10\",\"name\":\"demo-1-floor\",\"starts\":\"2026-12-05T20:00\",\"tiers\":[{\"key\":\"k11\",\"name\":\"ann\",\"price\":3,\"capacity\":2}]}",
+   "status": 201,
+   "answer": "{\"id\":4,\"name\":\"demo-1-floor\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":8,\"event\":4,\"name\":\"ann\",\"price\":3,\"capacity\":2,\"left\":2}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k12\",\"name\":\"cy\",\"price\":4,\"capacity\":2}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/1/tiers",
+   "body": "{\"key\":\"k6\",\"name\":\"balcony\",\"price\":4,\"capacity\":1}",
+   "status": 200,
+   "answer": "{\"id\":7,\"event\":1,\"name\":\"balcony\",\"price\":4,\"capacity\":1,\"left\":1}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k4\",\"name\":\"general\",\"price\":1}",
+   "status": 400,
+   "answer": "{\"error\":\"missing key \\\"capacity\\\"\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k4\",\"name\":\"front row\",\"price\":6,\"capacity\":2}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds",
+   "body": "{\"key\":\"k13\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":1,\"seconds\":3000}",
+   "status": 400,
+   "answer": "{\"error\":\"seconds: not a valid Seconds\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k14\",\"name\":\"demo-1\",\"price\":3,\"capacity\":3}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k15\",\"name\":\"Tape Live: The Retry Tour\",\"price\":4,\"capacity\":4}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/4",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":4,\"name\":\"demo-1-floor\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":8,\"event\":4,\"name\":\"ann\",\"price\":3,\"capacity\":2,\"left\":2}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds",
+   "body": "{\"key\":\"k16\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":7}",
+   "status": 409,
+   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/events",
+   "body": "",
+   "status": 200,
+   "answer": "[{\"id\":1,\"name\":\"Tape Live: The Retry Tour\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":1,\"event\":1,\"name\":\"floor\",\"price\":8500,\"capacity\":20,\"left\":20},{\"id\":2,\"event\":1,\"name\":\"balcony\",\"price\":4500,\"capacity\":50,\"left\":50},{\"id\":7,\"event\":1,\"name\":\"balcony\",\"price\":4,\"capacity\":1,\"left\":1}]},{\"id\":2,\"name\":\"Idempotency Unplugged\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":3,\"event\":2,\"name\":\"front row\",\"price\":12000,\"capacity\":4,\"left\":4},{\"id\":4,\"event\":2,\"name\":\"general\",\"price\":3000,\"capacity\":100,\"left\":100},{\"id\":6,\"event\":2,\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":2,\"left\":2}]},{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]},{\"id\":4,\"name\":\"demo-1-floor\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":8,\"event\":4,\"name\":\"ann\",\"price\":3,\"capacity\":2,\"left\":2}]}]"
+  },
+  {
+   "method": "POST",
+   "path": "/events/4/tiers",
+   "body": "{\"key\":\"k17\",\"name\":\"front row\",\"price\":6,\"capacity\":1}",
+   "status": 201,
+   "answer": "{\"id\":9,\"event\":4,\"name\":\"front row\",\"price\":6,\"capacity\":1,\"left\":1}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k18\",\"name\":\"Tape Live: The Retry Tour\",\"price\":7,\"capacity\":5}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k19\",\"name\":\"Tape Live: The Retry Tour\",\"price\":9,\"capacity\":5}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/cancel",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/4",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":4,\"name\":\"demo-1-floor\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":8,\"event\":4,\"name\":\"ann\",\"price\":3,\"capacity\":2,\"left\":2},{\"id\":9,\"event\":4,\"name\":\"front row\",\"price\":6,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/holds/6",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such hold\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/4/transfer",
+   "body": "{\"from\":\"2026-12-05T20:00\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/3/tiers",
+   "body": "{\"key\":\"k14\",\"name\":\"demo-1\",\"price\":3,\"capacity\":3}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/holds",
+   "body": "{\"key\":\"k16\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":7}",
+   "status": 409,
+   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/hold?bob",
+   "body": "",
+   "status": 404,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>No such hold</title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>No such hold</h1><p class=bad>There is no hold with that id.</p><p><a href=\"./\">Back to the events</a></p><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "GET",
+   "path": "/me?ann",
+   "body": "",
+   "status": 200,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>Tickets of </title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>Tickets of </h1><table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr></table><h2>Holds</h2><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "POST",
+   "path": "/events/9/tiers",
+   "body": "{\"key\":\"k20\",\"name\":\"general\",\"price\":3,\"capacity\":1}",
+   "status": 404,
+   "answer": "{\"error\":\"no such event on sale\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/4/tiers",
+   "body": "{\"key\":\"k1\",\"name\":\"front row\",\"price\":30,\"capacity\":2}",
+   "status": 201,
+   "answer": "{\"id\":10,\"event\":4,\"name\":\"front row\",\"price\":30,\"capacity\":2,\"left\":2}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/4",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":4,\"name\":\"demo-1-floor\",\"starts\":\"2026-12-05T20:00\",\"state\":\"onsale\",\"tiers\":[{\"id\":8,\"event\":4,\"name\":\"ann\",\"price\":3,\"capacity\":2,\"left\":2},{\"id\":9,\"event\":4,\"name\":\"front row\",\"price\":6,\"capacity\":1,\"left\":1},{\"id\":10,\"event\":4,\"name\":\"front row\",\"price\":30,\"capacity\":2,\"left\":2}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/holds/8/refund",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/8/transfer",
+   "body": "{\"from\":\"general\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/4/transfer",
+   "body": "{\"from\":\"2026-12-05T20:00\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/4/transfer",
+   "body": "{\"from\":\"2026-12-05T20:00\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/tickets/5/transfer",
+   "body": "{\"from\":\"demo-1\",\"to\":\"front row\"}",
+   "status": 404,
+   "answer": "{\"error\":\"no such ticket\"}"
+  },
+  {
+   "method": "GET",
+   "path": "/holds/3/release",
+   "body": "",
+   "status": 404,
+   "answer": "{\"error\":\"no such route\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/4/tiers",
+   "body": "{\"key\":\"k1\",\"name\":\"front row\",\"price\":30,\"capacity\":2}",
+   "status": 200,
+   "answer": "{\"id\":10,\"event\":4,\"name\":\"front row\",\"price\":30,\"capacity\":2,\"left\":2}"
+  },
+  {
+   "method": "GET",
+   "path": "/hold?ann",
+   "body": "",
+   "status": 404,
+   "answer": "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport content=\"width=device-width,initial-scale=1\"><title>No such hold</title><style>body{font:16px/1.45 system-ui,sans-serif;max-width:46rem;margin:1.5rem auto;padding:0 1rem;color:#1d1d1f}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:1.6rem}table{border-collapse:collapse;width:100%}td,th{padding:.35rem .5rem;border-bottom:1px solid #ddd;text-align:left}form{display:inline}input,select,button{font:inherit;padding:.2rem .4rem}input[type=number]{width:3.5rem}input[name=buyer],input[name=to]{width:7rem}.note{color:#666}.bad{color:#b00020}nav{margin-bottom:1rem}</style></head><body><nav><a href=\"./\">Events</a> &middot; <form method=get action=\"me\"><input name=buyer placeholder=\"your name\" required> <button>My tickets</button></form></nav><h1>No such hold</h1><p class=bad>There is no hold with that id.</p><p><a href=\"./\">Back to the events</a></p><p class=note>Served by a tape program. Every request is a transaction with an effect log; holds expire by a timer; payment goes to another program with a once key.</p></body></html>"
+  },
+  {
+   "method": "POST",
+   "path": "/events/6/tiers",
+   "body": "{\"key\":\"k11\",\"price\":7,\"capacity\":2}",
+   "status": 400,
+   "answer": "{\"error\":\"missing key \\\"name\\\"\"}"
+  },
+  {
+   "method": "POST",
+   "path": "/events/4/tiers",
+   "body": "{\"key\":\"k1\",\"name\":\"front row\",\"price\":30,\"capacity\":2}",
+   "status": 200,
+   "answer": "{\"id\":10,\"event\":4,\"name\":\"front row\",\"price\":30,\"capacity\":2,\"left\":2}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  },
+  {
+   "method": "GET",
+   "path": "/events/3",
+   "body": "",
+   "status": 200,
+   "answer": "{\"id\":3,\"name\":\"balcony\",\"starts\":\"2026-12-12T19:30\",\"state\":\"canceled\",\"tiers\":[{\"id\":5,\"event\":3,\"name\":\"front row\",\"price\":2,\"capacity\":1,\"left\":1}]}"
+  }
+ ]
+}

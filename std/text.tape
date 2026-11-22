@@ -1,0 +1,205 @@
+// std/text.tape: bytes and text.
+
+// The part of v before the first `byte`, or all of v when it has none.
+//
+//   > until(v: "key=value", byte: 61)
+//   "key"
+//   > "no equals sign" |> until(byte: 61)
+//   "no equals sign"
+fn until(v: View, byte: Int) -> View {
+  slice(v, from: 0, to: find(v, byte, at: 0))
+}
+
+// The part of v after the first `byte`, or nothing when it has none.
+//
+//   > after(v: "key=value", byte: 61)
+//   "value"
+//   > after(v: "key", byte: 61)
+//   ""
+fn after(v: View, byte: Int) -> View {
+  let at = find(v, byte, at: 0)
+  match {
+    at < len(v) -> slice(v, from: at + 1, to: len(v))
+    else -> ""
+  }
+}
+
+// The position of the first `byte` at or after `at`, or len(v).
+fn find(v: View, byte: Int, at: Int) -> Int {
+  match {
+    at >= len(v) or v[at] == byte -> at
+    else -> find(v, byte, at: at + 1)
+  }
+}
+
+// Does v begin with `prefix`?
+//
+//   > starts_with(v: "/todos/7", prefix: "/todos/")
+//   True
+//   > "/todo" |> starts_with(prefix: "/todos/")
+//   False
+fn starts_with(v: View, prefix: View) -> Bool {
+  len(v) >= len(prefix) and slice(v, from: 0, to: len(prefix)) == prefix
+}
+
+// Is `word` at position `at` of v?
+fn has(v: View, at: Int, word: View) -> Bool {
+  at + len(word) <= len(v) and slice(v, from: at, to: at + len(word)) == word
+}
+
+fn is_digit(b: Int) -> Bool {
+  b >= 48 and b <= 57
+}
+
+// The position of the first byte at or after `at` that is not a digit.
+fn digits_end(v: View, at: Int) -> Int {
+  match {
+    at < len(v) and is_digit(v[at]) -> digits_end(v, at: at + 1)
+    else -> at
+  }
+}
+
+// A canonical decimal number: digits only, no leading zero, at most 16 digits.
+//
+//   > decimal(v: "42")
+//   Some(value: 42)
+//   > decimal(v: "042")
+//   None
+//   > decimal(v: "12a")
+//   None
+fn decimal(v: View) -> Option[Int] {
+  match {
+    len(v) == 0 or len(v) > 16 or digits_end(v, at: 0) < len(v) -> None
+    v[0] == 48 and len(v) > 1 -> None
+    else -> Some(decimal_value(v, at: 0, value: 0))
+  }
+}
+
+fn decimal_value(v: View, at: Int, value: Int) -> Int {
+  match {
+    at >= len(v) -> value
+    else -> decimal_value(v, at: at + 1, value: value * 10 + v[at] - 48)
+  }
+}
+
+// Any run of one or more digits. Leading zeros are fine, and a value above 9007199254740991 stays there.
+//
+//   > digits(v: "007")
+//   Some(value: 7)
+//   > digits(v: "99999999999999999999")
+//   Some(value: 9007199254740991)
+fn digits(v: View) -> Option[Int] {
+  match {
+    len(v) == 0 or digits_end(v, at: 0) < len(v) -> None
+    else -> Some(digits_value(v, at: 0, value: 0))
+  }
+}
+
+fn digits_value(v: View, at: Int, value: Int) -> Int {
+  match {
+    at >= len(v) -> value
+    value * 10 + v[at] - 48 > 9007199254740991 -> 9007199254740991
+    else -> digits_value(v, at: at + 1, value: value * 10 + v[at] - 48)
+  }
+}
+
+// A number in decimal, as text.
+//
+//   > decimal_text(value: 2000)
+//   "2000"
+//   > "attempt " ++ decimal_text(value: -3)
+//   "attempt -3"
+fn decimal_text(value: Int) -> View {
+  buf() |> write_int(value) |> freeze
+}
+
+// Appends a number in decimal.
+//
+//   > buf() |> append(view: "n=") |> write_int(value: -305) |> freeze
+//   "n=-305"
+fn write_int(out: Buf, value: Int) -> Buf {
+  match {
+    value < 0 -> write_digits(
+      out: push(buf: out, byte: 45),
+      value: 0 - (value / 10),
+      last: 0 - (value % 10)
+    )
+    else -> write_digits(out, value: value / 10, last: value % 10)
+  }
+}
+
+fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
+  match {
+    value > 0 -> push(buf: write_digits(out, value: value / 10, last: value % 10), byte: 48 + last)
+    else -> push(buf: out, byte: 48 + last)
+  }
+}
+
+fn write_text(out: Buf, text: View) -> Buf {
+  append(buf: out, view: text)
+}
+
+// Appends a code point as UTF-8.
+fn write_code(out: Buf, code: Int) -> Buf {
+  match {
+    code < 128 -> push(buf: out, byte: code)
+    code < 2048 -> push(buf: push(buf: out, byte: 192 | (code >> 6)), byte: 128 | (code & 63))
+    code < 65536 -> push(
+      buf: push(buf: push(buf: out, byte: 224 | (code >> 12)), byte: 128 | ((code >> 6) & 63)),
+      byte: 128 | (code & 63)
+    )
+    else -> push(
+      buf: push(
+        buf: push(buf: push(buf: out, byte: 240 | (code >> 18)), byte: 128 | ((code >> 12) & 63)),
+        byte: 128 | ((code >> 6) & 63)
+      ),
+      byte: 128 | (code & 63)
+    )
+  }
+}
+
+// One UTF-8 sequence starting at a byte >= 128 (RFC 3629: no overlong forms, no surrogates, nothing above U+10FFFF).
+type Utf8 {
+  Utf8(code: Int, next: Int)
+  BadUtf8
+}
+
+fn utf8_at(v: View, at: Int) -> Utf8 {
+  let b = v[at]
+  match {
+    b >= 194 and b < 224 and cont(v, at: at + 1) -> Utf8(
+      code: ((b & 31) << 6) | (v[at + 1] & 63),
+      next: at + 2
+    )
+    b >= 224 and b < 240 and cont(v, at: at + 1) and cont(v, at: at + 2) and second_of_3(
+      b,
+      c: v[at + 1]
+    ) -> Utf8(
+      code: ((b & 15) << 12) | ((v[at + 1] & 63) << 6) | (v[at + 2] & 63),
+      next: at + 3
+    )
+    b >= 240 and b <= 244 and cont(v, at: at + 1) and cont(v, at: at + 2) and cont(
+      v,
+      at: at + 3
+    ) and second_of_4(
+      b,
+      c: v[at + 1]
+    ) -> Utf8(
+      code: ((b & 7) << 18) | ((v[at + 1] & 63) << 12) | ((v[at + 2] & 63) << 6) | (v[at + 3] & 63),
+      next: at + 4
+    )
+    else -> BadUtf8
+  }
+}
+
+fn cont(v: View, at: Int) -> Bool {
+  at < len(v) and (v[at] & 192) == 128
+}
+
+fn second_of_3(b: Int, c: Int) -> Bool {
+  (b != 224 or c >= 160) and (b != 237 or c <= 159)
+}
+
+fn second_of_4(b: Int, c: Int) -> Bool {
+  (b != 240 or c >= 144) and (b != 244 or c <= 143)
+}

@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "types": ["node", "@cloudflare/vitest-plugin/types"] },
+  "include": ["src", "test", "jepsen", "model", "kv", "demo", "verify", "*.ts"],
+  "exclude": ["node_modules"]
+}

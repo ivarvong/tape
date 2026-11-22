@@ -1,0 +1,100 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "typescript",
+    "unicorn",
+    "oxc",
+    "import",
+    "promise",
+    "node"
+  ],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "error",
+    "pedantic": "error",
+    "perf": "error"
+  },
+  "env": {
+    "node": true,
+    "es2024": true
+  },
+  "ignorePatterns": [
+    "node_modules",
+    "service/runtime.d.ts",
+    "experiments"
+  ],
+  "rules": {
+    "typescript/prefer-readonly-parameter-types": "off",
+    "eslint/sort-vars": "off",
+    "eslint/require-unicode-regexp": "off",
+    "eslint/no-inline-comments": "off",
+    "eslint/no-negated-condition": "off",
+    "unicorn/no-negated-condition": "off",
+    "eslint/max-lines": "off",
+    "eslint/max-lines-per-function": "off",
+    "import/max-dependencies": "off",
+    "eslint/max-classes-per-file": "off",
+    "unicorn/no-array-callback-reference": "off",
+    "unicorn/prefer-math-trunc": "off",
+    "import/no-unassigned-import": "off",
+    "typescript/no-confusing-void-expression": [
+      "error",
+      {
+        "ignoreArrowShorthand": true,
+        "ignoreVoidReturningFunctions": true
+      }
+    ],
+    "typescript/no-explicit-any": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/consistent-type-imports": "error",
+    "eslint/no-console": "off",
+    "typescript/strict-boolean-expressions": [
+      "error",
+      {
+        "allowNullableString": true,
+        "allowNullableBoolean": true,
+        "allowNullableObject": true,
+        "allowString": true,
+        "allowNumber": true,
+        "allowNullableNumber": false,
+        "allowAny": false
+      }
+    ],
+    "oxc/no-map-spread": "off",
+    "typescript/switch-exhaustiveness-check": [
+      "error",
+      {
+        "considerDefaultExhaustiveForUnions": true
+      }
+    ],
+    "eslint/max-depth": [
+      "error",
+      5
+    ],
+    "unicorn/no-thenable": "off",
+    "unicorn/consistent-function-scoping": "off",
+    "oxc/no-accumulating-spread": "off",
+    "no-await-in-loop": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "test/**",
+        "proof/**",
+        "apps/**"
+      ],
+      "rules": {
+        "typescript/prefer-includes": "off"
+      }
+    },
+    {
+      "files": [
+        "service/src/**",
+        "service/test/**"
+      ],
+      "rules": {
+        "import/default": "off"
+      }
+    }
+  ]
+}

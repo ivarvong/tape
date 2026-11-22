@@ -1,0 +1,14 @@
+# The formatter covers every TypeScript file. Left as written: records of experiments, results, generated types,
+# and programs, which tape fmt formats.
+experiments/
+proof/results/
+service/runtime.d.ts
+service/verify/results/
+examples/
+std/
+testdata/
+node_modules/
+*.md
+*.json
+*.yml
+*.html

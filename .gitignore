@@ -1,0 +1,15 @@
+node_modules
+.wrangler
+*.zip
+.cloudflare
+.dev.vars
+__pycache__
+*.pyc
+# what a run writes: read back by nothing, so never tracked
+proof/results/
+apps/tickets/results/plants.json
+service/verify/results/
+*.log
+*.cpuprofile
+*.heapprofile
+service/verify/rca/mutate-checker.txt

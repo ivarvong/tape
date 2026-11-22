@@ -1,0 +1,1238 @@
+[
+ {
+  "plant": "a decline without its expiry timer (the second bug prod Jepsen found)",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 16,
+  "runs": 16,
+  "choices": 17,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":4,\"state\":\"held\",\"note\":\"card declined\"}",
+   "hold 4 is left held with no timer set (note: card declined)"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c2",
+   "start c2",
+   "start c2",
+   "start c2",
+   "start c1",
+   "start c0",
+   "start c0",
+   "deliver c2.3:1",
+   "start c2",
+   "start c1",
+   "start c1",
+   "start c1",
+   "start c1",
+   "cut c1.4:1"
+  ],
+  "ms": 796
+ },
+ {
+  "plant": "a refund without its retry timer (the bug prod Jepsen found)",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 12251
+ },
+ {
+  "plant": "drop the capacity guard on a hold",
+  "compiler": [
+   "C73"
+  ],
+  "sim": "error",
+  "seed": 4,
+  "runs": 4,
+  "choices": 3,
+  "violations": [
+   "c1.0 (POST /holds) failed: CHECK constraint failed: left >= 0 AND left <= capacity"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c1"
+  ],
+  "ms": 89
+ },
+ {
+  "plant": "drop the capacity guard and the CHECK",
+  "compiler": [
+   "C73"
+  ],
+  "sim": "safety",
+  "seed": 4,
+  "runs": 4,
+  "choices": 3,
+  "violations": [
+   "seats: tier 3 left -1 outside 0..4"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c1"
+  ],
+  "ms": 116
+ },
+ {
+  "plant": "a hold key that does not name the tier",
+  "compiler": [
+   "C56"
+  ],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 4400
+ },
+ {
+  "plant": "reuse one once key for every charge",
+  "compiler": [
+   "C65"
+  ],
+  "sim": "does not build with the rules off"
+ },
+ {
+  "plant": "a once key per hold, not per attempt (the bug the scenarios found)",
+  "compiler": [],
+  "sim": "liveness",
+  "seed": 22,
+  "runs": 22,
+  "choices": 14,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c2",
+   "start c1",
+   "start c2",
+   "start c0",
+   "start c2",
+   "start c2",
+   "start c0",
+   "start c1",
+   "start c0",
+   "start c2",
+   "deliver c1.1:1",
+   "start c0",
+   "start c1",
+   "start c1"
+  ],
+  "ms": 21965
+ },
+ {
+  "plant": "charge without a once key",
+  "compiler": [
+   "C41"
+  ],
+  "sim": "does not build with the rules off"
+ },
+ {
+  "plant": "release twice: no state guard",
+  "compiler": [
+   "C63"
+  ],
+  "sim": "does not build with the rules off"
+ },
+ {
+  "plant": "release a paying hold",
+  "compiler": [
+   "C59"
+  ],
+  "sim": "error",
+  "seed": 6,
+  "runs": 6,
+  "choices": 6,
+  "violations": [
+   "c0.3 (POST /holds/1/release) failed: machine holds.state: that move is not declared (held -> paying, held -> expired, held -> released, paying -> held, paying -> confirmed, confirmed -> refunding, refunding -> refunded)"
+  ],
+  "script": [
+   "start c0",
+   "start c1",
+   "start c0",
+   "cut c0.1:1",
+   "start c0",
+   "start c0"
+  ],
+  "ms": 176
+ },
+ {
+  "plant": "expire a paying hold",
+  "compiler": [
+   "C59"
+  ],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 4561
+ },
+ {
+  "plant": "seats back with a set update outside the move",
+  "compiler": [
+   "C54"
+  ],
+  "sim": "error",
+  "seed": 1,
+  "runs": 1,
+  "choices": 5,
+  "violations": [
+   "c1.3 (POST /holds/1/release) failed: CHECK constraint failed: left >= 0 AND left <= capacity"
+  ],
+  "script": [
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "start c1",
+   "start c1"
+  ],
+  "ms": 111
+ },
+ {
+  "plant": "a refund that does not give the seats back",
+  "compiler": [],
+  "sim": "safety",
+  "seed": 4,
+  "runs": 4,
+  "choices": 9,
+  "violations": [
+   "tickets: invariant \"a tier's seats left and seats held add up to its capacity\" does not hold: {\"id\":4,\"left\":98,\"capacity\":100}",
+   "seats: tier 4 has 98 left and 0 taken by holds, capacity 100"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c1",
+   "start c1",
+   "start c1",
+   "deliver c1.2:1",
+   "start c1",
+   "start c1"
+  ],
+  "ms": 588
+ },
+ {
+  "plant": "tickets issued without ON CONFLICT",
+  "compiler": [],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 4534
+ },
+ {
+  "plant": "one ticket too few",
+  "compiler": [],
+  "sim": "safety",
+  "seed": 2,
+  "runs": 2,
+  "choices": 3,
+  "violations": [
+   "tickets: invariant \"a confirmed hold has one valid ticket for each seat\" does not hold: {\"id\":1,\"qty\":1}",
+   "tickets: hold 1 is confirmed with 0 valid tickets, wanted 1"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0"
+  ],
+  "ms": 197
+ },
+ {
+  "plant": "a hold without its expiry timer",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 95
+ },
+ {
+  "plant": "transfer without the owner check",
+  "compiler": [],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 4543
+ },
+ {
+  "plant": "promotion without its op-id guard",
+  "compiler": [
+   "C54"
+  ],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 4190
+ },
+ {
+  "plant": "admin cancel open to the public",
+  "compiler": [],
+  "sim": "liveness",
+  "seed": 10,
+  "runs": 10,
+  "choices": 3,
+  "violations": [
+   "event 2 is canceled, and no operator asked for it"
+  ],
+  "script": [
+   "start c2",
+   "start c2",
+   "start c2"
+  ],
+  "ms": 573
+ },
+ {
+  "plant": "cancel sweep does not drop the waitlist",
+  "compiler": [],
+  "sim": "liveness",
+  "seed": 36,
+  "runs": 36,
+  "choices": 8,
+  "violations": [
+   "tickets: invariant \"a canceled event has no paid hold and nobody waiting\" does not hold: {\"tier\":3}",
+   "waitlist entry 1 still waits for a canceled event"
+  ],
+  "script": [
+   "start c1",
+   "start c1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c0",
+   "deliver c1.3:1",
+   "start c1"
+  ],
+  "ms": 636
+ },
+ {
+  "plant": "a decline leaves the hold paying",
+  "compiler": [],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 3,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"paying\",\"note\":\"\"}",
+   "hold 1 is left paying with no timer set"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0"
+  ],
+  "ms": 13619
+ },
+ {
+  "plant": "the page writes the buyer unescaped",
+  "compiler": [],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 4618
+ },
+ {
+  "plant": "C78/C79 mutant 1a refund timer keyed 999999",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 13819
+ },
+ {
+  "plant": "C78/C79 mutant 1b decline timer keyed as the event (0 - id)",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 16,
+  "runs": 16,
+  "choices": 17,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":4,\"state\":\"held\",\"note\":\"card declined\"}",
+   "hold 4 is left held with no timer set (note: card declined)"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c2",
+   "start c2",
+   "start c2",
+   "start c2",
+   "start c1",
+   "start c0",
+   "start c0",
+   "deliver c2.3:1",
+   "start c2",
+   "start c1",
+   "start c1",
+   "start c1",
+   "start c1",
+   "cut c1.4:1"
+  ],
+  "ms": 992
+ },
+ {
+  "plant": "C78/C79 mutant 1c new hold timer keyed by its tier",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 180
+ },
+ {
+  "plant": "C78/C79 mutant 2a unknown outcome: no timer again",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "liveness",
+  "seed": 7,
+  "runs": 7,
+  "choices": 8,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":2,\"state\":\"paying\",\"note\":\"payment outcome unknown; it is asked again\"}",
+   "hold 2 is left paying with no timer set (note: payment outcome unknown; it is asked again)"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c2",
+   "tick 5000",
+   "wake tickets 2",
+   "cutafter w.tickets.2.1:1",
+   "wake tickets 2",
+   "lose w.tickets.2.2:1"
+  ],
+  "ms": 13693
+ },
+ {
+  "plant": "C78/C79 mutant 2b due before expiry: no timer again",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "liveness",
+  "seed": 25,
+  "runs": 25,
+  "choices": 4,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":2,\"state\":\"held\",\"note\":\"card declined\"}",
+   "hold 2 is left held with no timer set (note: card declined)"
+  ],
+  "script": [
+   "start c1",
+   "start c1",
+   "start c1",
+   "start c1"
+  ],
+  "ms": 532
+ },
+ {
+  "plant": "C78/C79 mutant 2c refund failed: no timer again",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "liveness",
+  "seed": 54,
+  "runs": 54,
+  "choices": 20,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":3,\"state\":\"refunding\",\"note\":\"\"}",
+   "tickets: hold 3 is refunding with 2 valid tickets, wanted 0"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c1",
+   "start c2",
+   "start c2",
+   "start c1",
+   "deliver c1.1:1",
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c1",
+   "deliver c2.2:1",
+   "start c1",
+   "start c1",
+   "start c2",
+   "tick 2000",
+   "wake tickets 5",
+   "tick 3000",
+   "wake tickets 3",
+   "drop w.tickets.3.1:1"
+  ],
+  "ms": 1278
+ },
+ {
+  "plant": "C78/C79 mutant 2d due leaves a refunding hold alone",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 14586
+ },
+ {
+  "plant": "C78/C79 mutant 3a refund timer set after the call",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 13603
+ },
+ {
+  "plant": "C78/C79 mutant 3b no refund timer; sweep picks confirmed by a parameter",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 11978
+ },
+ {
+  "plant": "C78/C79 mutant 3c no refund timer; sweep picks by NOT IN",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 12432
+ },
+ {
+  "plant": "C78/C79 mutant 3d no refund timer; sweep picks by <>",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 1,
+  "runs": 1,
+  "choices": 2,
+  "violations": [
+   "timers keep running without the clock moving: a timer is set again for now, every time it runs"
+  ],
+  "script": [
+   "start c1",
+   "start c1"
+  ],
+  "ms": 4480
+ },
+ {
+  "plant": "round 2 mutant 4a refund timer keyed id + 1",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 11909
+ },
+ {
+  "plant": "round 2 mutant 4b new hold timer keyed hold.id * 2",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 168
+ },
+ {
+  "plant": "round 2 mutant 4c refund retried with key id - 1",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 54,
+  "runs": 54,
+  "choices": 20,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":3,\"state\":\"refunding\",\"note\":\"\"}",
+   "tickets: hold 3 is refunding with 2 valid tickets, wanted 0"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c1",
+   "start c2",
+   "start c2",
+   "start c1",
+   "deliver c1.1:1",
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c1",
+   "deliver c2.2:1",
+   "start c1",
+   "start c1",
+   "start c2",
+   "tick 2000",
+   "wake tickets 5",
+   "tick 3000",
+   "wake tickets 3",
+   "drop w.tickets.3.1:1"
+  ],
+  "ms": 1193
+ },
+ {
+  "plant": "round 2 mutant 5a no refund timer; sweep picks by OR",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 1,
+  "runs": 1,
+  "choices": 2,
+  "violations": [
+   "timers keep running without the clock moving: a timer is set again for now, every time it runs"
+  ],
+  "script": [
+   "start c1",
+   "start c1"
+  ],
+  "ms": 5031
+ },
+ {
+  "plant": "round 2 mutant 5b no refund timer; sweep picks by nested AND/OR",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 12723
+ },
+ {
+  "plant": "round 2 mutant 5c no refund timer; sweep picks by NOT (… OR …)",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 12315
+ },
+ {
+  "plant": "round 2 mutant 6a woken: key > 0 is the sweep",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 157
+ },
+ {
+  "plant": "round 2 mutant 6b woken: key < 10 is the sweep",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 210
+ },
+ {
+  "plant": "round 2 mutant 7a charge unknown: an operator paged (a call), the row left",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "liveness",
+  "seed": 84,
+  "runs": 84,
+  "choices": 14,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":4,\"state\":\"paying\",\"note\":\"\"}",
+   "hold 4 is left paying with no timer set"
+  ],
+  "script": [
+   "start c2",
+   "start c0",
+   "tick 5000",
+   "start c0",
+   "wake tickets 1",
+   "start c1",
+   "wake tickets 2",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "tick 5000",
+   "wake tickets 4",
+   "lose w.tickets.4.1:1"
+  ],
+  "ms": 1279
+ },
+ {
+  "plant": "round 2 mutant 7b the same, only the page failing sets the timer",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 5008
+ },
+ {
+  "plant": "round 2 mutant 7d refund failed: refunded again at once, its failure left (the inner call is read on its own)",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "missed",
+  "seeds": 400,
+  "ms": 5160
+ },
+ {
+  "plant": "round 3 mutant A1 cancel timer keyed 0 - id - 1 (canceled is final)",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 9,
+  "violations": [
+   "tickets: invariant \"a canceled event has no paid hold and nobody waiting\" does not hold: {\"tier\":4}",
+   "hold 3 is confirmed on a canceled event"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c1",
+   "start c1",
+   "start c1",
+   "deliver c1.2:1",
+   "start c1",
+   "start c1"
+  ],
+  "ms": 413
+ },
+ {
+  "plant": "round 3 mutant A2 cancel timer keyed id (woken reads holds by a positive key)",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 9,
+  "violations": [
+   "tickets: invariant \"a canceled event has no paid hold and nobody waiting\" does not hold: {\"tier\":4}",
+   "hold 3 is confirmed on a canceled event"
+  ],
+  "script": [
+   "start c0",
+   "start c0",
+   "start c0",
+   "start c1",
+   "start c1",
+   "start c1",
+   "deliver c1.2:1",
+   "start c1",
+   "start c1"
+  ],
+  "ms": 489
+ },
+ {
+  "plant": "round 3 mutant C1 route(key): key > 0 is the sweep",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 154
+ },
+ {
+  "plant": "round 3 mutant C2 route(key): key < 10 is the sweep",
+  "compiler": [
+   "C78"
+  ],
+  "sim": "liveness",
+  "seed": 2,
+  "runs": 2,
+  "choices": 1,
+  "violations": [
+   "tickets: invariant \"no hold is left held, paying or refunding\" does not hold: {\"id\":1,\"state\":\"held\",\"note\":\"\"}",
+   "hold 1 is left held with no timer set"
+  ],
+  "script": [
+   "start c1"
+  ],
+  "ms": 188
+ },
+ {
+  "plant": "round 3 mutant D1 no refund timer; sweep picks h.id IN (SELECT … confirmed)",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 14287
+ },
+ {
+  "plant": "round 3 mutant D2 no refund timer; sweep picks EXISTS (correlated, confirmed)",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 12390
+ },
+ {
+  "plant": "round 3 mutant D3 no refund timer; sweep picks NOT EXISTS (correlated, refunding or refunded)",
+  "compiler": [
+   "C77"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 11852
+ },
+ {
+  "plant": "round 3 mutant F1 woken reads the hold only if held, paying or confirmed",
+  "compiler": [
+   "C79"
+  ],
+  "sim": "liveness",
+  "seed": 4,
+  "runs": 4,
+  "choices": 23,
+  "violations": [
+   "timers are still being set 60 minutes after the faults stopped: something asks again for ever"
+  ],
+  "script": [
+   "start c0",
+   "start c2",
+   "start c0",
+   "start c0",
+   "deliver c0.2:1",
+   "start c1",
+   "start c0",
+   "start c1",
+   "start c1",
+   "wake tickets 1",
+   "drop c1.2:1",
+   "tick 5000",
+   "start c1",
+   "start c1",
+   "wake tickets -2",
+   "wake tickets 2",
+   "wake tickets 1",
+   "wake tickets 5",
+   "deliver w.tickets.5.1:1",
+   "wake tickets 4",
+   "tick 5000",
+   "wake tickets -2",
+   "cut w.tickets.-2.2:1"
+  ],
+  "ms": 12193
+ }
+]

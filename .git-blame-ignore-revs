@@ -1,0 +1,5 @@
+# Commits that only reformat. git blame looks through them with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# prettier over the toolchain's JavaScript, 19 November 2026
+76f6cb12535c005a6e57475333f2896285ce31f4
+0f6f798ccdfc9dc6c4d6b6086838403c7533551b

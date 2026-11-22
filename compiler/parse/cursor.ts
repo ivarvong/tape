@@ -1,0 +1,76 @@
+// compiler/parse/cursor.ts: where a parse stands in a file's tokens. A production is a function from a Cursor to
+// what it read.
+import type { At, Token, TokenOf } from '../ast.ts';
+import { fail } from '../common.ts';
+import { lex } from '../lex.ts';
+
+const text8 = new TextDecoder();
+export const textOf = (bytes: number[]): string => text8.decode(new Uint8Array(bytes));
+const isKind = <K extends Token['t']>(t: Token, kind: K): t is TokenOf<K> => t.t === kind;
+/** a token as a message names it */
+export const shown = (t: Token): string =>
+  t.t === 'eof'
+    ? 'the end of the file'
+    : t.t === 'nl'
+      ? 'the end of the line'
+      : t.t === 'str' || t.t === 'interp'
+        ? 'a text literal'
+        : `\`${t.v}\``;
+const wanted = (kind: Token['t'], v?: string): string =>
+  v ? `\`${v}\`` : kind === 'id' ? 'a name' : kind === 'Id' ? 'a capitalized name' : kind;
+
+export class Cursor {
+  readonly file: string;
+  readonly toks: readonly Token[];
+  private readonly end: Token;
+  pos = 0;
+  /** over a file's text, or over tokens already read (a hole of a text literal) */
+  constructor(file: string, text: string | readonly Token[]) {
+    this.file = file;
+    this.toks = typeof text === 'string' ? lex(file, text) : text;
+    // lex ends every file with this token: reading past it gives it again
+    this.end = this.toks.at(-1) ?? { t: 'eof', line: 1, file };
+  }
+  peek(ahead = 0): Token {
+    return this.toks[this.pos + ahead] ?? this.end;
+  }
+  next(): Token {
+    const t = this.peek();
+    this.pos++;
+    return t;
+  }
+  /** where a node that opens at this token stands */
+  at(t: { line: number }): At {
+    return { line: t.line, file: this.file };
+  }
+  is(kind: Token['t'], v?: string): boolean {
+    const t = this.peek();
+    return t.t === kind && (v === undefined || t.v === v);
+  }
+  eat<K extends Token['t']>(kind: K, v?: string): TokenOf<K> | null {
+    const t = this.peek();
+    if (!isKind(t, kind) || (v !== undefined && t.v !== v)) return null;
+    this.pos++;
+    return t;
+  }
+  expect<K extends Token['t']>(kind: K, v?: string, hint = ''): TokenOf<K> {
+    return (
+      this.eat(kind, v) ?? fail(this.peek(), 'P01', `expected ${wanted(kind, v)} but found ${shown(this.peek())}`, hint)
+    );
+  }
+  skipNl(): void {
+    while (this.eat('nl') !== null);
+  }
+  /** `item`, then more of it after each comma */
+  list<T>(item: (c: Cursor) => T): T[] {
+    const out = [item(this)];
+    while (this.eat('op', ',')) out.push(item(this));
+    return out;
+  }
+  /** a list that may be empty, up to and past the bracket that closes it */
+  listUntil<T>(close: string, item: (c: Cursor) => T): T[] {
+    const out = this.is('op', close) ? [] : this.list(item);
+    this.expect('op', close);
+    return out;
+  }
+}

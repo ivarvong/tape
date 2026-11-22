@@ -1,0 +1,50 @@
+// web.ts: what the routes and the objects share: replies, hashes, signed trace links, the operator's token.
+const enc = new TextEncoder();
+
+export const SEGMENT = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+export const reply = (body: unknown, status = 200): Response => Response.json(body, { status });
+export const hexOf = (buf: ArrayBuffer | Uint8Array): string =>
+  [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+export const hex = async (bytes: BufferSource): Promise<string> => hexOf(await crypto.subtle.digest('SHA-256', bytes));
+export const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+export const randomHex = (bytes: number): string => hexOf(crypto.getRandomValues(new Uint8Array(bytes)));
+
+const TRACE_TTL = 7 * 24 * 3600; // seconds a signed trace URL lasts
+// Trace URLs are signed with the token: HMAC-SHA256 over the path and the expiry.
+const hmac = (token: string, use: 'sign' | 'verify'): Promise<CryptoKey> =>
+  crypto.subtle.importKey('raw', enc.encode(token), { name: 'HMAC', hash: 'SHA-256' }, false, [use]);
+/** The token's signature over some text, as hex. */
+export const signature = async (token: string, text: string): Promise<string> =>
+  hexOf(await crypto.subtle.sign('HMAC', await hmac(token, 'sign'), enc.encode(text)));
+export const signed = async (token: string, origin: string, path: string): Promise<string> => {
+  const exp = Math.floor(Date.now() / 1000) + TRACE_TTL;
+  return `${origin}/t${path}?exp=${exp}&sig=${await signature(token, `${path}?${exp}`)}`;
+};
+export const verified = async (
+  token: string,
+  path: string,
+  exp: string | null,
+  sig: string | null,
+): Promise<boolean> => {
+  if (sig === null || !/^[0-9a-f]{64}$/.test(sig) || !(Number(exp) > Date.now() / 1000)) return false;
+  const given = Uint8Array.from(sig.match(/../g) ?? [], h => Number.parseInt(h, 16));
+  return crypto.subtle.verify('HMAC', await hmac(token, 'verify'), given, enc.encode(`${path}?${exp}`));
+};
+
+export const authorized = (request: Request, token: string): boolean => {
+  const given = enc.encode(request.headers.get('authorization') ?? ''),
+    want = enc.encode(`Bearer ${token}`);
+  return given.length === want.length && crypto.subtle.timingSafeEqual(given, want);
+};
+
+// The program's request: METHOD SP TARGET LF BODY; through a published name's public route, METHOD SP TARGET SP
+// public LF BODY (std/http: caller Anyone). The target is percent-encoded by the URL, so it has no space.
+export const tapeRequest = async (
+  request: Request,
+  path: string,
+  search: string,
+  via: string | null = null,
+): Promise<Uint8Array<ArrayBuffer>> => {
+  const head = `${request.method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}\n`;
+  return new Uint8Array(await new Blob([head, await request.arrayBuffer()]).arrayBuffer());
+};

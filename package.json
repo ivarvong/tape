@@ -1,0 +1,24 @@
+{
+  "name": "tape",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "A language for Cloudflare Workers and Durable Objects, compiled to Wasm, where every effect is logged.",
+  "engines": {
+    "node": ">=25"
+  },
+  "scripts": {
+    "test": "node proof/all.ts --quick",
+    "check": "node proof/all.ts",
+    "types": "tsc --noEmit",
+    "lint": "node proof/lint.ts",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "oxlint": "1.94.0",
+    "oxlint-tsgolint": "7.0.2008",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0"
+  }
+}

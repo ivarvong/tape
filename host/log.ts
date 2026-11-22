@@ -1,0 +1,129 @@
+// host/log.ts: the effect log. Every call a program makes of its host is written down, so the same request can
+// be run again from the log alone and give the same answer.
+/** A value read from a row: node:sqlite gives bytes as a Uint8Array, Durable Object SQLite as an ArrayBuffer. */
+export type Cell = string | number | bigint | null | Uint8Array | ArrayBuffer;
+export type SqlParam = string | number | bigint | null;
+/** What the host needs of a database: Durable Object SQLite (ctx.storage.sql), or nodesql.ts over node:sqlite. */
+export type Sql = {
+  exec: (
+    query: string,
+    ...params: SqlParam[]
+  ) => {
+    rowsWritten: number;
+    raw: () => { toArray: () => Cell[][] };
+    toArray: () => Record<string, Cell>[];
+  };
+};
+
+/** A cell as text: what String() gives it, with bytes as their values. */
+export const cellText = (c: Cell | undefined): string => {
+  if (typeof c === 'string') return c;
+  if (c instanceof ArrayBuffer) return new Uint8Array(c).join(',');
+  return c instanceof Uint8Array ? c.join(',') : String(c);
+};
+
+/** Bytes in the log: text when they are UTF-8, otherwise the byte values. */
+export type Packed = string | { bytes: number[] };
+export type Status = 'ok' | 'timeout' | 'unreachable' | 'rejected' | 'skew';
+export const STATUS: readonly Status[] = ['ok', 'timeout', 'unreachable', 'rejected', 'skew'];
+export type Flags = Record<string, number | boolean>;
+/** Where a run is in a trace: its own span, and the span that caused it. */
+export type Span = { trace: string; span: string; parent: string | null; name: string | null; at: number };
+
+/** The first entry of a run: which build ran, under which flag values, and (for a method) the message it got. */
+export type Head = Partial<Span> & {
+  build: string;
+  flags: Flags;
+  method?: string;
+  message?: Packed;
+  took?: number;
+  /** the memory the run used */
+  bytes?: number;
+  undone?: true;
+  woke?: { key: number; due: number };
+};
+export type SqlEffect = { q: number; p: SqlParam[]; r?: number; rows?: Cell[][] };
+export type CallEffect = {
+  call: string;
+  method: string;
+  send: Packed;
+  within: number;
+  once?: string | number;
+  status: Status;
+  reply: Packed;
+  sent: number;
+  took: number;
+};
+export type NowEffect = { now: number };
+export type RandomEffect = { random: number };
+export type WakeEffect = { wake: number; after: number; due: number };
+export type Effect = Head | SqlEffect | CallEffect | NowEffect | RandomEffect | WakeEffect;
+
+/** One thing a traced run did, in order. `what` at a site: 2 the function was entered, 0 an arm or step was tried, 1 it matched. */
+export type TraceEvent =
+  | { site: number; what: number }
+  | { sql: number; p: SqlParam[]; r?: number | undefined; rows?: Cell[][] | undefined }
+  | { json: string }
+  | { call: string; method: string; within: number; status: Status }
+  | { flags: Flags }
+  | NowEffect
+  | RandomEffect
+  | WakeEffect;
+
+const TAGS = ['build', 'q', 'call', 'now', 'random', 'wake'];
+/** Is this value, read from a stored log, an entry of an effect log? Told by the field that names its kind. */
+export const isEffect = (v: unknown): v is Effect => typeof v === 'object' && v !== null && TAGS.some(tag => tag in v);
+export const isHead = (e: Effect): e is Head => 'build' in e;
+export const isSql = (e: Effect): e is SqlEffect => 'q' in e;
+export const isCall = (e: Effect): e is CallEffect => 'call' in e;
+export const isNow = (e: Effect): e is NowEffect => 'now' in e;
+export const isRandom = (e: Effect): e is RandomEffect => 'random' in e;
+export const isWake = (e: Effect): e is WakeEffect => 'wake' in e;
+
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+const enc = new TextEncoder();
+export const pack = (b: Uint8Array): Packed => {
+  try {
+    return utf8.decode(b);
+  } catch {
+    return { bytes: [...b] };
+  }
+};
+export const unpack = (v: Packed): Uint8Array<ArrayBuffer> =>
+  typeof v === 'string' ? Uint8Array.from(enc.encode(v)) : Uint8Array.from(v.bytes);
+
+// Distributed tracing. Every request is a span: its effect log starts with { trace, span, parent, name, at } and
+// ends up with `took`. Each call passes { trace, parent: this span } to the callee, whose log is the child span.
+// Ids have the sizes of W3C traceparent (32 and 16 hex digits). `sink(log)` receives every finished log; spans()
+// below joins logs from any number of objects into trees, and traceOf() expands any one span to every function
+// and match arm, after the fact, from its log alone.
+export const hex = (n: number): string =>
+  [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
+
+export type From = { trace: string; parent: string } | null;
+export const begin = (from: From, name: string | null): Span => ({
+  trace: from?.trace ?? hex(16),
+  span: hex(8),
+  parent: from?.parent ?? null,
+  name,
+  at: Date.now(),
+});
+
+export type SpanTree = Head & {
+  log: Effect[];
+  calls: { to: string; method: string; status: Status; took: number }[];
+  children: SpanTree[];
+};
+/** The logs of any number of objects, joined into trees: each run under the run that called it. */
+export function spans(logs: readonly Effect[][]): SpanTree[] {
+  const all = logs.flatMap((log): SpanTree[] => {
+    const [head] = log;
+    if (!head || !isHead(head)) return [];
+    const calls = log.filter(isCall).map(e => ({ to: e.call, method: e.method, status: e.status, took: e.took }));
+    return [{ ...head, log, calls, children: [] }];
+  });
+  const by = new Map(all.map(s => [s.span, s]));
+  for (const s of all) by.get(s.parent ?? undefined)?.children.push(s);
+  for (const s of all) s.children.sort((a, b) => (a.at ?? 0) - (b.at ?? 0));
+  return all.filter(s => !by.has(s.parent ?? undefined));
+}
