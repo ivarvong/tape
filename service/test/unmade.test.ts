@@ -1,5 +1,6 @@
 // Runs in workerd: a tokenless request for a name nobody made (or published) answers 404 and stores nothing. Only
 // one object, the list of published names, is asked; no object of the account is made.
+import { runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import page from './fixtures/page.tape?raw';
@@ -60,5 +61,21 @@ describe('a tokenless request for a name nobody made', () => {
     expect((await anyone('/p/ivar/onoff/')).status).toBe(404);
     const v = await got('/_public/ivar/onoff');
     expect(at(v, 'published')).toBe(false);
+  });
+
+  it('serves a name published before the list was kept, and no other such name', async () => {
+    // published as the version before the list did it: on the name's own object only
+    for (const n of ['ivar/tix', 'ivar/before']) {
+      await call(`/${n}`, { method: 'POST', body: page });
+      await runInDurableObject(env.NAMES.get(env.NAMES.idFromName(n)), (_, state) => {
+        state.storage.sql.exec(
+          'CREATE TABLE IF NOT EXISTS _tape_public(one INTEGER PRIMARY KEY CHECK (one = 1), published INTEGER NOT NULL CHECK (published IN (0, 1)), at INTEGER NOT NULL)',
+        );
+        state.storage.sql.exec('INSERT INTO _tape_public VALUES (1, 1, 0)');
+      });
+    }
+    expect([(await anyone('/p/ivar/tix/')).status, (await anyone('/p/ivar/before/')).status]).toEqual([200, 404]);
+    await call('/_public/ivar/tix', { method: 'PUT', body: '{"published":false}' });
+    expect((await anyone('/p/ivar/tix/')).status).toBe(404);
   });
 });

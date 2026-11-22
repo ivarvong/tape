@@ -348,6 +348,10 @@ const TOO_LARGE = `a public request's body is at most ${PUBLIC_BODY} bytes`;
 // During a split deployment an object runs the version its id was given, whatever version the Worker is (the
 // version-override header pins the Worker only): the list's object may be the version before the list, which has no
 // isPublished. Nothing was published to a list that version does not keep, so the name is not published.
+// The names published before the list was kept, which the list does not hold until they are published again: every
+// name that answered /p/ or was published in the 7 days of Workers Observability before the list (2026-11-22). Each
+// is still asked whether it is published, so unpublishing one still works.
+const PUBLISHED_BEFORE: ReadonlySet<string> = new Set(['ivar/tix']);
 const isPublished = async (ctx: ExecutionContext, key: string): Promise<boolean> => {
   try {
     return await ctx.exports.Name.getByName(PUBLISHED).isPublished(key);
@@ -371,7 +375,8 @@ const publicRoute = async (
   if (Number(request.headers.get('content-length') ?? 0) > PUBLIC_BODY) return reply({ error: TOO_LARGE }, 413);
   // only a published name's own object is asked anything: for any other name, the one object that lists the
   // published names answers, and no object of the account is made
-  if (!(await isPublished(ctx, `${account}/${name}`))) return reply({ error: 'no such page' }, 404);
+  const key = `${account}/${name}`;
+  if (!PUBLISHED_BEFORE.has(key) && !(await isPublished(ctx, key))) return reply({ error: 'no such page' }, 404);
   const stub = ctx.exports.Name.getByName(`${account}/${name}`),
     p = await stub.publication();
   if (!p.published || p.latest === null) return reply({ error: 'no such page' }, 404);
