@@ -10,7 +10,8 @@
 #     deployment yet; NEW must have the TOKEN secret
 #  4. route PREV 100% / NEW 0%
 #  5. pinned smoke (scripts/smoke.ts --pin NEW --sha <commit>): the Worker and its static assets as NEW serves them;
-#     and scripts/mcp-smoke.ts: /mcp through NEW's service binding to tape-mcp (deploy tape-mcp first: mcp/scripts/deploy.sh).
+#     and scripts/mcp-smoke.ts: /mcp through NEW's service binding to tape-mcp (deploy tape-mcp first: mcp/scripts/deploy.sh);
+#     and scripts/parity.ts: NEW's playground build and /mcp compile the same programs to the same diagnostics and Wasm.
 #     The Durable Objects still run PREV: an object runs the version the deployment gave its id, whatever version
 #     the override header pins the Worker to, so this smoke is NEW's Worker against PREV's objects, as in the ramp.
 #  6. telemetry gate on NEW (scripts/telemetry.ts): no invocation not ok, no 5xx but the 503s a deploy's object reset
@@ -139,6 +140,7 @@ done
 [ $ok = 1 ] || back "pinned requests never reached $NEW"
 node scripts/smoke.ts "$BASE" --pin "$NEW" --sha "$SHA" || back "pinned smoke"
 node scripts/mcp-smoke.ts "$BASE/mcp" --pin "$WORKER=$NEW" || back "pinned MCP smoke (/mcp through the binding to tape-mcp)"
+node scripts/parity.ts "$BASE" --pin "$NEW" --compilers-only || back "the playground and /mcp compile differently: deploy tape-mcp from this commit first"
 
 # ---- 6. telemetry on NEW
 say "telemetry gate (0%)"
