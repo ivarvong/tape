@@ -48,7 +48,13 @@ export function flag(c: Cursor, prog: Program): void {
       : ty.v === 'Bool' && d.t === 'Id' && (d.v === 'True' || d.v === 'False') && !neg
         ? d.v === 'True'
         : fail(d, 'C37', `flag ${n.v} needs ${wants} as its default`, HOW);
-  if (prog.flags.some(x => x.name === n.v)) fail(n, 'C37', `flag ${n.v} is already declared`, '');
+  if (prog.flags.some(x => x.name === n.v))
+    fail(
+      n,
+      'C37',
+      `flag ${n.v} is already declared`,
+      'Declare each flag once: remove one of the two, or give it another name.',
+    );
   prog.flags.push({ name: n.v, type: ty.v, default: value, ...c.at(n) });
 }
 
@@ -101,7 +107,17 @@ export function typeDecl(c: Cursor, prog: Program, isPrivate: boolean): void {
   while (!c.is('op', '}')) variants.push(variant(c));
   c.next();
   const name = claimType(c, prog, n);
-  if (variants.length === 0) fail(n, 'C02', `type ${n.v} has no constructors`, '');
+  if (variants.length === 0)
+    fail(
+      n,
+      'C02',
+      `type ${n.v} has no constructors`,
+      'A type has at least one constructor: `type ' +
+        n.v +
+        ' { ' +
+        n.v +
+        '(field: Int) }`, or `{ A  B }` for one without fields.',
+    );
   const decl: TypeDecl = { name, params: tparams, variants, ...c.at(n), private: isPrivate };
   prog.types.set(name, decl);
   claimConstructors(c, prog, decl);
@@ -201,12 +217,23 @@ export function interfaceDecl(c: Cursor, prog: Program): void {
   c.skipNl();
   while (!c.is('op', '}')) {
     const [name, m, at] = method(c);
-    if (methods.has(name)) fail(at, 'C04', `method ${name} is already defined`, '');
+    if (methods.has(name))
+      fail(
+        at,
+        'C04',
+        `method ${name} is already defined`,
+        'An interface lists each method once: remove one of them, or give it another name.',
+      );
     methods.set(name, m);
     c.skipNl();
   }
   c.next();
   if (prog.interfaces.has(n.v) || prog.types.has(n.v) || BUILTIN_TYPES.has(n.v))
-    fail(n, 'C01', `${n.v} is already defined`, '');
+    fail(
+      n,
+      'C01',
+      `${n.v} is already defined`,
+      `${n.v} is a type, an interface or a built-in type already: give this interface another name.`,
+    );
   prog.interfaces.set(n.v, { name: n.v, methods, ...c.at(n) });
 }

@@ -17,8 +17,21 @@ import { emitIntrinsic } from './intrinsic.ts';
 type Lambda = Extract<Expr, { k: 'lambda' }>;
 type Bind = Map<string, Type>;
 const typeOf = (pm: { name: string; type?: Type }, at: object): Type =>
-  pm.type ?? fail(at, 'C99', `the type of ${pm.name} is not known yet`, '');
-const retOf = (g: FnDecl): Type => g.ret ?? fail(g, 'C99', `the result type of ${g.name} is not known yet`, '');
+  pm.type ??
+  fail(
+    at,
+    'C99',
+    `the type of ${pm.name} is not known yet`,
+    'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+  );
+const retOf = (g: FnDecl): Type =>
+  g.ret ??
+  fail(
+    g,
+    'C99',
+    `the result type of ${g.name} is not known yet`,
+    'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+  );
 const asAst = (t: Type, at: At): TypeAst => ({
   name: t.name,
   args: t.args.map(a => asAst(a, at)),
@@ -189,7 +202,13 @@ function capture(c: Ctx, captured: readonly Stored[]): void {
 /** The value of function g with its first parameters captured: its table slot and the captured values. */
 export function closure(c: Ctx, g: FnDecl | null, captured: readonly Stored[]): Type {
   const { B } = c;
-  if (!g) return fail(c.f, 'C99', 'a function value of no function', '');
+  if (!g)
+    return fail(
+      c.f,
+      'C99',
+      'a function value of no function',
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   const k = captured.length;
   const tr = `&${g.name}/${k}`;
   if (!B.fns.has(tr)) {
@@ -206,7 +225,13 @@ export function closure(c: Ctx, g: FnDecl | null, captured: readonly Stored[]): 
     fnType(
       g.params.slice(k).map(pm => typeOf(pm, g)),
       retOf(g),
-    ) ?? fail(g, 'C44', 'a function value takes one or two parameters', '')
+    ) ??
+    fail(
+      g,
+      'C44',
+      'a function value takes one or two parameters',
+      'Pass a function of one or two parameters, or wrap it in one: `fn(x: Int) -> Int { f(x, y: 1) }`.',
+    )
   );
 }
 
@@ -240,14 +265,26 @@ function checkCaptured(c: Ctx, e: Lambda, captured: readonly Binding[]): void {
           ? 'A Buf has one owner. Pass it as a parameter and return it.'
           : 'A capability is passed where it is used, so the call that uses it shows it. Make it a parameter of a named function.',
       );
-    if (c.consumed.has(v)) fail(e, 'C25', `${v.name} is used after it was handed over`, '');
+    if (c.consumed.has(v))
+      fail(
+        e,
+        'C25',
+        `${v.name} is used after it was handed over`,
+        'A Buf has one owner at a time. Use the value the earlier call returned.',
+      );
   }
 }
 
 /** `fn(x: T) -> U { … }`: a function of its own, whose first parameters are the names it captures. */
 export function emitLambda(c: Ctx, e: Lambda): Type {
   const { B } = c;
-  if (e.params.length === 0 || e.params.length > 2) fail(e, 'C44', 'a function value takes one or two parameters', '');
+  if (e.params.length === 0 || e.params.length > 2)
+    fail(
+      e,
+      'C44',
+      'a function value takes one or two parameters',
+      'Give it one or two parameters. For more, take a record: `fn(p: Pair) -> Int { … }`.',
+    );
   const captured = capturedBy(c, e);
   checkCaptured(c, e, captured);
   const name = `fn@${e.file}:${e.line}#${B.counters.lambdas++}`;
@@ -283,7 +320,13 @@ function emitInterfaceCall(c: Ctx, e: Call, cap: Binding, iface: Interface): Typ
   const at = { line: e.line, file: e.file };
   const extra = e.args.filter(a => a.label !== null && ['send', 'within', 'once'].includes(a.label));
   const other = e.args.find(a => !extra.includes(a));
-  if (other) fail(other, 'C11', `${e.name} takes (send, within${m.kind === 'write' ? ', once' : ''})`, '');
+  if (other)
+    fail(
+      other,
+      'C11',
+      `${e.name} takes (send, within${m.kind === 'write' ? ', once' : ''})`,
+      `Pass the message as send:, a time limit in ms as within:${m.kind === 'write' ? ' and a key as once:' : ''}: ${e.name}(send: …, within: 2000${m.kind === 'write' ? ', once: …' : ''}).`,
+    );
   return emitCallOut(c, {
     k: 'call',
     name: m.kind === 'read' ? 'ask' : 'call',
@@ -301,9 +344,21 @@ function emitInterfaceCall(c: Ctx, e: Call, cap: Binding, iface: Interface): Typ
 /** A call of a function value held in a name: its arguments, then the captured values, through the table. */
 function emitHeldCall(c: Ctx, e: Call, held: Binding): Type {
   const ps = held.type.args.slice(0, -1);
-  const ret = held.type.args.at(-1) ?? fail(e, 'C99', `${e.name} has no result type`, '');
+  const ret =
+    held.type.args.at(-1) ??
+    fail(
+      e,
+      'C99',
+      `${e.name} has no result type`,
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   if (e.args.length !== ps.length)
-    fail(e, 'C12', `${e.name} takes ${ps.length} argument${ps.length > 1 ? 's' : ''}, in order`, '');
+    fail(
+      e,
+      'C12',
+      `${e.name} takes ${ps.length} argument${ps.length > 1 ? 's' : ''}, in order`,
+      `A function value's arguments are not named: write ${e.name}(${ps.map((_p, i) => `a${i + 1}`).join(', ')}).`,
+    );
   c.code.push(...get(held.locals[1] ?? 0));
   e.args.forEach((a, i) => {
     const p = ps[i] ?? ret;

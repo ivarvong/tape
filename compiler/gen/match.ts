@@ -137,7 +137,14 @@ export function uncovered(c: Ctx, rows: readonly Pattern[][], types: readonly Co
 function checkCovered(c: Ctx, e: Match, subject: Stored): void {
   if (!e.subject) return;
   if (c.B.isLinear(subject.type) || CAPABILITIES.includes(subject.type.name))
-    fail(e, 'C23', `cannot match on a ${key(subject.type)}`, '');
+    fail(
+      e,
+      'C23',
+      `cannot match on a ${key(subject.type)}`,
+      c.B.isLinear(subject.type)
+        ? 'Match on what you read from it instead; freeze it first for the bytes: `match freeze(buf: out) { … }`.'
+        : 'A capability is passed on, not looked into: match on what a call through it answers.',
+    );
   const missing = uncovered(
     c,
     e.arms.filter(a => !a.guard).map(a => [a.pat]),
@@ -220,11 +227,23 @@ const handedOver = (consumed: ReadonlySet<Binding>): string =>
     .join(',');
 
 export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean): Type {
-  if (!expected) return fail(e, 'C99', 'match needs a known result type', '');
+  if (!expected)
+    return fail(
+      e,
+      'C99',
+      'match needs a known result type',
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   const results = c.B.slotsOf(expected);
   const subject = e.subject ? inLocals(c, e.subject) : null;
   if (subject) checkCovered(c, e, subject);
-  else if (!endsWithElse(e)) fail(e, 'C24', 'a condition match must end with `else -> …`', '');
+  else if (!endsWithElse(e))
+    fail(
+      e,
+      'C24',
+      'a condition match must end with `else -> …`',
+      'Add a last arm `else -> …`: a condition match must say what it is when no condition holds.',
+    );
   const before = new Set(c.consumed);
   let after: { sig: string; set: Set<Binding> } | null = null;
   open(c, 0x02, results);

@@ -21,7 +21,13 @@ function declaration(c: Cursor, prog: Program, t: Token): void {
   else if (!kw && word === 'invariant' && c.is('str')) invariant(c, prog, t);
   else if (!kw && word === 'machine') machine(c, prog);
   else if (!kw && word === 'interface') interfaceDecl(c, prog);
-  else fail(t, 'P05', `expected \`fn\`, \`type\`, \`interface\` or \`schema\` but found ${shown(t)}`, '');
+  else
+    fail(
+      t,
+      'P05',
+      `expected \`fn\`, \`type\`, \`interface\` or \`schema\` but found ${shown(t)}`,
+      'A file is declarations: `fn`, `export fn`, `type`, `interface`, `migration`, `schema`, `flag`, `machine`, `invariant`. A statement goes inside a function.',
+    );
 }
 export function parse(file: string, text: string, prog: Program): void {
   const c = new Cursor(file, text);

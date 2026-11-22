@@ -37,7 +37,9 @@ function named(e: CallOut): Named {
         a,
         'C11',
         `${e.name} takes (${takes.join(', ')})`,
-        a.label === 'once' ? 'A read has no key. Use `call` for a command.' : '',
+        a.label === 'once'
+          ? 'A read has no key. Use `call` for a command.'
+          : `Take out ${a.label === null ? 'the unnamed argument' : `${a.label}:`}; ${e.name} is written ${e.name}(${takes.map(t => `${t}: …`).join(', ')}).`,
       );
   const within =
     arg('within') ??
@@ -60,9 +62,20 @@ function named(e: CallOut): Named {
   const method = must('method', 'Name the method, for example `method: "reserve"`.');
   const send = must('send', 'Pass the message record.');
   const reply = must('reply', 'Name the reply type, for example `reply: Reserved`.');
-  if (method.value.k !== 'str') return fail(method, 'C14', 'argument method should be a text literal', '');
+  if (method.value.k !== 'str')
+    return fail(
+      method,
+      'C14',
+      'argument method should be a text literal',
+      'Write the method as a text literal, `method: "reserve"`: it is part of the message both programs agree on.',
+    );
   if (reply.value.k !== 'ctor' || reply.value.args.length > 0)
-    return fail(reply, 'C14', 'argument reply should be a type name', '');
+    return fail(
+      reply,
+      'C14',
+      'argument reply should be a type name',
+      'Name the reply type itself, `reply: Reserved`, not a value of it.',
+    );
   return { within, once, to, method, send, reply, methodName: text(method.value.bytes), replyT: T(reply.value.name) };
 }
 
@@ -163,7 +176,7 @@ function readReply(c: Ctx, e: CallOut, replyT: Type): Type {
       e,
       'C99',
       'std/core.tape: CallError must be Timeout, Unreachable, Rejected(reason: View), Skew(reason: View)',
-      '',
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
     );
   const status = [0x22, ...uleb(r), 0x28, 2, 0, 0x41, 1, 0x6b, ...set(tag)];
   const body = [...get(r), 0x28, 2, 4, ...set(n), ...get(r), 0x41, 8, 0x6a, ...set(pt)];

@@ -22,9 +22,16 @@ export function emitDecode(c: Ctx, e: Call): Type {
   const ta =
     arg('as') ??
     fail(e, 'C13', 'decode is missing argument as', 'Name the type to decode into, for example `as: NewTodo`.');
-  for (const a of e.args) if (a !== ja && a !== ta) fail(a, 'C11', 'decode takes (json, as)', '');
+  for (const a of e.args)
+    if (a !== ja && a !== ta)
+      fail(a, 'C11', 'decode takes (json, as)', 'Write `decode(json: body, as: T)` and nothing else.');
   if (ta.value.k !== 'ctor' || ta.value.args.length > 0)
-    return fail(ta, 'C14', 'argument as should be a type name', '');
+    return fail(
+      ta,
+      'C14',
+      'argument as should be a type name',
+      'Name the type itself, `as: NewTodo`, not a value of it.',
+    );
   const named: TypeAst = { name: ta.value.name, args: [], line: ta.line, file: ta.file };
   const t = c.B.resolve(named);
   const v = inLocals(c, ja.value, VIEW);

@@ -32,7 +32,17 @@ function wrongType(c: Ctx, pt: CtorPat, owner: string, type: Type): never {
 }
 
 export function ctorOf(c: Ctx, pt: CtorPat, type: Type): Taken {
-  const made = c.B.ctors.get(pt.name) ?? fail(pt, 'C20', `unknown constructor ${pt.name}`, '');
+  const made =
+    c.B.ctors.get(pt.name) ??
+    fail(
+      pt,
+      'C20',
+      `unknown constructor ${pt.name}`,
+      ((n: string | null): string =>
+        n ? `Did you mean \`${n}\`?` : "Declare it in a type, or use one of the type's own constructors.")(
+        c.B.nearest(pt.name, [...c.B.ctors.keys()]),
+      ),
+    );
   if (made.decl.name !== type.name) wrongType(c, pt, made.decl.name, type);
   const adt = c.B.adtOf(type, pt);
   const fields: readonly Field[] = adt.variants[made.vi]?.fields ?? [];
@@ -183,7 +193,13 @@ function matchFn(c: Ctx, pt: Of<'fn'>, type: Type, ls: readonly number[]): void 
   const adt = c.B.adtOf(ret, pt);
   const some = adt.variants.findIndex(v => v.name === 'Some');
   const fl = adt.boxed ? undefined : adt.variants[some]?.fields[0];
-  if (!fl) return fail(pt, 'C34', `${pt.name} cannot be used as a pattern`, '');
+  if (!fl)
+    return fail(
+      pt,
+      'C34',
+      `${pt.name} cannot be used as a pattern`,
+      `A function pattern names a function of one parameter that returns Option[…], like decimal(n); ${pt.name} does not return one.`,
+    );
   c.code.push(...get(r[0] ?? 0), ...i32(some), 0x47);
   fails(c);
   matchPat(
@@ -240,7 +256,13 @@ function matchCtor(c: Ctx, pt: CtorPat, type: Type, bt: Type, ls: number[]): voi
     return fails(c);
   }
   if (isRefine(c, pt)) return matchRefined(c, pt, bt, ls);
-  if (!c.B.adtOrNull(type, pt)) fail(pt, 'C23', `${key(type)} has no constructors to match`, '');
+  if (!c.B.adtOrNull(type, pt))
+    fail(
+      pt,
+      'C23',
+      `${key(type)} has no constructors to match`,
+      `Match ${key(type)} with a literal, a name or \`_\`; constructor patterns are for types declared with \`type\`.`,
+    );
   const taken = ctorOf(c, pt, type);
   if (taken.adt.boxed) return matchBoxed(c, taken, ls[0] ?? 0);
   if (taken.adt.tagged) {

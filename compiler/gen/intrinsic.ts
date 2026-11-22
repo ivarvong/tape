@@ -18,7 +18,9 @@ const ld = (off: number): number[] => [0x28, 2, off];
 const st = (off: number): number[] => [0x36, 2, off];
 const i32 = (n: number): number[] => [0x41, ...sleb(n)];
 
-const argAt = (u: Use, i: number): Arg => u.args[i] ?? fail(u.e, 'C13', `${u.n} is missing an argument`, '');
+const argAt = (u: Use, i: number): Arg =>
+  u.args[i] ??
+  fail(u.e, 'C13', `${u.n} is missing an argument`, `${u.n} takes (${(INTRINSICS.get(u.n) ?? []).join(', ')}).`);
 const paramName = (u: Use, i: number): string => `argument ${INTRINSICS.get(u.n)?.[i]}`;
 /** Argument i as text: the locals of its pointer and length. */
 function view(u: Use, i: number): [number, number] {
@@ -109,7 +111,13 @@ function size(u: Use): Type {
       'size takes a Buf variable',
       "size reads a Buf's length without handing it over, so it needs the variable itself.",
     );
-  if (c.consumed.has(v)) fail(arg, 'C25', `${v.name} is used after it was handed over`, '');
+  if (c.consumed.has(v))
+    fail(
+      arg,
+      'C25',
+      `${v.name} is used after it was handed over`,
+      'A Buf has one owner at a time. Use the value the earlier call returned.',
+    );
   c.code.push(...get(v.locals[0] ?? 0), ...ld(4), 0xad);
   return INT;
 }
@@ -175,7 +183,12 @@ function next(u: Use): Type {
   const s = inLocals(c, arg.value);
   const [rowT] = s.type.args;
   if (s.type.name !== 'Rows' || !rowT)
-    return fail(arg, 'C14', `argument rows should be Rows[…] but is ${key(s.type)}`, '');
+    return fail(
+      arg,
+      'C14',
+      `argument rows should be Rows[…] but is ${key(s.type)}`,
+      'Pass the rows a `sql_all` gave, or the rest from the last `Next(value, rest)`.',
+    );
   const [ptr = 0, count = 0] = s.locals;
   const step = T(stdName(prog, 'types', 'Step'), rowT);
   const adt = c.B.adtOf(step, e);
@@ -253,7 +266,13 @@ function ask(c: Ctx, e: Call, n: 'now' | 'random'): Type {
   const [cap, label, kind, reads] =
     n === 'now' ? ['Clock', 'clock', 0, 'the time'] : ['Entropy', 'from', 1, 'random numbers'];
   const [arg] = e.args;
-  if (e.args.length !== 1 || !arg) return fail(e, 'C11', `${n} takes (${label})`, '');
+  if (e.args.length !== 1 || !arg)
+    return fail(
+      e,
+      'C11',
+      `${n} takes (${label})`,
+      `Write \`${n}(${label})\` with the ${label === 'clock' ? 'Clock' : 'Entropy'} parameter, and nothing else.`,
+    );
   if (c.emit(arg.value, T(cap), false).name !== cap)
     fail(
       arg,
@@ -311,5 +330,12 @@ export function emitIntrinsic(c: Ctx, e: Call): Type {
   if (n === 'now' || n === 'random') return ask(c, e, n);
   const args = c.B.orderArgs(`function ${n}`, INTRINSICS.get(n) ?? [], e.args, e);
   const known = Object.hasOwn(BY_NAME, n) ? BY_NAME[n] : undefined;
-  return known ? known({ c, e, n, args }) : fail(e, 'C99', `unsupported intrinsic ${n}`, '');
+  return known
+    ? known({ c, e, n, args })
+    : fail(
+        e,
+        'C99',
+        `unsupported intrinsic ${n}`,
+        'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+      );
 }

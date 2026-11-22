@@ -56,7 +56,7 @@ function rewritten(r: Reading, q: Query, s: Write, w: Rewrite, opTables: Readonl
       'C56',
       q.at,
       `this write's op-id guard (NOT EXISTS …) does not name the ${s.table} row it changes, so the same op id sent for another row is taken for a repeat of this one, and that write is lost`,
-      `Constrain the guard by the row's key as well, with the parameter the write uses for it (${(t?.pk ?? []).map(c => `${c} = ?n`).join(' AND ') || 'the key'}), and record the op id with that key.`,
+      `Constrain the guard by the row's key as well, with the parameter the write uses for it (${(t?.pk ?? []).map(c => `${c} = :${c}`).join(' AND ') || 'the key'}), and record the op id with that key.`,
     );
   const reads = readsOf(r, q, s, w);
   const dependent = w.assigns.filter(x => !settles(x, reads) && colsIn(x.expr, reads.a).some(reads.mine));
@@ -67,7 +67,7 @@ function rewritten(r: Reading, q: Query, s: Write, w: Rewrite, opTables: Readonl
     'C54',
     q.at,
     `run twice (a retried request, a timer that fires again), this write applies twice: ${dependent.map(x => `${x.col} = ${q.raw.slice(x.expr.s, x.expr.e).trim()}`).join(', ')} depends on the row it changes, and nothing at the top level of its WHERE stops a second run`,
-    `Make the second run a no-op: compare-and-set on a column it changes (\`AND state = 'pending'\` with a new state, \`AND version = ?n\` with version = version + 1), or guard it by an op id (\`AND NOT EXISTS (SELECT 1 FROM ops WHERE op = ?k AND key = ?n)\`). If every attempt is meant to count, say so in the call: \`repeat: True\`.`,
+    `Make the second run a no-op: compare-and-set on a column it changes (\`AND state = 'pending'\` with a new state, \`AND version = :version\` with version = version + 1), or guard it by an op id (\`AND NOT EXISTS (SELECT 1 FROM ops WHERE op = :op AND key = :key)\`). If every attempt is meant to count, say so in the call: \`repeat: True\`.`,
   );
 }
 

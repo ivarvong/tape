@@ -105,7 +105,17 @@ export function slotsOf(L: Layouts, t: Type, at: Place): number[] {
   if (fixed) return [...fixed];
   if (t.name === 'Rows') {
     const row = t.args.length === 1 ? t.args[0] : undefined;
-    rowOf(L, row ?? refuse(at, 'C05', 'Rows takes one type, for example Rows[Todo]', ''), at);
+    rowOf(
+      L,
+      row ??
+        refuse(
+          at,
+          'C05',
+          'Rows takes one type, for example Rows[Todo]',
+          'Name the row type in the brackets: `Rows[Todo]`.',
+        ),
+      at,
+    );
     return [I32, I32];
   }
   return L.prog.types.get(t.name)?.refine ? slotsOf(L, strip(L, t), at) : adtOf(L, t, at).slots;
@@ -155,7 +165,9 @@ function declOf(L: Layouts, t: Type, at: Place): TypeDecl {
       at,
       'C05',
       `type ${decl.name} takes ${decl.params.length} type argument${decl.params.length === 1 ? '' : 's'}, not ${t.args.length}`,
-      decl.params.length > 0 ? `Write ${decl.name}[${decl.params.join(', ')}] with a type for each.` : '',
+      decl.params.length > 0
+        ? `Write ${decl.name}[${decl.params.join(', ')}] with a type for each.`
+        : `${decl.name} takes no type arguments: write ${decl.name} alone.`,
     );
   return decl;
 }
@@ -202,7 +214,13 @@ function slotFor(slots: number[], vt: number, nth: number, first: number): numbe
 
 function flat(L: Layouts, t: Type, decl: TypeDecl, map: ReadonlyMap<string, Type>): FlatAdt {
   const k = key(t);
-  if (L.building.has(k)) refuse(decl, 'C07', `type ${k} contains itself`, '');
+  if (L.building.has(k))
+    refuse(
+      decl,
+      'C07',
+      `type ${k} contains itself`,
+      'A type cannot hold itself directly. Put the recursive field in a constructor beside one that ends it, as List has Cons(head, tail) and Nil.',
+    );
   L.building.add(k);
   const tagged = decl.variants.length > 1;
   const slots: number[] = tagged ? [I32] : [];

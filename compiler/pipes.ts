@@ -23,7 +23,16 @@ export function resolvePipes(prog: Program): void {
     const fixed = PIPE_FIRST[name],
       builtIn = INTRINSICS.get(name);
     if (fixed) return fixed;
-    if (builtIn) return builtIn[0] ?? fail(at, 'C49', `${name}() takes nothing, so nothing can be piped into it`, '');
+    if (builtIn)
+      return (
+        builtIn[0] ??
+        fail(
+          at,
+          'C49',
+          `${name}() takes nothing, so nothing can be piped into it`,
+          `Call it on its own line: \`${name}()\`.`,
+        )
+      );
     const dot = name.indexOf('.');
     if (dot > 0 && f.params.some(pm => pm.name === name.slice(0, dot))) return 'send'; // an interface method: repo.head(…)
     const own = prog.byFile.get(f.file)?.get(name),
@@ -43,7 +52,15 @@ export function resolvePipes(prog: Program): void {
         `${name} is defined in ${all.map(d => d.file).join(' and ')}`,
         `Say which one: ${all.map(d => `\`${stemOf(d.file)}.${name}(…)\``).join(' or ')}.`,
       );
-    return firsts[0] ?? fail(at, 'C49', `${name} takes nothing, so nothing can be piped into it`, '');
+    return (
+      firsts[0] ??
+      fail(
+        at,
+        'C49',
+        `${name} takes nothing, so nothing can be piped into it`,
+        `Call it on its own line: \`${name}()\`.`,
+      )
+    );
   };
   for (const f of prog.fns.values())
     eachExpr(f.body, e => {

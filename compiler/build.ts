@@ -135,7 +135,12 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
     sha256(utf8(JSON.stringify([method, layout.describe(L, send, at), layout.describe(L, reply, at)]))).slice(0, 16);
   for (const n of Object.keys(opts.pin))
     if (!prog.flags.some(x => x.name === n))
-      fail(null, 'C37', `cannot pin ${n}: the program declares no such flag`, '');
+      fail(
+        null,
+        'C37',
+        `cannot pin ${n}: the program declares no such flag`,
+        `Pin a flag the program declares${prog.flags.length > 0 ? `: ${prog.flags.map(x => x.name).join(', ')}` : '; it declares none'}.`,
+      );
   const shared = { STATES, WIRE, callsOf, fns, opts, prog, sqlFound, ctors, types, find, fingerprint };
   const constants = {
     FLAG_BASE: mod.FLAG_BASE,

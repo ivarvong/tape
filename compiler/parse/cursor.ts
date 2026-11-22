@@ -55,7 +55,13 @@ export class Cursor {
   }
   expect<K extends Token['t']>(kind: K, v?: string, hint = ''): TokenOf<K> {
     return (
-      this.eat(kind, v) ?? fail(this.peek(), 'P01', `expected ${wanted(kind, v)} but found ${shown(this.peek())}`, hint)
+      this.eat(kind, v) ??
+      fail(
+        this.peek(),
+        'P01',
+        `expected ${wanted(kind, v)} but found ${shown(this.peek())}`,
+        hint || `Write ${wanted(kind, v)} here.`,
+      )
     );
   }
   skipNl(): void {

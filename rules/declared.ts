@@ -126,7 +126,7 @@ function moveKeys({ prog, queries, tables, bad }: Reading): void {
       'C63',
       q.at,
       `this sql_move names the ${plan.table} row by ${plan.keyCols.join(', ')}, which is not a whole unique key of ${plan.table} (${[...new Set([t.pk, ...t.uniques].filter(u => u.length).map(u => u.join(', ')))].join('; ') || 'it has none but its rowid'}): when it moves no row, the row read back may be another one`,
-      `Name the row by its key: \`WHERE ${(t.pk.length > 0 ? t.pk : (t.uniques[0] ?? ['id'])).map((c, i) => `${c} = ?${i + 1}`).join(' AND ')} AND …\`.`,
+      `Name the row by its key: \`WHERE ${(t.pk.length > 0 ? t.pk : (t.uniques[0] ?? ['id'])).map(c => `${c} = :${c}`).join(' AND ')} AND …\`.`,
     );
   }
 }

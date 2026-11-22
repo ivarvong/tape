@@ -20,10 +20,11 @@
 //                        the row it changes (n = n + 1) is refused unless its WHERE, at the top level (not under an
 //                        OR or a NOT), stops a second run:
 //                        - a compare-and-set on a column it changes (`AND state = 'pending'` with a new state, `AND
-//                          version = ?n` with version = version + 1), or
-//                        - an op-id guard, `NOT EXISTS (SELECT … FROM ops WHERE op = ?k AND <the row's key>)`, over
+//                          version = :version` with version = version + 1), or
+//                        - an op-id guard, `NOT EXISTS (SELECT … FROM ops WHERE op = :op AND <the row's key>)`, over
 //                          a table the program records op ids in, or
-//                        - a witness `AND ?k = 1` whose argument is the count of such a guarded write.
+//                        - a witness `AND :done = 1` whose argument is the count of such a guarded write.
+//                        (The rules read the statement as the database is given it, each name numbered: ?1, ?2.)
 //                        An assignment that settles on its first run is not counted as depending on the row:
 //                        `col = max(col, e)`, `min(col, e)`, `coalesce(col, e)` or `ifnull(col, e)` where e reads
 //                        no column the write changes (applied twice, it gives what it gave once).

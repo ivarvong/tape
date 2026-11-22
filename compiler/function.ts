@@ -16,7 +16,14 @@ import type { Type } from './types.ts';
 function declareParams(c: Ctx): void {
   let slot = 0;
   c.f.params.forEach((pm, i) => {
-    const type = pm.type ?? fail(c.f, 'C99', `the type of ${pm.name} is not known`, '');
+    const type =
+      pm.type ??
+      fail(
+        c.f,
+        'C99',
+        `the type of ${pm.name} is not known`,
+        'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+      );
     const v = declare(
       c,
       pm.name,
@@ -54,9 +61,24 @@ function compileFn(B: Build, f: FnDecl): Compiled {
   const { trampoline } = f;
   if (trampoline) return compileEntry(B, { ...f, trampoline });
   const params = f.params.flatMap(pm =>
-    B.slotsOf(pm.type ?? fail(f, 'C99', `the type of ${pm.name} is not known`, '')),
+    B.slotsOf(
+      pm.type ??
+        fail(
+          f,
+          'C99',
+          `the type of ${pm.name} is not known`,
+          'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+        ),
+    ),
   );
-  const ret: Type = f.ret ?? fail(f, 'C99', `the result type of ${f.name} is not known`, '');
+  const ret: Type =
+    f.ret ??
+    fail(
+      f,
+      'C99',
+      `the result type of ${f.name} is not known`,
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   const c: Ctx = {
     B,
     f,

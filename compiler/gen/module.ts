@@ -214,7 +214,7 @@ export function orderArgs(what: string, names: readonly string[], args: readonly
         `${what} has no parameter ${a.label}`,
         `${what} takes ${list}.${a.pun ? ` \`${a.label}\` was read as shorthand for \`${a.label}: ${a.label}\`; write the parameter name, then the value.` : ''}`,
       );
-    if (by.has(a.label)) fail(a, 'C12', `argument ${a.label} is given twice`, '');
+    if (by.has(a.label)) fail(a, 'C12', `argument ${a.label} is given twice`, `Give ${a.label} once.`);
     by.set(a.label, a);
   }
   return names.map(n => by.get(n) ?? fail(at, 'C13', `${what} is missing argument ${n}`, `${what} takes ${list}.`));

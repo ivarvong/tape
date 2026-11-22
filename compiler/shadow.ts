@@ -79,7 +79,7 @@ export const clashHint = (what: string, name: string, file: string | undefined):
   CORE.has(name)
     ? `${name} is std's, and the compiler reads it by name: choose another name.`
     : isStd(file ?? '')
-      ? ''
+      ? `std defines it for its own use, and so may a program only in a file of its own: choose another name for this ${what}.`
       : `${file} defines this ${what} too; ${what === 'type' ? 'type' : 'constructor'} names are unique across a program's files.`;
 /** The std name a program's definition may have moved: the compiler's own uses of std's Step, Next and End. */
 export const stdName = (prog: Program, kind: Kind, name: string): string => prog.renamed?.[kind].get(name) ?? name;

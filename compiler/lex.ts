@@ -178,7 +178,13 @@ function sql(sc: Scan): void {
 }
 function operator(sc: Scan): void {
   const op = OPS.find(o => sc.text.startsWith(o, sc.i));
-  if (!op) return fail(here(sc), 'L01', `unexpected character ${JSON.stringify(sc.text[sc.i])}`, '');
+  if (!op)
+    return fail(
+      here(sc),
+      'L01',
+      `unexpected character ${JSON.stringify(sc.text[sc.i])}`,
+      'Tape has no such character outside a text literal or a comment. Put it in a text literal, or after `//`.',
+    );
   if (op === '(' || op === '[' || op === '{') sc.open.push(op);
   if (op === ')' || op === ']' || op === '}') sc.open.pop();
   // a line that starts with |> carries on the step before it

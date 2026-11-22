@@ -1,6 +1,6 @@
 // compiler/gen/expr.ts: an expression checked and written as Wasm; its type is what the emitter gives back.
-import { unreachable } from '../ast.ts';
-import type { Arg, Expr, Variant } from '../ast.ts';
+import { eachExpr, eachPattern, patternsIn, unreachable } from '../ast.ts';
+import type { Arg, Expr, Pattern, Variant } from '../ast.ts';
 import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
 import { BOOL, CAPABILITIES, INT, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
@@ -29,13 +29,34 @@ import { rangeOf } from './range.ts';
 type Of<K extends Expr['k']> = Extract<Expr, { k: K }>;
 const didYouMean = (n: string | null, otherwise = ''): string => (n ? `Did you mean \`${n}\`?` : otherwise);
 
+/**
+ * What to write for a name not in scope: the one meant, a function to call, a field a pattern matched without
+ * binding it (`Some(value: Transfer(…))` binds no `value`: `value: t = Transfer(…)` does), or where names come from.
+ */
+function unknownHint(c: Ctx, name: string): string {
+  const near = c.B.nearest(name, [...c.env.keys()]);
+  if (near) return `Did you mean \`${near}\`?`;
+  if (c.B.fns.has(name)) return `${name} is a function: call it with ${name}(...).`;
+  const unbound: string[] = [];
+  const look = (p: Pattern): void => {
+    eachPattern(p, q => {
+      if (q.k === 'ctor')
+        for (const s of q.subs) if (s.field === name && s.pat.k !== 'bind' && s.pat.k !== 'as') unbound.push(q.name);
+    });
+  };
+  eachExpr(c.f.body, x => {
+    for (const p of patternsIn(x)) look(p);
+  });
+  const [ctor] = unbound;
+  if (ctor !== undefined)
+    return `\`${ctor}(${name}: Pattern)\` matches the field ${name} without binding it. To have both, write \`${ctor}(${name}: ${name} = Pattern)\` (name = Pattern).`;
+  return `A name is a parameter, a \`let\`, or bound by a pattern before it is used: \`let ${name} = …\`.`;
+}
+
 function emitVar(c: Ctx, e: Of<'var'>): Type {
   const { B } = c;
   if (!c.env.has(e.name) && fnValue(c, e.name)) return closure(c, B.find(e.name, c.f.file), []);
-  const isFunction = (): string => (B.fns.has(e.name) ? `${e.name} is a function: call it with ${e.name}(...).` : '');
-  const v =
-    c.env.get(e.name) ??
-    fail(e, 'C16', `unknown name ${e.name}`, didYouMean(B.nearest(e.name, [...c.env.keys()]), isFunction()));
+  const v = c.env.get(e.name) ?? fail(e, 'C16', `unknown name ${e.name}`, unknownHint(c, e.name));
   if (B.isLinear(v.type)) {
     if (c.consumed.has(v))
       fail(
@@ -382,10 +403,24 @@ function emitBin(c: Ctx, e: Of<'bin'>): Type {
 type Built = { got: Type[]; ls: number[]; bound: Map<string, Type> };
 
 function emitFields(c: Ctx, e: Of<'ctor'>, v: Variant, args: readonly Arg[], type: Type | null): Built {
-  const { decl, vi } = c.B.ctors.get(e.name) ?? fail(e, 'C20', `unknown constructor ${e.name}`, '');
+  const { decl, vi } =
+    c.B.ctors.get(e.name) ??
+    fail(
+      e,
+      'C20',
+      `unknown constructor ${e.name}`,
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   const out: Built = { got: [], ls: [], bound: new Map() };
   v.fields.forEach((fl, i) => {
-    const arg = args[i] ?? fail(e, 'C13', `constructor ${e.name} is missing argument ${fl.name}`, '');
+    const arg =
+      args[i] ??
+      fail(
+        e,
+        'C13',
+        `constructor ${e.name} is missing argument ${fl.name}`,
+        `Give every field: ${e.name}(${v.fields.map(x => `${x.name}: …`).join(', ')}).`,
+      );
     const known = type ? (c.B.adtOf(type, e).variants[vi]?.fields[i]?.type ?? null) : null;
     const t = c.emit(arg.value, known, false);
     const param = decl.params.includes(fl.type.name) && fl.type.args.length === 0 ? fl.type.name : null;
@@ -404,7 +439,7 @@ function emitFields(c: Ctx, e: Of<'ctor'>, v: Variant, args: readonly Arg[], typ
 function emitCtor(c: Ctx, e: Of<'ctor'>, expected: Type | null): Type {
   const { B } = c;
   if (e.name === 'True' || e.name === 'False') {
-    if (e.args.length > 0) fail(e, 'C11', `${e.name} takes no arguments`, '');
+    if (e.args.length > 0) fail(e, 'C11', `${e.name} takes no arguments`, `Write ${e.name} alone, without brackets.`);
     c.code.push(0x41, e.name === 'True' ? 1 : 0);
     return BOOL;
   }
@@ -418,7 +453,14 @@ function emitCtor(c: Ctx, e: Of<'ctor'>, expected: Type | null): Type {
   const { decl, vi } =
     B.ctors.get(e.name) ??
     fail(e, 'C20', `unknown constructor ${e.name}`, didYouMean(B.nearest(e.name, [...B.ctors.keys()])));
-  const v = decl.variants[vi] ?? fail(e, 'C20', `unknown constructor ${e.name}`, '');
+  const v =
+    decl.variants[vi] ??
+    fail(
+      e,
+      'C20',
+      `unknown constructor ${e.name}`,
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   const given = decl.params.length === 0 ? T(decl.name) : expected?.name === decl.name ? expected : null;
   const args = B.orderArgs(
     `constructor ${e.name}`,
@@ -438,7 +480,14 @@ function emitCtor(c: Ctx, e: Of<'ctor'>, expected: Type | null): Type {
 
 /** The type of a constructor of a generic type, from what its fields turned out to be. */
 function inferred(c: Ctx, e: Of<'ctor'>, bound: ReadonlyMap<string, Type>): Type {
-  const decl = c.B.ctors.get(e.name)?.decl ?? fail(e, 'C20', `unknown constructor ${e.name}`, '');
+  const decl =
+    c.B.ctors.get(e.name)?.decl ??
+    fail(
+      e,
+      'C20',
+      `unknown constructor ${e.name}`,
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
   const args = decl.params.map(
     pm =>
       bound.get(pm) ??

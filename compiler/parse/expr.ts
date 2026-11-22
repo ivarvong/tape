@@ -141,7 +141,12 @@ function atom(c: Cursor, t: Token): Expr {
       '`match` can only be the last expression of a function or of a match arm',
       'Move this decision into its own function and call it here. Conditions can be combined with `and` / `or`, and patterns can nest.',
     );
-  return fail(t, 'P02', `expected an expression but found ${shown(t)}`, '');
+  return fail(
+    t,
+    'P02',
+    `expected an expression but found ${shown(t)}`,
+    'An expression is a number, a text, a name, a call, a constructor, `fn(…) -> T { … }`, or one of those with operators.',
+  );
 }
 // an atom and what follows it: `.field`, `file.name(…)`, `[index]`
 function primary(c: Cursor): Expr {

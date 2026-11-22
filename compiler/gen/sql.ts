@@ -178,7 +178,14 @@ function queryOf(c: Ctx, e: Call): Query {
       'argument db should be the Sql parameter',
       "Add `db: Sql` to this function's parameters and pass it here.",
     );
-  const qa = arg('query') ?? fail(e, 'C13', `${e.name} is missing argument query`, '');
+  const qa =
+    arg('query') ??
+    fail(
+      e,
+      'C13',
+      `${e.name} is missing argument query`,
+      'Pass the statement as a text literal: `query: "SELECT * FROM t WHERE id = :id"`.',
+    );
   if (qa.value.k !== 'str')
     return fail(
       qa,
@@ -230,7 +237,12 @@ function said(a: Arg | undefined, name: string, what: string): boolean {
 function rowTypeOf(c: Ctx, e: Call, ra: Arg | undefined): Type {
   if (!ra) return fail(e, 'C13', `${e.name} is missing argument row`, 'Name the row type, for example `row: Todo`.');
   if (ra.value.k !== 'ctor' || ra.value.args.length > 0)
-    return fail(ra, 'C14', 'argument row should be a type name', '');
+    return fail(
+      ra,
+      'C14',
+      'argument row should be a type name',
+      'Name the row type itself, `row: Todo`, not a value of it.',
+    );
   const named: TypeAst = { name: ra.value.name, args: [], line: ra.line, file: ra.file };
   const rowT = c.B.resolve(named);
   c.B.rowOf(rowT, ra);
@@ -261,7 +273,13 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
     else if (t.name === 'View') {
       const len = fresh(c, I32);
       c.code.push(...set(len), 0x36, 0, ...uleb(16 * i), ...get(block), ...get(len), 0x36, 0, ...uleb(16 * i + 4));
-    } else fail(a, 'C14', `argument ${a.as ?? a.label} should be Int, Bool or View but is ${key(t)}`, '');
+    } else
+      fail(
+        a,
+        'C14',
+        `argument ${a.as ?? a.label} should be Int, Bool or View but is ${key(t)}`,
+        'A query takes numbers, Bools and text. Pass a field of the record instead: `id: order.id`.',
+      );
     kinds += t.name === 'Int' ? 'i' : t.name === 'Bool' ? 'b' : 't';
   }
   return { block, kinds };
