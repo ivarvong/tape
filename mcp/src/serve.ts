@@ -321,6 +321,12 @@ export async function serve(request: Request, deps: Deps, gate: Gate): Promise<R
     total_ms: 0,
   };
   const res = secured(await route(request, url, deps, gate, seen, meta));
+  // a call refused before its body was read still finishes with the body: reached through the tape Worker's service
+  // binding, a body left unread is logged there as an error after the answer is sent
+  if (request.body && !request.bodyUsed)
+    await request.body.cancel().catch(() => {
+      // nothing more to read, or the client went away: either way it is done
+    });
   meta.status = res.status;
   meta.total_ms = Date.now() - t0;
   gate.log(logLine(seen, meta));

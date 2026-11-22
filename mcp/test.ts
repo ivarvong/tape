@@ -820,6 +820,28 @@ const tests: Test[] = [
     name: 'headers',
     run: async m => {
       const out: string[] = [];
+      // a refusal before the body is read still finishes with the body: through the tape Worker's binding a body
+      // left unread is logged as an error ("Can't read from request stream after response has been sent")
+      for (const [path, headers] of [
+        ['/v1/run', { origin: 'https://x.example' }],
+        ['/v1/run', { 'content-type': 'text/plain' }],
+        ['/nowhere', {}],
+      ] as const) {
+        const req = new Request(`https://tape.example${path}`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.7', ...headers },
+          body: '{"requests":["GET /"]}',
+        });
+        await m.serve.serve(req, depsOf(m), {
+          killSwitch: 'off',
+          salt: 'test-salt',
+          limiter: null,
+          log: line => {
+            void line;
+          },
+        });
+        if (!req.bodyUsed) out.push(`${path} ${JSON.stringify(headers)}: the refusal left the body unread`);
+      }
       const answers = [
         await rpc(m, 'tools/list', {}),
         await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/<script>alert(1)</script>'] })),
