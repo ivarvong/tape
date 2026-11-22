@@ -231,9 +231,12 @@ const dataRefusal = (
 };
 
 export class Name extends DurableObject {
-  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
-    super(ctx, env);
-    const { sql } = ctx.storage;
+  // The object's own tables are made on first use of #sql, not in the constructor: an object that is only asked a
+  // question (is this name registered? is it published?) stores nothing, so a tokenless request for a name nobody
+  // made leaves no storage behind (hardening.test.ts).
+  #made = false;
+  #make(): void {
+    const { sql } = this.ctx.storage;
     sql.exec(
       'CREATE TABLE IF NOT EXISTS _tape_served(trace TEXT, parent TEXT, version INTEGER NOT NULL, key TEXT, status TEXT NOT NULL, log_id TEXT, at INTEGER NOT NULL)',
     );
@@ -258,7 +261,18 @@ export class Name extends DurableObject {
     );
   }
   get #sql(): SqlStorage {
+    if (!this.#made) {
+      this.#make();
+      this.#made = true;
+    }
     return this.ctx.storage.sql;
+  }
+  /** Does this object hold the table? Reads only: it makes nothing. */
+  #has(table: string): boolean {
+    return (
+      this.ctx.storage.sql.exec("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1", table).toArray()
+        .length > 0
+    );
   }
   /** Is any version live? */
   #alive(): boolean {
@@ -330,6 +344,8 @@ export class Name extends DurableObject {
     return this.publication();
   }
   publication(): { published: boolean; since: string | null; latest: number | null } {
+    // an object never made has no versions and is not published: answered without making its tables
+    if (!this.#has('_tape_versions')) return { published: false, since: null, latest: null };
     this.#publicTable();
     const [row] = this.#sql.exec('SELECT published, at FROM _tape_public').toArray();
     const published = row?.published === 1;
@@ -844,6 +860,21 @@ export class Name extends DurableObject {
     this.registryTable();
     this.#sql.exec('INSERT INTO _tape_names VALUES (?1, ?2, ?3) ON CONFLICT(name) DO NOTHING', name, kind, Date.now());
     return true;
+  }
+  // ---- The published names of every account (PUBLISHED, one object): the public route asks only this object, so a
+  // tokenless request for a name nobody published reaches no account's objects and stores nothing.
+  setPublished(key: string, published: boolean): true {
+    this.#sql.exec('CREATE TABLE IF NOT EXISTS _tape_published(key TEXT PRIMARY KEY) WITHOUT ROWID');
+    if (published) this.#sql.exec('INSERT INTO _tape_published VALUES (?1) ON CONFLICT(key) DO NOTHING', key);
+    else this.#sql.exec('DELETE FROM _tape_published WHERE key = ?1', key);
+    return true;
+  }
+  /** Is account/name published? Reads only. */
+  isPublished(key: string): boolean {
+    return (
+      this.#has('_tape_published') &&
+      this.ctx.storage.sql.exec('SELECT 1 FROM _tape_published WHERE key = ?1', key).toArray().length > 0
+    );
   }
   registered(): { name: string; kind: string; at: number }[] {
     this.registryTable();

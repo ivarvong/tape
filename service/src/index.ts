@@ -326,6 +326,8 @@ const tracePage = async (url: URL, env: Env, ctx: ExecutionContext, m: RegExpMat
 // 404, the same answer as no such name.
 const PUBLIC = /^\/p\/([^/]+)\/([^/]+)(\/.*)?$/;
 export const PUBLIC_BODY = 64 * 1024;
+/** The object that lists every published account/name: no account or name can be `~` (SEGMENT). */
+export const PUBLISHED = '~/published';
 const TOO_LARGE = `a public request's body is at most ${PUBLIC_BODY} bytes`;
 const publicRoute = async (
   request: Request,
@@ -340,6 +342,10 @@ const publicRoute = async (
     return reply({ error: 'no such page' }, 404);
   if (!bodiless && request.method !== 'POST') return reply({ error: 'GET, HEAD or POST' }, 405);
   if (Number(request.headers.get('content-length') ?? 0) > PUBLIC_BODY) return reply({ error: TOO_LARGE }, 413);
+  // only a published name's own object is asked anything: for any other name, the one object that lists the
+  // published names answers, and no object of the account is made
+  if (!(await ctx.exports.Name.getByName(PUBLISHED).isPublished(`${account}/${name}`)))
+    return reply({ error: 'no such page' }, 404);
   const stub = ctx.exports.Name.getByName(`${account}/${name}`),
     p = await stub.publication();
   if (!p.published || p.latest === null) return reply({ error: 'no such page' }, 404);
@@ -379,7 +385,10 @@ const publishRoute = async (
   if (typeof published !== 'boolean') return reply({ error: '{"published": true} or {"published": false}' }, 400);
   if ((await stub.publication()).latest === null)
     return reply({ error: `${account}/${name} has no live version to publish` }, 404);
-  return reply({ account, name, ...(await stub.setPublic(published)), url: at.url });
+  // the public route answers only the names PUBLISHED lists: the name's own record first, then the list
+  const done = await stub.setPublic(published);
+  await ctx.exports.Name.getByName(PUBLISHED).setPublished(`${account}/${name}`, published);
+  return reply({ account, name, ...done, url: at.url });
 };
 // PUT or GET /_faults/:account: a fault plan (faults.ts) for an account named jepsen-*, and the faults so far
 const faultsRoute = async (request: Request, ctx: ExecutionContext, account: string): Promise<Response> => {
