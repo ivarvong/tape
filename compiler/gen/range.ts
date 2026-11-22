@@ -49,7 +49,7 @@ function evaluated(c: Ctx, e: Expr, out: Fact[]): void {
     case 'call':
     case 'ctor':
       for (const a of e.args) evaluated(c, a.value, out);
-      return;
+      break;
     default:
   }
 }

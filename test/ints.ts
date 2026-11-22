@@ -9,21 +9,24 @@ import type { Options } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { Trap } from '../interp.ts';
 import { std } from '../std.ts';
+import { unreachable } from '../compiler/ast.ts';
 import { bare, call, finish, same } from './harness.ts';
 
 const MIN = -(2n ** 63n),
   MAX = 2n ** 63n - 1n;
 /** what a run gives: a number, or the code of the trap it stopped with */
 type Got = bigint | `trap ${number}`;
-const DIVISION = 'trap 4',
-  OVERFLOW = 'trap 6',
-  SHIFT = 'trap 7';
+type Trapped = `trap ${number}`;
+const DIVISION: Trapped = 'trap 4',
+  OVERFLOW: Trapped = 'trap 6',
+  SHIFT: Trapped = 'trap 7';
 
 // ---- the oracle: exact arithmetic, and the trap a result outside 64 bits (or a zero divisor, or a shift amount
 // outside 0..63) stops with. `a % b` traps when `a / b` would: MIN % -1 is the one case where the remainder fits.
-class Stop {
-  readonly why: string;
-  constructor(why: string) {
+class Stop extends Error {
+  readonly why: Trapped;
+  constructor(why: Trapped) {
+    super(why);
     this.why = why;
   }
 }
@@ -57,6 +60,8 @@ function exact(op: Op, a: bigint, b: bigint): bigint {
       if (b < 0n || b > 63n) throw new Stop(SHIFT);
       // the bits shifted out of a left shift are gone; a right shift copies the sign bit in
       return op === '<<' ? asBits(a << b) : a >> b;
+    default:
+      return unreachable(op, 'operator');
   }
 }
 
@@ -69,7 +74,8 @@ function runAll(text: string, cases: readonly Case[]): Got[][] {
   const answers: Got[][] = cases.map(() => []);
   for (const o of BUILDS) {
     const r = compile([...std, { name: 't.tape', text }], { ...o, exports: fns });
-    if (r.wasm === null) throw new Error(`does not compile: ${r.errors.map(e => `${e.code} ${e.line} ${e.message}`)}`);
+    if (r.wasm === null)
+      throw new Error(`does not compile: ${r.errors.map(e => `${e.code} ${e.line} ${e.message}`).join('; ')}`);
     const ex = bare(new WebAssembly.Module(r.wasm));
     cases.forEach((c, i) => {
       call(ex.fns, 'reset');
@@ -106,7 +112,7 @@ const oracle = (f: () => bigint): Got => {
   try {
     return f();
   } catch (e) {
-    if (e instanceof Stop) return e.why as Got;
+    if (e instanceof Stop) return e.why;
     throw e;
   }
 };
@@ -177,14 +183,15 @@ let f = 1n;
 const factorials = Array.from({ length: 26 }, (_, i) => {
   const n = BigInt(i);
   f *= n === 0n ? 1n : n;
-  return { n, want: f > MAX ? OVERFLOW : f };
+  const want: Got = f > MAX ? OVERFLOW : f;
+  return { n, want };
 });
 same(
   '0! to 25!: exact up to 20!, a trap from 21! on',
   wrong(
     fact,
     factorials.map(x => ({ fn: 'fact', args: [x.n] })),
-    factorials.map(x => x.want as Got),
+    factorials.map(x => x.want),
   ),
   [],
 );
@@ -429,7 +436,11 @@ const rand = (n: number): number => {
   seed = BigInt.asUintN(64, seed * 6364136223846793005n + 1442695040888963407n);
   return Number((seed >> 33n) % BigInt(n));
 };
-const pick = <T>(xs: readonly T[]): T => xs[rand(xs.length)] ?? (xs[0] as T);
+const pick = <T>(xs: readonly T[]): T => {
+  const x = xs[rand(xs.length)];
+  if (x === undefined) throw new Error('nothing to pick from');
+  return x;
+};
 const INTERESTING = [...EDGES, 5n, 7n, 100n, 1000003n, 4294967296n, -4294967297n];
 const randomInt = (): bigint =>
   rand(3) === 0
@@ -458,6 +469,8 @@ const src = (e: E): string => {
       return `-(${src(e.e)})`;
     case 'bin':
       return `(${src(e.l)} ${e.op} ${src(e.r)})`;
+    default:
+      return unreachable(e, 'expression');
   }
 };
 const value = (e: E, env: Record<'x' | 'y' | 'z', bigint>): bigint => {
@@ -473,6 +486,8 @@ const value = (e: E, env: Record<'x' | 'y' | 'z', bigint>): bigint => {
       const l = value(e.l, env);
       return exact(e.op, l, value(e.r, env));
     }
+    default:
+      return unreachable(e, 'expression');
   }
 };
 const PER = 250,
