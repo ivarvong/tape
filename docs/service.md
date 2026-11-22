@@ -9,9 +9,8 @@ end; how its behaviour is checked is in [`service/VERIFY.md`](../service/VERIFY.
 
 **Not built yet.** A hosted MCP server and API are coming, at https://tape.ivar.workers.dev: post a program, and
 it is compiled and run, and its results and OTLP traces come back. This section will say how to use it once it
-works. Until then the deployed service accepts only its operator's token, and every
-route below that needs a token answers 401 without it (`curl https://tape.ivar.workers.dev/` answers
-`401 {"error":"unauthorized"}`).
+works. Until then the deployed service serves the homepage (`/`) and the in-browser playground (`/playground/`), and
+accepts only its operator's token: every route below that needs a token answers 401 without it.
 
 The rules for using it are in [`TERMS.md`](../TERMS.md): it is alpha software that can change at any time, what
 you do on it is logged and used to improve it, and content that breaks the acceptable-use rules is deleted.
@@ -136,8 +135,15 @@ token and the key that signs trace links; changing it invalidates every link iss
 ```sh
 cd service && npm install
 npx vitest run          # the service's tests, in local workerd
-npx cf deploy
+npm run build           # the site (scripts/site.ts, into .site/) and the Worker, with the site as its static assets
+npx cf deploy           # your own copy, straight to 100%
 ```
+
+The homepage and the playground are the Worker's static assets: `scripts/site.ts` builds `apps/playground` into
+`service/.site/` with a `robots.txt` and a `tape-version` header on every file, and `vite.config.ts` makes that
+directory Vite's public directory. Every response names the commit it was built from (`tape-version`) and the Worker
+version (`tape-worker-version`). The hosted service deploys only through `service/scripts/deploy.sh`: a 0% version,
+a pinned smoke, a telemetry gate and a stepped ramp with automatic rollback (the script's header says how).
 
 It uses Durable Objects with SQLite and the Worker Loader (Workers cannot compile Wasm at run time, so each
 version's module is loaded as a Worker of its own).
