@@ -2,6 +2,9 @@
 const enc = new TextEncoder();
 
 export const SEGMENT = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+/** The object that lists every published account/name (the public route asks only it): no account or name can be
+ * `~` (SEGMENT). */
+export const PUBLISHED = '~/published';
 export const reply = (body: unknown, status = 200): Response => Response.json(body, { status });
 export const hexOf = (buf: ArrayBuffer | Uint8Array): string =>
   [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');

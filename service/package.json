@@ -4,8 +4,9 @@
   "type": "module",
   "scripts": {
     "dev": "cf dev",
-    "build": "cf build",
-    "deploy": "cf deploy",
+    "site": "node scripts/site.ts",
+    "build": "node scripts/site.ts && cf build",
+    "deploy": "scripts/deploy.sh",
     "test": "node jepsen/selftest.ts && node model/selftest.ts && vitest run"
   },
   "devDependencies": {

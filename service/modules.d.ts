@@ -21,6 +21,8 @@ declare namespace Cloudflare {
   interface Env {
     LOADER: WorkerLoader;
     TOKEN: string;
+    // the version this is (cloudflare.config.ts); the tests have none
+    VERSION?: WorkerVersionMetadata;
     // the tests' seeds and switches (vitest.config.ts)
     JEPSEN_SEEDS: string;
     KV_SEEDS: string;
@@ -45,3 +47,6 @@ declare namespace Cloudflare {
 declare namespace WebAssembly {
   function compile(bytes: BufferSource): Promise<Module>;
 }
+
+// The commit the Worker was built from (vite.config.ts define); a build without it (the tests) has none.
+declare const TAPE_VERSION: string | undefined;

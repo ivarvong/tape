@@ -1,0 +1,9 @@
+{
+  "//": "The service's build and deploy scripts run in Node and build the playground: the repository's settings, with the browser's types the playground's modules need (service/tsconfig.json has the Workers runtime's).",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"]
+  },
+  "include": ["*.ts", "../../apps/playground/env.d.ts"],
+  "exclude": []
+}

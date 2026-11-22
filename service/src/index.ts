@@ -41,12 +41,14 @@ import type { ServiceReply } from '../../host.ts';
 import { build, isRefusal, rulesNow } from './build.ts';
 import { FAULTY, planOf, through } from './faults.ts';
 import { kv } from './kv.ts';
-import { KEEP_MAX, KEEP_MIN, Name, PRUNE_EVERY, TRACE_KEEP, WIPED_ERROR } from './name.ts';
+import { Name, WIPED_ERROR } from './name.ts';
+import { secured } from './headers.ts';
 import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
 import type { CallMeta } from './records.ts';
 import { manifest, mcp, policyOf, refusal } from './tools.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
 import {
+  PUBLISHED,
   SEGMENT,
   SOURCE_MAX,
   authorized,
@@ -60,7 +62,8 @@ import {
   verified,
 } from './web.ts';
 
-export { build, rulesNow, Name, TRACE_KEEP, PRUNE_EVERY, KEEP_MIN, KEEP_MAX, WIPED_ERROR, targetOf, buyerOf };
+// only entrypoints and functions: with static assets, a main module that exports a string or a number does not load
+export { build, rulesNow, Name, targetOf, buyerOf };
 
 const enc = new TextEncoder();
 type Env = Cloudflare.Env;
@@ -339,9 +342,7 @@ const tracePage = async (url: URL, env: Env, ctx: ExecutionContext, m: RegExpMat
 // PUBLIC_BODY bytes; it runs the latest live version. A name that is not published (or has no live version) is a
 // 404, the same answer as no such name.
 const PUBLIC = /^\/p\/([^/]+)\/([^/]+)(\/.*)?$/;
-export const PUBLIC_BODY = 64 * 1024;
-/** The object that lists every published account/name: no account or name can be `~` (SEGMENT). */
-export const PUBLISHED = '~/published';
+const PUBLIC_BODY = 64 * 1024;
 const TOO_LARGE = `a public request's body is at most ${PUBLIC_BODY} bytes`;
 const publicRoute = async (
   request: Request,
@@ -492,32 +493,9 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
   return reply({ error: 'no such route' }, 404);
 };
 
-// ---- The headers on every response the Worker gives (the site's pages and files are the static assets', with the
-// headers in their _headers, and only they may be indexed). Nothing the Worker answers is sniffed, framed or indexed, and nothing runs script: the API's JSON and text
-// are sandboxed with nothing allowed; a trace page may use its own inline style; a program's own HTML or SVG (its
-// operator route and its public route) may use inline style and data: images and post its forms to itself, and
-// runs sandboxed, so it has no origin and runs no script.
-export const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
-export const TRACE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox";
-export const PROGRAM_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms";
-const PROGRAM_PATH = /^\/p\/|^\/[^/]+\/[^/]+\/v\/\d+(\/|$)/;
-export const secured = (res: Response, path: string): Response => {
-  const out = new Response(res.body, res),
-    h = out.headers,
-    type = h.get('content-type') ?? '',
-    active = /^(text\/html|image\/svg\+xml)\b/.test(type);
-  h.set('x-content-type-options', 'nosniff');
-  h.set('x-frame-options', 'DENY');
-  h.set('referrer-policy', 'no-referrer');
-  h.set('x-robots-tag', 'noindex');
-  h.set('content-security-policy', !active ? API_CSP : PROGRAM_PATH.test(path) ? PROGRAM_CSP : TRACE_CSP);
-  return out;
-};
-
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    return secured(await route(request, env, ctx), new URL(request.url).pathname);
+    return secured(await route(request, env, ctx), new URL(request.url).pathname, env.VERSION?.id);
   },
 } satisfies ExportedHandler<Env>;
 

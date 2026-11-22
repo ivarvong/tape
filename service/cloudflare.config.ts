@@ -10,7 +10,10 @@ export default defineConfig({
     previewUrls: false,
     observability: { enabled: true },
     cache: { enabled: true, crossVersionCache: true },
-    env: { LOADER: bindings.workerLoader(), TOKEN: bindings.secret() },
+    env: { LOADER: bindings.workerLoader(), TOKEN: bindings.secret(), VERSION: bindings.versionMetadata() },
+    // the homepage and the playground (scripts/site.ts, Vite's public directory in vite.config.ts): a request for
+    // one of their files is answered from them with their _headers; any other request reaches the Worker
+    assets: { htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none' },
     exports: {
       default: exports.worker({ cache: { enabled: false } }),
       Wasm: exports.worker({ cache: { enabled: true } }),

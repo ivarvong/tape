@@ -70,6 +70,7 @@ const all: Part[] = [
   ['types: every file not on proof/untyped.txt passes tsc under strict', ['npx', 'tsc', '--noEmit']],
   ['types: the service, against the Workers runtime types', ['npx', 'tsc', '--noEmit', '-p', 'service/tsconfig.json']],
   ["types: the playground, with the browser's types", ['npx', 'tsc', '--noEmit', '-p', 'apps/playground']],
+  ["types: the service's build and deploy scripts", ['npx', 'tsc', '--noEmit', '-p', 'service/scripts']],
   ["types: the highlighter's page, with the browser's types", ['npx', 'tsc', '--noEmit', '-p', 'apps/highlight']],
   ['lint: every file not on proof/untyped.txt passes oxlint, type-aware', [node, 'proof/lint.ts']],
   [

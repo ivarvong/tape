@@ -13,3 +13,4 @@ service/verify/results/
 *.cpuprofile
 *.heapprofile
 service/verify/rca/mutate-checker.txt
+service/.site/

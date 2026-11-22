@@ -4,7 +4,7 @@ import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import page from './fixtures/page.tape?raw';
 import { anyone, at, call, got } from './help.ts';
-import { PUBLISHED } from '../src/index.ts';
+import { PUBLISHED } from '../src/web.ts';
 
 /** The ids of the Name objects that have storage, as the test pool lists their files. (cloudflare:test's
  * listDurableObjectIds throws on the files of a facet, whose names are not ids.) */
