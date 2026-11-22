@@ -80,7 +80,7 @@ const keyOf = (id: string): string =>
 
 if (has('delete-smoke')) {
   const all = keys('smoke/');
-  for (const k of all) cf('r2', 'objects', 'delete', k, '--bucket-name', BUCKET);
+  for (const k of all) cf('r2', 'objects', 'delete', k, '--bucket-name', BUCKET, '--force');
   console.log(`deleted ${all.length} smoke reports`);
 } else if (show !== null) {
   console.log(JSON.stringify(shown(get(keyOf(show))), null, 2));
