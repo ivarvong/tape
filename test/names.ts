@@ -2,6 +2,7 @@
 // sql_* call with `row:` is the row type's fields, C75), and the machine checker reading the program's matches.
 import '../node25.ts';
 import { compile, parseProgram } from '../compiler.ts';
+import { instantiate } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
 import { partsOf } from '../compiler/ast.ts';
@@ -324,6 +325,49 @@ T(
     c59(M(`    "canceled" -> respond(status: 409)\n    _ -> ${set}`)),
     ['C60'],
   );
+}
+
+// ---- a constructor named like one std keeps for itself (Malformed, in std/json.tape's JsonStep), in another of the
+// program's files: the program's is its own, and JSON still decodes, nested records too. It was P01 in the
+// generated `wire` source, with no fix, for std's `Wire_std.Malformed`.
+{
+  const files = [
+    { name: 'parsed.tape', text: 'type Parsed {\n  Good(n: Int)\n  Malformed(reason: View)\n}\n' },
+    {
+      name: 'app.tape',
+      text: `type Inner { Inner(n: Int) }
+type Outer { Outer(inner: Inner, tag: View) }
+
+fn f() -> Int {
+  match decode(json: "{\\"inner\\":{\\"n\\":7},\\"tag\\":\\"x\\"}", as: Outer) {
+    Ok(value: Outer(inner: Inner(n))) -> n + shown(p: Malformed(reason: "no"))
+    Err(error) -> -1
+  }
+}
+
+fn shown(p: Parsed) -> Int {
+  match p {
+    Good(n) -> n
+    Malformed(reason) -> len(reason) * 100
+  }
+}
+`,
+    },
+  ];
+  const r = compile([...std, ...files], { exports: ['f'] });
+  T(
+    "a constructor named like std/json.tape's Malformed, in another file: it compiles",
+    r.errors.map(e => `${e.code} ${e.file}:${e.line} ${e.message}`),
+    [],
+  );
+  if (r.wasm) {
+    const f = instantiate(new WebAssembly.Module(r.wasm)).exports['f'];
+    T(
+      'nested JSON decodes beside it (7), and the program\'s Malformed is its own (len("no") * 100)',
+      typeof f === 'function' ? f() : null,
+      207n,
+    );
+  }
 }
 
 finish();

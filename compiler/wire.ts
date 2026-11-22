@@ -87,6 +87,9 @@ export function wireSource(prog: Program): Wire {
       n =>
         record(n) &&
         !n.startsWith('Wire_') &&
+        // a std type whose name or a constructor's a program's own has moved aside (`std.Malformed`) cannot be
+        // named in source; std decodes none of its own types as nested JSON
+        ![n, ...(types.get(n)?.variants ?? []).map(v => v.name)].some(x => x.startsWith('std.')) &&
         able(n) &&
         !!types.get(n)?.variants.some(v => v.fields.some(f => deep(kind(f.type, false, new Set())))),
     ),
