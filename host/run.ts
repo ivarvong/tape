@@ -161,9 +161,17 @@ function effect<T extends Effect>(
 function sqlCall(L: Linked, id: number, ptr: number, mode: number): number {
   const q = L.Q[id] ?? fail(`no query ${id}`);
   const p = readParams(L.mem, q, ptr);
-  const exec = (): { r: number } | { rows: Cell[][] } => {
-    const cur = sqlOf(L).exec(q.run ?? q.sql, ...p);
-    return mode === 0 ? { r: cur.rowsWritten } : { rows: cur.raw().toArray() };
+  // `r` is the rows the statement changed, as SQLite counts them (changes()). Not the cursor's rowsWritten: Durable
+  // Object SQLite counts every row of every b-tree it wrote there, so one row inserted into a table with a
+  // UNIQUE column is 2. A statement that returns rows is logged with them, and, when it wrote (an INSERT, UPDATE
+  // or DELETE with RETURNING), with `r`: RETURNING gives one row for each row changed. A read's entry has no `r`.
+  const exec = (): { r: number } | { rows: Cell[][]; r?: number } => {
+    const db = sqlOf(L),
+      cur = db.exec(q.run ?? q.sql, ...p),
+      rows = cur.raw().toArray();
+    if (mode !== 0) return cur.rowsWritten > 0 ? { rows, r: rows.length } : { rows };
+    const [[changed] = []] = db.exec('SELECT changes()').raw().toArray();
+    return { r: Number(changed ?? 0) };
   };
   const answer = (e: { r?: number; rows?: Cell[][] }): number =>
     mode === 0 ? (e.r ?? 0) : writeRows(L.mem, q, e.rows ?? []);

@@ -21,7 +21,6 @@ type SqlJsStatement = {
 type SqlJsDatabase = {
   prepare: (sql: string) => SqlJsStatement;
   exec: (sql: string) => unknown;
-  getRowsModified: () => number;
   close: () => void;
 };
 export type SqlJs = { Database: new () => SqlJsDatabase };
@@ -103,6 +102,17 @@ export function nodeSql(): NodeSql {
   if (!SQL) throw new Error('SQLite has not loaded in this page yet');
   const db = new SQL.Database(),
     cache = new Map<string, SqlJsStatement>();
+  // the rows a statement wrote, as nodesql.ts counts them: how far total_changes() moved while it ran
+  // (getRowsModified() is changes(), the last write's count, which a read after it leaves as it was)
+  const changed = (): number => {
+    const st = prep('SELECT total_changes()');
+    try {
+      st.step();
+      return Number(st.get()[0] ?? 0);
+    } finally {
+      st.reset();
+    }
+  };
   const prep = (q: string): SqlJsStatement => {
     const made = cache.get(q) ?? db.prepare(q);
     cache.set(q, made);
@@ -128,7 +138,8 @@ export function nodeSql(): NodeSql {
     },
     exec(q: string, ...given: Cell[]) {
       const params = given.map(cell),
-        st = prep(realBound(q, params));
+        st = prep(realBound(q, params)),
+        before = changed();
       const arrays: Cell[][] = [];
       let cols: string[];
       try {
@@ -138,7 +149,7 @@ export function nodeSql(): NodeSql {
       } finally {
         st.reset();
       }
-      const written = db.getRowsModified();
+      const written = changed() - before;
       const rows = arrays.map(a => Object.fromEntries(cols.map((c, i): [string, Cell] => [c, a[i] ?? null])));
       return {
         rowsWritten: written,

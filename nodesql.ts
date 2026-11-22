@@ -11,7 +11,10 @@ export type NodeSql = { exec: (query: string, ...params: Cell[]) => ReturnType<S
 export function nodeSql(): NodeSql {
   const db = new DatabaseSync(':memory:'),
     cache = new Map<string, StatementSync>(),
-    changes = db.prepare('SELECT changes()');
+    // the rows a statement wrote: how far SQLite's count of rows written since the database opened moved while it
+    // ran. changes() would be the last write's count, and stays so through the reads after it
+    total = db.prepare('SELECT total_changes() AS n'),
+    changed = (): number => Number(total.get()?.['n'] ?? 0);
   const prep = (q: string): StatementSync => {
     const made = cache.get(q) ?? db.prepare(q);
     cache.set(q, made);
@@ -33,9 +36,10 @@ export function nodeSql(): NodeSql {
     exec(q: string, ...given: Cell[]) {
       const st = prep(q),
         cols = st.columns(),
-        params = given.map(p => (p instanceof ArrayBuffer ? new Uint8Array(p) : p));
+        params = given.map(p => (p instanceof ArrayBuffer ? new Uint8Array(p) : p)),
+        before = changed();
       const rows: Row[] = cols.length > 0 ? st.all(...params) : (st.run(...params), []);
-      const written = Number(Object.values(changes.get() ?? {})[0] ?? 0);
+      const written = changed() - before;
       const arrays = rows.map(r => cols.map(c => r[c.name] ?? null));
       return {
         rowsWritten: written,

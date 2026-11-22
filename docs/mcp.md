@@ -100,7 +100,8 @@ Also takes `requests`: 1 to 20, each `METHOD SP TARGET`, then optionally a line 
 ```
 
 - `effects` is the request's effect log: each SQL statement as the program wrote it (its `:name` placeholders),
-  the value bound to each name, and the rows returned or `rows_written`; calls to other programs (`kind: "call"`,
+  the value bound to each name, the rows returned, and `rows_written` for a statement that wrote (an INSERT,
+  UPDATE or DELETE with `RETURNING` has both); calls to other programs (`kind: "call"`,
   which answer Unreachable here: one program runs at a time), clock reads (`now`), random draws and timers set
   (`wake`). A BLOB is `{"base64": …}`.
 - A write or a timer that the request's `rollback(out)` or a trap undid has `undone: true`: it did not stay. Its

@@ -1,0 +1,93 @@
+// How many rows a statement wrote, as the effect log records it (`r`), for every way a program runs SQL: sql_exec,
+// and a write that returns its rows (sql_first, sql_all, sql_move with RETURNING), which was logged with its rows
+// and no count, so the trace and tape-mcp said a request that wrote rows wrote none. A read writes nothing, even
+// right after a write (SQLite's changes() still holds the last write's count then). The count is SQLite's, not
+// the database's rowsWritten: in Durable Object SQLite that counts index rows too (service/test/rows-written.test.ts).
+//
+// The expected counts are SQLite's own: the same statements, with the same values, run on a second database
+// through node:sqlite, each followed by `SELECT changes()`, and checked against a count of the table's rows.
+import '../node25.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { instantiate, isHead } from '../host.ts';
+import type { Effect } from '../host.ts';
+import { nodeSql } from '../nodesql.ts';
+import { built, finish, moduleOf, same } from './harness.ts';
+
+const TABLE = 'CREATE TABLE kv(k TEXT PRIMARY KEY NOT NULL, v INTEGER NOT NULL)';
+const program = `migration 1 "kv" {
+  ${TABLE}
+}
+
+type Kv { Kv(k: View, v: Int) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match raw {
+    "upsert " ++ k -> upsert(k)
+    "insert " ++ k -> respond(status: 200)
+      |> write_rows(rows: sql_all(
+        row: Kv,
+        query: "INSERT INTO kv(k, v) VALUES (:k || '1', 1), (:k || '2', 2) RETURNING *",
+        k
+      ))
+    "bump" -> respond(status: 200)
+      |> write_rows(rows: sql_all(row: Kv, query: "UPDATE kv SET v = v + 1 WHERE v < 100 RETURNING *", repeat: True))
+    "exec " ++ k -> respond(status: 200)
+      |> write_int(value: sql_exec(query: "DELETE FROM kv WHERE k = :k", k))
+    "read" -> respond(status: 200) |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv ORDER BY k"))
+    _ -> respond(status: 404)
+  }
+}
+
+fn upsert(k: View) -> Buf {
+  let Some(value: row) = sql_first(
+    row: Kv,
+    query: "INSERT INTO kv(k, v) VALUES (:k, 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING *",
+    k,
+    repeat: True
+  ) else -> respond(status: 500)
+  respond(status: 200) |> write_json(value: row)
+}
+`;
+
+// the requests, and the statement each runs with its values, as the oracle runs it
+const steps: [request: string, sql: string, params: string[]][] = [
+  ['upsert a', 'INSERT INTO kv(k, v) VALUES (?1, 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING *', ['a']],
+  ['upsert a', 'INSERT INTO kv(k, v) VALUES (?1, 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING *', ['a']],
+  ['read', 'SELECT * FROM kv ORDER BY k', []],
+  ['insert b', "INSERT INTO kv(k, v) VALUES (?1 || '1', 1), (?1 || '2', 2) RETURNING *", ['b']],
+  ['read', 'SELECT * FROM kv ORDER BY k', []],
+  ['bump', 'UPDATE kv SET v = v + 1 WHERE v < 100 RETURNING *', []],
+  ['exec b1', 'DELETE FROM kv WHERE k = ?1', ['b1']],
+  ['exec nothing', 'DELETE FROM kv WHERE k = ?1', ['nothing']],
+  ['read', 'SELECT * FROM kv ORDER BY k', []],
+];
+
+const oracle = new DatabaseSync(':memory:');
+oracle.exec(TABLE);
+const count = (): number => Number(oracle.prepare('SELECT count(*) AS n FROM kv').get()?.['n']);
+/** SQLite's own count of the rows a statement wrote: changes() after a write, nothing for a read. */
+function written(sql: string, params: string[]): number {
+  const before = count();
+  const st = oracle.prepare(sql);
+  if (st.columns().length > 0) st.all(...params);
+  else st.run(...params);
+  if (sql.startsWith('SELECT')) {
+    if (count() !== before) throw new Error('a read changed the rows');
+    return 0;
+  }
+  return Number(oracle.prepare('SELECT changes() AS n').get()?.['n']);
+}
+
+const app = instantiate(moduleOf(built([{ name: 'written.tape', text: program }])), { sql: nodeSql() });
+const enc = new TextEncoder();
+for (const [request, sql, params] of steps) {
+  const want = written(sql, params);
+  app.handle(enc.encode(request));
+  const logged = app.effects.filter((e: Effect) => !isHead(e) && 'q' in e);
+  const r = logged.map(e => ('q' in e ? (e.r ?? 0) : null));
+  same(`${request}: the rows it wrote, as SQLite counts them`, r, [want]);
+}
+// a write SQLite counts as having changed rows: the oracle itself says so, so the test above is not vacuous
+same('the oracle counts the upsert and the two-row insert', [written(steps[0]?.[1] ?? '', ['z']), count()], [1, 3]);
+
+finish();
