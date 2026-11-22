@@ -87,7 +87,13 @@ function inserted(r: Reading, q: Query, s: Extract<Write, { kind: 'insert' }>): 
 
 export function replayRules(r: Reading): void {
   const checked = reachable(r.prog, r.calls);
-  const opTables = new Set(r.queries.flatMap(q => (q.ast?.k === 'insert' ? [lc(q.ast.table)] : [])));
+  // the tables the program records op ids in: those it inserts into. A statement that does not parse (C67 says
+  // so) still names its table, read from its text, so that a write it guards is not refused as well
+  const unread = (q: Query): string[] => {
+    const into = q.ast ? null : /^\s*INSERT\s+(?:OR\s+\w+\s+)?INTO\s+"?(\w+)"?/i.exec(q.raw)?.[1];
+    return into ? [lc(into)] : [];
+  };
+  const opTables = new Set(r.queries.flatMap(q => (q.ast?.k === 'insert' ? [lc(q.ast.table)] : unread(q))));
   for (const q of r.queries) {
     if (!q.repeat) {
       if (checked.has(q.fn.name)) replayOf(r, q, opTables);

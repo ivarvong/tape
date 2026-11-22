@@ -572,4 +572,41 @@ for (const file of ['examples/todo.tape', 'examples/todo-decode.tape', 'examples
   T(`the table model agrees with SQLite on columns, unique keys and DEFAULTs (${compared} tables)`, wrong, []);
 }
 
+// ---- a statement the checker cannot read is C67, and only that: the rules that depend on it wait. A write
+// guarded by an op id recorded with a statement that does not parse (`AS from`, a keyword, unquoted) was C54 too,
+// and a migration that did not build gave C54 and C73 on a write that is fine.
+{
+  const opGuarded = (alias: string, end = ';') => `migration 1 "accounts" {
+  CREATE TABLE accounts(name TEXT PRIMARY KEY NOT NULL, balance INTEGER NOT NULL)${end}
+  CREATE TABLE ops(op TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL)${end}
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let n = sql_exec(
+    query: "UPDATE accounts SET balance = balance - :amount WHERE name = :who AND balance >= :amount \\
+        AND NOT EXISTS (SELECT 1 FROM ops WHERE op = :op AND name = :who)",
+    amount: 5,
+    who: "ann",
+    op: "o1"
+  )
+  let m = sql_exec(
+    query: "INSERT INTO ops(op, name) SELECT :op, a.name AS ${alias} FROM accounts AS a WHERE a.name = :who \\
+        ON CONFLICT(op) DO NOTHING",
+    op: "o1",
+    who: "ann"
+  )
+  respond(status: 200) |> write_int(value: n + m)
+}
+`;
+  T('the op-id write quoted: nothing refused', codes(opGuarded('\\"from\\"')), []);
+  T(
+    'the op-id write with a keyword for an alias: C67 on it, and no C54 on the write it guards',
+    codes(opGuarded('from')),
+    ['C67:14'],
+  );
+  T('a migration that does not build: C67, and no C54 or C73 on the writes', codes(opGuarded('\\"from\\"', '')), [
+    'C67:1',
+  ]);
+}
+
 finish();
