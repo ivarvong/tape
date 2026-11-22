@@ -6,9 +6,9 @@ You can also run it yourself ([below](#running-it-yourself)).
 
 `tape-mcp` compiles a Tape program you post and runs HTTP requests against it, and gives back what the compiler said,
 each response, its effect log, whether a replay from that log matched, and its OTLP/JSON trace. It is meant for
-AI agents that want to try Tape and check it for themselves, over MCP, and for anything that can POST JSON. It keeps
-nothing: every call compiles from scratch and runs on a fresh in-memory SQLite database that is gone when the call
-returns.
+AI agents that want to try Tape and check it for themselves, over MCP, and for anything that can POST JSON. Compile and
+run keep nothing: every call compiles from scratch and runs on a fresh in-memory SQLite database that is gone when
+the call returns. The third tool, [`feedback`](#feedback), stores the report you send for the maintainers.
 
 Alpha: anything can change at any time. **Calls are logged** ([what is logged](#what-is-logged)); the rules for the
 public service are in [`TERMS.md`](../TERMS.md).
@@ -59,7 +59,9 @@ curl -s https://tape.ivar.workers.dev/v1/compile -H 'content-type: application/j
   -d '{"files": [{"name": "hello.tape", "text": "…"}]}'
 ```
 
-## The two tools
+## The tools
+
+`compile` and `run` are below; [`feedback`](#feedback) sends what you found to the maintainers.
 
 Both take `files`, the program: at most 8 `{name, text}`, each name like `hello.tape` (letters, digits, `_`, `-`,
 then `.tape`). The files are one program, as [`LANGUAGE.md`](../LANGUAGE.md) describes, with the standard library
@@ -115,6 +117,37 @@ The same input gives the same output except trace ids and times. On purpose, `ra
 the same way on every call: an agent that sends the same program and requests again gets the same answer, so it can
 check what changed. `now()` is the real clock.
 
+### feedback
+
+Report anything surprising, wrong, confusing or missing about Tape: the language, the compiler and its
+diagnostics, or these tools. Send the smallest program that shows it.
+
+```json
+{ "text": "21! answers a negative number with status 200",
+  "kind": "bug",
+  "files": [{ "name": "fact.tape", "text": "…" }],
+  "requests": ["GET /fact/21"],
+  "expected": "a trap: the Int overflows",
+  "actual": "200 -4249290049419214848" }
+```
+
+Only `text` is required (at most 8 KB; `expected` and `actual` too). `kind` is `bug`, `confusing`, `missing`,
+`idea` or `praise`; `files` and `requests` are as `compile` and `run` take them. The answer is `{"ok": true, "id":
+"20261122T224501.123Z-4f2a9c01b3de"}`. Also `POST /v1/feedback` with the same JSON. At most 5 reports a minute
+from one address (`feedback_rate_limited`, 429).
+
+What is stored, one object per report in a private R2 bucket with no public URL: the fields you send, the time, the
+tape-mcp version, the daily salted hash of your address (below; never the address), your user agent, the
+`mcp-protocol-version` header, and, when you send `files`, what the compiler says of them at that moment, so we
+know which version it reproduced on. The maintainers read every report, to improve Tape. Reports are kept until we
+delete them. Do not send secrets or personal data. The refusals besides the ones below: `bad_text`,
+`text_too_large` (413), `bad_kind`, `bad_field`, `field_too_large` (413), `feedback_rate_limited` (429),
+`feedback_unavailable` (503) and `store_failed` (503).
+
+Reading them (maintainers): `node mcp/scripts/feedback.ts` lists the last 7 days' reports; `--show <id>` prints one
+in full; the address's hash is left out unless `--ip`. A deploy's smoke report goes under `smoke/`
+(`--smoke`, `--delete-smoke`).
+
 ## Limits
 
 These are alpha limits and may change.
@@ -145,7 +178,7 @@ browsers, so a web page cannot use its visitors as clients.
 
 ## What is logged
 
-One line per call to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
+One line per call (feedback too) to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
 requests and their statuses, the steps used, the compile, run and total times, a hash of the client's address, the
 user agent, and whether it was rate limited. Not the program's source, the requests' bodies or the responses. We
@@ -157,7 +190,8 @@ day at most. The rate limit keys on the same hash.
 
 ## How it works
 
-[`mcp/`](../mcp/) is a Worker of its own, `tape-mcp`, with no Durable Objects and no storage. It is
+[`mcp/`](../mcp/) is a Worker of its own, `tape-mcp`, with no Durable Objects and one private R2
+bucket, `tape-feedback`, which only the feedback tool writes. It is
 reached through the `tape` Worker at `/mcp`, `/v1/compile` and `/v1/run` (the `MCP` service binding in
 [`service/cloudflare.config.ts`](../service/cloudflare.config.ts), which passes the request as it came, before any
 token check), and answers on its own at https://tape-mcp.ivar.workers.dev too. Every answer names the tape-mcp

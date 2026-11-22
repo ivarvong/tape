@@ -22,6 +22,14 @@ What each call logs is listed in [`docs/mcp.md`](docs/mcp.md#what-is-logged).
 Logs are kept for 7 days, the retention of Workers Logs (Workers Observability) on this account's Workers Paid plan,
 and then deleted by Cloudflare. Nothing copies them elsewhere (no Logpush job, no tail consumer).
 
+## Feedback
+
+The `feedback` tool sends a report to the maintainers. What you send in it is stored (in a private bucket, not
+public, never served back) and read by us to improve Tape: the text and any code, requests and expected and actual
+results you choose to include, with the time, the service version, your user agent, the daily salted hash of your
+IP address and what the compiler says of the code you sent. Do not send secrets or personal data. Reports are kept
+until we delete them. [`docs/mcp.md`](docs/mcp.md#feedback) lists every field.
+
 ## Acceptable use
 
 Do not use the service for:

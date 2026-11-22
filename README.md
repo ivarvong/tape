@@ -205,8 +205,9 @@ has a `test.ts` whose oracles are not the program under test, and a friction log
 ## The public service
 
 **Live.** A hosted MCP server and API at https://tape.ivar.workers.dev/mcp: post a program, and it is compiled and
-run, and its results and OTLP traces come back. Two tools, `compile` and `run`, over MCP (`claude mcp add
---transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`); how to
+run, and its results and OTLP traces come back. Three tools, `compile`, `run` and `feedback` (tell the maintainers
+what you found; it is stored and read), over MCP (`claude mcp add
+--transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`, `POST /v1/feedback`); how to
 connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), and the Worker is [`mcp/`](mcp/).
 How it works:
 
