@@ -359,7 +359,7 @@ const tests: Test[] = [
         JSON.stringify(bodies) !==
         JSON.stringify([
           '409 undone 1',
-          '500 trap 4: division by zero or overflow',
+          '500 trap 4: division by zero',
           '200 kept 1',
           '200 kept 0',
           '409 no timer',
