@@ -12,6 +12,8 @@
 // policy does not grant is refused (403) before anything is stored, with the function and parameter that asked.
 import type { JsonSchema } from '../../compiler/gen/schema.ts';
 import type { Refusal, Stored } from './build.ts';
+import { fieldsOf, serveMcp } from './mcp.ts';
+import type { Fields } from './mcp.ts';
 
 const SECTION_IMPORT = 2;
 type Cursor = { i: number };
@@ -221,9 +223,6 @@ export type McpHost = {
   list: () => Promise<ToolEntry[]> | ToolEntry[];
   call: (tool: ToolEntry, input: unknown) => Promise<ToolResult>;
 };
-type Fields = Readonly<Record<string, unknown>>;
-const fieldsOf = (v: unknown): Fields => (typeof v === 'object' && v !== null ? { ...v } : {});
-const PROTOCOLS = new Set(['2025-06-18', '2025-03-26']);
 const listed = (t: ToolEntry): Fields => ({
   name: t.name,
   description: t.description,
@@ -247,47 +246,19 @@ const called = (r: ToolResult): Fields => {
     : { content: [{ type: 'text', text: r.error }], isError: true, _meta: meta };
 };
 
-// MCP over streamable HTTP (2025-06-18), JSON responses only: initialize, ping, tools/list, tools/call.
-export async function mcp(request: Request, { list, call, version }: McpHost): Promise<Response> {
-  if (request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
-  let msg: Fields;
-  try {
-    msg = fieldsOf(await request.json());
-  } catch {
-    return Response.json(
-      { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } },
-      { status: 400 },
-    );
-  }
-  const { id, method } = msg,
-    params = fieldsOf(msg.params);
-  if (id === undefined) return new Response(null, { status: 202 }); // a notification or a response: nothing to answer
-  const ok = (result: Fields): Response => Response.json({ jsonrpc: '2.0', id, result }),
-    no = (code: number, message: string): Response => Response.json({ jsonrpc: '2.0', id, error: { code, message } });
-  switch (method) {
-    case 'initialize': {
-      const asked = params.protocolVersion;
-      return ok({
-        protocolVersion: typeof asked === 'string' && PROTOCOLS.has(asked) ? asked : '2025-06-18',
-        capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: 'tape-tools', version },
-        instructions:
-          'Each tool is a Tape program. Every call returns a signed link to its trace, replayable from its effect log, in _meta.',
-      });
-    }
-    case 'ping':
-      return ok({});
-    case 'tools/list':
-      return ok({ tools: (await list()).map(listed) });
-    case 'tools/call': {
-      const t = (await list()).find(x => x.name === params.name);
-      if (!t) return no(-32602, `unknown tool ${String(params.name)}`);
-      return ok(called(await call(t, params.arguments ?? {})));
-    }
-    default:
-      return no(-32601, `method not found: ${String(method)}`);
-  }
-}
+// An account's tools over MCP (mcp.ts: streamable HTTP, JSON responses; initialize, ping, tools/list, tools/call).
+export const mcp = (request: Request, { list, call, version }: McpHost): Promise<Response> =>
+  serveMcp(request, {
+    name: 'tape-tools',
+    version,
+    instructions:
+      'Each tool is a Tape program. Every call returns a signed link to its trace, replayable from its effect log, in _meta.',
+    list: async () => (await list()).map(listed),
+    call: async (name, args) => {
+      const t = (await list()).find(x => x.name === name);
+      return t ? called(await call(t, args)) : null;
+    },
+  });
 
 const texts = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
 /** A policy as it was sent or stored (JSON): what of it is a policy. */
