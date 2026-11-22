@@ -381,6 +381,10 @@ fn hex_digit(d: Int) -> Int {
 // that do it from the three types and the helpers below. The host hands a nested value over as text for a second
 // decode: an object as it stands (WireObject); an array as its elements, one to a line (WireItems when they are
 // objects, WireValues when they are other values, each then written as {"value": …}).
+// An Int field takes a JSON number that is a whole number within ±(2^53 - 1) (9007199254740991), as JSON.parse
+// reads it (1e3 is 1000); outside that range decode answers Err("<field>: expected a whole number") and never
+// rounds: the host's JSON.parse reads numbers as doubles, which past 2^53 - 1 cannot hold every whole number.
+// Exact large-integer JSON, the whole 64-bit range, is planned for 0.3; until then such a value is sent as text.
 
 type WireObject = View where len(self) >= 0
 

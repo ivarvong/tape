@@ -123,7 +123,7 @@ state needs no `_` arm.
 | `wake(after: ms, key: n)` | `Timer` | asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again; a run that fails on a storage error is not retried, a known bug ([`STATUS.md`](STATUS.md#known-limitations)) |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
-| `rollback(out)` | | answers `out` and undoes this request's writes since its last call |
+| `rollback(out)` | | answers `out` and undoes this request's writes since its last call; the effect log marks each write it undid `undone` (as it does for a trap), and so does the trace |
 
 A query names each value it takes, `WHERE id = :id AND state = :from`, and the call passes each by that name: `id`
 when a value of that name is at hand, `from: "new"` otherwise. A name used twice is one value. A name with no
@@ -303,7 +303,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 
 | Job | The form | Otherwise |
 |---|---|---|
-| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors. A field the type does not have is refused, and so is `null` for an `Option` field: it is there or it is not | C35 |
+| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors. A field the type does not have is refused, and so is `null` for an `Option` field: it is there or it is not. An `Int` field takes a JSON number that is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), as `JSON.parse` reads it, so `1e3` is 1000; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded: the host reads JSON with `JSON.parse`, whose numbers are doubles, and past 2^53 - 1 a double cannot hold every whole number exactly. Send such a value as text until exact large-integer JSON, the whole 64-bit range, comes (planned for 0.3) | C35 |
 | Write a record, or the rows of a query | `write_json(value)`, `write_rows(rows)` | |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
 | Run something for what it does | `do f(…)` | C83-C85 |
