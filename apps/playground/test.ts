@@ -38,6 +38,7 @@ import type * as DataM from './src/data.ts';
 import type * as EditorM from './src/editor.ts';
 import type * as SimulateM from './src/simulate.ts';
 import type * as SqliteM from './src/sqlite.ts';
+import type * as LinesM from './src/lines.ts';
 import type * as WorkbenchM from './src/workbench.ts';
 
 const HERE = new URL('./', import.meta.url).pathname;
@@ -46,6 +47,7 @@ type Mods = {
   artefacts: typeof ArtefactsM;
   sqlite: typeof SqliteM;
   workbench: typeof WorkbenchM;
+  lines: typeof LinesM;
   editor: typeof EditorM;
   build: typeof BuildM;
   data: typeof DataM;
@@ -57,7 +59,8 @@ type Plant = { test: string; what: string; file: string; from: string; to: strin
 const EXPORTS: { readonly [K in keyof Mods]: readonly string[] } = {
   artefacts: ['artefacts'],
   sqlite: ['loadSqlite', 'nodeSql'],
-  workbench: ['Workbench', 'effectLine', 'queryNames'],
+  workbench: ['Workbench'],
+  lines: ['effectLine', 'queryNames'],
   editor: ['withMarks'],
   build: ['build', 'IMPORT', 'sri'],
   data: ['DATA', 'readData'],
@@ -96,6 +99,7 @@ async function modules(plant: Plant | null): Promise<Mods> {
     artefacts: await mod('artefacts', 'artefacts.ts'),
     sqlite: await mod('sqlite', 'src/sqlite.ts'),
     workbench: await mod('workbench', 'src/workbench.ts'),
+    lines: await mod('lines', 'src/lines.ts'),
     editor: await mod('editor', 'src/editor.ts'),
     build: await mod('build', 'build.ts'),
     data: await mod('data', 'src/data.ts'),
@@ -357,7 +361,7 @@ const tests: Test[] = [
           const literals = [...f.text.matchAll(/query: "((?:[^"\\]|\\[\s\S])*)"/g)].map(q =>
             (q[1] ?? '').replaceAll(/\\\n\s*/g, ''),
           );
-          const names = m.workbench.queryNames(f.text);
+          const names = m.lines.queryNames(f.text);
           for (const [i, q] of r.queries.entries()) {
             for (const lit of literals) {
               const order = [...new Set([...lit.matchAll(/:([A-Za-z_]\w*)/g)].map(x => x[1] ?? ''))];
@@ -366,7 +370,7 @@ const tests: Test[] = [
               if (num !== q.sql) continue;
               checked++;
               const p = order.map((_n, k) => k);
-              const l = m.workbench.effectLine(r, { q: i, p, r: 1 }, names);
+              const l = m.lines.effectLine(r, { q: i, p, r: 1 }, names);
               if (
                 l.sql?.query !== lit ||
                 JSON.stringify(l.sql.binds.map(b => b[0])) !== JSON.stringify(order.map(n => `:${n}`))
@@ -828,7 +832,7 @@ const PLANTS: Plant[] = [
   {
     test: 'names',
     what: "the effect log loses the program's names for its values (shows ?1)",
-    file: 'src/workbench.ts',
+    file: 'src/lines.ts',
     from: 'if (n.names && n.names.length > 0 && !n.mixed) out.set(n.sql, n.names);',
     to: 'if (n.names && n.names.length > 1 && !n.mixed) out.set(n.sql, n.names);',
   },

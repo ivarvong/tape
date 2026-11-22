@@ -27,8 +27,15 @@ type SqlJsDatabase = {
 export type SqlJs = { Database: new () => SqlJsDatabase };
 export type InitSqlJs = (config: { wasmBinary: ArrayBuffer }) => Promise<SqlJs>;
 
-/** The host's Sql, and more, as nodesql.ts has it. */
-export type NodeSql = { exec: (query: string, ...params: Cell[]) => ReturnType<Sql['exec']>; transaction: Transaction };
+/**
+ * The host's Sql, and more, as nodesql.ts has it; and close(), which frees the database's memory in sql.js's heap
+ * (the page drops a database and lets it go; a Worker that makes one per call must free each: mcp/).
+ */
+export type NodeSql = {
+  exec: (query: string, ...params: Cell[]) => ReturnType<Sql['exec']>;
+  transaction: Transaction;
+  close: () => void;
+};
 
 let SQL: SqlJs | null = null;
 
@@ -102,6 +109,11 @@ export function nodeSql(): NodeSql {
     return made;
   };
   return {
+    close() {
+      for (const st of cache.values()) st.free();
+      cache.clear();
+      db.close();
+    },
     // like ctx.storage.transactionSync: undo everything f wrote if it throws
     transaction<T>(f: () => T): T {
       db.exec('BEGIN');
