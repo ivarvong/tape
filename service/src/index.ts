@@ -46,7 +46,19 @@ import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
 import type { CallMeta } from './records.ts';
 import { manifest, mcp, policyOf, refusal } from './tools.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
-import { SEGMENT, authorized, hex, messageOf, reply, signature, signed, verified } from './web.ts';
+import {
+  SEGMENT,
+  SOURCE_MAX,
+  authorized,
+  bodyOf,
+  hex,
+  messageOf,
+  reply,
+  signature,
+  signed,
+  tooLarge,
+  verified,
+} from './web.ts';
 
 export { build, rulesNow, Name, TRACE_KEEP, PRUNE_EVERY, KEEP_MIN, KEEP_MAX, WIPED_ERROR, targetOf, buyerOf };
 
@@ -221,7 +233,9 @@ const setPolicy = async ({ request, ctx, m }: ToolArgs): Promise<Response> => {
 const uploadTool = async ({ request, ctx, m }: ToolArgs): Promise<Response> => {
   const [, account = '', tool = ''] = m,
     registry = ctx.exports.Name.getByName(`${account}/~tools`),
-    source = await request.text(),
+    sent = await bodyOf(request, SOURCE_MAX);
+  if (sent === null) return tooLarge("a tool's source", SOURCE_MAX);
+  const source = new TextDecoder().decode(sent),
     built = build(source);
   if (isRefusal(built)) return reply({ tool, ...built }, built.status);
   const no = refusal(tool, built, await registry.policy());
@@ -349,8 +363,8 @@ const publicRoute = async (
   const stub = ctx.exports.Name.getByName(`${account}/${name}`),
     p = await stub.publication();
   if (!p.published || p.latest === null) return reply({ error: 'no such page' }, 404);
-  const body = await request.arrayBuffer();
-  if (body.byteLength > PUBLIC_BODY) return reply({ error: TOO_LARGE }, 413);
+  const body = await bodyOf(request, PUBLIC_BODY);
+  if (body === null) return reply({ error: TOO_LARGE }, 413);
   const again = new Request(request.url, {
     method: request.method,
     headers: request.headers,

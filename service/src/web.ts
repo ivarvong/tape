@@ -37,14 +37,50 @@ export const authorized = (request: Request, token: string): boolean => {
   return given.length === want.length && crypto.subtle.timingSafeEqual(given, want);
 };
 
+// Body caps: a request's body is read as it streams and refused (413) once it passes its cap, so a body sent without
+// a content-length is never read whole; a content-length over the cap is refused before anything is read.
+export const BODY_MAX = 1024 * 1024; // an operator's request to a version
+export const SOURCE_MAX = 1024 * 1024; // an upload's source
+export const tooLarge = (what: string, max: number): Response =>
+  reply({ error: `${what} is at most ${max} bytes` }, 413);
+/** The request's body, if it is at most `max` bytes; null when it is longer, and the rest is not read. */
+export const bodyOf = async (request: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> => {
+  if (Number(request.headers.get('content-length') ?? 0) > max) return null;
+  if (request.body === null) return new Uint8Array(0);
+  const reader: ReadableStreamDefaultReader<unknown> = request.body.getReader(),
+    parts: Uint8Array[] = [];
+  let n = 0;
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk after another
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!(value instanceof Uint8Array)) throw new TypeError('a request body is bytes');
+    n += value.byteLength;
+    if (n > max) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(n);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.byteLength;
+  }
+  return out;
+};
+
 // The program's request: METHOD SP TARGET LF BODY; through a published name's public route, METHOD SP TARGET SP
 // public LF BODY (std/http: caller Anyone). The target is percent-encoded by the URL, so it has no space.
+// Null when the body is over BODY_MAX.
 export const tapeRequest = async (
   request: Request,
   path: string,
   search: string,
   via: string | null = null,
-): Promise<Uint8Array<ArrayBuffer>> => {
-  const head = `${request.method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}\n`;
-  return new Uint8Array(await new Blob([head, await request.arrayBuffer()]).arrayBuffer());
+): Promise<Uint8Array<ArrayBuffer> | null> => {
+  const head = `${request.method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}\n`,
+    body = await bodyOf(request, BODY_MAX);
+  return body === null ? null : new Uint8Array(await new Blob([head, body]).arrayBuffer());
 };

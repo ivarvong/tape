@@ -4,7 +4,7 @@ import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
 import type { Name } from './name.ts';
 import { RouterTrace, store } from './spans.ts';
-import { hex, messageOf, reply, signed, tapeRequest } from './web.ts';
+import { BODY_MAX, SOURCE_MAX, bodyOf, hex, messageOf, reply, signed, tapeRequest, tooLarge } from './web.ts';
 
 export type Args = {
   request: Request;
@@ -128,13 +128,14 @@ export async function run(
   { version, path, via }: Target,
 ): Promise<Response> {
   const open = via !== null && via !== '';
+  const bytes = await tapeRequest(request, path, url.search, via);
+  if (bytes === null) return tooLarge("a request's body", BODY_MAX);
   // the Worker's span for this request, and its call to the object (spans.ts); stored there before the reply
   const rt = await new RouterTrace(
     request,
     `${request.method} ${open ? '/p/{account}/{name}' : '/{account}/{name}/v/{version}'}${path}`,
     { 'tape.account': account, 'tape.name': name, 'tape.version': version, ...(open ? { 'tape.via': via } : {}) },
   ).started();
-  const bytes = await tapeRequest(request, path, url.search, via);
   // a jepsen-* account whose plan says router: true takes faults on this hop too (faults.ts); the decision is
   // made before the call span begins, so the call span stays the router's only child
   const fault = FAULTY.test(account)
@@ -201,7 +202,9 @@ const upload = async ({ request, stub, account, name, origin, token }: Args): Pr
     );
   if (name.startsWith('kv-'))
     return reply({ error: 'names beginning kv- are KV shards: create a cluster with POST /kv/:account/:cluster' }, 400);
-  const source = await request.text(),
+  const sent = await bodyOf(request, SOURCE_MAX);
+  if (sent === null) return tooLarge("a program's source", SOURCE_MAX);
+  const source = new TextDecoder().decode(sent),
     built = build(source);
   if (isRefusal(built)) return reply(built, built.status);
   const hash = await hex(built.plain),
