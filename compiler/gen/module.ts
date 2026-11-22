@@ -6,6 +6,7 @@ import { CompileError, fail, sleb, stemOf, vec } from '../common.ts';
 import type { DEFAULTS } from '../common.ts';
 import { integerParams } from '../../sql/analyze.ts';
 import { key } from '../types.ts';
+import { showExpr } from '../../rules/origins.ts';
 import type { Served } from './served.ts';
 
 export type Options = Omit<typeof DEFAULTS, 'pin' | 'exports' | 'rules'> & {
@@ -179,6 +180,19 @@ export function find(prog: Program, n: string, file: string, at?: Place): FnDecl
   return fns.get(n) ?? null;
 }
 
+/** The call with each unnamed argument given the name of the parameter in its place: `, as in pow(b, e: e - 1)`. */
+function rewrite(what: string, names: readonly string[], args: readonly Arg[]): string {
+  const callee = /^(?:function|constructor) (.+)$/.exec(what)?.[1];
+  if (callee === undefined || args.some(a => a.piped)) return '';
+  const shown = args.map((a, i) => {
+    const name = a.label !== null && names.includes(a.label) ? a.label : names[i];
+    if (name === undefined) return null;
+    const text = showExpr(a.value);
+    return a.value.k === 'var' && a.value.name === name ? name : `${name}: ${text}`;
+  });
+  return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `, as in \`${callee}(${shown.join(', ')})\``;
+}
+
 /** Call arguments in the order of the parameters' names. A one-parameter callee takes its argument bare. */
 export function orderArgs(what: string, names: readonly string[], args: readonly Arg[], at: Place): Arg[] {
   const list = `(${names.join(', ')})`;
@@ -191,7 +205,7 @@ export function orderArgs(what: string, names: readonly string[], args: readonly
         a,
         'C10',
         'arguments must be named',
-        `${what} takes ${list}. Write each argument as \`name: value\`; a variable with the parameter's name can be passed bare.`,
+        `${what} takes ${list}, so each argument is \`name: value\`${rewrite(what, names, args)}. A variable with the parameter's name can be passed bare, and so can the one argument of a function with one parameter.`,
       );
     if (!names.includes(a.label))
       fail(
