@@ -67,10 +67,10 @@ const runIn =
   };
 
 export default {
-  fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     void ctx;
     const deps: Deps = { std: STD, hello: { name: 'hello.tape', text: helloText }, run: runIn(env) };
-    return serve(request, deps, {
+    const res = await serve(request, deps, {
       killSwitch: env.KILL_SWITCH,
       salt: env.IP_SALT,
       limiter: env.RATE,
@@ -78,5 +78,8 @@ export default {
         console.log(JSON.stringify(line));
       },
     });
+    // which version of tape-mcp answered: for the deploy's pinned smoke, and through the tape Worker's binding
+    if (env.VERSION) res.headers.set('tape-mcp-version', env.VERSION.id);
+    return res;
   },
 } satisfies ExportedHandler<Env>;

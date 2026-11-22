@@ -26,6 +26,8 @@ declare namespace Cloudflare {
     KILL_SWITCH: string;
     /** a Worker secret: what client addresses are hashed with (serve.ts, ipHash) */
     IP_SALT?: string;
+    /** the version this is (cloudflare.config.ts): its id is the tape-mcp-version header */
+    VERSION?: WorkerVersionMetadata;
     // a second limiter, of two calls a minute, for the tests only (vitest.config.ts)
     TIGHT?: RateLimit;
   }

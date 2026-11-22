@@ -142,6 +142,13 @@ describe('tape-mcp in workerd', () => {
     expect(results(second.out).map(r => r['body'])).toEqual([d1?.['body'], d2?.['body']]);
   });
 
+  it('names the version that answered, a refusal too (tape-mcp-version)', async () => {
+    expect((await post('/v1/compile', {})).res.headers.get('tape-mcp-version')).toBe('test-version');
+    expect((await post('/mcp', {}, { origin: 'https://a.example' })).res.headers.get('tape-mcp-version')).toBe(
+      'test-version',
+    );
+  });
+
   it('answers JSON with nosniff and a sandbox CSP, and refuses pages, other types and bad JSON', async () => {
     const ok = await post('/v1/compile', {});
     expect(ok.status).toBe(200);

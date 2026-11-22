@@ -126,7 +126,7 @@ export function listing(deps: Deps): Fields[] {
     {
       name: 'compile',
       title: 'Compile a Tape program',
-      description: `Compile a Tape program (https://github.com/ivarvong/tape: a language for Cloudflare Workers, compiled to Wasm, whose compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size and its SQL statement count.
+      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size and its SQL statement count.
 
 To check it works: compile with no arguments gives {"ok": true, "diagnostics": []}. Send hello.tape with the line \`repeat: True,\` taken out, and it gives ok: false and one diagnostic, code C54 at hello.tape line 11: the INSERT … DO UPDATE SET n = n + 1 would apply twice if the request were run twice.
 
@@ -373,7 +373,7 @@ function mcpCall(text: string, deps: Deps, seen: Seen): Promise<Response> {
     name: 'tape',
     version: VERSION,
     instructions:
-      'Tape is a small language for Cloudflare Workers, compiled to Wasm (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. Alpha; calls are logged (TERMS.md).',
+      'Tape is a small language for durable services, compiled to WebAssembly; it runs in the browser, in Node and on Cloudflare Workers, and every effect is recorded (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. Alpha; calls are logged (TERMS.md).',
     list: () => listing(deps),
     call: async (name, args) => {
       seen.tool = typeof name === 'string' ? name.slice(0, 40) : null;

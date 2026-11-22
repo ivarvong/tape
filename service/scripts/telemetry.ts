@@ -1,5 +1,6 @@
 // telemetry.ts: the deploy's telemetry gate, from Workers Observability (cf o11y), for one version of the tape Worker.
-//   node scripts/telemetry.ts <version-id> <since-ms> [--min <invocations>] [--prev <version-id>]
+//   node scripts/telemetry.ts <version-id> <since-ms> [--min <invocations>] [--prev <version-id>] [--service <worker>]
+// (--service: another Worker's version, such as tape-mcp's; the default is tape)
 // Waits (up to ~2 min) until at least <min> fetch invocations of the version since <since-ms> are ingested, then
 // fails on any invocation of it whose outcome is not ok, any response of 500 or more, and any error log, except a 503
 // whose own invocation logged {"tape.stopped": reason} with a reason a deploy gives (the object was reset because
@@ -19,9 +20,12 @@ const opt = (name: string): string | null => {
 };
 const min = Number(opt('min') ?? '5'),
   prev = opt('prev'),
+  service = opt('service') ?? 'tape',
   since = Number(sinceArg);
 if (!/^[0-9a-f-]{36}$/.test(version) || !Number.isFinite(since)) {
-  console.error('usage: node scripts/telemetry.ts <version-id> <since-ms> [--min <n>] [--prev <version-id>]');
+  console.error(
+    'usage: node scripts/telemetry.ts <version-id> <since-ms> [--min <n>] [--prev <version-id>] [--service <worker>]',
+  );
   process.exit(2);
 }
 /** The reasons a deploy gives an object that stops: a 503 with one of these is expected, any other is a fault. */
@@ -67,7 +71,9 @@ const query = (filters: object[]): Ev[] => {
     view: 'events',
     limit: 2000,
     timeframe: { from: since - 5000, to: Date.now() + 5000 },
-    parameters: { filters: [{ key: '$metadata.service', operation: 'eq', type: 'string', value: 'tape' }, ...filters] },
+    parameters: {
+      filters: [{ key: '$metadata.service', operation: 'eq', type: 'string', value: service }, ...filters],
+    },
   };
   for (let attempt = 1; ; attempt++) {
     try {

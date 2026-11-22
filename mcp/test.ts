@@ -223,6 +223,8 @@ const tests: Test[] = [
       if (!isFields(F(r['capabilities'])['tools'])) out.push('no tools capability');
       const said = r['instructions'];
       if (typeof said !== 'string' || !said.includes('TERMS.md')) out.push('instructions do not mention TERMS.md');
+      if (typeof said !== 'string' || !said.includes('a small language for durable services, compiled to WebAssembly'))
+        out.push('instructions do not say what Tape is');
       const note = await rpc(m, 'notifications/initialized', {}, null);
       if (note.status !== 202) out.push(`a notification: ${note.status}, not 202`);
       const ping = await rpc(m, 'ping', {}, 2);
