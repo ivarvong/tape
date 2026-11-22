@@ -31,6 +31,8 @@ export type Metrics = {
   attempts: Attempt[];
   feedback: Feedback[];
   rateLimited: number;
+  /** compile or run calls with a stand-in text, not a program */
+  probes: number;
   costUsd: number;
   tokens: { input: number; output: number; cacheRead: number; cacheWrite: number };
   turns: number;
@@ -63,6 +65,7 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
     attempts: [],
     feedback: [],
     rateLimited: 0,
+    probes: 0,
     costUsd: 0,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     turns: 0,
@@ -105,6 +108,11 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
         }
         const files = recs(call.input['files']);
         if ((call.name !== 'compile' && call.name !== 'run') || files.length === 0) continue;
+        // Agents probe the tool's schema with a stand-in text ("placeholder"): that is not a program.
+        if (files.every(f => str(f['text']).trim().length < 40)) {
+          m.probes++;
+          continue;
+        }
         const diags = recs(answer['diagnostics']);
         const compiled = call.name === 'compile' ? answer['ok'] === true : recs(answer['results']).length > 0;
         const a: Attempt = {

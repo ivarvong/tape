@@ -28,10 +28,11 @@ type Hit = {
   failedChecks: { task: string; name: string }[];
 };
 
+// A theme that names the message wins over one that takes every message of the code.
 const themeOfDiag = (code: string, message: string): Theme | null =>
-  THEMES.find(t =>
-    (t.codes ?? []).some(c => c.code.test(code) && (c.message === undefined || c.message.test(message))),
-  ) ?? null;
+  THEMES.find(t => (t.codes ?? []).some(c => c.code.test(code) && c.message?.test(message) === true)) ??
+  THEMES.find(t => (t.codes ?? []).some(c => c.code.test(code) && c.message === undefined)) ??
+  null;
 
 export const rank = (jobs: JobResult[]): Hit[] => {
   const hits = new Map<string, Hit>();
@@ -82,7 +83,9 @@ export const rank = (jobs: JobResult[]): Hit[] => {
       }
     }
   }
-  const score = (h: Hit): number => h.tasks.size * (h.lostMs / 60_000);
+  // A feedback report counts as one minute: agents report what cost them time outside compiles (reading the docs for
+  // something that is not there, guessing names), which the compile log does not see.
+  const score = (h: Hit): number => h.tasks.size * (h.lostMs / 60_000 + h.feedback.length);
   return [...hits.values()].toSorted(
     (a, b) =>
       score(b) - score(a) ||
@@ -121,7 +124,7 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
   );
   put(
     `- Compile attempts ${jobs.reduce((s, j) => s + j.compileAttempts, 0)}, of which refused ${jobs.reduce((s, j) => s + j.failedAttempts, 0)}; ` +
-      `feedback reports filed ${jobs.reduce((s, j) => s + j.feedback.length, 0)}; calls rate-limited ${jobs.reduce((s, j) => s + j.rateLimited, 0)}.`,
+      `feedback reports filed ${jobs.reduce((s, j) => s + j.feedback.length, 0)}; calls rate-limited ${jobs.reduce((s, j) => s + j.rateLimited, 0)}; schema probes (a stand-in text, not counted as attempts) ${jobs.reduce((s, j) => s + (j.probes ?? 0), 0)}.`,
   );
   put(
     `- Cost $${cost.toFixed(2)} (CLI-reported list price), ${jobs.reduce((s, j) => s + j.tokens.output, 0).toLocaleString('en-US')} output tokens.`,
@@ -156,7 +159,7 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
   const ranked = rank(jobs);
   put('## Friction ranking', '');
   put(
-    'Score = tasks affected × minutes lost (the time from each refused compile to the next attempt, shared among its codes). ' +
+    'Score = tasks affected × (minutes lost + feedback reports). Minutes lost: the time from each refused compile to the next attempt, shared among its codes; a feedback report that names the theme counts one minute, for time spent outside compiles. ' +
       'Ties go to more tasks, then more feedback, then more failed checks, then more evidence from before.',
     '',
   );
@@ -169,7 +172,7 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
       .map(([c, n]) => `${c}×${n}`)
       .join(' ');
     put(
-      `| ${i + 1} | ${cell(h.theme.title)} | ${h.tasks.size} | ${(h.lostMs / 60_000).toFixed(1)} | ${(h.tasks.size * (h.lostMs / 60_000)).toFixed(1)} | ${diags || '—'} | ${h.feedback.length} | ${h.failedChecks.length} | ${cell(h.theme.change)} |`,
+      `| ${i + 1} | ${cell(h.theme.title)} | ${h.tasks.size} | ${(h.lostMs / 60_000).toFixed(1)} | ${(h.tasks.size * (h.lostMs / 60_000 + h.feedback.length)).toFixed(1)} | ${diags || '—'} | ${h.feedback.length} | ${h.failedChecks.length} | ${cell(h.theme.change)} |`,
     );
   });
   put('');

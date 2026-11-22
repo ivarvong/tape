@@ -238,7 +238,15 @@ const pool = async <T, R>(items: T[], n: number, f: (x: T) => Promise<R>): Promi
 
 const regrade = async (outDir: string): Promise<void> => {
   const saved = loadSaved(outDir);
-  for (const j of saved.jobs) {
+  for (const [i, j] of saved.jobs.entries()) {
+    // The transcript is read again too, so a change to transcript.ts applies to old runs.
+    const transcript = join(outDir, j.id, 'transcript.jsonl');
+    if (existsSync(transcript)) {
+      const lines = readFileSync(transcript, 'utf8')
+        .split('\n')
+        .filter(l => l !== '');
+      saved.jobs[i] = Object.assign(j, analyse(lines, j.wallMs), { transcript });
+    }
     const sol = join(outDir, j.id, 'solution');
     const files = existsSync(sol)
       ? readdirSync(sol).map(f => ({ name: f, text: readFileSync(join(sol, f), 'utf8') }))

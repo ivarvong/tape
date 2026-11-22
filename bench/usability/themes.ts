@@ -20,7 +20,7 @@ export const THEMES: Theme[] = [
     change:
       'decode takes the shapes real APIs send (optional fields, lists of records, nullable), and its refusal names the field and the fix',
     codes: [{ code: /^C35$/ }, { code: /^C09$/, message: /json|JSON|decode|written as/ }],
-    feedback: /decode|JSON (array|body|field)|optional field|Option\[/i,
+    feedback: /decode|JSON (array|body|field)/i,
     prior: [
       'apps/trace/FRICTION.md #1: decode refuses unknown keys, so OTLP needed a hand-written reader',
       'feedback 20261122T232050.119Z-809602d0280e: decode cannot read JSON arrays (C09); 400 of 833 lines were a parser',
@@ -138,7 +138,7 @@ export const THEMES: Theme[] = [
     id: 'headers',
     title: 'No response headers (Location, content type) and no request headers',
     change: 'let a program set response headers (at least Location and Content-Type) and read request headers',
-    feedback: /header|Location|redirect|content.type/i,
+    feedback: /Location|redirect|response header|set a header|set headers/i,
     checks: /302|redirect/,
     prior: ['apps/tickets/FRICTION.md 14:40 and 15:04: no headers, so no redirect and no caller identity'],
   },
@@ -184,6 +184,69 @@ export const THEMES: Theme[] = [
       'every snippet and fix string compiles in CI; the guide has a worked REST example with validation and lists',
     feedback: /documentation|the docs|README|LANGUAGE\.md|guide\.md|mcp\.md|undocumented|not documented/i,
     prior: ['feedback 20261122T225732.543Z-67e1f8a9ede0: README and examples used retired syntax'],
+  },
+  {
+    id: 'undocumented-std',
+    title:
+      'std is not documented: respond_as(content: Json), Request.query, form_field exist but agents cannot find them',
+    change:
+      "a std reference (every public function and type, with a one-line example) in the docs, and the MCP tool descriptions name respond_as and Request's fields",
+    codes: [
+      { code: /^C22$/, message: /unknown function/ },
+      { code: /^C11$/, message: /^function \w+ has no parameter/ },
+      { code: /^C18$/, message: /has no field/ },
+      // a snippet compiled to ask the compiler whether a name exists
+      { code: /^C30$/, message: /no function handle/ },
+    ],
+    feedback: /application\/json|content.?type|text\/plain|Request's fields|Request has a|std reference|no std|guess/i,
+    prior: [
+      'std/http.tape defines respond_as(status, content: Json) and Request(query: Option[View]); none of README, LANGUAGE.md, guide.md, mcp.md mentions either',
+    ],
+  },
+  {
+    id: 'reserved-field-names',
+    title: 'Reserved words cannot be field names, so JSON keys like "type" cannot be decoded',
+    change: 'allow reserved words as field names (or a key-rename on decode), and P01 says the word is reserved',
+    codes: [
+      { code: /^P01$/, message: /found `(type|fn|match|let|do|if|else|and|or|not|with|export|schema|migration|flag)`/ },
+    ],
+    feedback: /reserved/i,
+    prior: ['feedback 20261122T232056.998Z-9d2e11f1f1d1: a parameter named `or` gives a generic P02'],
+  },
+  {
+    id: 'nullable-key',
+    title: 'C69: a TEXT PRIMARY KEY may be NULL in SQLite, so a View field cannot hold it',
+    change:
+      'treat a PRIMARY KEY column as NOT NULL for row types (or say "add NOT NULL" as the whole fix, first); the docs say so where tables are made',
+    codes: [{ code: /^C69$/ }],
+    feedback: /C69|NOT NULL|may be NULL/i,
+    prior: [],
+  },
+  {
+    id: 'once-keys',
+    title: 'Idempotency keys of calls (C65): what a once: key must contain',
+    change: 'the call example in LANGUAGE.md shows a message that carries the id, and C65 writes the key to use',
+    codes: [{ code: /^C65$/ }, { code: /^C6[46]$/ }],
+    feedback: /C65|once:|once key/i,
+    prior: [],
+  },
+  {
+    id: 'mcp-tooling',
+    title: 'MCP tooling: run answers carry full OTLP traces; programs re-sent in full each call; no clock control',
+    change:
+      'run takes `trace: false` (and effects-only), a compile-and-run that keeps the last program by hash, and a fake clock (`now` per request) to test time windows',
+    feedback: /trace|OTLP|budget|whole (file|source)|pasted|clock.*frozen|cannot be tested|wall time/i,
+    prior: [
+      'feedback 20261122T232059.296Z-5acdb5a4da77: run cannot report wall time; ask for a per-function step profile',
+    ],
+  },
+  {
+    id: 'text-patterns-in-let',
+    title: 'Text patterns (`a ++ "x" ++ b`) only in match arms, not in let … else',
+    change: 'let P = e else accepts every pattern a match arm does, as LANGUAGE.md section 4 says it should',
+    codes: [{ code: /^P01$/, message: /expected `=` but found `\+\+`/ }],
+    feedback: /let .*\+\+|text pattern/i,
+    prior: [],
   },
   {
     id: 'json-output',
