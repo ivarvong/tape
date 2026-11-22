@@ -9,7 +9,11 @@ export default defineConfig({
     workersDev: true,
     previewUrls: false,
     observability: { enabled: true },
-    cache: { enabled: true, crossVersionCache: true },
+    // Each version has its own cache (no crossVersionCache): with one shared cache, a new version answered / and
+    // /playground/ from the cache the version before filled (tape-version of the old commit, seen by the pinned
+    // smoke of d9e16de1, 2026-11-22), and could answer a page whose hashed files it does not have. A deploy costs a
+    // cold cache: the Wasm of each version is fetched from its object again, once per location.
+    cache: { enabled: true },
     env: {
       LOADER: bindings.workerLoader(),
       TOKEN: bindings.secret(),
