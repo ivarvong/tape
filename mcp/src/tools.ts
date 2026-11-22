@@ -89,7 +89,7 @@ export type EffectOut =
     }
   | { kind: 'now'; now: number }
   | { kind: 'random'; random: number }
-  | { kind: 'wake'; key: number; after_ms: number; due: number };
+  | { kind: 'wake'; key: number; after_ms: number; due: number; undone?: true };
 export type RunResultOne = {
   request: string;
   status: number;
@@ -302,7 +302,10 @@ function effectsOut(built: Built, effects: readonly Effect[], names: ReadonlyMap
       ];
     if ('now' in e) return [{ kind: 'now', now: e.now }];
     if ('random' in e) return [{ kind: 'random', random: e.random }];
-    if ('wake' in e) return [{ kind: 'wake', key: e.wake, after_ms: e.after, due: e.due }];
+    if ('wake' in e)
+      return [
+        { kind: 'wake', key: e.wake, after_ms: e.after, due: e.due, ...(e.undone ? { undone: true as const } : {}) },
+      ];
     return [];
   });
 }

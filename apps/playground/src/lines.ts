@@ -85,7 +85,11 @@ export function effectLine(built: Built | null, e: Effect, names: ReadonlyMap<st
     };
   }
   if (isWake(e))
-    return { kind: 'wake', text: `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})` };
+    return {
+      kind: 'wake',
+      text: `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})${e.undone ? ', undone' : ''}`,
+      ...(e.undone ? { undone: true as const } : {}),
+    };
   if (isNow(e)) return { kind: 'now', text: `now     -> ${e.now} (${new Date(e.now).toISOString()})` };
   if (isRandom(e)) return { kind: 'now', text: `random  -> ${e.random}` };
   if (isSql(e)) {

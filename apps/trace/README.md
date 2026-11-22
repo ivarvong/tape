@@ -35,9 +35,9 @@ What the picture shows (Honeycomb/Jaeger-style: one row per span, label column l
 - Durations everywhere to three significant digits without trailing zeros (812 ns, 60 µs, 1.12 ms, 2 s), with
   tabular numerals; beside the bar, or inside it when it is wide and there is no room, never running into a
   gap's band.
-- Event marks by kind: a tick for SQL (`db.*`; dashed, keyed "undone", when its `tape.sql.undone` is true: a
-  write its run's rollback or trap undid), a ring for `tape.timer.set`, a red diamond for an error event
-  (`tape.span.missing`, `tape.run.rolled_back`, `tape.check.problem`, `db.prepare.failed`, `exception`), a dot
+- Event marks by kind: a tick for SQL (`db.*`) and a ring for `tape.timer.set`, each dashed when its
+  `tape.sql.undone` or `tape.timer.undone` is true (a write or a timer its run's rollback or trap undid; keyed
+  "undone" and "timer undone"), a red diamond for an error event (`tape.span.missing`, `tape.run.rolled_back`, `tape.check.problem`, `db.prepare.failed`, `exception`), a dot
   for anything else. An event whose time lies outside its span is drawn faint (class `out`) and its tooltip
   says so.
 - Errors: a red accent at the row's left edge, a red bar and a red duration, plus the status message in the

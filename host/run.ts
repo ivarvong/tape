@@ -444,8 +444,9 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
 }
 
 // A rollback(out), or a trap, undoes the writes of the stretch it ends: those after the run's last call (the earlier
-// stretches were committed before their calls). Each SQL write there is marked `undone` in the live run's log, so
-// the log, its trace and every view of it say the write did not stay. A read is not marked.
+// stretches were committed before their calls). Each SQL write there, and each timer set there (its row in _wakes is
+// in the same transaction), is marked `undone` in the live run's log, so the log, its trace and every view of it say
+// it did not stay. A read is not marked; a clock read or a random draw undoes nothing.
 const WRITE = /\b(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 function markUndone(L: Linked, effects: readonly Effect[]): void {
   if (!L.live) return;
@@ -453,7 +454,7 @@ function markUndone(L: Linked, effects: readonly Effect[]): void {
   effects.forEach((e, i) => {
     if (isCall(e)) from = i + 1;
   });
-  for (const e of effects.slice(from)) if (isSql(e) && WRITE.test(L.Q[e.q]?.sql ?? '')) e.undone = true;
+  for (const e of effects.slice(from)) if ((isSql(e) && WRITE.test(L.Q[e.q]?.sql ?? '')) || isWake(e)) e.undone = true;
 }
 
 /** The run's answer, with what it used written into its log. */

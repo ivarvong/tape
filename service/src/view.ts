@@ -193,6 +193,8 @@ const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent
         'tape.wake.key': e.wake,
         'tape.wake.after_ms': e.after,
         'tape.wake.due': iso(e.due),
+        // set in a stretch its run's rollback(out) or trap undid: the timer was never kept
+        'tape.timer.undone': e.undone,
       }),
     ];
   if ('now' in e) return [event(t, 'tape.clock', { 'tape.now': e.now })];

@@ -395,6 +395,9 @@ const tests: Test[] = [
         out.push(`an undone write in the log: ${JSON.stringify(undone)}`);
       if (kept.sql?.result !== '2 written' || kept.undone !== undefined)
         out.push(`a kept write in the log: ${JSON.stringify(kept)}`);
+      const timer = m.lines.effectLine(one, { wake: 3, after: 10, due: 0, undone: true });
+      if (!timer.text.endsWith(', undone') || timer.undone !== true)
+        out.push(`an undone timer in the log: ${JSON.stringify(timer)}`);
       const [tl] = m.lines.traceLines(one, 'w.tape', [], [{ sql: 0, p: [], r: 2, undone: true }]);
       if (tl?.text !== 'sql [] -> 2 written, undone' || tl.undone !== true)
         out.push(`an undone write in the trace: ${JSON.stringify(tl)}`);

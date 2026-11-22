@@ -1879,11 +1879,13 @@ fn with_bit(kinds: Int, bit: Int) -> Int {
 }
 
 // An event's mark: an SQL event whose first tape.sql.undone attribute is true is a write its run's rollback or trap
-// undid (16, a dashed tick); otherwise by its name.
+// undid (16, a dashed tick), a timer whose first tape.timer.undone is true a timer it undid (32, a dashed ring);
+// otherwise by its name.
 fn ev_kind(ev: Ev) -> Int {
   let k = kind_bit(name: ev.name)
   match {
     k == 1 and attr_named(list: ev.attrs, key: "tape.sql.undone") == "true" -> 16
+    k == 2 and attr_named(list: ev.attrs, key: "tape.timer.undone") == "true" -> 32
     else -> k
   }
 }
@@ -1985,6 +1987,8 @@ fn style(out: Buf) -> Buf {
     |> append(view: ".otlp-waterfall .ev{stroke:var(--_bg);stroke-width:1}.otlp-waterfall \
         .ev.q{stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall \
         .ev.u{stroke:var(--_mut);stroke-width:1.5;stroke-dasharray:2 2}.otlp-waterfall \
+        .ev.tu{fill:var(--_bg);stroke:var(--_mut);stroke-width:1.5;stroke-dasharray:2 \
+        1.5}.otlp-waterfall \
         .ev.t{fill:var(--_bg);stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall \
         .ev.o{fill:var(--_fg)}.otlp-waterfall .ev.x{fill:var(--_err)}.otlp-waterfall \
         .ev.out{opacity:.45}.otlp-waterfall .k-q{fill:var(--_fg);font-weight:700}.otlp-waterfall \
@@ -2148,6 +2152,7 @@ fn event_key(out: Buf, kinds: Int) -> Buf {
     |> key_part(on: kinds & 1, view: "<tspan class=\"k-q\">│</tspan> sql ")
     |> key_part(on: kinds & 16, view: "<tspan class=\"k-u\">┆</tspan> undone ")
     |> key_part(on: kinds & 2, view: "<tspan class=\"k-t\">○</tspan> timer ")
+    |> key_part(on: kinds & 32, view: "<tspan class=\"k-u\">◌</tspan> timer undone ")
     |> key_part(on: kinds & 4, view: "<tspan class=\"k-x\">◆</tspan> error ")
     |> key_part(on: kinds & 8, view: "<tspan class=\"k-o\">•</tspan> event ")
 }
@@ -2691,8 +2696,8 @@ fn duration(out: Buf, x: Int, xe: Int, d: Int, after: Bool, before: Bool) -> Buf
 }
 
 // A mark for each event, to 100, at its time (kept to the axis; an unreadable time is the span's start). Its
-// shape says its kind: a tick for SQL (dashed for a write its run undid), a ring for a timer, a red diamond for an
-// error, a dot for anything else.
+// shape says its kind: a tick for SQL and a ring for a timer (each dashed when its run undid it), a red diamond for
+// an error, a dot for anything else.
 // An event whose time is outside its span's is drawn faint and says so.
 fn markers(out: Buf, list: List[Ev], n: Int, b: Int, e: Int, axis: Axis) -> Buf {
   match list {
@@ -2767,13 +2772,14 @@ fn tick_kind(out: Buf, kind: Int) -> Buf {
 fn circle_kind(out: Buf, kind: Int) -> Buf {
   match {
     kind == 2 -> out |> append(view: "t")
+    kind == 32 -> out |> append(view: "tu")
     else -> out |> append(view: "o")
   }
 }
 
 fn circle_size(out: Buf, kind: Int) -> Buf {
   match {
-    kind == 2 -> out |> append(view: "\" cy=\"13\" r=\"3.5\"><title>")
+    kind == 2 or kind == 32 -> out |> append(view: "\" cy=\"13\" r=\"3.5\"><title>")
     else -> out |> append(view: "\" cy=\"13\" r=\"2.5\"><title>")
   }
 }

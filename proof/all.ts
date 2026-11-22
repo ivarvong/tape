@@ -63,9 +63,9 @@ const slow: Part[] = [
     /^all 13 plants caught$/m,
   ],
   [
-    'apps/trace/test.ts --plants: 38 bugs planted in trace.tape, each caught by its gate',
+    'apps/trace/test.ts --plants: 39 bugs planted in trace.tape, each caught by its gate',
     [node, 'apps/trace/test.ts', '--plants'],
-    s => (s.match(/^caught /gm) ?? []).length === 38 && !/^(MISSED|PLANT NOT FOUND)/m.test(s),
+    s => (s.match(/^caught /gm) ?? []).length === 39 && !/^(MISSED|PLANT NOT FOUND)/m.test(s),
   ],
   [
     "apps/playground/test.ts --plants: 18 bugs planted in the playground's modules, each caught by its test",

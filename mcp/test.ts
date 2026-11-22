@@ -349,7 +349,7 @@ const tests: Test[] = [
       const out: string[] = [];
       const { out: r } = await tool(m, 'run', {
         files: [{ name: 'undone.tape', text: UNDONE_TAPE }],
-        requests: ['GET /undo', 'GET /trap', 'GET /keep', 'GET /keep'],
+        requests: ['GET /undo', 'GET /trap', 'GET /keep', 'GET /keep', 'GET /wake'],
       });
       const rs = RESULTS(r);
       // the first INSERT is undone by rollback(out), the second by the trap: the third request writes the row
@@ -357,11 +357,17 @@ const tests: Test[] = [
       const bodies = rs.map(x => `${String(x['status'])} ${String(x['body'])}`);
       if (
         JSON.stringify(bodies) !==
-        JSON.stringify(['409 undone 1', '500 trap 4: division by zero or overflow', '200 kept 1', '200 kept 0'])
+        JSON.stringify([
+          '409 undone 1',
+          '500 trap 4: division by zero or overflow',
+          '200 kept 1',
+          '200 kept 0',
+          '409 no timer',
+        ])
       )
         out.push(`bodies ${JSON.stringify(bodies)}`);
       const marks = rs.map(x => L(x['effects']).map(e => F(e)['undone'] === true));
-      if (JSON.stringify(marks) !== '[[true],[true],[false],[false]]')
+      if (JSON.stringify(marks) !== '[[true],[true],[false],[false],[true,true]]')
         out.push(`undone marks ${JSON.stringify(marks)}`);
       if (!rs.every(x => x['replayed'] === true)) out.push('a run with undone writes does not replay');
       // the trace says so: the write's event has tape.sql.undone, and the span's rows_written leaves it out
@@ -390,6 +396,15 @@ const tests: Test[] = [
         if (String(w) !== written)
           out.push(`request ${i}: the span's tape.sql.rows_written ${String(w)}, not ${written}`);
       }
+      // a timer set in the stretch a rollback undid is undone too: its row in _wakes was rolled back with the rest
+      const wake = L(rs[4]?.['effects']).map(F);
+      if (JSON.stringify(wake.map(e => [e['kind'], e['undone'] === true])) !== '[["sql",true],["wake",true]]')
+        out.push(`/wake: ${JSON.stringify(wake)}`);
+      const wakeEv = L(spanOf(rs[4] ?? {})['events'])
+        .map(F)
+        .find(e => e['name'] === 'tape.timer.set');
+      if (F(attr(wakeEv?.['attributes'], 'tape.timer.undone'))['boolValue'] !== true)
+        out.push(`/wake: the timer's event ${JSON.stringify(wakeEv)}`);
       return out;
     },
   },

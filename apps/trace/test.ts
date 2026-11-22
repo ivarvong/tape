@@ -295,11 +295,13 @@ const KIND_BAD = new Set([
 ]);
 const kindBit = (name: string): number =>
   KIND_BAD.has(name) ? 4 : name.startsWith('db.') ? 1 : name === 'tape.timer.set' ? 2 : 8;
-/** An event's mark: an SQL event whose first tape.sql.undone attribute is true is a write its run undid (16). */
-const kindOf = (ev: Ev): number =>
-  kindBit(ev.name) === 1 && (ev.attrs.find(a => a.key === 'tape.sql.undone')?.value ?? '') === 'true'
-    ? 16
-    : kindBit(ev.name);
+/** An event's mark: an SQL event whose first tape.sql.undone attribute is true is a write its run undid (16), a
+ * timer whose first tape.timer.undone is true a timer it undid (32). */
+const firstIs = (ev: Ev, key: string): boolean => (ev.attrs.find(a => a.key === key)?.value ?? '') === 'true';
+const kindOf = (ev: Ev): number => {
+  const k = kindBit(ev.name);
+  return k === 1 && firstIs(ev, 'tape.sql.undone') ? 16 : k === 2 && firstIs(ev, 'tape.timer.undone') ? 32 : k;
+};
 
 function expect(bytes: Uint8Array): Expect {
   const doc = readJson(bytes);
@@ -500,7 +502,7 @@ const bp = (pct: string | undefined): number => {
 const NEAR = 7;
 const textNoTitle = (el: El): string =>
   el.kids.map(k => (typeof k === 'string' ? k : k.name === 'title' ? '' : textNoTitle(k))).join('');
-const EV_CLASS = ['', 'q', 't', '', 'x', '', '', '', 'o', '', '', '', '', '', '', '', 'u'];
+const EV_CLASS: Record<number, string> = { 1: 'q', 2: 't', 4: 'x', 8: 'o', 16: 'u', 32: 'tu' };
 
 /** What is wrong with this SVG for this input: a list of [check, detail]. */
 function check(input: Uint8Array, svg: Uint8Array): [string, string][] {
@@ -553,6 +555,7 @@ function check(input: Uint8Array, svg: Uint8Array): [string, string][] {
     (kinds & 1 ? '│ sql ' : '') +
     (kinds & 16 ? '┆ undone ' : '') +
     (kinds & 2 ? '○ timer ' : '') +
+    (kinds & 32 ? '◌ timer undone ' : '') +
     (kinds & 4 ? '◆ error ' : '') +
     (kinds & 8 ? '• event ' : '');
   if (!lg || textOf(lg) !== legend) say('header', `legend "${lg ? textOf(lg) : ''}" is not "${legend}"`);
@@ -814,7 +817,10 @@ function randomDoc(r: () => number): Uint8Array {
         ? { raw: '7' }
         : {
             obj: [
-              ['key', pick(['service.name', 'db.query.text', 'tape.sql.undone', 'k', pick(NAMES)])],
+              [
+                'key',
+                pick(['service.name', 'db.query.text', 'tape.sql.undone', 'tape.timer.undone', 'k', pick(NAMES)]),
+              ],
               ['value', anyValue()],
             ],
           },
@@ -849,7 +855,7 @@ function randomDoc(r: () => number): Uint8Array {
                 ? [
                     {
                       obj: [
-                        ['key', 'tape.sql.undone'],
+                        ['key', pick(['tape.sql.undone', 'tape.timer.undone'])],
                         ['value', { obj: [['boolValue', { raw: 'true' }]] }],
                       ],
                     },
@@ -1207,6 +1213,12 @@ function runGates(text: string, only?: string): Map<string, string[]> {
 // ---------- planted bugs: each must fail the gate named ----------
 
 const PLANTS: { gate: string; why: string; from: string; to: string }[] = [
+  {
+    gate: 'random',
+    why: 'an undone timer is drawn as a kept one',
+    from: '    k == 2 and attr_named(list: ev.attrs, key: "tape.timer.undone") == "true" -> 32\n',
+    to: '    k == 2 and attr_named(list: ev.attrs, key: "tape.timer.undone") == "true" -> 2\n',
+  },
   {
     gate: 'random',
     why: 'an undone write is drawn as a kept one',

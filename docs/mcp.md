@@ -103,8 +103,8 @@ Also takes `requests`: 1 to 20, each `METHOD SP TARGET`, then optionally a line 
   the value bound to each name, and the rows returned or `rows_written`; calls to other programs (`kind: "call"`,
   which answer Unreachable here: one program runs at a time), clock reads (`now`), random draws and timers set
   (`wake`). A BLOB is `{"base64": …}`.
-- A write that the request's `rollback(out)` or a trap undid has `undone: true`: it did not stay. Its trace event
-  has `tape.sql.undone`, and the span's `tape.sql.rows_written` leaves it out.
+- A write or a timer that the request's `rollback(out)` or a trap undid has `undone: true`: it did not stay. Its
+  trace event has `tape.sql.undone` (or `tape.timer.undone`), and the span's `tape.sql.rows_written` leaves it out.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got
   the same bytes back (or, for a trap, the same trap). `replay_error` says why when it did not.
 - `trace` is OTLP/JSON, made by the same `otlp()` the service uses ([`service/src/view.ts`](../service/src/view.ts))

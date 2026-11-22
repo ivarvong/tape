@@ -81,7 +81,7 @@ export function logView(lines: readonly Line[]): string {
         return `<li class="k-sql${l.undone ? ' undone' : ''}"><span class="lk">sql</span><code class="lq">${q}</code><span class="lb">${binds}<span class="lr">${esc(l.sql.result)}</span></span></li>`;
       }
       const [kind = '', ...rest] = l.text.split(/\s+/);
-      return `<li class="k-${esc(l.kind)}"><span class="lk">${esc(kind)}</span><code class="lq">${esc(rest.join(' '))}</code></li>`;
+      return `<li class="k-${esc(l.kind)}${l.undone ? ' undone' : ''}"><span class="lk">${esc(kind)}</span><code class="lq">${esc(rest.join(' '))}</code></li>`;
     })
     .join('');
 }

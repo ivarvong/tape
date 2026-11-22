@@ -70,7 +70,8 @@ export type CallEffect = {
 };
 export type NowEffect = { now: number };
 export type RandomEffect = { random: number };
-export type WakeEffect = { wake: number; after: number; due: number };
+/** `undone`: a timer its run's rollback(out) or trap undid (its row in _wakes was rolled back; host/run.ts, markUndone) */
+export type WakeEffect = { wake: number; after: number; due: number; undone?: true };
 export type Effect = Head | SqlEffect | CallEffect | NowEffect | RandomEffect | WakeEffect;
 
 /** One thing a traced run did, in order. `what` at a site: 2 the function was entered, 0 an arm or step was tried, 1 it matched. */

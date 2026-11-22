@@ -123,7 +123,7 @@ state needs no `_` arm.
 | `wake(after: ms, key: n)` | `Timer` | asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again; a run that fails on a storage error is not retried, a known bug ([`STATUS.md`](STATUS.md#known-limitations)) |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
-| `rollback(out)` | | answers `out` and undoes this request's writes since its last call; the effect log marks each write it undid `undone` (as it does for a trap), and so does the trace |
+| `rollback(out)` | | answers `out` and undoes this request's writes since its last call; the effect log marks each write and each timer it undid `undone` (as it does for a trap), and so does the trace |
 
 A query names each value it takes, `WHERE id = :id AND state = :from`, and the call passes each by that name: `id`
 when a value of that name is at hand, `from: "new"` otherwise. A name used twice is one value. A name with no
