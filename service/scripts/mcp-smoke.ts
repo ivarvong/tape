@@ -41,6 +41,8 @@ const check = (ok: boolean, what: string): void => {
 type J = Record<string, unknown>;
 const obj = (v: unknown): J => (typeof v === 'object' && v !== null && !Array.isArray(v) ? { ...v } : {});
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+/** A value as text, for a message. */
+const str = (v: unknown): string => (typeof v === 'string' ? v : (JSON.stringify(v) ?? 'undefined'));
 const post = async (
   path: string,
   body: unknown,
@@ -93,7 +95,7 @@ const init = await rpc('initialize', {
 const result = obj(init.j['result']);
 check(init.r.status === 200, `initialize: ${init.r.status}`);
 check(obj(result['serverInfo'])['name'] === 'tape', `initialize: serverInfo ${JSON.stringify(result['serverInfo'])}`);
-check(String(result['instructions'] ?? '').includes('TERMS.md'), 'initialize: the instructions');
+check(str(result['instructions'] ?? '').includes('TERMS.md'), 'initialize: the instructions');
 const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
 check(JSON.stringify(names) === '["compile","run"]', `tools/list: ${JSON.stringify(names)}`);
@@ -105,11 +107,11 @@ const sees = (where: string, ran: J): string => {
   check(rs.length === 2, `${where}: ${rs.length} results`);
   check(
     rs[0]?.['status'] === 200 && rs[0]['body'] === 'Hello, ada',
-    `${where}: first ${rs[0]?.['status']} ${rs[0]?.['body']}`,
+    `${where}: first ${str(rs[0]?.['status'])} ${str(rs[0]?.['body'])}`,
   );
   check(
     rs[1]?.['status'] === 200 && rs[1]['body'] === 'Hello again, ada #2!',
-    `${where}: second ${rs[1]?.['status']} ${rs[1]?.['body']}`,
+    `${where}: second ${str(rs[1]?.['status'])} ${str(rs[1]?.['body'])}`,
   );
   check(
     rs.every(x => x['replayed'] === true),
@@ -119,7 +121,7 @@ const sees = (where: string, ran: J): string => {
     rs.every(x => arr(obj(x['trace'])['resourceSpans']).length > 0),
     `${where}: OTLP traces`,
   );
-  return rs.map(x => `${x['status']} ${JSON.stringify(x['body'])} replayed ${x['replayed']}`).join(', ');
+  return rs.map(x => `${str(x['status'])} ${JSON.stringify(x['body'])} replayed ${str(x['replayed'])}`).join(', ');
 };
 const ran = sees('run hello twice', await tool('run', twice));
 const without = hello.replace(/^\s*repeat: True,\n/m, '');
@@ -129,7 +131,7 @@ const d = arr(c['diagnostics']).map(obj);
 check(c['ok'] === false && d.length === 1, `compile without repeat: ok ${String(c['ok'])}, ${d.length} diagnostics`);
 check(
   d[0]?.['code'] === 'C54' && d[0]['line'] === 11,
-  `compile without repeat: ${d[0]?.['code']} line ${d[0]?.['line']}`,
+  `compile without repeat: ${str(d[0]?.['code'])} line ${str(d[0]?.['line'])}`,
 );
 const v1 = await post('/v1/run', twice);
 check(v1.r.status === 200, `/v1/run: ${v1.r.status}`);
@@ -143,7 +145,7 @@ check(
   origin.r.status === 403 && origin.j['error'] === 'origin_refused',
   `Origin: ${origin.r.status} ${String(origin.j['error'])}`,
 );
-console.log(`  run: ${ran}; compile: ${d[0]?.['code']} line ${d[0]?.['line']}; Origin: ${origin.r.status}`);
+console.log(`  run: ${ran}; compile: ${str(d[0]?.['code'])} line ${str(d[0]?.['line'])}; Origin: ${origin.r.status}`);
 console.log(
   failed === 0 ? `mcp smoke ok: ${passed} checks` : `FAIL mcp smoke: ${failed} of ${passed + failed} checks failed`,
 );
