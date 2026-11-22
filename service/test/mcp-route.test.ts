@@ -1,4 +1,4 @@
-// Runs in workerd: /mcp, /v1/compile and /v1/run are the hosted compiler and runner (docs/mcp.md), another Worker,
+// Runs in workerd: /mcp, /v1/compile, /v1/run and /v1/feedback are the hosted compiler and runner (docs/mcp.md), another Worker,
 // tape-mcp, reached through the MCP service binding. They need no token; the request reaches tape-mcp as it came
 // (its client address, which tape-mcp hashes, and its Origin, which tape-mcp refuses), and the answer comes back with
 // the headers every answer of this Worker has. Here tape-mcp is an echo (vitest.config.ts). /mcp/:account is still
@@ -20,8 +20,8 @@ const echoed = async (
 };
 
 describe('the hosted compiler and runner, through the MCP binding', () => {
-  it('passes /mcp, /v1/compile and /v1/run to tape-mcp without a token, as they came', async () => {
-    for (const path of ['/mcp', '/v1/compile', '/v1/run']) {
+  it('passes /mcp, /v1/compile, /v1/run and /v1/feedback to tape-mcp without a token, as they came', async () => {
+    for (const path of ['/mcp', '/v1/compile', '/v1/run', '/v1/feedback']) {
       const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', path });
       const r = await anyone(`${path}?q=1`, {
         method: 'POST',
@@ -62,7 +62,7 @@ describe('the hosted compiler and runner, through the MCP binding', () => {
   });
 
   it('passes nothing else: /mcp/:account is the tools, /v1 and the like are the API', async () => {
-    for (const path of ['/mcp/ivar', '/mcp/', '/v1', '/v1/', '/v1/runs', '/v1/compile/x', '/MCP']) {
+    for (const path of ['/mcp/ivar', '/mcp/', '/v1', '/v1/', '/v1/runs', '/v1/compile/x', '/v1/feedbacks', '/MCP']) {
       const r = await anyone(path, { method: 'POST', body: '{}' });
       expect([path, r.status]).toEqual([path, 401]);
       expect(r.headers.get('tape-mcp-version')).toBeNull();
