@@ -28,7 +28,7 @@ const README = readFileSync(`${ROOT}README.md`, 'utf8');
 
 type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM };
 type Plant = { test: string; what: string; file: string; from: string; to: string };
-const SRC = ['runner.ts', 'tools.ts', 'serve.ts', 'host.ts', 'sqlite.ts'];
+const SRC = ['runner.ts', 'tools.ts', 'feedback.ts', 'serve.ts', 'host.ts', 'sqlite.ts'];
 
 const isMods = (m: Record<string, unknown>): m is Mods =>
   typeof m['runner'] === 'object' && typeof m['tools'] === 'object' && typeof m['serve'] === 'object';
@@ -237,13 +237,128 @@ const tests: Test[] = [
     },
   },
   {
+    name: 'feedback',
+    run: async m => {
+      const out: string[] = [];
+      const stored: { key: string; body: string }[] = [];
+      let allow = true,
+        broken = false;
+      const feedback = {
+        put: async (key: string, body: string): Promise<void> => {
+          await Promise.resolve();
+          if (broken) throw new Error('R2 is down');
+          stored.push({ key, body });
+        },
+        limiter: { limit: (): Promise<{ success: boolean }> => Promise.resolve({ success: allow }) },
+      };
+      const gate: Partial<Gate> = { version: 'v-test', feedback };
+      const call = async (
+        args: unknown,
+        headers: Record<string, string> = {},
+        over: Partial<Gate> = gate,
+      ): Promise<{ out: Fields; isError: boolean; answer: Answer }> => {
+        const answer = await rpc(m, 'tools/call', { name: 'feedback', arguments: args }, 1, { gate: over, headers });
+        const r = F(F(answer.body)['result']);
+        return { out: F(r['structuredContent']), isError: r['isError'] === true, answer };
+      };
+      const report = {
+        text: '21! is negative',
+        kind: 'bug',
+        files: [{ name: 'hello.tape', text: WITHOUT_REPEAT }],
+        requests: ['GET /hello/ada'],
+        expected: 'a trap',
+        actual: 'status 200',
+      };
+      const ok = await call(report, { 'mcp-protocol-version': '2025-06-18' });
+      const id = ok.out['id'];
+      if (ok.isError || ok.out['ok'] !== true || typeof id !== 'string') out.push(`a report: ${ok.answer.text}`);
+      const day = new Date().toISOString().slice(0, 10);
+      const [first] = stored;
+      if (stored.length !== 1 || !first) return [...out, `${stored.length} objects stored, not 1`];
+      if (!/^\d{4}\/\d{2}\/\d{2}\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}\.json$/.test(first.key))
+        out.push(`key ${first.key}`);
+      if (first.key !== `${day.replaceAll('-', '/')}/${String(id)}.json`)
+        out.push(`key ${first.key} is not of ${String(id)}`);
+      const body = F(JSON.parse(first.body));
+      for (const k of ['text', 'kind', 'files', 'requests', 'expected', 'actual'] as const)
+        if (JSON.stringify(body[k]) !== JSON.stringify(report[k])) out.push(`stored ${k}: ${JSON.stringify(body[k])}`);
+      if (body['id'] !== id) out.push(`stored id ${String(body['id'])}`);
+      // the program as it compiled when it was reported: hello.tape without repeat is C54 (README.md)
+      const rep = F(body['reproduced']);
+      if (rep['ok'] !== false || JSON.stringify(rep['diagnostic_codes']) !== '["C54"]')
+        out.push(`reproduced ${JSON.stringify(rep)}`);
+      const server = F(body['server']);
+      if (server['ip_hash'] !== (await m.serve.ipHash('203.0.113.7', 'test-salt', day)))
+        out.push(`ip_hash ${String(server['ip_hash'])}`);
+      if (server['user_agent'] !== 'mcp-test/1') out.push(`user_agent ${String(server['user_agent'])}`);
+      if (server['mcp_protocol_version'] !== '2025-06-18')
+        out.push(`mcp_protocol_version ${String(server['mcp_protocol_version'])}`);
+      if (server['tape_mcp_version'] !== 'v-test') out.push(`tape_mcp_version ${String(server['tape_mcp_version'])}`);
+      if (typeof body['received_at'] !== 'string' || !body['received_at'].startsWith(day))
+        out.push(`received_at ${String(body['received_at'])}`);
+      if (first.body.includes('203.0.113.7')) out.push('the raw address is stored');
+      const line = ok.answer.logs[0];
+      if (line?.['tool'] !== 'feedback' || JSON.stringify(line).includes('21!'))
+        out.push(`log ${JSON.stringify(line)}`);
+      // as plain JSON, with only text; a deploy's smoke under smoke/
+      const http = await post(m, '/v1/feedback', JSON.stringify({ text: 'only text' }), { gate });
+      const hj = F(http.body);
+      if (http.status !== 200 || hj['ok'] !== true || typeof hj['id'] !== 'string')
+        out.push(`/v1/feedback: ${http.text}`);
+      if (F(JSON.parse(stored[1]?.body ?? '{}'))['reproduced'] !== null)
+        out.push('reproduced without files is not null');
+      await call({ text: 'smoke' }, { 'x-tape-synthetic': 'deploy-smoke' });
+      if (!stored[2]?.key.startsWith('smoke/')) out.push(`a smoke report's key ${String(stored[2]?.key)}`);
+      // refusals: nothing stored
+      const n = stored.length;
+      const refusals: [unknown, string][] = [
+        [{}, 'bad_text'],
+        [{ text: '  ' }, 'bad_text'],
+        [{ text: 'x'.repeat(8 * 1024 + 1) }, 'text_too_large'],
+        [{ text: 'x', kind: 'rant' }, 'bad_kind'],
+        [{ text: 'x', mood: 'sad' }, 'unknown_argument'],
+        [{ text: 'x', files: [{ name: 'a.tape', text: 'x'.repeat(64 * 1024 + 1) }] }, 'source_too_large'],
+        [{ text: 'x', requests: Array.from({ length: 21 }, () => 'GET /') }, 'too_many_requests'],
+        [{ text: 'x', expected: 'x'.repeat(8 * 1024 + 1) }, 'field_too_large'],
+        [{ text: 'x', actual: 7 }, 'bad_field'],
+      ];
+      for (const [args, code] of refusals) {
+        const r = await call(args);
+        if (!r.isError || r.out['error'] !== code)
+          out.push(`${JSON.stringify(args).slice(0, 60)}: ${r.answer.text.slice(0, 160)}`);
+      }
+      const none = await call({ text: 'x' }, {}, { version: 'v-test' });
+      if (none.out['error'] !== 'feedback_unavailable') out.push(`no bucket: ${none.answer.text}`);
+      allow = false;
+      const limited = await call({ text: 'x' });
+      if (limited.out['error'] !== 'feedback_rate_limited') out.push(`rate limit: ${limited.answer.text}`);
+      allow = true;
+      const off = await call({ text: 'x' }, {}, { ...gate, killSwitch: 'on' });
+      if (off.answer.status !== 503) out.push(`kill switch: ${off.answer.status}`);
+      broken = true;
+      const down = await call({ text: 'x' });
+      if (down.out['error'] !== 'store_failed') out.push(`a failed write: ${down.answer.text}`);
+      if (stored.length !== n) out.push(`${stored.length - n} refused reports stored`);
+      return out;
+    },
+  },
+  {
     name: 'list',
     run: async m => {
       const out: string[] = [];
       const tools = L(F(F((await rpc(m, 'tools/list', {})).body)['result'])['tools']).map(F);
-      if (JSON.stringify(tools.map(t => t['name'])) !== '["compile","run"]')
+      if (JSON.stringify(tools.map(t => t['name'])) !== '["compile","run","feedback"]')
         out.push(`tools: ${tools.map(t => String(t['name'])).join(', ')}`);
-      for (const t of tools) {
+      const fb = tools[2];
+      const fd = String(fb?.['description']);
+      for (const said of ['surprising', 'minimal program', 'stored', 'read by the maintainers', 'secrets', 'TERMS.md'])
+        if (!fd.includes(said)) out.push(`feedback: its description does not say ${said}`);
+      const fs = F(fb?.['inputSchema']);
+      if (JSON.stringify(fs['required']) !== '["text"]' || fs['additionalProperties'] !== false)
+        out.push(`feedback: inputSchema ${JSON.stringify(fs)}`);
+      if (F(F(fs['properties'])['text'])['maxLength'] !== 8192) out.push('feedback: text has no maxLength 8192');
+      if (F(fb?.['annotations'])['readOnlyHint'] !== false) out.push('feedback: it is not read-only');
+      for (const t of tools.slice(0, 2)) {
         const d = String(t['description']);
         if (!d.includes(HELLO.trimEnd())) out.push(`${String(t['name'])}: its description does not hold hello.tape`);
         if (!d.includes('TERMS.md')) out.push(`${String(t['name'])}: its description does not say calls are logged`);

@@ -8,8 +8,10 @@ import { bytes } from './bytes.ts';
 const miniflare = {
   workerLoaders: { LOADER: {} },
   bindings: { KILL_SWITCH: 'off', IP_SALT: 'test-salt', VERSION: { id: 'test-version', tag: '', timestamp: '' } },
+  r2Buckets: { FEEDBACK: 'tape-feedback' },
   ratelimits: {
     RATE: { namespace_id: '7101', simple: { limit: 1000, period: 60 } },
+    FEEDBACK_RATE: { namespace_id: '7103', simple: { limit: 1000, period: 60 } },
     TIGHT: { namespace_id: '7102', simple: { limit: 2, period: 60 } },
   },
 } as const;

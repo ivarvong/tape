@@ -1,6 +1,6 @@
 {
   "//": "The Node side of mcp/: test.ts (with the parts of src/ it runs, which run in Node as well as in workerd) and the build's config. src/tsconfig.json checks the Worker with workerd's types, test/tsconfig.json its workerd tests.",
   "extends": "../tsconfig.json",
-  "include": ["*.ts", "../wasm.d.ts"],
+  "include": ["*.ts", "scripts/*.ts", "../wasm.d.ts"],
   "exclude": ["node_modules"]
 }

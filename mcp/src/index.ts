@@ -24,6 +24,7 @@ import { LIMITS } from './tools.ts';
 import type { Deps, Program } from './tools.ts';
 import type { RanAll } from './runner.ts';
 import type { Runner } from './loaded.ts';
+import type { Store } from './feedback.ts';
 
 const MODULES = {
   'loaded.js': loadedSrc,
@@ -66,6 +67,14 @@ const runIn =
     return runner.run([...requests]);
   };
 
+/** Feedback reports: one private R2 object each (feedback.ts), behind their own rate limit. */
+const feedbackStore = (bucket: R2Bucket, limiter: RateLimit | null): Store => ({
+  put: async (key, body) => {
+    await bucket.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+  },
+  limiter,
+});
+
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     void ctx;
@@ -74,6 +83,8 @@ export default {
       killSwitch: env.KILL_SWITCH,
       salt: env.IP_SALT,
       limiter: env.RATE,
+      feedback: feedbackStore(env.FEEDBACK, env.FEEDBACK_RATE),
+      version: env.VERSION?.id ?? null,
       log: line => {
         console.log(JSON.stringify(line));
       },

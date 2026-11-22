@@ -1,5 +1,5 @@
 // serve.ts: the HTTP face of tape-mcp. POST /mcp is MCP over streamable HTTP (the service's transport,
-// service/src/mcp.ts); POST /v1/compile and POST /v1/run are the same two tools as plain JSON. Every answer is
+// service/src/mcp.ts); POST /v1/compile, POST /v1/run and POST /v1/feedback are the same three tools as plain JSON. Every answer is
 // JSON with nosniff and a sandboxing CSP, and nothing a caller sends is ever served back as a page.
 //
 // Before a call reaches a tool: the kill switch, the Origin check, the method and content type, the body's size,
@@ -13,6 +13,8 @@ import { fieldsOf, serveMcp } from '../../service/src/mcp.ts';
 import type { Fields, McpServer } from '../../service/src/mcp.ts';
 import { LIMITS, compileTool, isRefusal, refused, runTool } from './tools.ts';
 import type { Deps, Refusal, Usage } from './tools.ts';
+import { FEEDBACK, KINDS, feedbackTool } from './feedback.ts';
+import type { CallMeta, Store } from './feedback.ts';
 
 export const VERSION = '0.1.0';
 /** What the Worker is given besides the tools' dependencies (index.ts, from env). */
@@ -23,6 +25,10 @@ export type Gate = {
   salt: string | undefined;
   limiter: { limit: (o: { key: string }) => Promise<{ success: boolean }> } | null;
   log: (line: Fields) => void;
+  /** where feedback goes (an R2 bucket) and its own rate limit; without it the feedback tool refuses (503) */
+  feedback?: Store | null;
+  /** this version's id (tape-mcp-version), stored with each report */
+  version?: string | null;
 };
 
 const HEADERS = {
@@ -186,13 +192,57 @@ ${limits}`,
       },
       annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
     },
+    {
+      name: 'feedback',
+      title: 'Report something about Tape to its maintainers',
+      description: `Report anything surprising, wrong, confusing or missing about Tape (https://github.com/ivarvong/tape): the language, the compiler and its diagnostics, or these tools. A wrong answer, a rule that gets in the way, an error that did not help, a feature you reached for: all are worth a report, and so is what worked. Say what you did, what you expected and what happened, and send the minimal program that shows it in \`files\` (and the \`requests\` that show it, as run takes them): the smaller the program, the sooner it is fixed. Returns {ok: true, id}.
+
+What is stored: the fields you send, the time, the tape-mcp version, a daily salted hash of your address (never the address), your user agent and, when you send a program, what the compiler says of it now. Reports are read by the maintainers to improve Tape and are kept until we delete them. Do not send secrets or personal data. Limits: text, expected and actual ${FEEDBACK.textBytes / 1024} KB each; files as compile takes them (${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB); ${LIMITS.requests} requests; ${FEEDBACK.perMinute} reports a minute. https://github.com/ivarvong/tape/blob/main/TERMS.md`,
+      inputSchema: {
+        type: 'object',
+        properties: {
+          text: {
+            type: 'string',
+            minLength: 1,
+            maxLength: FEEDBACK.textBytes,
+            description: 'What you found, in a few sentences: what you did, and why it surprised you.',
+          },
+          kind: { type: 'string', enum: [...KINDS], description: 'What sort of report it is.' },
+          files: { ...FILES_SCHEMA, description: 'The minimal program that shows it, if there is one.' },
+          requests: {
+            type: 'array',
+            maxItems: LIMITS.requests,
+            items: { type: 'string' },
+            description: 'The requests that show it, as run takes them: "GET /hello/ada".',
+          },
+          expected: { type: 'string', maxLength: FEEDBACK.textBytes, description: 'What you expected.' },
+          actual: { type: 'string', maxLength: FEEDBACK.textBytes, description: 'What happened instead.' },
+        },
+        required: ['text'],
+        additionalProperties: false,
+      },
+      outputSchema: {
+        type: 'object',
+        properties: { ok: { type: 'boolean' }, id: { type: 'string' }, ...refusalFields },
+        required: ['ok'],
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
   ];
 }
 
 type Called = { result: unknown; usage: Usage | null };
-const TOOLS: Readonly<Record<string, (args: unknown, deps: Deps) => Called | Promise<Called>>> = {
+type Tool = (args: unknown, deps: Deps, meta: CallMeta, store: Store | null) => Called | Promise<Called>;
+const TOOLS: Readonly<Record<string, Tool>> = {
   compile: compileTool,
   run: runTool,
+  feedback: feedbackTool,
+};
+/** The tool each plain-JSON route is. */
+const HTTP_TOOLS: Readonly<Record<string, string>> = {
+  '/v1/compile': 'compile',
+  '/v1/run': 'run',
+  '/v1/feedback': 'feedback',
 };
 /** A tool's answer as MCP's CallToolResult: the JSON as text, and as structuredContent; a refusal is an error. */
 const toolResult = (result: unknown): Fields => {
@@ -291,7 +341,7 @@ async function route(
     return refusal(r);
   };
   const path = url.pathname;
-  const known = path === '/mcp' || path === '/v1/compile' || path === '/v1/run';
+  const known = path === '/mcp' || path in HTTP_TOOLS;
   if (gate.killSwitch === 'on')
     return no(refused(503, 'disabled', 'the hosted compiler and runner is switched off for now; try again later'));
   if (!gate.salt)
@@ -307,13 +357,16 @@ async function route(
     return json({
       name: 'tape-mcp',
       version: VERSION,
-      what: 'Compile Tape programs and run requests against them: MCP at POST /mcp, or JSON at POST /v1/compile and POST /v1/run.',
+      what: 'Compile Tape programs and run requests against them, and report what you find: MCP at POST /mcp, or JSON at POST /v1/compile, POST /v1/run and POST /v1/feedback.',
       docs: 'https://github.com/ivarvong/tape/blob/main/docs/mcp.md',
       terms: 'https://github.com/ivarvong/tape/blob/main/TERMS.md',
       limits: LIMITS,
     });
   }
-  if (!known) return no(refused(404, 'not_found', `no route ${path}: POST /mcp, POST /v1/compile or POST /v1/run`));
+  if (!known)
+    return no(
+      refused(404, 'not_found', `no route ${path}: POST /mcp, POST /v1/compile, POST /v1/run or POST /v1/feedback`),
+    );
   // a browser's request (DNS rebinding, a page using its visitors as clients): MCP clients and HTTP tools send none
   if (request.headers.has('origin'))
     return no(
@@ -347,22 +400,30 @@ async function route(
   }
   const text = await capped(request);
   if (text === null) return no(refused(413, 'body_too_large', `the body is more than ${MAX_BODY} bytes`));
-  if (path === '/mcp') return mcpCall(text, deps, seen);
+  const call: CallMeta = {
+    ip_hash: meta.ip_hash,
+    user_agent: request.headers.get('user-agent') ?? '',
+    mcp_protocol_version: request.headers.get('mcp-protocol-version'),
+    tape_mcp_version: gate.version ?? null,
+    smoke: request.headers.has('x-tape-synthetic'),
+  };
+  const store = gate.feedback ?? null;
+  if (path === '/mcp') return mcpCall(text, deps, seen, call, store);
   let args: unknown;
   try {
     args = JSON.parse(text);
   } catch {
     return no(refused(400, 'bad_json', 'the body is not JSON'));
   }
-  seen.tool = path === '/v1/run' ? 'run' : 'compile';
-  const called = await (TOOLS[seen.tool] ?? compileTool)(args, deps);
+  seen.tool = HTTP_TOOLS[path] ?? 'compile';
+  const called = await (TOOLS[seen.tool] ?? compileTool)(args, deps, call, store);
   seen.usage = called.usage;
   if (isRefusal(called.result)) return no(called.result);
   seen.ok = okOf(called.result);
   return json(called.result);
 }
 
-function mcpCall(text: string, deps: Deps, seen: Seen): Promise<Response> {
+function mcpCall(text: string, deps: Deps, seen: Seen, meta: CallMeta, store: Store | null): Promise<Response> {
   try {
     const method: unknown = fieldsOf(JSON.parse(text))['method'];
     seen.method = typeof method === 'string' ? method.slice(0, 64) : null;
@@ -373,13 +434,13 @@ function mcpCall(text: string, deps: Deps, seen: Seen): Promise<Response> {
     name: 'tape',
     version: VERSION,
     instructions:
-      'Tape is a small language for durable services, compiled to WebAssembly; it runs in the browser, in Node and on Cloudflare Workers, and every effect is recorded (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. Alpha; calls are logged (TERMS.md).',
+      'Tape is a small language for durable services, compiled to WebAssembly; it runs in the browser, in Node and on Cloudflare Workers, and every effect is recorded (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. If anything about Tape surprises you, looks wrong or is missing, report it with feedback, with the smallest program that shows it: the maintainers read every report. Alpha; calls are logged (TERMS.md).',
     list: () => listing(deps),
     call: async (name, args) => {
       seen.tool = typeof name === 'string' ? name.slice(0, 40) : null;
       const tool = typeof name === 'string' ? TOOLS[name] : undefined;
       if (!tool) return null;
-      const called = await tool(args, deps);
+      const called = await tool(args, deps, meta, store);
       seen.usage = called.usage;
       seen.ok = isRefusal(called.result) ? false : okOf(called.result);
       if (isRefusal(called.result)) seen.refused = called.result.error;

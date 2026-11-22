@@ -1,4 +1,4 @@
-// tools.ts: the two tools, compile and run, as functions of their JSON arguments. The same functions answer MCP's
+// tools.ts: the two tools, compile and run, as functions of their JSON arguments (the third, feedback, is feedback.ts). The same functions answer MCP's
 // tools/call and POST /v1/compile and /v1/run (serve.ts). They use no Workers API: how a program is run is given
 // (Deps.run: in production a Dynamic Worker, index.ts; in test.ts, runner.ts in Node), so test.ts runs them as
 // they are.
@@ -125,7 +125,7 @@ const FILE_NAME = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,62}\.tape$/;
 const REQUEST_LINE = /^[A-Z]{1,16} \/\S*$/;
 
 /** Arguments with keys that are not the tool's: refused, so a misspelt `file` is not silently ignored. */
-const unknownKeys = (args: Fields, known: readonly string[]): Refusal | null => {
+export const unknownKeys = (args: Fields, known: readonly string[]): Refusal | null => {
   const extra = Object.keys(args).filter(k => !known.includes(k));
   return extra.length === 0
     ? null

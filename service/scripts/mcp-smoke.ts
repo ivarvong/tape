@@ -3,9 +3,10 @@
 // <mcp-url> is https://tape.ivar.workers.dev/mcp (through the tape Worker's service binding) or
 // https://tape-mcp.ivar.workers.dev/mcp (tape-mcp itself); /v1/run and /v1/compile are beside it. With --pin every
 // request carries Cloudflare-Workers-Version-Overrides for that Worker. With --mcp-version every answer must name that
-// tape-mcp version (its tape-mcp-version header). Seven calls of tape-mcp's 60 a minute. Exits 1 if any check fails.
+// tape-mcp version (its tape-mcp-version header). Eight calls of tape-mcp's 60 a minute, one of feedback's 5. Exits 1 if any check fails.
 //
-// Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run]; run with no files and
+// Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run, feedback]; a feedback report
+// (stored under smoke/: delete with node mcp/scripts/feedback.ts --delete-smoke); run with no files and
 // GET /hello/ada twice: 200 "Hello, ada" then 200 "Hello again, ada #2!", both replayed, each with an OTLP trace;
 // compile of hello.tape without `repeat: True,` is C54 at line 11; the same run as plain JSON at /v1/run; a request
 // with an Origin is 403 origin_refused; every answer is JSON, nosniff, no-store and sandboxed.
@@ -53,6 +54,8 @@ const post = async (
     headers: {
       'content-type': 'application/json',
       'user-agent': 'tape-mcp-smoke',
+      // a deploy's: its feedback report is stored under smoke/, apart from real ones
+      'x-tape-synthetic': 'deploy-smoke',
       ...(pin === null ? {} : { 'cloudflare-workers-version-overrides': pin.replace('=', '="') + '"' }),
       ...headers,
     },
@@ -98,7 +101,7 @@ check(obj(result['serverInfo'])['name'] === 'tape', `initialize: serverInfo ${JS
 check(str(result['instructions'] ?? '').includes('TERMS.md'), 'initialize: the instructions');
 const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
-check(JSON.stringify(names) === '["compile","run"]', `tools/list: ${JSON.stringify(names)}`);
+check(JSON.stringify(names) === '["compile","run","feedback"]', `tools/list: ${JSON.stringify(names)}`);
 
 const twice = { requests: ['GET /hello/ada', 'GET /hello/ada'] };
 const sees = (where: string, ran: J): string => {
@@ -133,6 +136,9 @@ check(
   d[0]?.['code'] === 'C54' && d[0]['line'] === 11,
   `compile without repeat: ${str(d[0]?.['code'])} line ${str(d[0]?.['line'])}`,
 );
+const fb = await tool('feedback', { text: 'deploy smoke: ignore', kind: 'praise' });
+const fbId = str(fb['id']);
+check(fb['ok'] === true && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}$/.test(fbId), `feedback: ${JSON.stringify(fb)}`);
 const v1 = await post('/v1/run', twice);
 check(v1.r.status === 200, `/v1/run: ${v1.r.status}`);
 sees('/v1/run', v1.j);
@@ -145,6 +151,7 @@ check(
   origin.r.status === 403 && origin.j['error'] === 'origin_refused',
   `Origin: ${origin.r.status} ${String(origin.j['error'])}`,
 );
+console.log(`  feedback: ${fbId} (smoke/)`);
 console.log(`  run: ${ran}; compile: ${str(d[0]?.['code'])} line ${str(d[0]?.['line'])}; Origin: ${origin.r.status}`);
 console.log(
   failed === 0 ? `mcp smoke ok: ${passed} checks` : `FAIL mcp smoke: ${failed} of ${passed + failed} checks failed`,

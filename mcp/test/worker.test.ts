@@ -57,7 +57,7 @@ describe('tape-mcp in workerd', () => {
       capabilities: { tools: {} },
     });
     const tools = L((await rpc('tools/list'))['tools']).map(F);
-    expect(tools.map(t => t['name'])).toEqual(['compile', 'run']);
+    expect(tools.map(t => t['name'])).toEqual(['compile', 'run', 'feedback']);
     expect(String(tools[1]?.['description'])).toContain('Hello again, ada #2!');
   });
 
@@ -140,6 +140,58 @@ describe('tape-mcp in workerd', () => {
       requests: ['GET /dice', 'GET /dice'],
     });
     expect(results(second.out).map(r => r['body'])).toEqual([d1?.['body'], d2?.['body']]);
+  });
+
+  it('stores a feedback report in R2, one object, without the address; refuses past its own rate limit', async () => {
+    const before = (await env.FEEDBACK.list()).objects.length;
+    const r = await rpc('tools/call', {
+      name: 'feedback',
+      arguments: {
+        text: 'negative literals do not parse',
+        kind: 'missing',
+        files: [{ name: 'hello.tape', text: hello }],
+        expected: '-1 is a number',
+      },
+    });
+    const out = F(r['structuredContent']);
+    expect(out).toMatchObject({ ok: true });
+    const fid = String(out['id']);
+    const day = new Date().toISOString().slice(0, 10).replaceAll('-', '/');
+    const obj = await env.FEEDBACK.get(`${day}/${fid}.json`);
+    expect(obj).not.toBeNull();
+    const text = (await obj?.text()) ?? '';
+    const body = F(JSON.parse(text));
+    expect(body).toMatchObject({
+      id: fid,
+      kind: 'missing',
+      text: 'negative literals do not parse',
+      expected: '-1 is a number',
+      actual: null,
+      requests: null,
+      reproduced: { ok: true, diagnostic_codes: [] },
+      server: { tape_mcp_version: 'test-version', user_agent: 'workerd-test' },
+    });
+    expect(F(body['server'])['ip_hash']).toMatch(/^[0-9a-f]{16}$/);
+    expect(text).not.toContain('198.51.100.4');
+    expect((await env.FEEDBACK.list()).objects.length).toBe(before + 1);
+    // the same as plain JSON
+    const http = await post('/v1/feedback', { text: 'as JSON' });
+    expect([http.status, http.json['ok']]).toEqual([200, true]);
+    // its own limiter: TIGHT allows two a minute
+    const req = (): Request =>
+      new Request('https://tape-mcp/v1/feedback', {
+        method: 'POST',
+        headers: { ...headers, 'cf-connecting-ip': '198.51.100.99' },
+        body: '{"text":"x"}',
+      });
+    if (!env.TIGHT) throw new Error('vitest.config.ts gives no TIGHT limiter');
+    const tight = { ...env, FEEDBACK_RATE: env.TIGHT };
+    const codes: unknown[] = [];
+    for (let i = 0; i < 3; i++) {
+      const res = await worker.fetch(req(), tight, createExecutionContext());
+      codes.push(res.status === 200 ? 200 : F(await res.json())['error']);
+    }
+    expect(codes).toEqual([200, 200, 'feedback_rate_limited']);
   });
 
   it('names the version that answered, a refusal too (tape-mcp-version)', async () => {

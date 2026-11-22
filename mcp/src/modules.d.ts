@@ -28,6 +28,10 @@ declare namespace Cloudflare {
     IP_SALT?: string;
     /** the version this is (cloudflare.config.ts): its id is the tape-mcp-version header */
     VERSION?: WorkerVersionMetadata;
+    /** feedback reports, one object each: a private bucket (cloudflare.config.ts) */
+    FEEDBACK: R2Bucket;
+    /** feedback's own rate limit, per client */
+    FEEDBACK_RATE: RateLimit;
     // a second limiter, of two calls a minute, for the tests only (vitest.config.ts)
     TIGHT?: RateLimit;
   }

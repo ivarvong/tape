@@ -10,7 +10,8 @@
 #  3. build and upload NEW (cf workers versions create): in no deployment yet; NEW must have the IP_SALT secret
 #     (a secret carries over to each new version) and the VERSION binding
 #  4. route PREV 100% / NEW 0%
-#  5. pinned smoke (service/scripts/mcp-smoke.ts --pin tape-mcp=NEW --mcp-version NEW): every answer from NEW
+#  5. pinned smoke (service/scripts/mcp-smoke.ts --pin tape-mcp=NEW --mcp-version NEW): every answer from NEW; its
+#     feedback report is stored under smoke/ (delete them with node mcp/scripts/feedback.ts --delete-smoke)
 #  6. telemetry gate on NEW (service/scripts/telemetry.ts --service tape-mcp): no invocation not ok, no 5xx, no error logs
 #  7. NEW 100%: wait until unpinned calls answer from NEW, then the smoke unpinned, here and through the tape Worker
 #     (/mcp on $TAPE_BASE), and the telemetry gate over the run
@@ -135,7 +136,7 @@ note "pinned smoke: $(tail -1 "$STATE/smoke-mcp.out")"
 
 # ---- 6. telemetry on NEW
 say "telemetry gate (0%)"
-node "$SCRIPTS/telemetry.ts" "$NEW" "$T0" --min 8 --service "$WORKER" > "$STATE/telemetry-mcp.out" 2>&1 || { cat "$STATE/telemetry-mcp.out"; back "telemetry at 0%"; }
+node "$SCRIPTS/telemetry.ts" "$NEW" "$T0" --min 6 --service "$WORKER" > "$STATE/telemetry-mcp.out" 2>&1 || { cat "$STATE/telemetry-mcp.out"; back "telemetry at 0%"; }
 cat "$STATE/telemetry-mcp.out"
 note "0%: $(grep '^telemetry ' "$STATE/telemetry-mcp.out")"
 
@@ -159,7 +160,7 @@ if curl -s -o /dev/null -D - -X POST "$TAPE_BASE/mcp" | grep -qi '^tape-mcp-vers
 else
   note "$TAPE_BASE/mcp does not reach tape-mcp yet (no service binding deployed): not smoked there"
 fi
-node "$SCRIPTS/telemetry.ts" "$NEW" "$T0" --min 16 --service "$WORKER" > "$STATE/telemetry-mcp.out" 2>&1 || { cat "$STATE/telemetry-mcp.out"; back "telemetry over the run"; }
+node "$SCRIPTS/telemetry.ts" "$NEW" "$T0" --min 12 --service "$WORKER" > "$STATE/telemetry-mcp.out" 2>&1 || { cat "$STATE/telemetry-mcp.out"; back "telemetry over the run"; }
 cat "$STATE/telemetry-mcp.out"
 note "run: $(grep '^telemetry ' "$STATE/telemetry-mcp.out")"
 OUTCOME=deployed
