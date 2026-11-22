@@ -51,7 +51,7 @@ const headers = (extra: Record<string, string> = {}): Record<string, string> => 
   ...(pin === null ? {} : { 'cloudflare-workers-version-overrides': `tape="${pin}"` }),
   ...extra,
 });
-const get = async (path: string): Promise<Response> => fetch(`${base}${path}`, { headers: headers() });
+const get = (path: string): Promise<Response> => fetch(`${base}${path}`, { headers: headers() });
 
 // ---- 1. the same commit and compiler
 const home = await get('/');

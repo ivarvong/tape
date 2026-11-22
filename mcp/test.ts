@@ -357,13 +357,7 @@ const tests: Test[] = [
       const bodies = rs.map(x => `${String(x['status'])} ${String(x['body'])}`);
       if (
         JSON.stringify(bodies) !==
-        JSON.stringify([
-          '409 undone 1',
-          '500 trap 4: division by zero',
-          '200 kept 1',
-          '200 kept 0',
-          '409 no timer',
-        ])
+        JSON.stringify(['409 undone 1', '500 trap 4: division by zero', '200 kept 1', '200 kept 0', '409 no timer'])
       )
         out.push(`bodies ${JSON.stringify(bodies)}`);
       const marks = rs.map(x => L(x['effects']).map(e => F(e)['undone'] === true));
