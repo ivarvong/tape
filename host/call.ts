@@ -5,7 +5,7 @@
 // reply: the callee may have run and committed (a connection lost after it answered, an object reset before its
 // reply went out), so the outcome is unknown and the call is a Timeout, never a Rejected; only the callee says
 // Rejected.
-import { pack } from './log.ts';
+import { clockUs, pack } from './log.ts';
 import type { CallEffect, From, Status } from './log.ts';
 
 /** A service may throw this to say "no answer in time" at once, without the clock: tests and the schedule explorer use it. */
@@ -85,7 +85,8 @@ function answered(reply: unknown): [Status, Uint8Array] {
 
 /** Makes the call; gives the entry for the log. `left`: what remains of the whole request's time. */
 export async function perform(c: Caller, p: Pending, trace: From, left: number): Promise<CallEffect> {
-  const began = Date.now();
+  const began = Date.now(),
+    beganUs = clockUs();
   // sent: when the call went out, so a trace can place it (the run's own clock only moves across I/O like this)
   const entry = (status: Status, reply: Uint8Array): CallEffect => ({
     call: p.to,
@@ -97,6 +98,8 @@ export async function perform(c: Caller, p: Pending, trace: From, left: number):
     reply: pack(reply),
     sent: began,
     took: Date.now() - began,
+    sent_us: beganUs,
+    took_us: clockUs() - beganUs,
   });
   const service = c.services[p.to];
   const budget = Math.min(p.within, left);

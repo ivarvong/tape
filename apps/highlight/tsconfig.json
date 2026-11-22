@@ -1,0 +1,9 @@
+{
+  "//": "The highlighter page's own check: the repository's settings, with the browser's types (the root tsconfig.json has no DOM, so it cannot check page.ts).",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"]
+  },
+  "include": ["page.ts"],
+  "exclude": []
+}

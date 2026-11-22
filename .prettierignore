@@ -12,3 +12,4 @@ node_modules/
 *.json
 *.yml
 *.html
+apps/playground/vendor/

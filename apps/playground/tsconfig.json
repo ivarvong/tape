@@ -1,0 +1,9 @@
+{
+  "//": "The playground's own check: the repository's settings, with the browser's types for the page's files (the root tsconfig.json has no DOM, so it cannot check src/main.ts, src/editor.ts and src/worker.ts).",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["esnext", "dom", "dom.iterable"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dist"]
+}

@@ -11,7 +11,7 @@
 // rolls back, and still answers with `out`; the log's first entry says `undone`.
 import { Pending, REAL_TIMERS, perform } from './call.ts';
 import type { Service, Timers } from './call.ts';
-import { STATUS, begin, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
+import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
 import type { CallEffect, Cell, Effect, Flags, From, Head, Span, Sql, Status, TraceEvent, WakeEffect } from './log.ts';
 import {
   answerAt,
@@ -520,7 +520,7 @@ function stretch(
     // a run that failed (a trap, a storage error) rolled back; its log so far goes with the error, so the host
     // can record that it ran and what it did before the failure
     const [head] = mine;
-    if (head && isHead(head)) head.took = Date.now() - me.at;
+    if (head && isHead(head)) timeTook(head, me);
     if (
       typeof err === 'object' &&
       err !== null &&
@@ -529,6 +529,12 @@ function stretch(
       Object.assign(err, { effects: mine });
     throw err;
   }
+}
+
+/** A run's head, told how long the run took: in ms, and in µs from the fine clock when the run began on it. */
+function timeTook(head: Head, me: Span): void {
+  head.took = Date.now() - me.at;
+  if (me.at_us !== undefined) head.took_us = clockUs() - me.at_us;
 }
 
 // Requests to one object interleave at calls, so each run keeps its own log and installs it for each stretch.
@@ -545,7 +551,7 @@ function runLogged(L: Linked, bytes: Uint8Array, options: RunOptions = {}): Prom
     const s = stretch(L, bytes, mine, to, me, { transaction, done });
     if ('out' in s) {
       const [head] = mine;
-      if (head && isHead(head)) head.took = Date.now() - me.at;
+      if (head && isHead(head)) timeTook(head, me);
       if (mine.length > 0) L.o.sink?.(mine);
       return { out: s.out, effects: mine };
     }

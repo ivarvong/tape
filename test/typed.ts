@@ -25,9 +25,11 @@ const T = (name: string, got: readonly string[]) => {
   console.log(got.length > 0 ? 'FAIL' : 'ok  ', name, got.length > 0 ? `-> ${got.slice(0, 8).join(', ')}` : '');
 };
 
+// vendored: third-party code kept as its authors published it, with its licence beside it
+const VENDORED = /^apps\/playground\/vendor\//;
 T(
-  'no JavaScript file is tracked',
-  tracked.filter(f => /\.(js|mjs|cjs|jsx)$/.test(f)),
+  'no JavaScript file is tracked, but what is vendored',
+  tracked.filter(f => /\.(js|mjs|cjs|jsx)$/.test(f) && !VENDORED.test(f)),
 );
 const unchecked = tracked.filter(
   f => f.endsWith('.ts') && !APART.test(f) && /^(#!.*\n)?\/\/ @ts-nocheck/.test(readFileSync(root + f, 'utf8')),

@@ -179,8 +179,28 @@ to a method that itself makes a call, can both run; that is a known bug
 
 ## The playground
 
-**Coming.** A page to write and run Tape in the browser, with a syntax highlighter and a trace viewer, both
-written in Tape. It is not in this tree yet.
+[`apps/playground/`](apps/playground/) is a homepage and a playground that run Tape in the browser, with nothing
+on a server. The page loads the repository's own compiler, host, simulator and formatter, and the service's OTLP
+view, unchanged; SQLite is [sql.js](https://github.com/sql-js/sql.js), vendored. The homepage (`/`) runs
+`examples/hello.tape` twice, shows its effect log and trace, and shows what the compiler says when the
+`repeat: True` line is taken out. The playground (`/playground/`) edits a program, sends it requests, shows each
+response with its effect log, trace, spans, OTLP/JSON and tables, and runs `tape sim` in a worker.
+
+```sh
+node apps/playground/serve.ts 8080          # then open http://127.0.0.1:8080/ or /playground/
+node apps/playground/build.ts out           # the site as static files in out/
+node apps/playground/test.ts                # its logic and build, without a browser
+```
+
+`serve.ts` builds the site from the tree on each load. `build.ts` writes plain files: the two pages, `_headers`,
+and every other file named by the hash of its content, which `_headers` marks immutable. Its design is in
+[`apps/playground/DESIGN.md`](apps/playground/DESIGN.md), and what had to be worked around is in
+[`apps/playground/FRICTION.md`](apps/playground/FRICTION.md).
+
+The syntax highlighting and the trace waterfalls are programs in Tape too, compiled to Wasm when the site is built:
+[`apps/highlight/`](apps/highlight/) (`highlight.tape`, Tape source in and HTML out, with the token boundaries of
+`compiler/lex.ts`) and [`apps/trace/`](apps/trace/) (`trace.tape`, OTLP/JSON in and an SVG waterfall out). Each
+has a `test.ts` whose oracles are not the program under test, and a friction log.
 
 ## The public service
 
@@ -246,7 +266,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | `sim.ts`, `sim/` | The simulator behind `tape sim`. |
 | `service/` | Tape as a service on Workers, with its tests, fault harnesses and protocol models. |
 | `adapters/` | Host-side adapters; `ply.ts` makes a git repository a `Git` capability using [ply](https://github.com/ivarvong/ply). |
-| `examples/`, `apps/` | Example programs, and applications written as a user would, each with its friction log. |
+| `examples/`, `apps/` | Example programs, and applications written as a user would, each with its friction log; `apps/playground/` is the homepage and playground. |
 | `test/`, `proof/` | The tests, one file per subject, and the checks that are more than a test; `proof/all.ts` runs everything. |
 | `bench/`, `experiments/` | Benchmarks, and the experiments behind the rules, kept as they were run. |
 | `testdata/` | Programs the checks read that are not examples: odd formatting, failing doc examples, and two workflow programs (billing, an agent loop) with planted bugs. |
@@ -254,3 +274,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 ## License
 
 MIT, see [`LICENSE`](LICENSE).
+
+`apps/playground/vendor/sql.js-1.10.3/` is [sql.js](https://github.com/sql-js/sql.js) 1.10.3, MIT, with its
+licence beside it ([`LICENSE`](apps/playground/vendor/sql.js-1.10.3/LICENSE)); the SQLite inside it is in the
+public domain.

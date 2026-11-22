@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tape Highlighter</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  /* the syntax palette of apps/playground/style.css (DESIGN.md): each colour >= 4.5:1 on its background */
+  color-scheme: light;
+  --bg: #ffffff; --panel: #fbfbfa; --line: #e7e7e5; --fg: #0c0c0e; --muted: #5c5c64;
+  --c: #6c6c74; --s: #2b7a1f; --e: #a6550a; --n: #a6550a; --k: #9a2f86; --w: #6a46c9; --t: #0b7285;
+  --i: #0c0c0e; --o: #55555d; --q: #2a58c2; --sk: #1f47a8; --sp: #b3245e; --ss: #2b7a1f; --x: #c0262d; --hole: rgba(166, 85, 10, 0.08);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b0b0c; --panel: #111113; --line: #232326; --fg: #ededee; --muted: #a0a0a8;
+  --c: #8a8a93; --s: #9fd07f; --e: #f0a75f; --n: #f0a75f; --k: #e48ad4; --w: #b7a2ff; --t: #5fcfd9;
+  --i: #ededee; --o: #a5a5ad; --q: #8cb4ff; --sk: #a3c2ff; --sp: #ff8cb6; --ss: #9fd07f; --x: #ff7a73; --hole: rgba(240, 167, 95, 0.1);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b0b0c; --panel: #111113; --line: #232326; --fg: #ededee; --muted: #a0a0a8;
+  --c: #8a8a93; --s: #9fd07f; --e: #f0a75f; --n: #f0a75f; --k: #e48ad4; --w: #b7a2ff; --t: #5fcfd9;
+  --i: #ededee; --o: #a5a5ad; --q: #8cb4ff; --sk: #a3c2ff; --sp: #ff8cb6; --ss: #9fd07f; --x: #ff7a73; --hole: rgba(240, 167, 95, 0.1);
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); }
+body { font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 16px; max-width: 1600px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+header p { margin: 0 0 12px; color: var(--muted); font-size: 14px; }
+#status { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); margin: 0 0 12px; overflow-wrap: anywhere; }
+#status.bad { color: var(--x); }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 900px) { main { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }
+textarea, pre {
+  width: 100%; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; tab-size: 2; color: var(--fg);
+}
+textarea { white-space: pre; overflow: auto; height: 40vh; min-height: 220px; resize: vertical; }
+@media (min-width: 900px) { textarea, pre { height: calc(100vh - 150px); } }
+pre { overflow: auto; }
+@media (max-width: 899px) { pre { height: 60vh; } }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 12px 0 0; font: 12px ui-monospace, Menlo, monospace; }
+.c { color: var(--c); }
+.s, .ss { color: var(--s); }
+.e, .hd { color: var(--e); }
+.h { background: var(--hole); border-radius: 3px; }
+.n { color: var(--n); }
+.k { color: var(--k); }
+.w { color: var(--w); }
+.t { color: var(--t); }
+.i { color: var(--i); }
+.o { color: var(--o); }
+.q { color: var(--q); }
+.sk { color: var(--sk); }
+.sp { color: var(--sp); }
+.x { color: var(--x); text-decoration: wavy underline var(--x); }
+button { font: inherit; font-size: 13px; padding: 2px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--fg); cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Tape Highlighter</h1>
+  <p>A lexer written in Tape (<code>apps/highlight/highlight.tape</code>), compiled to Wasm in this page by the repository's compiler, highlighting what you type. <button id="theme" type="button">theme</button></p>
+</header>
+<div id="status">compiling…</div>
+<main>
+  <textarea id="src" wrap="off" spellcheck="false" autocomplete="off" aria-label="Tape source"></textarea>
+  <pre id="out" aria-label="highlighted"><code></code></pre>
+</main>
+<div class="legend">
+  <span class="k">reserved</span><span class="w">contextual</span><span class="t">Type</span><span class="i">name</span>
+  <span class="o">-&gt;</span><span class="n">42</span><span class="s">"text<span class="e">\n</span>"</span><span class="c">// comment</span>
+  <span class="q"><span class="sk">SELECT</span> <span class="ss">'sql'</span></span><span class="x">refused</span>
+</div>
+<script type="module" src="page.ts"></script>
+</body>
+</html>

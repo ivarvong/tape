@@ -23,6 +23,7 @@ Numbers on this page were produced by the command named beside them on the tree 
 | JSON in is what was sent; anything else is refused. | `test/json.ts`: 300 generated nested values come back as `JSON.stringify` writes them; the same with one thing wrong inside are refused. | sampled |
 | Two programs that disagree about a message do not talk. | Fingerprints over the whole message: `test/json.ts` (a field two records down), `test/calls.ts`. | per test |
 | The definition and the compiler agree. | `test/definition.ts`: every program in `LANGUAGE.md` compiles, is in `fmt`'s layout and is clean under `tape sim`; each edit it shows is refused with the code it names. | per form shown |
+| The playground, the highlighter and the trace renderer show what the tree computes. | `apps/playground/test.ts`: the page's SQLite (sql.js) against `node:sqlite` on 61 preset requests, responses and effect logs compared; each request's OTLP against its logs; the homepage's build-time copy against what `node tape.ts` answers, traces and refuses. `apps/highlight/test.ts`: `highlight.tape` gives back its input byte for byte and the tokens of `compiler/lex.ts`, on the 103 `.tape` files in the tree and 6,000 generated sources. `apps/trace/test.ts`: `trace.tape`'s SVG against what the OTLP alone says it should show, on the fixtures and 2,000 generated inputs. Planted bugs, each caught by the test meant for it: 18, 13 and 37 (full gate only). In a browser, by hand only. | sampled; per test |
 
 ## How strict the gate's numbers are
 

@@ -176,6 +176,14 @@ const event = (t: number, name: string, attributes: Attributes): OtlpEvent => ({
 });
 /** The time an entry was logged at, when it carries one. */
 const atOf = (e: Entry | undefined): number => (e && 'at' in e && typeof e.at === 'number' ? e.at : 0);
+// The host also logs times to the microsecond (host/log.ts, clockUs): `at_us` and `took_us` on a run's head,
+// `sent_us` and `took_us` on a call. A span is placed by them when they are there, in fractional ms (ns() keeps
+// the µs), and by the ms fields when they are not (a log from before them, or a row the service measured in ms).
+const fine = (us: unknown, inMs: number): number => (typeof us === 'number' ? us / 1000 : inMs);
+/** When a run began: to the µs when its head says so. */
+const startOf = (e: Entry | undefined): number => fine(e && 'at_us' in e ? e.at_us : undefined, atOf(e));
+/** How long a run took, as its head says: to the µs when it can. */
+const tookOf = (h: { took?: number | undefined; took_us?: number | undefined }): number => fine(h.took_us, h.took ?? 0);
 
 /** One entry of a log as span events, at time t. */
 const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent[] => {
@@ -187,7 +195,7 @@ const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent
         'tape.wake.due': iso(e.due),
       }),
     ];
-  if ('now' in e) return [event(e.now, 'tape.clock', { 'tape.now': e.now })];
+  if ('now' in e) return [event(t, 'tape.clock', { 'tape.now': e.now })];
   if ('random' in e) return [event(t, 'tape.entropy', { 'tape.random': e.random })];
   if ('migrate' in e)
     return e.statements.map(st =>
@@ -212,11 +220,14 @@ const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent
     }),
   ];
 };
-// Effects as span events, timed by the log's own clock: each takes the latest `now` read before it.
+// Effects as span events, timed by the log's own clock: each takes the latest `now` read before it (the clock
+// event too). A `now` is Date.now(), truncated to the ms, while the run's start may be to the µs, so a reading in
+// the run's first ms can fall before the start it came after: it is taken as the start, never earlier.
 const events = (v: Pick<Run, 'effects' | 'queries'>): OtlpEvent[] => {
-  let t = atOf(v.effects[0]);
+  const start = startOf(v.effects[0]);
+  let t = start;
   return v.effects.slice(1).flatMap(e => {
-    if ('now' in e) t = e.now;
+    if ('now' in e) t = Math.max(start, e.now);
     return entryEvents(e, t, v.queries);
   });
 };
@@ -431,8 +442,8 @@ export const otlp = (j: Joined, { window = null }: { window?: Window | null } = 
     stats = sqlStats(j.effects),
     failed = run?.failed ?? j.failed ?? null,
     partial = run?.partial === true;
-  const start = window?.start ?? atOf(head),
-    end = window ? window.end : atOf(head) + (head.took ?? 0);
+  const start = window?.start ?? startOf(head),
+    end = window ? window.end : startOf(head) + tookOf(head);
   const { name, kind, own } = runKind(j, head);
   const span: OtlpSpan = {
     traceId: head.trace,
@@ -476,37 +487,54 @@ export const otlp = (j: Joined, { window = null }: { window?: Window | null } = 
 /** A number of a stored log, which a log from before it was recorded does not have. */
 const ms = (v: unknown): number => (typeof v === 'number' ? v : 0);
 const timed = (e: CallEffect): boolean => ms(e.sent) > 0;
+/** How long a call took, to the µs when its entry says so. */
+const tookOfCall = (e: CallEffect): number => fine(e.took_us, ms(e.took));
 const sentAt = (effects: readonly Entry[], at: number, e: CallEffect, floor: number): number => {
-  if (timed(e)) return e.sent;
+  if (timed(e)) return fine(e.sent_us, e.sent);
   let t = floor;
   for (const x of effects.slice(0, at)) {
     if ('now' in x) t = Math.max(t, x.now);
-    else if ('call' in x) t += ms(x.took);
+    else if ('call' in x) t += tookOfCall(x);
   }
   return t;
 };
+const toUs = (t: number): number => Math.round(t * 1000) / 1000;
 const staleNote = (took: number, within: number): string =>
-  `this object's clock was stale when the call arrived (its last I/O was earlier): its span reads ${took} ms, longer than the ${within} ms call that contained it, so its start is ${took - within} ms or more too early; its end is measured`;
+  `this object's clock was stale when the call arrived (its last I/O was earlier): its span reads ${toUs(took)} ms, longer than the ${toUs(within)} ms call that contained it, so its start is ${toUs(took - within)} ms or more too early; its end is measured`;
 /** The window of a callee's span: from when the call reached it to when it answered, as its supervisor measured
  * across the facet call (rows from before that was recorded fall back to the callee's own clock, which reads 0 ms). */
-const calleeWindow = (s: ServedRow, h: RunHead | null): Window => ({
-  start: Math.min(h ? atOf(h) : Infinity, s.began ?? Infinity),
-  end: Math.max(h ? atOf(h) + (h.took ?? 0) : 0, s.began === null ? 0 : s.began + (s.took ?? 0)),
-});
+// `us`: to the µs where the head and the row say so (the stale-clock check below picks one resolution for both).
+const calleeWindow = (s: ServedRow, h: RunHead | null, us = true): Window => {
+  const began = s.began === null ? null : us ? fine(s.began_us, s.began) : s.began,
+    took = us ? fine(s.took_us, s.took ?? 0) : (s.took ?? 0),
+    start = h ? (us ? startOf(h) : atOf(h)) : Infinity;
+  return {
+    start: Math.min(start, began ?? Infinity),
+    end: Math.max(h ? start + (us ? tookOf(h) : (h.took ?? 0)) : 0, began === null ? 0 : began + took),
+  };
+};
 const isNumber = (v: unknown): v is number => typeof v === 'number';
 const timedTook = (e: CallEffect): boolean => isNumber(e.took);
-// a callee window longer than the answered call that contained it began on a stale clock (requestSpans, below)
-const staleAt = (e: CallEffect, w: Window): OtlpEvent[] => {
-  const took = w.end - w.start;
-  return e.status === 'ok' && timedTook(e) && took > e.took
-    ? [missing(w.start, 'supervisor.start', staleNote(took, e.took))]
+// A callee window longer than the answered call that contained it began on a stale clock (requestSpans, below).
+// Both durations are compared at one resolution: in µs when the call and the row were both timed so, else in ms
+// as recorded (a ms field is Date.now() truncated, so a µs window against a ms call, or the reverse, would read
+// up to 1 ms long and be called stale when it is not). The mark goes at the start of the span it is drawn on
+// (`span`, the window the span is placed by), so it lies inside that span.
+const staleAt = (e: CallEffect, s: ServedRow, h: RunHead | null, span: Window): OtlpEvent[] => {
+  const us = isNumber(e.took_us) && isNumber(s.began_us) && isNumber(s.took_us),
+    w = calleeWindow(s, h, us),
+    took = w.end - w.start,
+    within = us ? tookOfCall(e) : e.took;
+  return e.status === 'ok' && timedTook(e) && took > within
+    ? [missing(span.start, 'supervisor.start', staleNote(took, within))]
     : [];
 };
 /** The call itself, as the caller saw it: a client span under the run's. */
 const clientSpan = (c: JoinedCall, head: RunHead, id: string, start: number): OtlpSpan => {
   const { e, served: s, why } = c;
   const noted = (): OtlpEvent[] => {
-    if (!s) return [missing(start + ms(e.took), 'callee', why ?? `${e.call} ${NO_RECORD}`, { 'rpc.service': e.call })];
+    if (!s)
+      return [missing(start + tookOfCall(e), 'callee', why ?? `${e.call} ${NO_RECORD}`, { 'rpc.service': e.call })];
     return s.view
       ? []
       : [event(s.at, 'tape.call.deduplicated', { 'tape.call.key': s.key, 'tape.call.reply_status': s.status })];
@@ -518,7 +546,7 @@ const clientSpan = (c: JoinedCall, head: RunHead, id: string, start: number): Ot
     name: `${e.call}/${e.method}`,
     kind: KIND.client,
     startTimeUnixNano: ns(start),
-    endTimeUnixNano: ns(start + ms(e.took)),
+    endTimeUnixNano: ns(start + tookOfCall(e)),
     attributes: attrs({
       'rpc.system': 'tape',
       'rpc.service': e.call,
@@ -556,7 +584,7 @@ const storedSpan = (e: CallEffect, s: ServedRow, head: RunHead, id: string): Otl
       'tape.call.deduplicated': true,
       'tape.duration.source': MEASURED,
     }),
-    events: staleAt(e, w),
+    events: staleAt(e, s, null, w),
     status: s.status === 'ok' ? UNSET : error(s.status),
   };
 };
@@ -592,7 +620,7 @@ const servedSpan = (e: CallEffect, s: ServedRow, view: Run, h: RunHead, id: stri
       'tape.run.failed': failed ? true : undefined,
       'tape.run.rolled_back': failed ? true : undefined,
     }),
-    events: [...staleAt(e, w), ...events(view)],
+    events: [...staleAt(e, s, h, w), ...events(view)],
     status: status(),
   };
 };
@@ -612,7 +640,7 @@ const callSpans = (
     const { e, served: s } = c,
       at = j.effects.indexOf(e),
       id = childId(head.span, at),
-      start = sentAt(j.effects, at, e, Math.max(base, atOf(head)));
+      start = sentAt(j.effects, at, e, Math.max(base, startOf(head)));
     spans.push(clientSpan(c, head, id, start));
     if (!s) continue;
     const [h] = s.view?.effects ?? [];

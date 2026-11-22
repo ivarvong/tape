@@ -264,7 +264,13 @@ const post = (item: string, key: string) =>
   );
   T(
     'log: the call',
-    { ...ok.effects[2], took: 0, sent: typeof callAt(ok.effects, 2)?.sent },
+    {
+      ...ok.effects[2],
+      took: 0,
+      sent: typeof callAt(ok.effects, 2)?.sent,
+      sent_us: typeof callAt(ok.effects, 2)?.sent_us,
+      took_us: typeof callAt(ok.effects, 2)?.took_us,
+    },
     {
       call: 'stock',
       method: 'reserve',
@@ -275,6 +281,8 @@ const post = (item: string, key: string) =>
       reply: '{"item":"lamp","remaining":1}',
       sent: 'number',
       took: 0,
+      sent_us: 'number',
+      took_us: 'number',
     },
   );
   T(

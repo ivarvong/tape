@@ -28,7 +28,15 @@ export type Status = 'ok' | 'timeout' | 'unreachable' | 'rejected' | 'skew';
 export const STATUS: readonly Status[] = ['ok', 'timeout', 'unreachable', 'rejected', 'skew'];
 export type Flags = Record<string, number | boolean>;
 /** Where a run is in a trace: its own span, and the span that caused it. */
-export type Span = { trace: string; span: string; parent: string | null; name: string | null; at: number };
+export type Span = {
+  trace: string;
+  span: string;
+  parent: string | null;
+  name: string | null;
+  at: number;
+  /** when the run began, in µs since 1970, from the fine clock below (absent in logs from before it) */
+  at_us?: number;
+};
 
 /** The first entry of a run: which build ran, under which flag values, and (for a method) the message it got. */
 export type Head = Partial<Span> & {
@@ -37,6 +45,8 @@ export type Head = Partial<Span> & {
   method?: string;
   message?: Packed;
   took?: number;
+  /** how long the run took in µs, from the fine clock (absent in logs from before it) */
+  took_us?: number;
   /** the memory the run used */
   bytes?: number;
   undone?: true;
@@ -53,6 +63,9 @@ export type CallEffect = {
   reply: Packed;
   sent: number;
   took: number;
+  /** sent and took in µs, from the fine clock (absent in logs from before it) */
+  sent_us?: number;
+  took_us?: number;
 };
 export type NowEffect = { now: number };
 export type RandomEffect = { random: number };
@@ -101,12 +114,20 @@ export const hex = (n: number): string =>
   [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
 
 export type From = { trace: string; parent: string } | null;
+// The fine clock: µs since 1970, for traces only. `at`, `sent` and `took` stay Date.now() milliseconds, as every
+// reader of a log expects; the *_us fields beside them say the same to the microsecond, so a span of 0.3 ms is not
+// 0. Nothing a program sees or a replay compares reads them: a program's own time is the `now` effect, and
+// replay answers from the recorded entries. In Node, performance.now() moves with the CPU; in a Worker it moves
+// only across I/O (as Date.now() does there), so a run with no I/O still reads 0 µs.
+export const clockUs = (): number => Math.round((performance.timeOrigin + performance.now()) * 1000);
+
 export const begin = (from: From, name: string | null): Span => ({
   trace: from?.trace ?? hex(16),
   span: hex(8),
   parent: from?.parent ?? null,
   name,
   at: Date.now(),
+  at_us: clockUs(),
 });
 
 export type SpanTree = Head & {

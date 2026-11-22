@@ -108,6 +108,9 @@ export type ServedRow = {
   at: number;
   began: number | null;
   took: number | null;
+  /** began and took in µs, when whoever recorded the row measured them so (absent: use the ms fields) */
+  began_us?: number | null;
+  took_us?: number | null;
   log_id: string | null;
   view: Run | null;
 };

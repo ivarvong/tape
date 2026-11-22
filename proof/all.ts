@@ -1,6 +1,7 @@
 // proof/all.ts: every check in the repository, one after another, and one table at the end.
 //   node proof/all.ts            everything (about twenty minutes on two cores)
 //   node proof/all.ts --quick    without the service suite, the all-programs simulation and the planted bugs
+//                                (the apps' planted bugs too)
 //   node proof/all.ts --only sim a part whose name contains the word
 // Exit 0 only when every row passed. A row passes when its command exits 0 and, where a number is recorded below
 // (how many planted bugs are caught, and by what), the number is the one recorded: a check that quietly got weaker
@@ -47,12 +48,29 @@ const slow: Part[] = [
     [node, 'proof/sim-plants.ts', '--runs', '500'],
     s => Number(/found (\d+) from the programs alone/.exec(s)?.[1] ?? 0) >= 37,
   ],
+  [
+    'apps/highlight/test.ts --plants: 13 bugs planted in highlight.tape, each caught by its gate',
+    [node, 'apps/highlight/test.ts', '--plants'],
+    /^all 13 plants caught$/m,
+  ],
+  [
+    'apps/trace/test.ts --plants: 37 bugs planted in trace.tape, each caught by its gate',
+    [node, 'apps/trace/test.ts', '--plants'],
+    s => (s.match(/^caught /gm) ?? []).length === 37 && !/^(MISSED|PLANT NOT FOUND)/m.test(s),
+  ],
+  [
+    "apps/playground/test.ts --plants: 18 bugs planted in the playground's modules, each caught by its test",
+    [node, 'apps/playground/test.ts', '--plants'],
+    /^all 18 plants caught$/m,
+  ],
   service,
 ];
 const all: Part[] = [
   ['format: the toolchain is as prettier writes it', ['npx', 'prettier', '--check', '.']],
   ['types: every file not on proof/untyped.txt passes tsc under strict', ['npx', 'tsc', '--noEmit']],
   ['types: the service, against the Workers runtime types', ['npx', 'tsc', '--noEmit', '-p', 'service/tsconfig.json']],
+  ["types: the playground, with the browser's types", ['npx', 'tsc', '--noEmit', '-p', 'apps/playground']],
+  ["types: the highlighter's page, with the browser's types", ['npx', 'tsc', '--noEmit', '-p', 'apps/highlight']],
   ['lint: every file not on proof/untyped.txt passes oxlint, type-aware', [node, 'proof/lint.ts']],
   [
     'format: every program is as the formatter writes it',
@@ -67,6 +85,9 @@ const all: Part[] = [
       ...tapes('examples/tools'),
       ...tapes('apps/tickets'),
       ...tapes('apps/queue'),
+      ...tapes('apps/highlight'),
+      ...tapes('apps/trace'),
+      ...tapes('apps/trace/fixtures'),
       ...tapes('testdata/compare'),
     ],
   ],
@@ -132,6 +153,20 @@ const all: Part[] = [
     [node, 'bench/hello.ts'],
     /^204 requests answered three ways, 0 differ$/m,
   ],
+  [
+    'apps/highlight/test.ts: highlight.tape against compiler/lex.ts, LANGUAGE.md and hand-written HTML',
+    [node, 'apps/highlight/test.ts'],
+    /^all 6 gates pass$/m,
+  ],
+  [
+    'apps/trace/test.ts: trace.tape against what the OTLP alone says the picture should show',
+    [node, 'apps/trace/test.ts'],
+  ],
+  [
+    "apps/playground/test.ts: the playground's logic and build, without a browser",
+    [node, 'apps/playground/test.ts'],
+    /^all 9 tests pass$/m,
+  ],
   ...(quick ? [] : slow),
 ];
 const parts = all.filter(p => only === null || only === undefined || p[0].includes(only));
@@ -196,7 +231,7 @@ function runPart([name, cmd, expect, cwd]: Part): Row {
 const rows = parts.map(runPart);
 const bad = rows.filter(r => !r.ok);
 console.log(
-  `\n${rows.length} parts, ${rows.length - bad.length} passed, ${bad.length} failed, ${rows.reduce((n, r) => n + r.s, 0)} s${quick ? ' (quick: the service suite, sim-all and sim-plants were not run)' : ''}`,
+  `\n${rows.length} parts, ${rows.length - bad.length} passed, ${bad.length} failed, ${rows.reduce((n, r) => n + r.s, 0)} s${quick ? ' (quick: the service suite, sim-all, sim-plants and the --plants runs of the apps were not run)' : ''}`,
 );
 for (const r of bad) console.log(`  FAILED: ${r.name}`);
 process.exit(bad.length > 0 ? 1 : 0);

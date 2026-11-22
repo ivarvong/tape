@@ -21,7 +21,8 @@
   "ignorePatterns": [
     "node_modules",
     "service/runtime.d.ts",
-    "experiments"
+    "experiments",
+    "apps/playground/vendor"
   ],
   "rules": {
     "typescript/prefer-readonly-parameter-types": "off",

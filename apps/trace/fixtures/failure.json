@@ -1,0 +1,803 @@
+{
+ "resourceSpans": [
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "demo/orders"
+      }
+     },
+     {
+      "key": "service.version",
+      "value": {
+       "stringValue": "v1"
+      }
+     },
+     {
+      "key": "telemetry.sdk.name",
+      "value": {
+       "stringValue": "tape"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "tape"
+     },
+     "spans": [
+      {
+       "traceId": "631323db20ef46b541df1d1d8b713ad3",
+       "spanId": "419764ee0b72e6a6",
+       "name": "POST /orders",
+       "kind": 2,
+       "startTimeUnixNano": "1795374220090306000",
+       "endTimeUnixNano": "1795374220090843000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/orders"
+         }
+        },
+        {
+         "key": "http.response.status_code",
+         "value": {
+          "intValue": "409"
+         }
+        },
+        {
+         "key": "tape.request_id",
+         "value": {
+          "stringValue": "79950f4a-2322-4f96-b81c-a491d5da8981"
+         }
+        },
+        {
+         "key": "tape.build",
+         "value": {
+          "stringValue": "c8180e766a932f3b"
+         }
+        },
+        {
+         "key": "tape.memory_bytes",
+         "value": {
+          "intValue": "648"
+         }
+        },
+        {
+         "key": "tape.duration.source",
+         "value": {
+          "stringValue": "unmeasured: a run cannot time itself (a Worker's clock does not advance while code runs), and no supervisor measured this one"
+         }
+        },
+        {
+         "key": "tape.sql.statements",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "tape.sql.rows_returned",
+         "value": {
+          "intValue": "2"
+         }
+        },
+        {
+         "key": "tape.sql.rows_written",
+         "value": {
+          "intValue": "0"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1795374220090306000",
+         "name": "db.query",
+         "attributes": [
+          {
+           "key": "db.system.name",
+           "value": {
+            "stringValue": "sqlite"
+           }
+          },
+          {
+           "key": "db.query.text",
+           "value": {
+            "stringValue": "INSERT INTO orders(client, item, state) VALUES (?1, ?2, 'pending') ON CONFLICT(client) DO NOTHING RETURNING id, item, state"
+           }
+          },
+          {
+           "key": "db.query.parameters",
+           "value": {
+            "stringValue": "[\"o-1\",\"lamp\"]"
+           }
+          },
+          {
+           "key": "db.response.returned_rows",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "tape.sql.rows",
+           "value": {
+            "stringValue": "[[1,\"lamp\",\"pending\"]]"
+           }
+          }
+         ]
+        },
+        {
+         "timeUnixNano": "1795374220090306000",
+         "name": "db.query",
+         "attributes": [
+          {
+           "key": "db.system.name",
+           "value": {
+            "stringValue": "sqlite"
+           }
+          },
+          {
+           "key": "db.query.text",
+           "value": {
+            "stringValue": "UPDATE orders SET state = 'refused' WHERE id = ?1 AND state = 'pending' RETURNING id, item, state"
+           }
+          },
+          {
+           "key": "db.query.parameters",
+           "value": {
+            "stringValue": "[1]"
+           }
+          },
+          {
+           "key": "db.response.returned_rows",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "tape.sql.rows",
+           "value": {
+            "stringValue": "[[1,\"lamp\",\"refused\"]]"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 0
+       }
+      },
+      {
+       "traceId": "631323db20ef46b541df1d1d8b713ad3",
+       "spanId": "419764ee0b72e6a5",
+       "parentSpanId": "419764ee0b72e6a6",
+       "name": "stock/reserve",
+       "kind": 3,
+       "startTimeUnixNano": "1795374220090439000",
+       "endTimeUnixNano": "1795374220090757000",
+       "attributes": [
+        {
+         "key": "rpc.system",
+         "value": {
+          "stringValue": "tape"
+         }
+        },
+        {
+         "key": "rpc.service",
+         "value": {
+          "stringValue": "stock"
+         }
+        },
+        {
+         "key": "rpc.method",
+         "value": {
+          "stringValue": "reserve"
+         }
+        },
+        {
+         "key": "tape.call.once",
+         "value": {
+          "stringValue": "{\"order\":1}"
+         }
+        },
+        {
+         "key": "tape.call.key",
+         "value": {
+          "stringValue": "demo/orders/reserve/{\"order\":1}"
+         }
+        },
+        {
+         "key": "tape.call.within_ms",
+         "value": {
+          "intValue": "2000"
+         }
+        },
+        {
+         "key": "tape.call.status",
+         "value": {
+          "stringValue": "rejected"
+         }
+        },
+        {
+         "key": "tape.call.deduplicated",
+         "value": {
+          "boolValue": false
+         }
+        },
+        {
+         "key": "tape.duration.source",
+         "value": {
+          "stringValue": "measured by the caller around the call"
+         }
+        }
+       ],
+       "events": [],
+       "status": {
+        "code": 2,
+        "message": "rejected"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "demo/stock"
+      }
+     },
+     {
+      "key": "service.version",
+      "value": {
+       "stringValue": "v1"
+      }
+     },
+     {
+      "key": "telemetry.sdk.name",
+      "value": {
+       "stringValue": "tape"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "tape"
+     },
+     "spans": [
+      {
+       "traceId": "631323db20ef46b541df1d1d8b713ad3",
+       "spanId": "af72c02252511d01",
+       "parentSpanId": "419764ee0b72e6a5",
+       "name": "stock reserve",
+       "kind": 2,
+       "startTimeUnixNano": "1795374220090486000",
+       "endTimeUnixNano": "1795374220090745000",
+       "attributes": [
+        {
+         "key": "rpc.system",
+         "value": {
+          "stringValue": "tape"
+         }
+        },
+        {
+         "key": "rpc.service",
+         "value": {
+          "stringValue": "stock"
+         }
+        },
+        {
+         "key": "rpc.method",
+         "value": {
+          "stringValue": "reserve"
+         }
+        },
+        {
+         "key": "tape.request_id",
+         "value": {
+          "stringValue": "b7bc1856-fdb0-4cf1-a828-8662fc3adc58"
+         }
+        },
+        {
+         "key": "tape.build",
+         "value": {
+          "stringValue": "4d138e92efcd7bc2"
+         }
+        },
+        {
+         "key": "tape.call.key",
+         "value": {
+          "stringValue": "demo/orders/reserve/{\"order\":1}"
+         }
+        },
+        {
+         "key": "tape.call.reply_status",
+         "value": {
+          "stringValue": "rejected"
+         }
+        },
+        {
+         "key": "tape.duration.source",
+         "value": {
+          "stringValue": "measured by the supervisor around the facet call that ran it (includes making its writes durable); the run's own clock does not advance, so its events are in order but not timed"
+         }
+        },
+        {
+         "key": "tape.sql.statements",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tape.sql.rows_returned",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tape.sql.rows_written",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tape.run.failed",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "tape.run.rolled_back",
+         "value": {
+          "boolValue": true
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1795374220090520000",
+         "name": "db.query",
+         "attributes": [
+          {
+           "key": "db.system.name",
+           "value": {
+            "stringValue": "sqlite"
+           }
+          },
+          {
+           "key": "db.query.text",
+           "value": {
+            "stringValue": "UPDATE stock SET remaining = remaining - 1 WHERE item = ?1 AND remaining > 0 RETURNING remaining"
+           }
+          },
+          {
+           "key": "db.query.parameters",
+           "value": {
+            "stringValue": "[\"lamp\"]"
+           }
+          },
+          {
+           "key": "db.response.returned_rows",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "tape.sql.rows",
+           "value": {
+            "stringValue": "[[1]]"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 2,
+        "message": "trap 4: division by zero or overflow"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "demo/trap"
+      }
+     },
+     {
+      "key": "service.version",
+      "value": {
+       "stringValue": "v1"
+      }
+     },
+     {
+      "key": "telemetry.sdk.name",
+      "value": {
+       "stringValue": "tape"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "tape"
+     },
+     "spans": [
+      {
+       "traceId": "9ce6195f527b1f0c921f4767f747106c",
+       "spanId": "af07be2e69082eef",
+       "name": "POST /todos",
+       "kind": 2,
+       "startTimeUnixNano": "1795374220090875000",
+       "endTimeUnixNano": "1795374220090943000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/todos"
+         }
+        },
+        {
+         "key": "http.response.status_code",
+         "value": {
+          "intValue": "500"
+         }
+        },
+        {
+         "key": "tape.request_id",
+         "value": {
+          "stringValue": "c25c4e37-365a-4010-b428-ebf55b1cd677"
+         }
+        },
+        {
+         "key": "tape.build",
+         "value": {
+          "stringValue": "c21718d1578a4d47"
+         }
+        },
+        {
+         "key": "tape.duration.source",
+         "value": {
+          "stringValue": "unmeasured: a run cannot time itself (a Worker's clock does not advance while code runs), and no supervisor measured this one"
+         }
+        },
+        {
+         "key": "tape.sql.statements",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tape.sql.rows_returned",
+         "value": {
+          "intValue": "0"
+         }
+        },
+        {
+         "key": "tape.sql.rows_written",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tape.run.failed",
+         "value": {
+          "boolValue": true
+         }
+        },
+        {
+         "key": "tape.run.rolled_back",
+         "value": {
+          "boolValue": true
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1795374220090875000",
+         "name": "db.query",
+         "attributes": [
+          {
+           "key": "db.system.name",
+           "value": {
+            "stringValue": "sqlite"
+           }
+          },
+          {
+           "key": "db.query.text",
+           "value": {
+            "stringValue": "INSERT INTO todos(id, title, done) VALUES (1, 'never stored', 0)"
+           }
+          },
+          {
+           "key": "db.query.parameters",
+           "value": {
+            "stringValue": "[]"
+           }
+          },
+          {
+           "key": "tape.sql.rows_written",
+           "value": {
+            "intValue": "1"
+           }
+          }
+         ]
+        },
+        {
+         "timeUnixNano": "1795374220090943000",
+         "name": "tape.run.rolled_back",
+         "attributes": [
+          {
+           "key": "error.message",
+           "value": {
+            "stringValue": "trap 4: division by zero or overflow"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 2,
+        "message": "trap 4: division by zero or overflow"
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "resource": {
+    "attributes": [
+     {
+      "key": "service.name",
+      "value": {
+       "stringValue": "demo/lonely"
+      }
+     },
+     {
+      "key": "service.version",
+      "value": {
+       "stringValue": "v1"
+      }
+     },
+     {
+      "key": "telemetry.sdk.name",
+      "value": {
+       "stringValue": "tape"
+      }
+     }
+    ]
+   },
+   "scopeSpans": [
+    {
+     "scope": {
+      "name": "tape"
+     },
+     "spans": [
+      {
+       "traceId": "ba1629203d11fb21df8eafc3a1925929",
+       "spanId": "fa6d9f0014cd9bbc",
+       "name": "POST /orders",
+       "kind": 2,
+       "startTimeUnixNano": "1795374220090967000",
+       "endTimeUnixNano": "1795374220091336000",
+       "attributes": [
+        {
+         "key": "http.request.method",
+         "value": {
+          "stringValue": "POST"
+         }
+        },
+        {
+         "key": "url.path",
+         "value": {
+          "stringValue": "/orders"
+         }
+        },
+        {
+         "key": "http.response.status_code",
+         "value": {
+          "intValue": "504"
+         }
+        },
+        {
+         "key": "tape.request_id",
+         "value": {
+          "stringValue": "52ad8be2-31be-4cb9-b87e-568da437058c"
+         }
+        },
+        {
+         "key": "tape.build",
+         "value": {
+          "stringValue": "b4821b5065da4687"
+         }
+        },
+        {
+         "key": "tape.memory_bytes",
+         "value": {
+          "intValue": "536"
+         }
+        },
+        {
+         "key": "tape.duration.source",
+         "value": {
+          "stringValue": "unmeasured: a run cannot time itself (a Worker's clock does not advance while code runs), and no supervisor measured this one"
+         }
+        },
+        {
+         "key": "tape.sql.statements",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tape.sql.rows_returned",
+         "value": {
+          "intValue": "1"
+         }
+        },
+        {
+         "key": "tape.sql.rows_written",
+         "value": {
+          "intValue": "0"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1795374220090967000",
+         "name": "db.query",
+         "attributes": [
+          {
+           "key": "db.system.name",
+           "value": {
+            "stringValue": "sqlite"
+           }
+          },
+          {
+           "key": "db.query.text",
+           "value": {
+            "stringValue": "INSERT INTO orders(client, item, state) VALUES (?1, ?2, 'pending') ON CONFLICT(client) DO NOTHING RETURNING id, item, state"
+           }
+          },
+          {
+           "key": "db.query.parameters",
+           "value": {
+            "stringValue": "[\"o-2\",\"desk\"]"
+           }
+          },
+          {
+           "key": "db.response.returned_rows",
+           "value": {
+            "intValue": "1"
+           }
+          },
+          {
+           "key": "tape.sql.rows",
+           "value": {
+            "stringValue": "[[1,\"desk\",\"pending\"]]"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 2,
+        "message": "504\n{\"error\":\"stock did not answer in time; the order stays pending\"}"
+       }
+      },
+      {
+       "traceId": "ba1629203d11fb21df8eafc3a1925929",
+       "spanId": "fa6d9f0014cd9bbf",
+       "parentSpanId": "fa6d9f0014cd9bbc",
+       "name": "stock/reserve",
+       "kind": 3,
+       "startTimeUnixNano": "1795374220091227000",
+       "endTimeUnixNano": "1795374220091295000",
+       "attributes": [
+        {
+         "key": "rpc.system",
+         "value": {
+          "stringValue": "tape"
+         }
+        },
+        {
+         "key": "rpc.service",
+         "value": {
+          "stringValue": "stock"
+         }
+        },
+        {
+         "key": "rpc.method",
+         "value": {
+          "stringValue": "reserve"
+         }
+        },
+        {
+         "key": "tape.call.once",
+         "value": {
+          "stringValue": "{\"order\":1}"
+         }
+        },
+        {
+         "key": "tape.call.within_ms",
+         "value": {
+          "intValue": "2000"
+         }
+        },
+        {
+         "key": "tape.call.status",
+         "value": {
+          "stringValue": "timeout"
+         }
+        },
+        {
+         "key": "tape.duration.source",
+         "value": {
+          "stringValue": "measured by the caller around the call"
+         }
+        }
+       ],
+       "events": [
+        {
+         "timeUnixNano": "1795374220091295000",
+         "name": "tape.span.missing",
+         "attributes": [
+          {
+           "key": "tape.missing",
+           "value": {
+            "stringValue": "callee"
+           }
+          },
+          {
+           "key": "tape.missing.reason",
+           "value": {
+            "stringValue": "stock it has no record of this call under this trace: it did not run it (refused, unreachable or never sent), or it was reset after the run and before recording it, and then the caller got no reply"
+           }
+          },
+          {
+           "key": "rpc.service",
+           "value": {
+            "stringValue": "stock"
+           }
+          }
+         ]
+        }
+       ],
+       "status": {
+        "code": 2,
+        "message": "timeout"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
