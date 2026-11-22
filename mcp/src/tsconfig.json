@@ -1,0 +1,7 @@
+{
+  "//": "The Worker, with workerd's types (the service's runtime.d.ts, for the same compatibility date).",
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "types": ["node", "@cloudflare/vitest-plugin/types"] },
+  "include": ["**/*.ts", "../../service/runtime.d.ts"],
+  "exclude": []
+}

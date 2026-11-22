@@ -1,0 +1,6 @@
+{
+  "//": "The Worker's tests in workerd (vitest.config.ts), with the Worker itself.",
+  "extends": "../src/tsconfig.json",
+  "include": ["**/*.ts", "../src/**/*.ts", "../../service/runtime.d.ts"],
+  "exclude": []
+}

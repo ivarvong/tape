@@ -29,6 +29,7 @@
     "node_modules",
     "**/node_modules",
     "service",
+    "mcp",
     "experiments",
     "apps/playground",
     "apps/highlight/page.ts"

@@ -13,7 +13,8 @@ import list from '../../std/list.tape?raw';
 import map from '../../std/map.tape?raw';
 import retry from '../../std/retry.tape?raw';
 
-const STD = Object.entries({ core, text, json, http, list, map, retry }).map(([n, t]) => ({
+/** The standard library as the compiler takes it (std.ts in Node); mcp/ uses the same list. */
+export const STD = Object.entries({ core, text, json, http, list, map, retry }).map(([n, t]) => ({
   name: `std/${n}.tape`,
   text: t,
 }));
