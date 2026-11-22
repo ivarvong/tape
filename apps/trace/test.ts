@@ -295,6 +295,11 @@ const KIND_BAD = new Set([
 ]);
 const kindBit = (name: string): number =>
   KIND_BAD.has(name) ? 4 : name.startsWith('db.') ? 1 : name === 'tape.timer.set' ? 2 : 8;
+/** An event's mark: an SQL event whose first tape.sql.undone attribute is true is a write its run undid (16). */
+const kindOf = (ev: Ev): number =>
+  kindBit(ev.name) === 1 && (ev.attrs.find(a => a.key === 'tape.sql.undone')?.value ?? '') === 'true'
+    ? 16
+    : kindBit(ev.name);
 
 function expect(bytes: Uint8Array): Expect {
   const doc = readJson(bytes);
@@ -495,7 +500,7 @@ const bp = (pct: string | undefined): number => {
 const NEAR = 7;
 const textNoTitle = (el: El): string =>
   el.kids.map(k => (typeof k === 'string' ? k : k.name === 'title' ? '' : textNoTitle(k))).join('');
-const EV_CLASS = ['', 'q', 't', '', 'x', '', '', '', 'o'];
+const EV_CLASS = ['', 'q', 't', '', 'x', '', '', '', 'o', '', '', '', '', '', '', '', 'u'];
 
 /** What is wrong with this SVG for this input: a list of [check, detail]. */
 function check(input: Uint8Array, svg: Uint8Array): [string, string][] {
@@ -537,7 +542,7 @@ function check(input: Uint8Array, svg: Uint8Array): [string, string][] {
   const header = `${duration(want.t1 - t0)} · ${plural(want.spans.length, 'span')} · ${plural(want.services.length, 'service')}${errors > 0 ? ` · ${plural(errors, 'error')}` : ''}${traces.length === 1 ? ` · trace ${short(traces[0] ?? '', 9)}` : traces.length > 1 ? ` · ${traces.length} traces` : ''}`;
   if (!meta || textNoTitle(meta) !== header) say('header', `"${meta ? textNoTitle(meta) : ''}" is not "${header}"`);
   const lg = all(root, e => has(e, 'lg'))[0];
-  const kinds = want.spans.reduce((k, s) => s.events.slice(0, 100).reduce((k2, e) => k2 | kindBit(e.name), k), 0);
+  const kinds = want.spans.reduce((k, s) => s.events.slice(0, 100).reduce((k2, e) => k2 | kindOf(e), k), 0);
   const n = want.services.length;
   const legend =
     want.services
@@ -546,6 +551,7 @@ function check(input: Uint8Array, svg: Uint8Array): [string, string][] {
       .join('') +
     (n > 8 ? `■ ${n - 7} more` : '') +
     (kinds & 1 ? '│ sql ' : '') +
+    (kinds & 16 ? '┆ undone ' : '') +
     (kinds & 2 ? '○ timer ' : '') +
     (kinds & 4 ? '◆ error ' : '') +
     (kinds & 8 ? '• event ' : '');
@@ -680,7 +686,7 @@ function check(input: Uint8Array, svg: Uint8Array): [string, string][] {
       const x = bp(mk.attrs['x1'] ?? mk.attrs['cx'] ?? mk.attrs['x']);
       if (Math.abs(x - xOf(t - t0, axis)) > NEAR)
         say('events', `span ${sp.idx} event ${k}: at ${x / 100}%, expected ${xOf(t - t0, axis) / 100}%`);
-      const kind = EV_CLASS[kindBit(ev.name)] ?? '';
+      const kind = EV_CLASS[kindOf(ev)] ?? '';
       if (!has(mk, kind))
         say('events', `span ${sp.idx} event ${k} (${ev.name}): class "${mk.attrs['class']}", not ${kind}`);
       const out = ev.time >= 0n && (ev.time < b || ev.time > finish(sp));
@@ -802,13 +808,13 @@ function randomDoc(r: () => number): Uint8Array {
       () => ({ obj: [] }),
       () => ({ raw: '"not an object"' }),
     ])();
-  const attrs = (): J =>
+  const attrs = (): J[] =>
     Array.from({ length: Math.floor(r() * (r() < 0.1 ? 40 : 5)) }, () =>
       r() < 0.05
         ? { raw: '7' }
         : {
             obj: [
-              ['key', pick(['service.name', 'db.query.text', 'k', pick(NAMES)])],
+              ['key', pick(['service.name', 'db.query.text', 'tape.sql.undone', 'k', pick(NAMES)])],
               ['value', anyValue()],
             ],
           },
@@ -837,7 +843,20 @@ function randomDoc(r: () => number): Uint8Array {
           const obj: [string, J][] = [
             ['timeUnixNano', time()],
             ['name', pick(['db.query', 'tape.timer.set', 'tape.span.missing', 'exception', pick(NAMES)])],
-            ['attributes', attrs()],
+            [
+              'attributes',
+              r() < 0.25
+                ? [
+                    {
+                      obj: [
+                        ['key', 'tape.sql.undone'],
+                        ['value', { obj: [['boolValue', { raw: 'true' }]] }],
+                      ],
+                    },
+                    ...attrs(),
+                  ]
+                : attrs(),
+            ],
           ];
           return { obj };
         }),
@@ -1188,6 +1207,12 @@ function runGates(text: string, only?: string): Map<string, string[]> {
 // ---------- planted bugs: each must fail the gate named ----------
 
 const PLANTS: { gate: string; why: string; from: string; to: string }[] = [
+  {
+    gate: 'random',
+    why: 'an undone write is drawn as a kept one',
+    from: '    k == 1 and attr_named(list: ev.attrs, key: "tape.sql.undone") == "true" -> 16\n',
+    to: '    k == 1 and attr_named(list: ev.attrs, key: "tape.sql.undone") == "true" -> 1\n',
+  },
   { gate: 'compile', why: 'a type error', from: '    a > b -> a\n', to: '    a > b -> "a"\n' },
   { gate: 'fmt', why: 'a second space', from: 'fn max(a: Int, b: Int)', to: 'fn max(a: Int,  b: Int)' },
   {

@@ -495,6 +495,11 @@ type Note`,
     [true, [null, 1, 0]],
   );
   T(
+    'ledger: each write the rollback undid is marked undone in the log; the read before them is not',
+    log.slice(1).map(e => (isSql(e) ? e.undone === true : undefined)),
+    [false, true, true],
+  );
+  T(
     'ledger: the undone request replays',
     text(again(module, enc.encode('POST /transfers\n{"key":"t2","from":"alice","to":"carol","amount":5}'), log)),
     lost,

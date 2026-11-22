@@ -63,9 +63,9 @@ const slow: Part[] = [
     /^all 13 plants caught$/m,
   ],
   [
-    'apps/trace/test.ts --plants: 37 bugs planted in trace.tape, each caught by its gate',
+    'apps/trace/test.ts --plants: 38 bugs planted in trace.tape, each caught by its gate',
     [node, 'apps/trace/test.ts', '--plants'],
-    s => (s.match(/^caught /gm) ?? []).length === 37 && !/^(MISSED|PLANT NOT FOUND)/m.test(s),
+    s => (s.match(/^caught /gm) ?? []).length === 38 && !/^(MISSED|PLANT NOT FOUND)/m.test(s),
   ],
   [
     "apps/playground/test.ts --plants: 18 bugs planted in the playground's modules, each caught by its test",
@@ -183,7 +183,7 @@ const all: Part[] = [
   [
     "mcp/test.ts: tape-mcp's tools and HTTP face, in Node, against README.md and the playground's traces",
     [node, 'mcp/test.ts'],
-    /^all 16 tests pass$/m,
+    /^all 17 tests pass$/m,
   ],
   [
     'apps/trace/test.ts: trace.tape against what the OTLP alone says the picture should show',

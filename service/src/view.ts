@@ -217,6 +217,8 @@ const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent
       'db.response.returned_rows': e.rows?.length,
       'tape.sql.rows': e.rows ? JSON.stringify(e.rows) : undefined,
       'tape.sql.rows_written': e.r,
+      // rolled back by the run's rollback(out) or trap (host/run.ts, markUndone): it did not stay
+      'tape.sql.undone': e.undone,
     }),
   ];
 };
@@ -351,7 +353,8 @@ const sqlStats = (effects: readonly Entry[]): { statements: number; returned: nu
   return {
     statements: sql.length,
     returned: sql.reduce((n, e) => n + (e.rows?.length ?? 0), 0),
-    written: sql.reduce((n, e) => n + (e.r ?? 0), 0),
+    // what stayed written: an undone write's rows are not counted
+    written: sql.reduce((n, e) => n + (e.undone ? 0 : (e.r ?? 0)), 0),
   };
 };
 const UNMEASURED =

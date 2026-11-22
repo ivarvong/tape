@@ -60,7 +60,7 @@ const EXPORTS: { readonly [K in keyof Mods]: readonly string[] } = {
   artefacts: ['artefacts'],
   sqlite: ['loadSqlite', 'nodeSql'],
   workbench: ['Workbench'],
-  lines: ['effectLine', 'queryNames'],
+  lines: ['effectLine', 'queryNames', 'traceLines'],
   editor: ['withMarks'],
   build: ['build', 'IMPORT', 'sri'],
   data: ['DATA', 'readData'],
@@ -380,6 +380,24 @@ const tests: Test[] = [
           }
         }
       if (checked < 10) out.push(`only ${checked} statements checked`);
+      // a write that its run's rollback(out) or trap undid (host/run.ts marks it) says so, in the log and the trace
+      const one = compile([
+        ...std,
+        {
+          name: 'w.tape',
+          text: 'schema "CREATE TABLE IF NOT EXISTS t(k TEXT)"\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let w = sql_exec(query: "DELETE FROM t")\n  respond(status: 200) |> append(view: "\\(w)")\n}\n',
+        },
+      ]);
+      if (!one.wasm) return [...out, `the undone check's program does not compile: ${one.errors[0]?.message}`];
+      const undone = m.lines.effectLine(one, { q: 0, p: [], r: 2, undone: true }),
+        kept = m.lines.effectLine(one, { q: 0, p: [], r: 2 });
+      if (undone.sql?.result !== '2 written, undone' || undone.undone !== true)
+        out.push(`an undone write in the log: ${JSON.stringify(undone)}`);
+      if (kept.sql?.result !== '2 written' || kept.undone !== undefined)
+        out.push(`a kept write in the log: ${JSON.stringify(kept)}`);
+      const [tl] = m.lines.traceLines(one, 'w.tape', [], [{ sql: 0, p: [], r: 2, undone: true }]);
+      if (tl?.text !== 'sql [] -> 2 written, undone' || tl.undone !== true)
+        out.push(`an undone write in the trace: ${JSON.stringify(tl)}`);
       console.log(`  names: ${checked} statements logged in the program's words`);
       return out;
     },

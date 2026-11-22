@@ -1047,6 +1047,12 @@ button.link:hover {
 .log .k-sql .lq {
   color: var(--syn-q);
 }
+/* a write its run's rollback(out) or trap undid: it did not stay */
+.log .undone .lq,
+.log .undone .lr,
+.tl.undone .tx {
+  text-decoration: line-through;
+}
 .log .ph {
   color: var(--syn-sp);
 }

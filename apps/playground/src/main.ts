@@ -617,7 +617,7 @@ function runSections(root: RunView, lines: (r: RunView) => Line[], clickable = f
                   clickable && l.line !== undefined
                     ? ` data-goto="${esc(r.program)}:${l.line}" tabindex="0" role="button"`
                     : '';
-                return `<div class="tl k-${esc(l.kind)}"${attrs}>${at}<span class="mk">${mark}</span><span class="tx">${esc(l.text)}</span></div>`;
+                return `<div class="tl k-${esc(l.kind)}${l.undone ? ' undone' : ''}"${attrs}>${at}<span class="mk">${mark}</span><span class="tx">${esc(l.text)}</span></div>`;
               })
               .join('')
           : `<div class="tl muted">${clickable ? 'Tracing… (the traced build compiles on first use)' : 'No entries.'}</div>`;

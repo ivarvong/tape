@@ -78,7 +78,7 @@ export function logView(lines: readonly Line[]): string {
         const binds = l.sql.binds
           .map(([k, v]) => `<span><code>${esc(k)}</code> = <span class="v">${esc(v)}</span></span>`)
           .join('');
-        return `<li class="k-sql"><span class="lk">sql</span><code class="lq">${q}</code><span class="lb">${binds}<span class="lr">${esc(l.sql.result)}</span></span></li>`;
+        return `<li class="k-sql${l.undone ? ' undone' : ''}"><span class="lk">sql</span><code class="lq">${q}</code><span class="lb">${binds}<span class="lr">${esc(l.sql.result)}</span></span></li>`;
       }
       const [kind = '', ...rest] = l.text.split(/\s+/);
       return `<li class="k-${esc(l.kind)}"><span class="lk">${esc(kind)}</span><code class="lq">${esc(rest.join(' '))}</code></li>`;
@@ -92,7 +92,7 @@ export function traceView(lines: readonly Line[]): string {
     .map(l => {
       const mark = l.kind === 'ok' ? '✓' : l.kind === 'no' ? '✗' : '';
       const label = l.kind === 'ok' ? ' aria-label="taken"' : l.kind === 'no' ? ' aria-label="not taken"' : '';
-      return `<div class="tl k-${esc(l.kind)}"><span class="ln">${l.line ?? ''}</span><span class="mk"${label}>${mark}</span><span class="tx">${esc(l.text)}</span></div>`;
+      return `<div class="tl k-${esc(l.kind)}${l.undone ? ' undone' : ''}"><span class="ln">${l.line ?? ''}</span><span class="mk"${label}>${mark}</span><span class="tx">${esc(l.text)}</span></div>`;
     })
     .join('');
 }

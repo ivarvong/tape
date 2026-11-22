@@ -24,6 +24,7 @@ const HERE = new URL('./', import.meta.url).pathname;
 const ROOT = new URL('../', import.meta.url).pathname;
 const HELLO = readFileSync(`${ROOT}examples/hello.tape`, 'utf8');
 const LIMITS_TAPE = readFileSync(`${HERE}test/limits.tape`, 'utf8');
+const UNDONE_TAPE = readFileSync(`${HERE}test/undone.tape`, 'utf8');
 const README = readFileSync(`${ROOT}README.md`, 'utf8');
 
 type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM };
@@ -339,6 +340,56 @@ const tests: Test[] = [
       const down = await call({ text: 'x' });
       if (down.out['error'] !== 'store_failed') out.push(`a failed write: ${down.answer.text}`);
       if (stored.length !== n) out.push(`${stored.length - n} refused reports stored`);
+      return out;
+    },
+  },
+  {
+    name: 'undone',
+    run: async m => {
+      const out: string[] = [];
+      const { out: r } = await tool(m, 'run', {
+        files: [{ name: 'undone.tape', text: UNDONE_TAPE }],
+        requests: ['GET /undo', 'GET /trap', 'GET /keep', 'GET /keep'],
+      });
+      const rs = RESULTS(r);
+      // the first INSERT is undone by rollback(out), the second by the trap: the third request writes the row
+      // (1), and the fourth finds it there (0)
+      const bodies = rs.map(x => `${String(x['status'])} ${String(x['body'])}`);
+      if (
+        JSON.stringify(bodies) !==
+        JSON.stringify(['409 undone 1', '500 trap 4: division by zero or overflow', '200 kept 1', '200 kept 0'])
+      )
+        out.push(`bodies ${JSON.stringify(bodies)}`);
+      const marks = rs.map(x => L(x['effects']).map(e => F(e)['undone'] === true));
+      if (JSON.stringify(marks) !== '[[true],[true],[false],[false]]')
+        out.push(`undone marks ${JSON.stringify(marks)}`);
+      if (!rs.every(x => x['replayed'] === true)) out.push('a run with undone writes does not replay');
+      // the trace says so: the write's event has tape.sql.undone, and the span's rows_written leaves it out
+      const spanOf = (x: Fields): Fields =>
+        F(L(F(L(F(L(F(x['trace'])['resourceSpans'])[0])['scopeSpans'])[0])['spans'])[0]);
+      const attr = (list: unknown, key: string): unknown =>
+        F(
+          F(
+            L(list)
+              .map(F)
+              .find(a => a['key'] === key),
+          )['value'],
+        );
+      for (const [i, undone, written] of [
+        [0, true, '0'],
+        [1, true, '0'],
+        [2, false, '1'],
+      ] as const) {
+        const span = spanOf(rs[i] ?? {}),
+          ev = L(span['events'])
+            .map(F)
+            .find(e => e['name'] === 'db.query');
+        const u = F(attr(ev?.['attributes'], 'tape.sql.undone'))['boolValue'];
+        if ((u === true) !== undone) out.push(`request ${i}: tape.sql.undone ${String(u)}`);
+        const w = F(attr(span['attributes'], 'tape.sql.rows_written'))['intValue'];
+        if (String(w) !== written)
+          out.push(`request ${i}: the span's tape.sql.rows_written ${String(w)}, not ${written}`);
+      }
       return out;
     },
   },

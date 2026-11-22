@@ -176,7 +176,12 @@ function sqlCall(L: Linked, id: number, ptr: number, mode: number): number {
     () => `query ${id} ${same}`,
     () => ({ q: id, p, ...exec() }),
   );
-  L.o.trace?.push({ sql: id, p, ...(mode === 0 ? { r: e.r } : { rows: e.rows }) });
+  L.o.trace?.push({
+    sql: id,
+    p,
+    ...(mode === 0 ? { r: e.r } : { rows: e.rows }),
+    ...(e.undone ? { undone: true as const } : {}),
+  });
   return answer(e);
 }
 
@@ -438,6 +443,19 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
   return finished(L, bytes, h, floor);
 }
 
+// A rollback(out), or a trap, undoes the writes of the stretch it ends: those after the run's last call (the earlier
+// stretches were committed before their calls). Each SQL write there is marked `undone` in the live run's log, so
+// the log, its trace and every view of it say the write did not stay. A read is not marked.
+const WRITE = /\b(INSERT|UPDATE|DELETE|REPLACE)\b/i;
+function markUndone(L: Linked, effects: readonly Effect[]): void {
+  if (!L.live) return;
+  let from = 0;
+  effects.forEach((e, i) => {
+    if (isCall(e)) from = i + 1;
+  });
+  for (const e of effects.slice(from)) if (isSql(e) && WRITE.test(L.Q[e.q]?.sql ?? '')) e.undone = true;
+}
+
 /** The run's answer, with what it used written into its log. */
 function finished(L: Linked, bytes: Uint8Array, h: number, floor: number): Uint8Array<ArrayBuffer> {
   // how much memory this run used: the same number on every run and every replay of the same request
@@ -458,6 +476,7 @@ function finished(L: Linked, bytes: Uint8Array, h: number, floor: number): Uint8
     out,
     undone,
   });
+  if (undone) markUndone(L, L.effects);
   return out;
 }
 
@@ -519,6 +538,7 @@ function stretch(
     if (err instanceof Undo) return { out: err.out };
     // a run that failed (a trap, a storage error) rolled back; its log so far goes with the error, so the host
     // can record that it ran and what it did before the failure
+    if (!(err instanceof Pending)) markUndone(L, mine);
     const [head] = mine;
     if (head && isHead(head)) timeTook(head, me);
     if (
@@ -763,6 +783,8 @@ export function link(module: WebAssembly.Module, options: LinkOptions = {}) {
         return transaction(() => handle(L, bytes));
       } catch (err) {
         if (err instanceof Undo) return err.out;
+        // a trap: the transaction rolled back what this run wrote
+        markUndone(L, L.effects);
         throw err;
       }
     },

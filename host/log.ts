@@ -52,7 +52,8 @@ export type Head = Partial<Span> & {
   undone?: true;
   woke?: { key: number; due: number };
 };
-export type SqlEffect = { q: number; p: SqlParam[]; r?: number; rows?: Cell[][] };
+/** `undone`: a write that its run's rollback(out) or trap undid (the host marks it; host/run.ts, markUndone) */
+export type SqlEffect = { q: number; p: SqlParam[]; r?: number; rows?: Cell[][]; undone?: true };
 export type CallEffect = {
   call: string;
   method: string;
@@ -75,7 +76,7 @@ export type Effect = Head | SqlEffect | CallEffect | NowEffect | RandomEffect | 
 /** One thing a traced run did, in order. `what` at a site: 2 the function was entered, 0 an arm or step was tried, 1 it matched. */
 export type TraceEvent =
   | { site: number; what: number }
-  | { sql: number; p: SqlParam[]; r?: number | undefined; rows?: Cell[][] | undefined }
+  | { sql: number; p: SqlParam[]; r?: number | undefined; rows?: Cell[][] | undefined; undone?: true }
   | { json: string }
   | { call: string; method: string; within: number; status: Status }
   | { flags: Flags }

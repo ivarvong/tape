@@ -1865,7 +1865,7 @@ fn kinds_of(list: List[Ev], n: Int, kinds: Int) -> Int {
     Cons(head, tail) if n < 100 -> kinds_of(
       list: tail,
       n: n + 1,
-      kinds: with_bit(kinds, bit: kind_bit(name: head.name))
+      kinds: with_bit(kinds, bit: ev_kind(ev: head))
     )
     _ -> kinds
   }
@@ -1875,6 +1875,16 @@ fn with_bit(kinds: Int, bit: Int) -> Int {
   match {
     kinds & bit > 0 -> kinds
     else -> kinds + bit
+  }
+}
+
+// An event's mark: an SQL event whose first tape.sql.undone attribute is true is a write its run's rollback or trap
+// undid (16, a dashed tick); otherwise by its name.
+fn ev_kind(ev: Ev) -> Int {
+  let k = kind_bit(name: ev.name)
+  match {
+    k == 1 and attr_named(list: ev.attrs, key: "tape.sql.undone") == "true" -> 16
+    else -> k
   }
 }
 
@@ -1974,9 +1984,11 @@ fn style(out: Buf) -> Buf {
         .env{fill-opacity:.2;stroke:currentColor;stroke-opacity:.55;stroke-width:1}.otlp-waterfall .orphan .bar,.otlp-waterfall .cycle .bar{stroke:var(--_fg);stroke-width:1;stroke-dasharray:3 2}.otlp-waterfall .err .dur,.otlp-waterfall .err .nm{fill:var(--_err)}.otlp-waterfall .dur.in{fill:var(--_ink);font-weight:600}.otlp-waterfall .err .dur.in{fill:var(--_ink)}")
     |> append(view: ".otlp-waterfall .ev{stroke:var(--_bg);stroke-width:1}.otlp-waterfall \
         .ev.q{stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall \
+        .ev.u{stroke:var(--_mut);stroke-width:1.5;stroke-dasharray:2 2}.otlp-waterfall \
         .ev.t{fill:var(--_bg);stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall \
         .ev.o{fill:var(--_fg)}.otlp-waterfall .ev.x{fill:var(--_err)}.otlp-waterfall \
         .ev.out{opacity:.45}.otlp-waterfall .k-q{fill:var(--_fg);font-weight:700}.otlp-waterfall \
+        .k-u{fill:var(--_mut);font-weight:700}.otlp-waterfall \
         .k-x{fill:var(--_err)}.otlp-waterfall .k-t,.otlp-waterfall \
         .k-o{fill:var(--_fg)}.otlp-waterfall .why{font-size:15px;font-weight:600}.otlp-waterfall \
         .warn{fill:var(--_s2)}@media (max-width:560px){.otlp-waterfall .odd,.otlp-waterfall \
@@ -2134,6 +2146,7 @@ fn swatch_gap(out: Buf, color: Int) -> Buf {
 fn event_key(out: Buf, kinds: Int) -> Buf {
   out
     |> key_part(on: kinds & 1, view: "<tspan class=\"k-q\">│</tspan> sql ")
+    |> key_part(on: kinds & 16, view: "<tspan class=\"k-u\">┆</tspan> undone ")
     |> key_part(on: kinds & 2, view: "<tspan class=\"k-t\">○</tspan> timer ")
     |> key_part(on: kinds & 4, view: "<tspan class=\"k-x\">◆</tspan> error ")
     |> key_part(on: kinds & 8, view: "<tspan class=\"k-o\">•</tspan> event ")
@@ -2678,7 +2691,8 @@ fn duration(out: Buf, x: Int, xe: Int, d: Int, after: Bool, before: Bool) -> Buf
 }
 
 // A mark for each event, to 100, at its time (kept to the axis; an unreadable time is the span's start). Its
-// shape says its kind: a tick for SQL, a ring for a timer, a red diamond for an error, a dot for anything else.
+// shape says its kind: a tick for SQL (dashed for a write its run undid), a ring for a timer, a red diamond for an
+// error, a dot for anything else.
 // An event whose time is outside its span's is drawn faint and says so.
 fn markers(out: Buf, list: List[Ev], n: Int, b: Int, e: Int, axis: Axis) -> Buf {
   match list {
@@ -2709,11 +2723,12 @@ fn outside(ev: Ev, b: Int, e: Int) -> Bool {
 fn marker(out: Buf, ev: Ev, b: Int, e: Int, axis: Axis) -> Buf {
   let t = event_time(ev, b, axis)
   let x = x_of(t, axis)
-  let kind = kind_bit(name: ev.name)
+  let kind = ev_kind(ev)
   let out_of = outside(ev, b, e)
   match {
-    kind == 1 -> out
-      |> append(view: "<line class=\"ev q")
+    kind == 1 or kind == 16 -> out
+      |> append(view: "<line class=\"ev ")
+      |> tick_kind(kind)
       |> out_class(on: out_of)
       |> append(view: "\" x1=\"")
       |> write_bp(bp: x)
@@ -2739,6 +2754,13 @@ fn marker(out: Buf, ev: Ev, b: Int, e: Int, axis: Axis) -> Buf {
       |> circle_size(kind)
       |> event_title(ev, t, b: b - axis.t0, out_of)
       |> append(view: "</title></circle>")
+  }
+}
+
+fn tick_kind(out: Buf, kind: Int) -> Buf {
+  match {
+    kind == 16 -> out |> append(view: "u")
+    else -> out |> append(view: "q")
   }
 }
 

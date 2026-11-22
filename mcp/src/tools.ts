@@ -74,6 +74,8 @@ export type EffectOut =
       params: Record<string, unknown>;
       rows?: unknown[][];
       rows_written?: number;
+      /** the write was undone: its run's rollback(out) or trap rolled it back */
+      undone?: true;
     }
   | {
       kind: 'call';
@@ -281,6 +283,7 @@ function effectsOut(built: Built, effects: readonly Effect[], names: ReadonlyMap
           params,
           ...(e.rows ? { rows: e.rows.map(r => r.map(jsonCell)) } : {}),
           ...(e.r === undefined ? {} : { rows_written: e.r }),
+          ...(e.undone ? { undone: true as const } : {}),
         },
       ];
     }

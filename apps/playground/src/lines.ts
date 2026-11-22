@@ -17,7 +17,11 @@ export type Line = {
   program?: string;
   /** a query, as the program wrote it (its `:name` placeholders), the value bound to each name, and what came back */
   sql?: { query: string; binds: [string, string][]; result: string };
+  /** a write its run's rollback(out) or trap undid: shown struck through */
+  undone?: true;
 };
+/** What a write's line says it wrote; an undone one says so. */
+const wrote = (r: number | undefined, undone: boolean): string => `${r} written${undone ? ', undone' : ''}`;
 
 const cells = (rows: readonly Cell[][] | undefined): string =>
   JSON.stringify(rows, (_k, v: unknown) =>
@@ -88,12 +92,13 @@ export function effectLine(built: Built | null, e: Effect, names: ReadonlyMap<st
     const numberedSql = built?.queries[e.q]?.sql ?? `query ${e.q}`,
       own = ownNames(numberedSql),
       query = inNames(numberedSql, own),
-      result = e.rows ? cells(e.rows) : `${e.r} written`;
+      result = e.rows ? cells(e.rows) : wrote(e.r, e.undone === true);
     const binds = e.p.map((v, i): [string, string] => [own?.[i] ? `:${own[i]}` : `?${i + 1}`, JSON.stringify(v)]);
     return {
       kind: 'sql',
       text: `sql     ${query}  ${JSON.stringify(e.p)} -> ${result}`,
       sql: { query, binds, result },
+      ...(e.undone ? { undone: true as const } : {}),
     };
   }
   return { kind: 'mut', text: JSON.stringify(e) };
@@ -116,7 +121,13 @@ export function traceLines(
   const source = (line: number): string => (lines[line - 1] ?? '').trim().slice(0, 120);
   return events.flatMap((e, i): Line[] => {
     if ('sql' in e)
-      return [{ kind: 'sql', text: `sql ${JSON.stringify(e.p)} -> ${e.rows ? cells(e.rows) : `${e.r} written`}` }];
+      return [
+        {
+          kind: 'sql',
+          text: `sql ${JSON.stringify(e.p)} -> ${e.rows ? cells(e.rows) : wrote(e.r, e.undone === true)}`,
+          ...(e.undone ? { undone: true as const } : {}),
+        },
+      ];
     if ('json' in e) return [{ kind: e.json === 'decoded' ? 'ok' : 'bad', text: `json: ${e.json}` }];
     if ('call' in e)
       return [
