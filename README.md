@@ -1,9 +1,9 @@
 # Tape
 
-A small language for Cloudflare Workers and Durable Objects, compiled to Wasm. It has one way to do each job. The
-compiler refuses a set of mistakes that lose or double data when a request is retried, each a rule with a code.
-Every effect a program has is recorded, so each request can be replayed and traced, and the program contains no
-tracing code.
+Tape is a small language for durable services, compiled to WebAssembly. It runs in the browser, in Node, and on
+Cloudflare Workers, where each program gets its own Durable Object and SQLite database. The compiler refuses mistakes
+that lose or double data when a request is retried (each a rule with a code), and every effect is recorded, so each
+request can be replayed and traced; the program contains no tracing code. It has one way to do each job.
 
 **Status: alpha.** The language is at version 0.1 and still changes; the service and its API can change at any
 time. It is not published as a package. What is checked, and what is known to be broken, is in
