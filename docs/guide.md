@@ -492,6 +492,29 @@ is made, nothing on the way to it reads the clock in a way that can flip or an `
 it ends a path only on a `call`'s reply, which carries a once key (C41), so the callee repeats it. Seven programs with a machine and timers, ported from Temporal samples' shapes, are in
 `examples/timed/`.
 
+## Numbers: exact, or a trap
+
+An `Int` is 64 bits, and arithmetic that does not fit stops the request instead of wrapping around. Before
+22 November 2026, `fact(21)` answered `-4249290049419214848` with status 200; now the request is answered 500
+with `trap 6: integer overflow`, its writes undone, and the log says where. Division by zero is trap 4, a shift
+amount outside 0 to 63 trap 7. A literal is checked when it is compiled: `-9223372036854775808` is the least Int,
+and one digit more is P08.
+
+```tape
+fn fact(n: Int) -> Int {
+  match {
+    n <= 1 -> 1
+    else -> n * fact(n - 1)
+  }
+}
+```
+
+`fact(n - 1)` passes its argument bare because `fact` has one parameter; a function of two names the others,
+`pow(b, e: e - 1)`, and C10 shows that rewrite when it is missing. A hash or a checksum that means arithmetic
+modulo 2^64 says so with `wrapping_add`, `wrapping_sub` or `wrapping_mul`. A loop over text, `at + 1` after
+`at >= len(v)` did not hold or after `v[at]` was read, costs no overflow test: the compiler knows `at` is a length
+at most ([`compiler/gen/range.ts`](../compiler/gen/range.ts)).
+
 ## Examples
 
 | File | What it shows |

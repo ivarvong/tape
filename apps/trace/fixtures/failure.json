@@ -407,7 +407,7 @@
        ],
        "status": {
         "code": 2,
-        "message": "trap 4: division by zero or overflow"
+        "message": "trap 4: division by zero"
        }
       }
      ]
@@ -556,7 +556,7 @@
           {
            "key": "error.message",
            "value": {
-            "stringValue": "trap 4: division by zero or overflow"
+            "stringValue": "trap 4: division by zero"
            }
           }
          ]
@@ -564,7 +564,7 @@
        ],
        "status": {
         "code": 2,
-        "message": "trap 4: division by zero or overflow"
+        "message": "trap 4: division by zero"
        }
       }
      ]

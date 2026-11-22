@@ -75,6 +75,20 @@ export const params = (c: Cursor): Param[] => {
 };
 
 // ---- expressions
+/**
+ * An integer literal, `-` and all when it is negative: a value an Int holds, from -9223372036854775808 to
+ * 9223372036854775807, or refused (it would otherwise wrap).
+ */
+function intLiteral(t: Token, v: bigint): bigint {
+  if (v < -(2n ** 63n) || v > 2n ** 63n - 1n)
+    fail(
+      t,
+      'P08',
+      `${v} does not fit in an Int`,
+      'An Int is a 64-bit signed integer, from -9223372036854775808 to 9223372036854775807.',
+    );
+  return v;
+}
 // one argument: `label: value`, or a bare expression (a bare name stands for `name: name`)
 function arg(c: Cursor): Arg {
   const first = c.peek(),
@@ -106,7 +120,7 @@ function holeOrText(c: Cursor, part: TokenOf<'interp'>['v'][number], at: At): Ex
 // an expression with no operator outside it, before any `.field` or `[index]`
 function atom(c: Cursor, t: Token): Expr {
   const at = c.at(t);
-  if (t.t === 'int') return { k: 'int', v: t.v, ...at };
+  if (t.t === 'int') return { k: 'int', v: intLiteral(t, t.v), ...at };
   if (t.t === 'str') return { k: 'str', bytes: t.v, ...at };
   if (t.t === 'interp') return { k: 'interp', parts: t.v.flatMap(part => holeOrText(c, part, at)), ...at };
   if (t.t === 'kw' && t.v === 'fn') return lambda(c, t);
@@ -169,9 +183,18 @@ function numberedCall(e: Call): Expr {
     args: e.args.map(a => (a.value === query ? { ...a, value: { ...query, bytes: utf8(sql) } } : number(a))),
   };
 }
+// `-` before a number is part of it: `-7` is a literal, and so is the least Int, -9223372036854775808, whose
+// digits alone do not fit. Before anything else it negates, binding tighter than every binary operator.
 function unary(c: Cursor): Expr {
   const t = c.peek();
-  return c.eat('op', '-') ? { k: 'neg', e: unary(c), ...c.at(t) } : primary(c);
+  if (!c.eat('op', '-')) return primary(c);
+  const n = c.peek(),
+    after = c.peek(1);
+  if (n.t === 'int' && !(after.t === 'op' && (after.v === '.' || after.v === '['))) {
+    c.next();
+    return { k: 'int', v: intLiteral(t, -n.v), ...c.at(t) };
+  }
+  return { k: 'neg', e: unary(c), ...c.at(t) };
 }
 // a |> f(b: 1) is f(<f's first parameter>: a, b: 1). The right side is one call (or a function's name, for a call
 // with nothing else to pass). Which parameter is first is known once every file is parsed (resolvePipes).
@@ -261,8 +284,8 @@ function simplePattern(c: Cursor): Pattern {
   const t = c.next(),
     at = c.at(t);
   if (t.t === 'op' && t.v === '_') return { k: 'any', ...at };
-  if (t.t === 'int') return { k: 'int', v: t.v, ...at };
-  if (t.t === 'op' && t.v === '-') return { k: 'int', v: -c.expect('int').v, ...at };
+  if (t.t === 'int') return { k: 'int', v: intLiteral(t, t.v), ...at };
+  if (t.t === 'op' && t.v === '-') return { k: 'int', v: intLiteral(t, -c.expect('int').v), ...at };
   if (t.t === 'str')
     return c.eat('op', '++') ? { k: 'prefix', bytes: t.v, rest: pattern(c), ...at } : { k: 'str', bytes: t.v, ...at };
   if (t.t === 'id') return namedPattern(c, t);
@@ -372,7 +395,7 @@ function steps(c: Cursor, allowMatch: boolean): Steps {
     // `let Order(id, sku) = e` takes a value apart; the pattern must always match (checked where it is compiled),
     // unless an `else` takes the other cases. Any pattern can stand here: a constructor, a text, a number
     // (`let 1 = sql_exec(…) else -> …`: go on when one row changed).
-    else if (c.is('Id') || c.is('str') || c.is('int')) {
+    else if (c.is('Id') || c.is('str') || c.is('int') || (c.is('op', '-') && c.peek(1).t === 'int')) {
       const at = c.at(c.peek()),
         pat = pattern(c);
       c.expect('op', '=', 'A destructuring `let` is `let Ctor(field, …) = expression`.');

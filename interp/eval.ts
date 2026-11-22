@@ -45,7 +45,13 @@ class Tail {
     this.args = args;
   }
 }
-const MIN = -(2n ** 63n);
+const MIN = -(2n ** 63n),
+  MAX = 2n ** 63n - 1n;
+/** An Int result: the exact value, which must be within 64 bits, or the run stops (integer overflow). */
+const fit = (x: bigint): bigint => {
+  if (x < MIN || x > MAX) throw new Trap(TRAP.OVERFLOW);
+  return x;
+};
 const enc = new TextEncoder();
 const stemOf = (f: string): string => f.replace(/^.*\//, '').replace(/\.tape$/, '');
 export const stop = (message: string): never => {
@@ -112,32 +118,33 @@ const concat = (a: Uint8Array, b: Uint8Array): Uint8Array => {
   out.set(b, a.length);
   return out;
 };
-// arithmetic on 64-bit integers, wrapping; division traps on zero and on the one quotient that does not fit
+// arithmetic on 64-bit integers: computed exactly, and a result outside 64 bits stops the run. Division stops on
+// zero, and `%` wherever `/` stops (the least Int by -1 too, though its remainder, 0, would fit). Bitwise
+// operators work on the 64 bits; a shift amount must be 0 to 63, and a left shift drops the bits it moves out.
 type Arithmetic = '+' | '-' | '*' | '/' | '%' | '&' | '|' | '^' | '<<' | '>>';
 function arithmetic(op: Arithmetic, l: bigint, r: bigint): bigint {
   switch (op) {
     case '+':
-      return wrap(l + r);
+      return fit(l + r);
     case '-':
-      return wrap(l - r);
+      return fit(l - r);
     case '*':
-      return wrap(l * r);
+      return fit(l * r);
     case '/':
-      if (r === 0n || (l === MIN && r === -1n)) throw new Trap(TRAP.ARITH);
-      return l / r;
     case '%':
-      if (r === 0n) throw new Trap(TRAP.ARITH);
-      return l % r;
+      if (r === 0n) throw new Trap(TRAP.DIVISION);
+      fit(l / r);
+      return op === '/' ? l / r : l % r;
     case '&':
-      return wrap(l & r);
+      return l & r;
     case '|':
-      return wrap(l | r);
+      return l | r;
     case '^':
-      return wrap(l ^ r);
+      return l ^ r;
     case '<<':
-      return wrap(BigInt.asUintN(64, l) << (r & 63n));
     case '>>':
-      return l >> (r & 63n);
+      if (r < 0n || r > 63n) throw new Trap(TRAP.SHIFT);
+      return op === '<<' ? wrap(l << r) : l >> r;
     default:
       return unreachable(op, 'operator');
   }
@@ -174,6 +181,9 @@ const INTRINSIC = {
   append: ['buf', 'view'],
   freeze: ['buf'],
   size: ['buf'],
+  wrapping_add: ['a', 'b'],
+  wrapping_sub: ['a', 'b'],
+  wrapping_mul: ['a', 'b'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -206,6 +216,13 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
       return Uint8Array.from(asBuf(a[0]).buf);
     case 'size':
       return BigInt(asBuf(a[0]).buf.length);
+    // the low 64 bits of the exact result, read as a signed number
+    case 'wrapping_add':
+      return wrap(asInt(a[0]) + asInt(a[1]));
+    case 'wrapping_sub':
+      return wrap(asInt(a[0]) - asInt(a[1]));
+    case 'wrapping_mul':
+      return wrap(asInt(a[0]) * asInt(a[1]));
     default:
       return unreachable(name, 'intrinsic');
   }
@@ -283,7 +300,7 @@ function matchOf(it: Interp, e: Of<'match'>, env: Env, file: string, tail: boole
 function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value | Tail {
   switch (e.k) {
     case 'int':
-      return wrap(e.v);
+      return fit(e.v);
     case 'str':
       return Uint8Array.from(e.bytes);
     case 'interp':
@@ -306,7 +323,7 @@ function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value
       return BigInt(byte);
     }
     case 'neg':
-      return wrap(-asInt(ev(it, e.e, env, file)));
+      return fit(-asInt(ev(it, e.e, env, file)));
     case 'not':
       return !asBool(ev(it, e.e, env, file));
     case 'bin':
@@ -376,7 +393,7 @@ export function match(it: Interp, p: Pattern, v: Value, env: Env, file: string):
       env.set(p.name, v);
       return true;
     case 'int':
-      return v === wrap(p.v);
+      return v === p.v;
     case 'str':
       return sameBytes(asBytes(v), p.bytes);
     case 'prefix':

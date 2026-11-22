@@ -54,6 +54,9 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     random: null,
     wake: null,
     write_json: ['out', 'value'],
+    wrapping_add: ['a', 'b'],
+    wrapping_sub: ['a', 'b'],
+    wrapping_mul: ['a', 'b'],
   }),
 );
 /** A type as the compiler holds it: a name applied to types. */

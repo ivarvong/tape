@@ -573,7 +573,7 @@ T(
       [7, false, 'got 4'],
       [9, false, 'got Order(id: 6, state: "done")'],
       [11, false, 'C14 argument n should be Int but is View'],
-      [13, false, 'trapped (arithmetic)'],
+      [13, false, 'trapped (division by zero)'],
       [15, false, 'an example needs what it should give on the next comment line'],
     ],
   );
@@ -682,7 +682,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
       ),
       pending().length,
     ],
-    ['trap 4: division by zero or overflow', 0],
+    ['trap 4: division by zero', 0],
   );
   T(
     'timer: std/retry.tape sets the timer backoff picks: 100 ms, then 10 times longer, capped, three attempts',

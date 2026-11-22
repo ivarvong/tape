@@ -9,7 +9,8 @@ import { format } from '../fmt.ts';
 import { search } from '../sim.ts';
 import type { Searched } from '../sim/search.ts';
 import { autoOf, wrongIn } from './simulated.ts';
-import { ok, finish, raw, read, std } from './harness.ts';
+import { interpret, Trap } from '../interp.ts';
+import { bare, call, ok, finish, raw, read, std } from './harness.ts';
 
 const build = (text: string) => compile([...std, { name: 'program.tape', text }]);
 /** The first thing refused, as text; or that nothing was. */
@@ -44,7 +45,49 @@ const sim = (text: string): Promise<Searched> => {
 const clean = await sim(whole);
 ok('tape sim finds nothing wrong with it in 100 runs', clean.ok, wrongIn(clean));
 
-for (const b of blocks.filter(x => x.kind === 'tape' && x.info !== '')) {
+// a program shown with what calls of it give: `// f(1, -2) is 3`, `// f(0) traps: reason`, compiled and interpreted
+const TRAPS: Readonly<Record<number, string>> = {
+  4: 'division by zero',
+  6: 'integer overflow',
+  7: 'shift amount outside 0 to 63',
+};
+for (const b of blocks.filter(x => x.kind === 'tape' && x.info === 'gives')) {
+  const calls = [...b.text.matchAll(/^\/\/ (\w+)\(([^)]*)\) (?:is (-?\d+)|traps: (.+))$/gm)];
+  const fns = [...new Set(calls.map(m => m[1] ?? ''))];
+  const r = compile([...std, { name: 'program.tape', text: b.text }], { exports: fns });
+  ok(
+    "a program shown with what it gives compiles, and is in fmt's layout",
+    r.wasm !== null && format(b.text) === b.text,
+    refusal(r, 80),
+  );
+  if (!r.wasm || calls.length === 0) continue;
+  const ex = bare(new WebAssembly.Module(r.wasm)),
+    it = interpret([...std, { name: 'program.tape', text: b.text }]);
+  for (const [line, fn = '', list = '', value, reason] of calls) {
+    const args = list === '' ? [] : list.split(',').map(a => BigInt(a.trim()));
+    let compiled: string, interpreted: string;
+    call(ex.fns, 'reset');
+    try {
+      compiled = `is ${String(call(ex.fns, fn, ...args))}`;
+    } catch {
+      compiled = `traps: ${TRAPS[ex.why()] ?? ex.why()}`;
+    }
+    try {
+      const v = it.call(fn, args);
+      interpreted = typeof v === 'bigint' ? `is ${v}` : 'not a number';
+    } catch (e) {
+      interpreted = e instanceof Trap ? `traps: ${TRAPS[e.code] ?? e.code}` : String(e);
+    }
+    const want = value === undefined ? `traps: ${reason}` : `is ${value}`;
+    ok(
+      `${line.slice(3)}, compiled and interpreted`,
+      compiled === want && interpreted === want,
+      `${compiled}; ${interpreted}`,
+    );
+  }
+}
+
+for (const b of blocks.filter(x => x.kind === 'tape' && x.info !== '' && x.info !== 'gives')) {
   const want = /^refused (\w+)$/.exec(b.info)?.[1],
     r = build(b.text);
   ok(

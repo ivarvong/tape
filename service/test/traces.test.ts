@@ -276,7 +276,7 @@ fn divide(wrote: Option[N]) -> Buf {
         spans.find(s => s.name === 'POST /go'),
         'run',
       );
-    expect([attr(run, 'tape.run.failed'), run.status.message]).toEqual([true, 'trap 4: division by zero or overflow']);
+    expect([attr(run, 'tape.run.failed'), run.status.message]).toEqual([true, 'trap 4: division by zero']);
   });
 });
 

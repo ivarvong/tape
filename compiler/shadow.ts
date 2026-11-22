@@ -28,7 +28,19 @@ const CORE = new Set([
   'Skew',
   'Wake',
 ]);
-export const SHADOWABLE = new Set(['len', 'slice', 'buf', 'push', 'append', 'freeze', 'size', 'next']);
+export const SHADOWABLE = new Set([
+  'len',
+  'slice',
+  'buf',
+  'push',
+  'append',
+  'freeze',
+  'size',
+  'next',
+  'wrapping_add',
+  'wrapping_sub',
+  'wrapping_mul',
+]);
 type Kind = 'types' | 'ctors';
 // the file that defines the type or constructor of this name, if one does
 const definedIn = (prog: Program, kind: Kind, name: string): string | undefined =>

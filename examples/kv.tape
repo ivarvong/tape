@@ -295,9 +295,16 @@ fn skew_of(tail: View) -> Int {
   }
 }
 
-// the decimal number at the start of v, up to its first non-digit (-1 when there is none)
+// the decimal number at the start of v, up to its first non-digit (-1 when there is none, or when it has more than
+// 18 digits: an Int holds every 18-digit number, and a longer one would not fit)
+//
+//   > digits_until(v: "999999999999999999", at: 0, n: 0)
+//   999999999999999999
+//   > digits_until(v: "9999999999999999999&window=5", at: 0, n: 0)
+//   -1
 fn digits_until(v: View, at: Int, n: Int) -> Int {
   match {
+    at >= 18 and at < len(v) and v[at] >= 48 and v[at] <= 57 -> -1
     at < len(v) and v[at] >= 48 and v[at] <= 57 -> digits_until(
       v,
       at: at + 1,

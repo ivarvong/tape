@@ -265,6 +265,16 @@ function ask(c: Ctx, e: Call, n: 'now' | 'random'): Type {
   return INT;
 }
 
+/** wrapping_add(a, b), wrapping_sub, wrapping_mul: the low 64 bits of the exact result, never a stop. */
+const wrapping =
+  (opcode: number) =>
+  (u: Use): Type => {
+    const a = int(u, 0);
+    const b = int(u, 1);
+    u.c.code.push(...get(a), ...get(b), opcode);
+    return INT;
+  };
+
 const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   len: u => {
     u.c.code.push(...get(view(u, 0)[1]), 0xad);
@@ -286,6 +296,9 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   size,
   write_json: writeJson,
   next,
+  wrapping_add: wrapping(0x7c),
+  wrapping_sub: wrapping(0x7d),
+  wrapping_mul: wrapping(0x7e),
 };
 
 export function emitIntrinsic(c: Ctx, e: Call): Type {

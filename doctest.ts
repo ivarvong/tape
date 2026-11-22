@@ -34,7 +34,16 @@ type Built =
   | { readonly wasm: Uint8Array<ArrayBuffer>; readonly errors: readonly never[] }
   | { readonly wasm: null; readonly errors: readonly Problem[] };
 
-const TRAPS = ['', 'out of memory', 'too many steps', 'out of bounds', 'arithmetic', 'use after release'];
+const TRAPS = [
+  '',
+  'out of memory',
+  'too many steps',
+  'out of bounds',
+  'division by zero',
+  'use after release',
+  'integer overflow',
+  'shift amount outside 0 to 63',
+];
 const MISSING = 'an example needs what it should give on the next comment line';
 
 export function examples(text: string): Example[] {

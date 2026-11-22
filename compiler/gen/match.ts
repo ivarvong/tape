@@ -7,6 +7,8 @@ import type { Type } from '../types.ts';
 import { close, ev, inLocals, need, noConsume, open, release, site } from './fn.ts';
 import type { Binding, Ctx, Stored } from './fn.ts';
 import { ctorOf, irrefutable, isBool, isRefine, matchPat } from './pattern.ts';
+import { proved, withFacts } from './range.ts';
+import type { Fact } from './range.ts';
 
 type Match = Extract<Expr, { k: 'match' }>;
 const text = (bytes: readonly number[]): string => new TextDecoder().decode(new Uint8Array(bytes));
@@ -199,7 +201,9 @@ function emitArm(c: Ctx, e: Match, a: PatArm | CondArm, subject: Stored | null, 
   ev(c, id, 1);
   // nothing else can reach an unshared value matched here: its memory goes to the next value of its size
   if (subject && size !== null) release(c, subject.locals[0] ?? 0, size);
-  need(c, c.emit(a.body, expected, tail), expected, a, 'this arm');
+  // the arm runs when its condition held: what that proves holds in its body
+  const held = !('pat' in a) && a.cond ? proved(c, a.cond, true) : [];
+  withFacts(c, held, () => need(c, c.emit(a.body, expected, tail), expected, a, 'this arm'));
   c.code.push(0x0c, 1);
   close(c);
   c.env = outer;
@@ -224,9 +228,14 @@ export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean
   const before = new Set(c.consumed);
   let after: { sig: string; set: Set<Binding> } | null = null;
   open(c, 0x02, results);
+  // an arm of a condition match is reached when every condition before it did not hold
+  const failed: Fact[] = [];
   for (const a of e.arms) {
     c.consumed = new Set(before);
-    emitArm(c, e, a, subject, expected, tail);
+    withFacts(c, failed, () => {
+      emitArm(c, e, a, subject, expected, tail);
+    });
+    if (!('pat' in a) && a.cond) failed.push(...proved(c, a.cond, false));
     const sig = handedOver(c.consumed);
     if (after !== null && after.sig !== sig)
       fail(

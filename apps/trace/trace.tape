@@ -1104,7 +1104,7 @@ fn nanos_from(t: View, at: Int, value: Int, most: Int) -> Int {
     at >= len(t) -> value
     not is_digit(t[at]) -> -1
     value > (most - (t[at] - 48)) / 10 -> -1
-    else -> nanos_from(t, at: at + 1, value: value * 10 + t[at] - 48, most)
+    else -> nanos_from(t, at: at + 1, value: value * 10 + (t[at] - 48), most)
   }
 }
 

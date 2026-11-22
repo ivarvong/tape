@@ -36,8 +36,10 @@ const TRAPS: Readonly<Record<number, string>> = {
   1: 'out of memory',
   2: 'reduction budget exceeded',
   3: 'index out of bounds',
-  4: 'division by zero or overflow',
+  4: 'division by zero',
   5: 'a value was read after its memory was released (a compiler bug)',
+  6: 'integer overflow',
+  7: 'shift amount outside 0 to 63',
 };
 /** the longest a timer may be set for: 30 days */
 export const MAX_WAKE_MS = 30 * 24 * 3600 * 1000;

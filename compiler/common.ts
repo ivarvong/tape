@@ -3,7 +3,8 @@
 export const I32 = 0x7f,
   I64 = 0x7e,
   F64 = 0x7c;
-export const TRAP = { MEMORY: 1, REDUCTIONS: 2, BOUNDS: 3, ARITH: 4, RELEASED: 5 } as const;
+// DIVISION: by zero. OVERFLOW: an Int result that does not fit in 64 bits. SHIFT: a shift amount outside 0..63.
+export const TRAP = { MEMORY: 1, REDUCTIONS: 2, BOUNDS: 3, DIVISION: 4, RELEASED: 5, OVERFLOW: 6, SHIFT: 7 } as const;
 // trace: emit an event for every function entered and every arm or step tried and matched (for replay traces).
 export const DEFAULTS = {
   pin: {},

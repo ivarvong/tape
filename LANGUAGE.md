@@ -1,11 +1,11 @@
-# The Tape language, version 0.1
+# The Tape language, version 0.2
 
 This is the definition of Tape as it stands: what a program is made of, and the one way to do each job. It is
 short on purpose. [The guide](docs/guide.md) teaches; this states. Where the two disagree, this file is right, and where this file
 and the compiler disagree, that is a bug in one of them: `test/definition.ts` compiles every program in this file, makes
 every edit it shows, and fails when the compiler does not say what the file says.
 
-This is version 0.1. A form that is here has one meaning and one way to be written, and the tests hold the
+This is version 0.2. A form that is here has one meaning and one way to be written, and the tests hold the
 compiler to it. Before 1.0 a form may still go: when one does, the old way is a compile error that says the new
 one, and the last section says what went and when. A program is tied to the compiler it was built with; the
 service runs the same compiler on every upload and keeps old versions as built.
@@ -24,7 +24,9 @@ waits on a call, another may run. Three things hold for every program:
 
 ## 2. Text
 
-`//` starts a comment. Integers are decimal. Text literals are in double quotes, on one line, with the escapes
+`//` starts a comment. Integers are decimal, from `-9223372036854775808` to `9223372036854775807`: a `-` written
+before the digits is part of the literal (`-7`, and in a pattern `-1 ->`), and a literal outside that range is
+refused (P08). Text literals are in double quotes, on one line, with the escapes
 `\" \\ \/ \n \r \t \b \f`. `\(e)` in a literal is a hole: `"Hello, \(name) #\(n)"` is the text with the value
 of each expression in its place, a View as it is and an Int in decimal. A hole holds one expression with no text
 literal in it (L05); a value of any other type is refused (C19). Appended to a Buf, the text is written straight
@@ -43,7 +45,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 
 | Type | What it is |
 |---|---|
-| `Int` | a 64-bit signed integer. Overflow wraps; division by zero is a trap |
+| `Int` | a 64-bit signed integer. Arithmetic is exact or it traps (section 10): there is no wrapping |
 | `Bool` | `True` or `False` |
 | `View` | read-only bytes (text is UTF-8 bytes) |
 | `Buf` | bytes being written. It has one owner: a function that is handed a `Buf` uses it once (C25) |
@@ -59,6 +61,16 @@ std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `E
 
 There are no floats, no null, no exceptions, no mutable variables and no loops.
 
+On `Int`: `+ - *` and unary `-` give the exact result, and trap (integer overflow) when it does not fit in 64 bits.
+`/` truncates toward zero and `%` has the sign of its left side; both trap on a zero divisor (division by zero),
+and on the least Int by -1 (integer overflow: the quotient does not fit, so neither does the remainder). `& | ^`
+work on the 64 bits. `a << n` and `a >> n` take a shift `n` from 0 to 63 and trap on any other; `<<` drops the
+bits it moves out, `>>` copies the sign in. Where a hash or a checksum means arithmetic modulo 2^64, it says so:
+`wrapping_add(a, b)`, `wrapping_sub(a, b)` and `wrapping_mul(a, b)` give the low 64 bits of the exact result.
+
+Operators, tightest first: unary `-`; `* / %`; `+ - ++`; `<< >>`; `&`; `^`; `|` and `|>`; the comparisons, which
+do not chain; `not`; `and`; `or`. So `-x * y` is `(-x) * y`, and `-2 * 3` is `-6`.
+
 ## 4. Functions
 
 ```
@@ -70,7 +82,8 @@ fn name(param: Type, …) -> Type {
 ```
 
 Arguments are named: `f(at: i)`. A variable named like the parameter is passed bare, `f(at)`; so is the only
-argument of a one-parameter function. `a |> f(b: 1)` is `f(<first parameter>: a, b: 1)`.
+argument of a one-parameter function, whatever expression it is: `fact(n - 1)`. Any other argument is named, so a
+function of two parameters is called `pow(b, e: e - 1)` (C10). `a |> f(b: 1)` is `f(<first parameter>: a, b: 1)`.
 
 A body is steps, then one expression that is its value. There are three steps:
 
@@ -100,7 +113,7 @@ A pattern can fail, and binds what it proves.
 | Pattern | Matches |
 |---|---|
 | `Ctor(field, other: P)` | that constructor; a field named bare is bound, fields left out are not looked at |
-| `"text"`, `42`, `True` | that value |
+| `"text"`, `42`, `-1`, `True` | that value |
 | `"prefix" ++ rest` | bytes that start so; `rest` is matched against what follows |
 | `Key(k)` | a value for which the refined type's condition holds; `k` has the type |
 | `decimal(n)` | any one-parameter function returning `Option[…]`, when it returns `Some` |
@@ -438,7 +451,46 @@ A program says what must hold, and what must hold in the end (`settled`), and is
 ## 10. When a program stops
 
 A trap ends the request, undoes its writes and is recorded: out of memory (64 MB), more than 50,000,000 steps, an
-index out of bounds, a division by zero. Nothing else stops a program: every other failure is a value.
+index out of bounds, a division by zero (trap 4), an `Int` result that does not fit in 64 bits (trap 6, integer
+overflow), a shift by less than 0 or more than 63 (trap 7). Nothing else stops a program: every other failure is a
+value. A request that traps is answered 500 with the reason, `trap 6: integer overflow`. Each line `// f(…) is v`
+or `// f(…) traps: reason` below is a call `test/definition.ts` makes, compiled and in the reference interpreter:
+
+```tape gives
+fn fact(n: Int) -> Int {
+  match {
+    n <= 1 -> 1
+    else -> n * fact(n - 1)
+  }
+}
+
+fn pow(b: Int, e: Int) -> Int {
+  match {
+    e <= 0 -> 1
+    else -> b * pow(b, e: e - 1)
+  }
+}
+
+fn sign(n: Int) -> Int {
+  match n {
+    -1 -> -1
+    0 -> 0
+    _ -> 1
+  }
+}
+
+// one step of 64-bit FNV-1a: from its offset basis and "a" (97), the published 0xaf63dc4c8601ec8c
+fn hash(h: Int, byte: Int) -> Int {
+  wrapping_mul(a: h ^ byte, b: 1099511628211)
+}
+
+// fact(20) is 2432902008176640000
+// fact(21) traps: integer overflow
+// pow(-2, 63) is -9223372036854775808
+// pow(2, 63) traps: integer overflow
+// sign(-1) is -1
+// hash(-3750763034362895579, 97) is -5808556873153909620
+```
 
 ## 11. Not defined yet
 
@@ -452,6 +504,7 @@ index out of bounds, a division by zero. Nothing else stops a program: every oth
 
 | When | What | Now |
 |---|---|---|
+| 22 November 2026 | `Int` arithmetic that did not fit wrapped around (`fact(21)` answered `-4249290049419214848`), and so did a literal too large for an `Int` | a trap, integer overflow (trap 6; division by zero is trap 4 alone, a shift outside 0..63 is trap 7); `wrapping_add`, `wrapping_sub`, `wrapping_mul` where wrapping is meant; a literal out of range is P08 |
 | 22 November 2026 | numbered placeholders, `WHERE id = ?1` with `p1: id` | names: `WHERE id = :id` with `id` (C32) |
 | 22 November 2026 | a comment in the SQL to say a write is meant to repeat, or may go below a floor | `repeat: True`, `no_floor: True` on the call (C88 when it is not needed) |
 | 22 November 2026 | a file laid out as it was typed | one layout: a step that fits is one line, a wider one is broken in one way (`tape fmt`) |

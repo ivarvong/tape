@@ -27,7 +27,8 @@ it('a busy, locked or reset store is transient at the edge; a full database is s
     false,
     true,
   ]);
-  expect(
-    ['trap 4: division by zero or overflow', 'SQLITE_CONSTRAINT: UNIQUE constraint failed: t.x'].map(between),
-  ).toEqual([false, false]);
+  expect(['trap 4: division by zero', 'SQLITE_CONSTRAINT: UNIQUE constraint failed: t.x'].map(between)).toEqual([
+    false,
+    false,
+  ]);
 });
