@@ -72,6 +72,7 @@ export default {
     const deps: Deps = { std: STD, hello: { name: 'hello.tape', text: helloText }, run: runIn(env) };
     return serve(request, deps, {
       killSwitch: env.KILL_SWITCH,
+      salt: env.IP_SALT,
       limiter: env.RATE,
       log: line => {
         console.log(JSON.stringify(line));

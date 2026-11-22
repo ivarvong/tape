@@ -24,6 +24,8 @@ declare namespace Cloudflare {
     LOADER: WorkerLoader;
     RATE: RateLimit;
     KILL_SWITCH: string;
+    /** a Worker secret: what client addresses are hashed with (serve.ts, ipHash) */
+    IP_SALT?: string;
     // a second limiter, of two calls a minute, for the tests only (vitest.config.ts)
     TIGHT?: RateLimit;
   }

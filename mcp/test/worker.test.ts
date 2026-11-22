@@ -159,10 +159,13 @@ describe('tape-mcp in workerd', () => {
     });
   });
 
-  it('refuses everything when the kill switch is on, and over the real rate limit', async () => {
+  it('refuses everything when the kill switch is on or IP_SALT is missing, and over the real rate limit', async () => {
     const req = (): Request => new Request('https://tape-mcp/v1/compile', { method: 'POST', headers, body: '{}' });
     const off = await worker.fetch(req(), { ...env, KILL_SWITCH: 'on' }, createExecutionContext());
     expect([off.status, F(await off.json())['error']]).toEqual([503, 'disabled']);
+    const { IP_SALT: _salt, ...unsalted } = env;
+    const bare = await worker.fetch(req(), unsalted, createExecutionContext());
+    expect([bare.status, F(await bare.json())['error']]).toEqual([503, 'misconfigured']);
     const tight = env.TIGHT;
     if (!tight) throw new Error('vitest.config.ts gives no TIGHT limiter');
     const statuses: number[] = [];

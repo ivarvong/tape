@@ -19,6 +19,8 @@ export const VERSION = '0.1.0';
 export type Gate = {
   /** "on" refuses every call (503) */
   killSwitch: string;
+  /** the secret the address is hashed with (IP_SALT); without it every call is refused (503) */
+  salt: string | undefined;
   limiter: { limit: (o: { key: string }) => Promise<{ success: boolean }> } | null;
   log: (line: Fields) => void;
 };
@@ -43,9 +45,15 @@ const refusal = (r: Refusal): Response => json({ ok: false, error: r.error, reas
 
 const enc = new TextEncoder();
 const hexOf = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
-/** The client's IP as a short hash: what the log and the rate limit key on, never the address itself. */
-export const ipHash = async (ip: string): Promise<string> =>
-  hexOf(await crypto.subtle.digest('SHA-256', enc.encode(`tape-mcp:${ip}`))).slice(0, 16);
+/** The UTC day of a time, as 2026-11-22. */
+export const dayOf = (ms: number): string => new Date(ms).toISOString().slice(0, 10);
+/**
+ * The client's IP as a short hash: what the log and the rate limit key on, never the address itself. It is salted
+ * with a secret (IP_SALT, a Worker secret, never in the repository), so it cannot be reversed by trying every
+ * address without it, and with the UTC day, so one client's calls are linked for a day at most.
+ */
+export const ipHash = async (ip: string, salt: string, day: string): Promise<string> =>
+  hexOf(await crypto.subtle.digest('SHA-256', enc.encode(`${ip}\u0000${day}\u0000${salt}`))).slice(0, 16);
 
 // The whole body of a request: an MCP message or a tool's arguments, which hold the program and its requests
 const MAX_BODY = LIMITS.sourceBytes + LIMITS.requests * (LIMITS.requestBodyBytes + LIMITS.lineBytes) + 64 * 1024;
@@ -113,7 +121,7 @@ const refusalFields = { error: { type: 'string' }, reason: { type: 'string' } };
 /** The tools' descriptions: what each does, and examples/hello.tape with what it gives, to check in one call. */
 export function listing(deps: Deps): Fields[] {
   const hello = `examples/hello.tape, the program used when \`files\` is left out:\n\n\`\`\`tape\n${deps.hello.text.trimEnd()}\n\`\`\``;
-  const limits = `Limits: ${LIMITS.files} files and ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, each body at most ${LIMITS.requestBodyBytes / 1024} KB; each request runs within Tape's own budget (50,000,000 steps, 64 MB of memory); response bodies longer than ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true). Alpha: anything can change. Calls are logged (what was called and how it went, not the source or bodies): https://github.com/ivarvong/tape/blob/main/TERMS.md`;
+  const limits = `Limits: ${LIMITS.files} files and ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, each body at most ${LIMITS.requestBodyBytes / 1024} KB; each request runs within Tape's own budget (50,000,000 steps, 64 MB of memory); response bodies longer than ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. These are alpha limits and may change, as may anything else. Calls are logged (what was called, sizes, counts, codes and timings; not the source, bodies or responses): https://github.com/ivarvong/tape/blob/main/TERMS.md`;
   return [
     {
       name: 'compile',
@@ -144,7 +152,7 @@ ${limits}`,
       title: 'Run HTTP requests against a Tape program',
       description: `Compile a Tape program and send it HTTP requests, in order, against one fresh in-memory SQLite database that lasts for this call only. A request is "METHOD SP TARGET", then optionally a line feed and a body: "GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}".
 
-Each result has the status, content type and body; effects, the effect log (each SQL statement as the program wrote it, with its :name placeholders, the params bound to each name, and the rows it returned or how many it wrote; calls, clock reads, random draws, timers); replayed, true when the service ran the request again from that log alone and got the same bytes; steps, the reductions it used; and trace, its spans as OTLP/JSON (resourceSpans), made from the same log. If the program does not compile, ok is false and diagnostics says why, as compile does. random() is seeded the same way each call, so the same input gives the same output except trace ids and times. Calls to other programs answer Unreachable: one program runs at a time.
+Each result has the status, content type and body; effects, the effect log (each SQL statement as the program wrote it, with its :name placeholders, the params bound to each name, and the rows it returned or how many it wrote; calls, clock reads, random draws, timers); replayed, true when the service ran the request again from that log alone and got the same bytes; steps, the reductions it used; and trace, its spans as OTLP/JSON (resourceSpans), made from the same log. If the program does not compile, ok is false and diagnostics says why, as compile does. random() is seeded the same way on every call, on purpose: the same input gives the same output except trace ids and times. Calls to other programs answer Unreachable: one program runs at a time.
 
 To check it works: run with requests ["GET /hello/ada", "GET /hello/ada"] and no files. Both are status 200; the first body is "Hello, ada", the second "Hello again, ada #2!"; each has one sql effect, the INSERT with params {":name": "ada"} and rows [[1]] then [[2]]; both are replayed: true.
 
@@ -256,7 +264,7 @@ export async function serve(request: Request, deps: Deps, gate: Gate): Promise<R
       usage: null,
     };
   const meta = {
-    ip_hash: await ipHash(ip),
+    ip_hash: gate.salt ? await ipHash(ip, gate.salt, dayOf(Date.now())) : 'unsalted',
     user_agent: request.headers.get('user-agent') ?? '',
     rate_limited: false,
     status: 0,
@@ -286,6 +294,14 @@ async function route(
   const known = path === '/mcp' || path === '/v1/compile' || path === '/v1/run';
   if (gate.killSwitch === 'on')
     return no(refused(503, 'disabled', 'the hosted compiler and runner is switched off for now; try again later'));
+  if (!gate.salt)
+    return no(
+      refused(
+        503,
+        'misconfigured',
+        'this deployment has no IP_SALT secret, so it does not serve; its operator sets one',
+      ),
+    );
   if (path === '/' || path === '/v1') {
     if (request.method !== 'GET') return no(refused(405, 'method_not_allowed', `${path} is GET`));
     return json({

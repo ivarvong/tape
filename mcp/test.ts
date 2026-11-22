@@ -108,6 +108,7 @@ async function post(
     depsOf(m, deps),
     {
       killSwitch: 'off',
+      salt: 'test-salt',
       limiter: null,
       log: l => {
         logs.push({ ...l });
@@ -554,6 +555,23 @@ const tests: Test[] = [
       if (page.status !== 403 || F(page.body)['error'] !== 'origin_refused') out.push(`an Origin: ${page.status}`);
       const big = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /'], pad: 'x'.repeat(1_000_000) }));
       if (big.status !== 413 || F(big.body)['error'] !== 'body_too_large') out.push(`a 1 MB body: ${big.status}`);
+      const unsalted = await rpc(m, 'tools/list', {}, 1, { gate: { salt: undefined } });
+      if (unsalted.status !== 503 || F(unsalted.body)['error'] !== 'misconfigured')
+        out.push(`no IP_SALT: ${unsalted.status}`);
+      if (unsalted.logs[0]?.['ip_hash'] !== 'unsalted') out.push('without a salt the address is still hashed');
+      // the hash: the same for one address, salt and day; another for another day or salt; the address not in it
+      const h = (ip: string, salt: string, day: string): Promise<string> => m.serve.ipHash(ip, salt, day);
+      const base = await h('203.0.113.7', 'a', '2026-11-22');
+      if (base !== (await h('203.0.113.7', 'a', '2026-11-22'))) out.push('the hash is not stable within a day');
+      if (base === (await h('203.0.113.7', 'a', '2026-11-23'))) out.push('the hash does not change with the day');
+      if (base === (await h('203.0.113.7', 'b', '2026-11-22'))) out.push('the hash does not depend on the salt');
+      if (base === (await h('203.0.113.8', 'a', '2026-11-22'))) out.push('two addresses hash the same');
+      if (!/^[0-9a-f]{16}$/.test(base)) out.push(`the hash ${base} is not 16 hex`);
+      if (
+        m.serve.dayOf(Date.UTC(2026, 10, 22, 23, 59)) !== '2026-11-22' ||
+        m.serve.dayOf(Date.UTC(2026, 10, 23)) !== '2026-11-23'
+      )
+        out.push('dayOf is not the UTC day');
       const off = await rpc(m, 'tools/list', {}, 1, { gate: { killSwitch: 'on' } });
       if (off.status !== 503 || F(off.body)['error'] !== 'disabled') out.push(`the kill switch: ${off.status}`);
       const keys: string[] = [];
@@ -569,7 +587,10 @@ const tests: Test[] = [
       });
       if (limited.status !== 429 || F(limited.body)['error'] !== 'rate_limited')
         out.push(`the rate limit: ${limited.status}`);
-      if (keys[0] !== (await m.serve.ipHash('203.0.113.7')) || keys[0]?.includes('203'))
+      if (
+        keys[0] !== (await m.serve.ipHash('203.0.113.7', 'test-salt', m.serve.dayOf(Date.now()))) ||
+        keys[0]?.includes('203')
+      )
         out.push(`the rate limit's key ${String(keys[0])} is not the address's hash`);
       if (limited.logs[0]?.['rate_limited'] !== true) out.push('a rate-limited call is not logged as one');
       const slow = await tool(m, 'run', { requests: ok }).then(() =>
@@ -665,7 +686,8 @@ const tests: Test[] = [
       for (const [k, v] of Object.entries(want))
         if (JSON.stringify(line[k]) !== JSON.stringify(v))
           out.push(`${k}: ${JSON.stringify(line[k])}, not ${JSON.stringify(v)}`);
-      if (line['ip_hash'] !== (await m.serve.ipHash('203.0.113.7'))) out.push(`ip_hash ${String(line['ip_hash'])}`);
+      if (line['ip_hash'] !== (await m.serve.ipHash('203.0.113.7', 'test-salt', m.serve.dayOf(Date.now()))))
+        out.push(`ip_hash ${String(line['ip_hash'])}`);
       if (JSON.stringify(line['statuses']) !== '[200,404]') out.push(`statuses ${JSON.stringify(line['statuses'])}`);
       if (line['source_bytes'] !== new TextEncoder().encode(text).length)
         out.push(`source_bytes ${String(line['source_bytes'])}`);
@@ -905,6 +927,27 @@ const PLANTS: Plant[] = [
     file: 'serve.ts',
     from: "seen.method = typeof method === 'string' ? method.slice(0, 64) : null;",
     to: 'seen.method = text;',
+  },
+  {
+    test: 'limits',
+    what: 'the address is hashed without the salt',
+    file: 'serve.ts',
+    from: 'enc.encode(`${ip}\\u0000${day}\\u0000${salt}`)',
+    to: 'enc.encode(`${ip}\\u0000${day}`)',
+  },
+  {
+    test: 'limits',
+    what: 'the address is hashed without the day',
+    file: 'serve.ts',
+    from: 'enc.encode(`${ip}\\u0000${day}\\u0000${salt}`)',
+    to: 'enc.encode(`${ip}\\u0000${salt}`)',
+  },
+  {
+    test: 'limits',
+    what: 'a deployment without IP_SALT serves anyway',
+    file: 'serve.ts',
+    from: '  if (!gate.salt)\n    return no(',
+    to: '  if (false)\n    return no(',
   },
   {
     test: 'determinism',

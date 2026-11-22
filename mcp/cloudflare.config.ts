@@ -1,8 +1,10 @@
 import { bindings, defineConfig } from 'cf/config';
 
-// tape-mcp: the hosted compiler and runner (docs/mcp.md). Stateless: no Durable Objects, no storage, no secrets.
+// tape-mcp: the hosted compiler and runner (docs/mcp.md). Stateless: no Durable Objects, no storage; one secret.
 // LOADER runs each posted program in a Dynamic Worker (a Worker cannot compile Wasm itself), with no network.
 // RATE is per client IP (a hash of it), per Cloudflare location. KILL_SWITCH "on" refuses every call (503).
+// IP_SALT is a secret, set with `cf` (docs/mcp.md), never here: the hash of a client's address is salted with it and
+// the UTC day. Without it the Worker refuses every call (503).
 // No accountId: cf takes the account from CLOUDFLARE_ACCOUNT_ID, or the only one your login can reach, or asks.
 export default defineConfig({
   worker: {
@@ -16,6 +18,7 @@ export default defineConfig({
       LOADER: bindings.workerLoader(),
       RATE: bindings.rateLimit({ namespace: '7101', simple: { limit: 60, period: 60 } }),
       KILL_SWITCH: bindings.text('off'),
+      IP_SALT: bindings.secret(),
     },
   },
 });

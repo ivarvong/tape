@@ -50,7 +50,7 @@ planted bugs, and takes about two and a half minutes.
 | `proof/sim-all.ts`, `proof/sim-invariants.ts`, `proof/sim-plants.ts` (full only) | the simulator on every program; a bug planted against every invariant; tickets' planted bugs found from the programs alone |
 | the apps' `--plants` (full only) | 13 bugs planted in `highlight.tape`, 37 in `trace.tape`, 18 in the playground's modules, each caught by the test meant for it |
 | service suite (full only) | `cd service && npx vitest run`, in workerd |
-| `mcp/test.ts`; mcp suite and `--plants` (full only) | tape-mcp's tools and HTTP face in Node, against README.md and the playground's traces; `cd mcp && npx vitest run` in workerd; 28 planted bugs, each caught |
+| `mcp/test.ts`; mcp suite and `--plants` (full only) | tape-mcp's tools and HTTP face in Node, against README.md and the playground's traces; `cd mcp && npx vitest run` in workerd; 31 planted bugs, each caught |
 
 What the recorded numbers do and do not hold fixed is in [`STATUS.md`](STATUS.md#how-strict-the-gates-numbers-are).
 `.github/workflows/check.yml` runs the full gate each night and on demand, not on every push; run `npm test`
