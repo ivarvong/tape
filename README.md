@@ -212,8 +212,9 @@ to connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), a
 
 - Tape is alpha-quality software. Anything (the language, the API, the service, its limits) can change at any
   time, without notice.
-- **What you do on the service is logged**: the programs uploaded, the requests, their logs and traces, and usage.
-  We use it to improve the platform.
+- **Each call is logged, as metadata**: the tool, sizes, counts, error codes, statuses, timings, step counts, a
+  daily-salted hash of your IP and your user agent; not your program's source, request bodies or responses. We
+  use it to improve the platform.
 - Content that breaks the acceptable-use rules (phishing, malware, illegal content, abuse of other services,
   attempts to break isolation or limits, spam, cryptomining) is deleted, at our discretion.
 

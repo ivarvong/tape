@@ -12,6 +12,19 @@ returns.
 Alpha: anything can change at any time. **Calls are logged** ([what is logged](#what-is-logged)); the rules for the
 public service are in [`TERMS.md`](../TERMS.md).
 
+## Validate in one call
+
+Call `run` with no `files` (the program is then [`examples/hello.tape`](../examples/hello.tape)) and two requests:
+
+```json
+{ "requests": ["GET /hello/ada", "GET /hello/ada"] }
+```
+
+Expect `ok: true` and two results, both status 200: the first body `Hello, ada`, the second `Hello again, ada #2!`,
+each with one `sql` effect (params `{":name": "ada"}`, rows `[[1]]` then `[[2]]`) and `replayed: true`. Then
+`compile` hello.tape with the line `repeat: True,` taken out: `ok: false`, one diagnostic, C54 at line 11, and its
+`fix` says what to write. The tool descriptions hold the program and these answers.
+
 ## Connecting
 
 Claude Code:
@@ -97,17 +110,13 @@ Also takes `requests`: 1 to 20, each `METHOD SP TARGET`, then optionally a line 
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not
   compile, `ok` is false, `diagnostics` says why and nothing runs.
 
-The same input gives the same output except trace ids and times: `random()` is seeded the same way on every call.
-`now()` is the real clock.
-
-### Check it in one call
-
-The tool descriptions hold `examples/hello.tape` and what it gives. `run` with
-`{"requests": ["GET /hello/ada", "GET /hello/ada"]}` gives 200 `Hello, ada`, then 200 `Hello again, ada #2!`,
-one `sql` effect each with params `{":name": "ada"}` and rows `[[1]]` then `[[2]]`, both `replayed: true`.
-`compile` with the line `repeat: True,` taken out of hello.tape gives `ok: false` and C54 at line 11.
+The same input gives the same output except trace ids and times. On purpose, `random(from: entropy)` is seeded
+the same way on every call: an agent that sends the same program and requests again gets the same answer, so it can
+check what changed. `now()` is the real clock.
 
 ## Limits
+
+These are alpha limits and may change.
 
 | What | Limit |
 |---|---|
@@ -118,14 +127,15 @@ one `sql` effect each with params `{":name": "ada"}` and rows `[[1]]` then `[[2]
 | a result's effects and trace | 512 KB of JSON; past that both are left out and `omitted` says so |
 | a run call | 20 s of wall time; the Dynamic Worker running the program has 10 s of CPU and no network |
 | a request body | 499,712 bytes (488 KB) |
-| calls | 60 a minute per client address (a hash of it), per Cloudflare location |
+| calls | 60 a minute per client address (its daily salted hash, below), per Cloudflare location |
 
 Every refusal is JSON, `{"ok": false, "error": "<code>", "reason": "<what to change>"}`, with an HTTP status: over
 MCP it is a tool result with `isError: true` and the same JSON. The codes: `bad_arguments`, `unknown_argument`,
 `bad_files`, `bad_file_name`, `too_many_files` (413), `source_too_large` (413), `bad_requests`,
 `bad_request_line`, `too_many_requests` (413), `request_too_large` (413), `body_too_large` (413), `bad_json`,
 `unsupported_media_type` (415), `method_not_allowed` (405), `origin_refused` (403), `not_found` (404),
-`rate_limited` (429), `run_timeout` (504), `run_failed` (503), `disabled` (503: switched off for now).
+`rate_limited` (429), `run_timeout` (504), `run_failed` (503), `disabled` (503: switched off for now),
+`misconfigured` (503: the deployment has no `IP_SALT`).
 
 Every answer is `application/json` with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
 'none'; sandbox` and `Cache-Control: no-store`; what a program answers is a JSON string, never a page. There are no
@@ -137,12 +147,16 @@ browsers, so a web page cannot use its visitors as clients.
 One line per call to Workers Observability: the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
 requests and their statuses, the steps used, the compile, run and total times, a hash of the client's address, the
-user agent, and whether it was rate limited. Not the source, the requests' bodies or the responses. We use it to
-improve Tape and the service ([`TERMS.md`](../TERMS.md)).
+user agent, and whether it was rate limited. Not the program's source, the requests' bodies or the responses. We
+use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
+
+The address is never logged. Its hash is SHA-256 of the address, the UTC day and a secret salt, cut to 16 hex
+digits: without the salt it cannot be reversed by trying every address, and one client's calls are linked for one
+day at most. The rate limit keys on the same hash.
 
 ## How it works
 
-[`mcp/`](../mcp/) is a Worker of its own, `tape-mcp`, with no Durable Objects, no storage and no secrets. It is
+[`mcp/`](../mcp/) is a Worker of its own, `tape-mcp`, with no Durable Objects and no storage. It is
 meant to be reached through the `tape` Worker at `/mcp` and `/v1/*` (a service binding), and works on its own too.
 
 - `src/serve.ts`: the routes, the checks before a tool runs, the log line. MCP is the service's transport,
@@ -153,13 +167,20 @@ meant to be reached through the `tape` Worker at `/mcp` and `/v1/*` (a service b
   CPU limit, and is cached by the build's hash. The database is [sql.js](https://github.com/sql-js/sql.js) through
   the playground's adapter ([`apps/playground/src/sqlite.ts`](../apps/playground/src/sqlite.ts)), the one in-memory
   SQLite that runs in workerd (Durable Object SQLite would need a Durable Object; there is no `node:sqlite`).
-- `KILL_SWITCH` (`on` refuses every call) and `RATE` (the rate limit) are its only settings.
+- Its settings: `KILL_SWITCH` (`on` refuses every call), `RATE` (the rate limit) and one secret, `IP_SALT`,
+  which lives in Cloudflare, not in the repository. Without it every call is refused (503, `misconfigured`). Set
+  it, or rotate it, with a long random value (rotating a secret uploads a new version of the Worker):
+
+  ```sh
+  env -u CLOUDFLARE_API_TOKEN npx cf workers secrets update IP_SALT --worker tape-mcp --text "$(openssl rand -hex 32)"
+  ```
 
 ### Running it yourself
 
 ```sh
 cd mcp && npm ci
+echo 'IP_SALT=dev-salt' > .dev.vars   # a salt for your own copy (.dev.vars is not tracked)
 npx cf dev                  # then POST to /mcp at the address it prints
-node test.ts                # the tools and the HTTP face in Node; --plants plants 28 bugs, each caught
+node test.ts                # the tools and the HTTP face in Node; --plants plants 31 bugs, each caught
 npx vitest run              # the Worker in workerd, with the real Loader and rate limiter
 ```

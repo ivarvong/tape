@@ -14,9 +14,10 @@ anything that matters.
 
 ## What is logged
 
-We log what people do on the service: the programs uploaded, the requests sent to them, their effect logs and
-traces, and usage. We use this to improve Tape and the service. Do not upload or send anything you are not willing
-to have logged.
+We log metadata about each call: the tool called, sizes, counts, error and diagnostic codes, response statuses,
+timings, step counts, a hash of your IP address salted with a secret and the day, and your user agent. We do not
+log your program's source, your requests' bodies or the responses. We use this to improve Tape and the service.
+What each call logs is listed in [`docs/mcp.md`](docs/mcp.md#what-is-logged).
 
 The hosted service is not live yet. These terms, including how long logs are kept, will be set before it is.
 
