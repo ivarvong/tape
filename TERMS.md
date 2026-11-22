@@ -3,8 +3,8 @@
 These are the rules for the hosted service at https://tape.ivar.workers.dev. They do not apply to the code in this
 repository, which is under the [MIT license](LICENSE), or to a copy of the service you run yourself.
 
-**The hosted service is not live yet.** A hosted MCP server and API are coming. This page describes how the public
-service will work once it is.
+The hosted MCP server and API are live at https://tape.ivar.workers.dev/mcp (the same server also answers at
+https://tape-mcp.ivar.workers.dev/mcp). What is described here applies to both.
 
 ## Alpha software
 
@@ -19,7 +19,8 @@ timings, step counts, a hash of your IP address salted with a secret and the day
 log your program's source, your requests' bodies or the responses. We use this to improve Tape and the service.
 What each call logs is listed in [`docs/mcp.md`](docs/mcp.md#what-is-logged).
 
-The hosted service is not live yet. These terms, including how long logs are kept, will be set before it is.
+Logs are kept for 7 days, the retention of Workers Logs (Workers Observability) on this account's Workers Paid plan,
+and then deleted by Cloudflare. Nothing copies them elsewhere (no Logpush job, no tail consumer).
 
 ## Acceptable use
 

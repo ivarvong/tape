@@ -204,11 +204,11 @@ has a `test.ts` whose oracles are not the program under test, and a friction log
 
 ## The public service
 
-**Built, not live yet.** A hosted MCP server and API, at https://tape.ivar.workers.dev: post a program, and it is
-compiled and run, and its results and OTLP traces come back. Two tools, `compile` and `run`, over MCP (`claude mcp
-add --transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`); how
-to connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), and the Worker is
-[`mcp/`](mcp/). How it will work:
+**Live.** A hosted MCP server and API at https://tape.ivar.workers.dev/mcp: post a program, and it is compiled and
+run, and its results and OTLP traces come back. Two tools, `compile` and `run`, over MCP (`claude mcp add
+--transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`); how to
+connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), and the Worker is [`mcp/`](mcp/).
+How it works:
 
 - Tape is alpha-quality software. Anything (the language, the API, the service, its limits) can change at any
   time, without notice.
@@ -218,7 +218,8 @@ to connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), a
 - Content that breaks the acceptable-use rules (phishing, malware, illegal content, abuse of other services,
   attempts to break isolation or limits, spam, cryptomining) is deleted, at our discretion.
 
-The full rules are in [`TERMS.md`](TERMS.md). Today the deployed service takes only its operator's token. Its API,
+The full rules are in [`TERMS.md`](TERMS.md). Past the MCP server, the homepage and the playground, the deployed
+service takes only its operator's token. Its API,
 and how to run your own copy, are in [`docs/service.md`](docs/service.md).
 
 ## Speed
@@ -246,7 +247,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | [`LANGUAGE.md`](LANGUAGE.md) | The definition, version 0.1. `test/definition.ts` holds the compiler to it. |
 | [`docs/guide.md`](docs/guide.md) | The language one feature at a time: patterns, steps, JSON, rules, machines, invariants, timers, migrations, the simulator. |
 | [`STATUS.md`](STATUS.md) | Each claim and the check that fails when it breaks; known limitations; what is on trust. |
-| [`docs/mcp.md`](docs/mcp.md) | The hosted compiler and runner (not live yet): connecting over MCP or HTTP, the two tools, limits, logging. |
+| [`docs/mcp.md`](docs/mcp.md) | The hosted compiler and runner (live): connecting over MCP or HTTP, the two tools, limits, logging. |
 | [`docs/service.md`](docs/service.md) | The service's API, authentication and limits; running your own. |
 | [`TERMS.md`](TERMS.md) | Rules for the public service. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Running the checks, and what they check. |

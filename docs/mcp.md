@@ -1,7 +1,8 @@
 # The hosted compiler and runner (MCP and HTTP)
 
-**Not live yet.** This is how it will work once it is deployed at https://tape.ivar.workers.dev. Until then you can
-run it yourself ([below](#running-it-yourself)).
+**Live** at https://tape.ivar.workers.dev/mcp (MCP) and https://tape.ivar.workers.dev/v1/compile,
+https://tape.ivar.workers.dev/v1/run (JSON). The same Worker answers at https://tape-mcp.ivar.workers.dev/mcp too.
+You can also run it yourself ([below](#running-it-yourself)).
 
 `tape-mcp` compiles a Tape program you post and runs HTTP requests against it, and gives back what the compiler said,
 each response, its effect log, whether a replay from that log matched, and its OTLP/JSON trace. It is meant for
@@ -144,7 +145,7 @@ browsers, so a web page cannot use its visitors as clients.
 
 ## What is logged
 
-One line per call to Workers Observability: the route and MCP method, the tool, whether it was ok or refused and
+One line per call to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
 requests and their statuses, the steps used, the compile, run and total times, a hash of the client's address, the
 user agent, and whether it was rate limited. Not the program's source, the requests' bodies or the responses. We
@@ -157,7 +158,10 @@ day at most. The rate limit keys on the same hash.
 ## How it works
 
 [`mcp/`](../mcp/) is a Worker of its own, `tape-mcp`, with no Durable Objects and no storage. It is
-meant to be reached through the `tape` Worker at `/mcp` and `/v1/*` (a service binding), and works on its own too.
+reached through the `tape` Worker at `/mcp`, `/v1/compile` and `/v1/run` (the `MCP` service binding in
+[`service/cloudflare.config.ts`](../service/cloudflare.config.ts), which passes the request as it came, before any
+token check), and answers on its own at https://tape-mcp.ivar.workers.dev too. Every answer names the tape-mcp
+version that gave it (`tape-mcp-version`).
 
 - `src/serve.ts`: the routes, the checks before a tool runs, the log line. MCP is the service's transport,
   [`service/src/mcp.ts`](../service/src/mcp.ts).
@@ -174,6 +178,12 @@ meant to be reached through the `tape` Worker at `/mcp` and `/v1/*` (a service b
   ```sh
   env -u CLOUDFLARE_API_TOKEN npx cf workers secrets update IP_SALT --worker tape-mcp --text "$(openssl rand -hex 32)"
   ```
+
+- Deploying: `CLOUDFLARE_ACCOUNT_ID=<id> mcp/scripts/deploy.sh "<message>"`, from a clean commit on main that passed
+  the full gate (`service/scripts/gate.sh`): a 0% version, a smoke pinned to it
+  ([`service/scripts/mcp-smoke.ts`](../service/scripts/mcp-smoke.ts)), its telemetry, then 100%, the smoke again here
+  and through the `tape` Worker, with a rollback to the previous version if any step fails. Deploy tape-mcp before
+  a `tape` Worker that needs it.
 
 ### Running it yourself
 
