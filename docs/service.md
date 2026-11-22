@@ -7,10 +7,10 @@ end; how its behaviour is checked is in [`service/VERIFY.md`](../service/VERIFY.
 
 ## The public service (coming)
 
-**Not built yet.** A hosted MCP server and API are coming, at https://tape.ivar.workers.dev: post a program, and
-it is compiled and run, and its results and OTLP traces come back. This section will say how to use it once it
-works. Until then the deployed service serves the homepage (`/`) and the in-browser playground (`/playground/`), and
-accepts only its operator's token: every route below that needs a token answers 401 without it.
+**Live.** A hosted MCP server and API: post a program, and it is compiled and run, and its results and OTLP traces
+come back. It is a Worker of its own, `tape-mcp` ([`mcp/`](../mcp/)), at https://tape-mcp.ivar.workers.dev/mcp, and
+[`docs/mcp.md`](mcp.md) says how to use it. The deployed service also serves the homepage (`/`) and the in-browser
+playground (`/playground/`); every other route below needs its operator's token and answers 401 without it.
 
 The rules for using it are in [`TERMS.md`](../TERMS.md): it is alpha software that can change at any time, what
 you do on it is logged and used to improve it, and content that breaks the acceptable-use rules is deleted.

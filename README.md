@@ -204,8 +204,11 @@ has a `test.ts` whose oracles are not the program under test, and a friction log
 
 ## The public service
 
-**Coming, not built yet.** A hosted MCP server and API are coming, at https://tape.ivar.workers.dev: post a
-program, and it is compiled and run, and its results and OTLP traces come back. How it will work:
+**Built, not live yet.** A hosted MCP server and API, at https://tape.ivar.workers.dev: post a program, and it is
+compiled and run, and its results and OTLP traces come back. Two tools, `compile` and `run`, over MCP (`claude mcp
+add --transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`); how
+to connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), and the Worker is
+[`mcp/`](mcp/). How it will work:
 
 - Tape is alpha-quality software. Anything (the language, the API, the service, its limits) can change at any
   time, without notice.
@@ -242,6 +245,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | [`LANGUAGE.md`](LANGUAGE.md) | The definition, version 0.1. `test/definition.ts` holds the compiler to it. |
 | [`docs/guide.md`](docs/guide.md) | The language one feature at a time: patterns, steps, JSON, rules, machines, invariants, timers, migrations, the simulator. |
 | [`STATUS.md`](STATUS.md) | Each claim and the check that fails when it breaks; known limitations; what is on trust. |
+| [`docs/mcp.md`](docs/mcp.md) | The hosted compiler and runner (not live yet): connecting over MCP or HTTP, the two tools, limits, logging. |
 | [`docs/service.md`](docs/service.md) | The service's API, authentication and limits; running your own. |
 | [`TERMS.md`](TERMS.md) | Rules for the public service. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Running the checks, and what they check. |
@@ -265,6 +269,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | `tape.ts`, `cli/` | The command line: run requests, `fmt`, `test`, `sim`. |
 | `sim.ts`, `sim/` | The simulator behind `tape sim`. |
 | `service/` | Tape as a service on Workers, with its tests, fault harnesses and protocol models. |
+| `mcp/` | `tape-mcp`: the hosted compiler and runner, a stateless Worker serving MCP and `/v1/compile`, `/v1/run`. |
 | `adapters/` | Host-side adapters; `ply.ts` makes a git repository a `Git` capability using [ply](https://github.com/ivarvong/ply). |
 | `examples/`, `apps/` | Example programs, and applications written as a user would, each with its friction log; `apps/playground/` is the homepage and playground. |
 | `test/`, `proof/` | The tests, one file per subject, and the checks that are more than a test; `proof/all.ts` runs everything. |
