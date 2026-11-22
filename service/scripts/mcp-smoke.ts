@@ -93,7 +93,7 @@ const init = await rpc('initialize', {
 const result = obj(init.j['result']);
 check(init.r.status === 200, `initialize: ${init.r.status}`);
 check(obj(result['serverInfo'])['name'] === 'tape', `initialize: serverInfo ${JSON.stringify(result['serverInfo'])}`);
-check(String(result['instructions'] ?? '').includes('durable services'), 'initialize: the instructions');
+check(String(result['instructions'] ?? '').includes('TERMS.md'), 'initialize: the instructions');
 const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
 check(JSON.stringify(names) === '["compile","run"]', `tools/list: ${JSON.stringify(names)}`);
