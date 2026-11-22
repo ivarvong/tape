@@ -500,7 +500,8 @@ export default {
 } satisfies ExportedHandler<Env>;
 
 async function route(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-  if (env.TOKEN === '') return reply({ error: 'unauthorized' }, 401);
+  // a version without its secret opens nothing (not even to "Bearer undefined")
+  if (typeof env.TOKEN !== 'string' || env.TOKEN === '') return reply({ error: 'unauthorized' }, 401);
   const url = new URL(request.url),
     page = request.method === 'GET' ? TRACE_PAGE.exec(url.pathname) : null;
   if (page) return tracePage(url, env, ctx, page);
