@@ -91,6 +91,8 @@ describe('tape-mcp in workerd', () => {
           query: 'INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n',
           params: { ':name': 'ada' },
           rows: [[i + 1]],
+          // an upsert changes one row each time, an insert and then an update (SQLite's changes())
+          rows_written: 1,
         },
       ]);
       const span = F(L(F(L(F(L(F(r?.['trace'])['resourceSpans'])[0])['scopeSpans'])[0])['spans'])[0]);

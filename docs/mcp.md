@@ -22,7 +22,7 @@ Call `run` with no `files` (the program is then [`examples/hello.tape`](../examp
 ```
 
 Expect `ok: true` and two results, both status 200: the first body `Hello, ada`, the second `Hello again, ada #2!`,
-each with one `sql` effect (params `{":name": "ada"}`, rows `[[1]]` then `[[2]]`) and `replayed: true`. Then
+each with one `sql` effect (params `{":name": "ada"}`, rows `[[1]]` then `[[2]]`, `rows_written: 1` both times) and `replayed: true`. Then
 `compile` hello.tape with the line `repeat: True,` taken out: `ok: false`, one diagnostic, C54 at line 11, and its
 `fix` says what to write. The tool descriptions hold the program and these answers.
 
