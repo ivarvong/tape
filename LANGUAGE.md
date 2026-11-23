@@ -95,18 +95,18 @@ On `Int`: `+ - *` and unary `-` give the exact result, and trap (integer overflo
 and on the least Int by -1 (integer overflow: the quotient does not fit, so neither does the remainder). `& | ^`
 work on the 64 bits. `a << n` and `a >> n` take a shift `n` from 0 to 63 and trap on any other; `<<` drops the
 bits it moves out, `>>` copies the sign in. Where a hash or a checksum means arithmetic modulo 2^64, it says so:
-`wrapping_add(a, b)`, `wrapping_sub(a, b)` and `wrapping_mul(a, b)` give the low 64 bits of the exact result.
+`wrapping_add(a: …, b: …)`, `wrapping_sub(a: …, b: …)` and `wrapping_mul(a: …, b: …)` give the low 64 bits of the exact result.
 
 On `Dec[s]`: `+` and `-` take two Decs of one scale. Two scales are refused (C14), and the fix is the one way to
-change a scale: `rescale(x, to: 3)` adds digits, exactly; `round(x, to: 2, rounding: HalfEven)` drops them as
+change a scale: `rescale(x: …, to: 3)` adds digits, exactly; `round(x: …, to: 2, rounding: HalfEven)` drops them as
 the rounding says. A literal is a Dec at the scale it is written: `price + 0.5` with a `Dec[2]` price is refused,
 and the fix is `0.50`; `5` is an Int, so a Dec of five is `5.00`. `a * b` is exact and adds the scales (a
 `Dec[2]` times a `Dec[3]` is a `Dec[5]`, refused past 18); an Int is a count, so `price * qty` stays a `Dec[2]`.
-`== != < <= > >=` compare values whatever the scales: `1.50 == 1.5`. There is no `/` or `%` (C19): `div(a, by:
-b, scale: 2, rounding: HalfEven)` is the quotient at a scale, and `mul(a, by: b, scale: 2, rounding: HalfEven)` a
+`== != < <= > >=` compare values whatever the scales: `1.50 == 1.5`. There is no `/` or `%` (C19): `div(a: …,
+by: …, scale: 2, rounding: HalfEven)` is the quotient at a scale, and `mul(a: …, by: …, scale: 2, rounding: HalfEven)` a
 product with fewer digits than `*` keeps, each rounded once from the exact value: they compute through a 128-bit
 intermediate, so a rate applied to an amount, or `a * b / c`, loses nothing before the one rounding, and traps
-only when the result does not fit. `by` may be an Int. `dec(n, scale: 2)` is an Int as a Dec, `to_int(x,
+only when the result does not fit. `by` may be an Int. `dec(n: …, scale: 2)` is an Int as a Dec, `to_int(x: …,
 rounding: Down)` a Dec as an Int, `float(x)` the Float nearest a Dec, and `to_dec(x, scale: 2, rounding:
 HalfEven)` a Float's exact value, rounded (`2.675f` is a little below 2.675, so HalfUp gives 2.67). The scales
 these take are numbers written in the call. `abs`, `min` and `max` take Decs of one scale. The roundings:
@@ -121,7 +121,7 @@ traps (trap 8, float not finite), so every Float a program holds is finite. Unar
 compare values, and `-0f == 0f`. There is no `%` and no bitwise operator (C19), and an Int and a Float do not mix
 (C14): `float(n)` is the Float nearest an Int, and `trunc(x)` the Int toward zero, trapping (integer overflow)
 outside the Ints. `floor(x)`, `ceil(x)`, `abs(x)` and `sqrt(x)` are exactly as IEEE 754 defines them (`sqrt` of a
-negative traps); `abs`, `min(a, b)` and `max(a, b)` take two Ints or two Floats. `sin(x)`, `cos(x)`,
+negative traps); `abs`, `min(a: …, b: …)` and `max(a: …, b: …)` take two Ints or two Floats. `sin(x)`, `cos(x)`,
 `atan2(y:, x:)`, `exp(x)`, `log(x)` and `pow(x:, y:)` are musl's (fdlibm's, and Arm's), compiled into the module as
 Wasm, so a result is the same bits in every engine and in a replay: within 1 ulp of the true value (atan2, 1.5 ulp),
 and a trap where it would be infinite or not a number (`log(0f)`, `exp(1000f)`, `pow(x: -8f, y: 0.5f)`). A
@@ -299,7 +299,7 @@ A Dec is given to a query as its count, an INTEGER (12.30 is 1230), and an INTEG
 as a count at the field's scale; so the SQL sees counts, and `CHECK (amount > 0)` and `SUM(amount)` work on them.
 A count beyond ±2^53 stops the request rather than reach the database rounded. In JSON a Dec is written as text,
 `"12.30"`, exact for any reader, and decoded from a number or text that is exactly a Dec of the field's scale
-(`12.3` and `"12.300"` for a `Dec[2]`, but not `12.345`: `amount: not a Dec[2]`). `parse_dec(text, scale: 2)` reads
+(`12.3` and `"12.300"` for a `Dec[2]`, but not `12.345`: `amount: not a Dec[2]`). `parse_dec(text: …, scale: 2)` reads
 one from text the same way, as an `Option`.
 
 **A call is a commit point.** Writes made before a `call` or `ask` are durable when it is sent. The run may end
@@ -473,12 +473,12 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Job | The form | Otherwise |
 |---|---|---|
 | Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); `null` for an `Option` field is refused: it is there or it is not. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
-| Write JSON | `write_json(value)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows)` for the rows of a query | C09 |
-| Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
+| Write JSON | `write_json(value: …)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows: …)` for the rows of a query | C09 |
+| Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list: …, sep: …)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
 | Hold money, or any number with a fixed count of decimals | `Dec[s]`, with literals at its scale (`12.30`) | C14 |
-| Change a Dec's scale | `rescale(x, to: 3)` up, exactly; `round(x, to: 2, rounding: HalfEven)` down | C14 |
-| Divide a Dec, or apply a rate | `div(a, by: b, scale: 2, rounding: HalfEven)`, `mul(a, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
+| Change a Dec's scale | `rescale(x: …, to: 3)` up, exactly; `round(x: …, to: 2, rounding: HalfEven)` down | C14 |
+| Divide a Dec, or apply a rate | `div(a: …, by: …, scale: 2, rounding: HalfEven)`, `mul(a: …, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
 | Money in currencies of different places (USD 2, JPY 0) | one scale for all, `Dec[2]`; for a 0-place currency compute at scale 0 and rescale up, `rescale(x: mul(a: sub, by: rate, scale: 0, rounding: HalfUp), to: 2)`, rather than round a 2-place result (that rounds twice) | C14 |
 | Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back. sin, cos, atan2, exp, log and pow are Float's: a Dec has none (`sin(x)` of a Dec is C14), so an exact kernel stays Int, with Dec at its edges | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
@@ -495,7 +495,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |
-| Answer | functions return a value (`Outcome`); one function turns it into bytes: `respond(status)`, or `respond_as(status, content: Json)` for a type, then the body | |
+| Answer | functions return a value (`Outcome`); one function turns it into bytes: `respond(status: …)`, or `respond_as(status: …, content: Json)` for a type, then the body | |
 | Set a response header | `respond(status: 302) \|> header(name: "location", value: url)`, anywhere before or after the body. A name is a token, a value has no CR, LF or NUL; the host refuses those it sets itself (content-type, set-cookie, the security headers) and answers 500 with the reason | |
 | Read a request header | `header_of(request: r, name: "if-none-match")`, an `Option[View]`; the host passes only those it means a program to see | |
 
@@ -741,7 +741,7 @@ what went before.
 | 23 November 2026 | no response headers (a redirect had no Location) and no request headers | `header(name:, value:)` on an answer and `header_of(request:, name:)`; the status line carries them, `STATUS CR name: value LF BODY`, checked by the host (host.ts responseOf) |
 | 23 November 2026 | a JSON list of computed items needed a Buf kept in a record (C08), and `Cons(head: 1, tail: Nil)` in a `let` could not tell its type (C21) | std: `write_json_list`, `write_each`, `join`; a constructor's later fields take the type parameters its earlier ones gave |
 | 23 November 2026 | a debit after its transfer id was inserted (`ON CONFLICT DO NOTHING`, the row required by a step) was C54, and agents marked it `repeat: True` | the claim is an op-id guard: C54 takes a write that runs only once the claim inserted its row |
-| 23 November 2026 | byte classes, a number with a sign or leading zeros, min and max written by hand in each program | std: `is_digit is_alpha is_alnum is_space is_lower is_upper`, `every_byte(v, keep)`, `parse_int(text)`, `min`, `max` |
+| 23 November 2026 | byte classes, a number with a sign or leading zeros, min and max written by hand in each program | std: `is_digit is_alpha is_alnum is_space is_lower is_upper`, `every_byte(v: …, keep: …)`, `parse_int(text: …)`, `min`, `max` |
 | 23 November 2026 | `Some("")` as a pattern was P01 (a name expected), though `Some("")` builds one; parse errors named only the token | the one field of a constructor takes its pattern unnamed; a backtick, `;`, `&&`, `!`, a single quote, `if`, `return` and `let x: T` are each named for what they are, with what Tape writes instead |
 | 23 November 2026 | a field given a pattern bound only what the pattern bound, so `Some(value: Account(…)) -> value` was C16 | the field's name is bound too, where the arm reads it and nothing else binds it |
 | 23 November 2026 | a `let` whose pattern opened with a name (`let head ++ "&" ++ rest = q else …`) read as a plain `let` (P01) | every pattern a match arm takes stands there; a `STRICT` table's PRIMARY KEY is known NOT NULL (C69), and C69's fix is the declaration to write |

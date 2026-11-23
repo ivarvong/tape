@@ -140,7 +140,7 @@ What to notice:
   claim needs nothing more (C54 sees the claim); `repeat: True` is only for a write meant to apply on every attempt.
   Without the `UNIQUE` key and its `ON CONFLICT` the compiler refuses the INSERT (C55).
 - **`rollback(out:)`** answers and undoes this request's writes: the claim of an order for an unknown item goes too.
-- **JSON out** is `respond_as(status, content: Json)` and `write_json` of a record.
+- **JSON out** is `respond_as(status: …, content: Json)` and `write_json(value: …)` of a record.
 - **A call to another program** (a payment, say) is in [`LANGUAGE.md`](../LANGUAGE.md) section 8, a whole program
   with one: a `once:` key that names the row, a pending state, and a timer (`wake`, `woken`) that sends the call
   again until it is answered. The `run` tool answers such calls from its `remotes` argument ([`mcp.md`](mcp.md)).
@@ -214,8 +214,8 @@ respond(status: 200) |> append(view: "Hello again, ") |> append(view: name) |> a
 ```
 
 So that the rule has something to work with, every function in std, and every built-in, takes the value it works
-on first: `append(buf, view)`, `write_int(out, value)`, `until(v, byte)`, `get(map, key)`, `fold(list, from, by)`,
-`sql_first(db, …)`, `decode(json, as)`, `call(to, …)`. A new function should do the same. `|>` binds tighter than
+on first: `append(buf: …, view: …)`, `write_int(out: …, value: …)`, `until(v: …, byte: …)`, `get(map: …, key: …)`,
+`fold(list: …, from: …, by: …)`, `sql_first(db: …, …)`, `decode(json: …, as: …)`, `call(to: …, …)`. A new function should do the same. `|>` binds tighter than
 comparisons and looser than arithmetic: `x + 1 |> f()` pipes `x + 1`, and `x |> f() == 3` compares the result.
 Errors say what went wrong: naming the first parameter again is `C12 … The value before |> is already scale's
 first parameter, amount`; a right side that is not a call is `P07`.
@@ -304,7 +304,7 @@ with what the step left (`advance` above, through `carry`), which compiles to a 
 
 ## JSON: records, lists, and records inside records
 
-`decode(json, as: T)` gives `Result[T, View]` and `write_json(out, value)` writes one; a message between programs
+`decode(json: …, as: T)` gives `Result[T, View]` and `write_json(value: …)` writes one; a message between programs
 is the same thing in each direction. This is the one way to read a body: a body that may be one of several shapes
 decodes as a type with several constructors (`examples/todo.tape`), and the pattern `json(T(…))` that used to do
 this is refused (C35). A field of a JSON type is:
@@ -467,7 +467,7 @@ Every build runs the rules in `rules.ts` after type-checking. Each rejects a kin
 | C88 | `repeat: True` or `no_floor: True` on a call whose statement the rule it answers (C54 and C55, or C73) would accept anyway. The argument is a claim about the write, so it is refused where it is not true. |
 | C80 | a constructor declared `final` made where a second run may decide otherwise: a condition, guard or match subject on the way to it (in its function, or in a caller that answers with it) reads the clock in a way that can flip (`now() > t` is allowed on its own arm, `now() < t` on the arms after it), or an `ask`'s reply ([design](design.md#timers-c77-to-c80)) |
 
-C54 does not count an assignment that settles on its first run: `col = max(col, e)`, `min(col, e)`,
+C54 does not count an assignment that settles on its first run: `col = max(a: col, b: e)`, `min(a: col, b: e)`,
 `coalesce(col, e)` or `ifnull(col, e)`, where e reads no column the write changes. A write that takes from a
 column with no floor says so in the call with `no_floor: True`. A write that may leave any state says so by listing them:
 `AND live IN (0, 1)`.

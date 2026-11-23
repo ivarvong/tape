@@ -10,7 +10,7 @@ The examples under a function (`> expression`, then what it gives) are run by `t
 
 ### Respond with JSON
 
-`respond(status)` answers `text/plain`. `respond_as(status, content: Json)` answers `application/json`; then write the body with `write_json` (a record) or `write_rows` (the rows of a query). An error body is a record too.
+`respond(status: …)` answers `text/plain`. `respond_as(status: …, content: Json)` answers `application/json`; then write the body with `write_json` (a record) or `write_rows` (the rows of a query). An error body is a record too.
 
 ```tape
 type Item {
@@ -171,7 +171,7 @@ Uses: [`parse_dec`](#builtin-parse_dec), [`mul`](#builtin-mul), [`div`](#builtin
 
 ### Validate characters
 
-`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v, keep)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.
+`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v: …, keep: …)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.
 
 ```tape
 // a slug: 1 to 32 bytes of a-z, 0-9 and -

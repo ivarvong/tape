@@ -315,7 +315,7 @@ const TASKS: Task[] = [
   {
     title: 'Respond with JSON',
     uses: ['fn respond_as', 'type Content', 'builtin write_json', 'fn write_rows', 'fn respond'],
-    text: '`respond(status)` answers `text/plain`. `respond_as(status, content: Json)` answers `application/json`; then write the body with `write_json` (a record) or `write_rows` (the rows of a query). An error body is a record too.',
+    text: '`respond(status: …)` answers `text/plain`. `respond_as(status: …, content: Json)` answers `application/json`; then write the body with `write_json` (a record) or `write_rows` (the rows of a query). An error body is a record too.',
     program: `type Item {
   Item(id: Int, name: View)
 }
@@ -458,7 +458,7 @@ fn query_of(raw: View) -> View {
   {
     title: 'Validate characters',
     uses: ['fn every_byte', 'fn is_lower', 'fn is_digit', 'fn is_alpha', 'fn is_alnum', 'builtin len'],
-    text: '`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v, keep)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.',
+    text: '`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v: …, keep: …)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.',
     program: `// a slug: 1 to 32 bytes of a-z, 0-9 and -
 type Slug = View where len(self) >= 1 and len(self) <= 32 and every_byte(v: self, keep: slug_byte)
 

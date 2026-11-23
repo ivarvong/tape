@@ -69,7 +69,7 @@ Every response names its request (`tape-request-id`) and carries signed links to
 ### What a program answers
 
 A program answers `STATUS LF BODY` (`respond(status)`, served as `text/plain`) or `STATUS SP TYPE LF BODY`
-(`respond_as(status, content: Html)`; `Json`, `Text`, `Css`, `Svg` and `Csv` too). The type is from a closed list; other
+(`respond_as(status: …, content: Html)`; `Json`, `Text`, `Css`, `Svg` and `Csv` too). The type is from a closed list; other
 headers follow the status line, each after a carriage return (`header(name:, value:)`: `Location`, `cache-control`),
 and the host refuses those it sets itself (content-type, set-cookie, the security headers) with a 500 that says why.
 A first line that is neither form is all body. A program reads the request headers the host passes (accept,
@@ -80,7 +80,7 @@ content-type, if-match, if-none-match, idempotency-key and x-…, never cookie o
 After `PUT /_public/:account/:name {"published": true}` (operator), `/p/:account/:name/<path>` answers GET, HEAD and
 POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. The program
 sees who called: the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)` says so.
-For HTML forms, std/http has `form_field(body, name)` and `write_html(out, text)` (escaped). `apps/tickets/` is a
+For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
 box office served this way.
 
 ## Tools for agents

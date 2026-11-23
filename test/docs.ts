@@ -5,7 +5,7 @@
 // missing ("no `x` yet", "there is no `x`") is wrong when std or the compiler has it; and each limit the docs once
 // stated and a release lifted is looked for by its words and proven lifted by a program here.
 import '../node25.ts';
-import { compile } from '../compiler.ts';
+import { compile, parseProgram } from '../compiler.ts';
 import { INTRINSICS } from '../compiler/types.ts';
 import { finish, ok, raw, std } from './harness.ts';
 
@@ -135,4 +135,38 @@ for (const l of LIFTED) {
     );
   }
 }
+// ---- a std function in prose is written with its parameters' names. guide.md's "`every_byte(v, keep)` is True
+// when …" read as a call by position, and on the 2026-11-23e bench five runs wrote `every_byte(self, fn …)` (C11)
+// after finding the name there. So a call in backticks, outside a code block, to a std function or built-in of two or
+// more parameters names each argument (`every_byte(v: …, keep: …)`). Not looked at: a function a doc defines
+// itself, LANGUAGE.md's history (section 11 on), which records what each release said, and the one sentence in
+// std.md that shows the shorthand itself.
+{
+  const params = new Map<string, readonly string[]>();
+  for (const f of parseProgram(std).fns.values())
+    if (!f.name.includes('.'))
+      params.set(
+        f.name,
+        f.params.filter(p => !p.implicit).map(p => p.name),
+      );
+  for (const [n, ps] of INTRINSICS) if (ps) params.set(n, ps);
+  // a function a doc's own program defines (LANGUAGE.md's `fn pow(b: Int, e: Int)`) is that program's, not std's
+  for (const { text } of docs) for (const [, n = ''] of text.matchAll(/\bfn ([a-z_][a-z0-9_]*)\(/g)) params.delete(n);
+  const bare: string[] = [];
+  for (const { path, text } of docs) {
+    const body = path === 'LANGUAGE.md' ? text.slice(0, text.indexOf('\n## 11.')) : text;
+    let inBlock = false;
+    body.split('\n').forEach((line, i) => {
+      if (line.startsWith('```')) inBlock = !inBlock;
+      if (inBlock || line.includes('may be written bare')) return;
+      for (const [whole, name = '', inner = ''] of line.matchAll(/`([a-z_][a-z0-9_]*)\(([^`()]*)\)[^`]*`/g)) {
+        const ps = params.get(name);
+        if (ps === undefined || ps.length < 2 || inner.trim() === '' || inner.trim() === '…') continue;
+        if (inner.split(',').some(a => !a.includes(':') && a.trim() !== '…')) bare.push(`${path}:${i + 1}: ${whole}`);
+      }
+    });
+  }
+  ok(`a std call in the docs' prose names its arguments: ${bare.join('; ')}`, bare.length === 0);
+}
+
 finish();
