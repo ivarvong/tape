@@ -4,6 +4,6 @@
   "compilerOptions": {
     "lib": ["esnext", "dom", "dom.iterable"]
   },
-  "include": ["*.ts", "../../apps/playground/env.d.ts"],
+  "include": ["*.ts", "obs/*.ts", "../../apps/playground/env.d.ts"],
   "exclude": []
 }
