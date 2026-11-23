@@ -27,7 +27,7 @@ const want: Record<string, readonly [string, string]> = {
   '1a': ['C78', "UPDATE holds SET state = 'refunding'"],
   '1b': ['C78', "UPDATE holds SET state = 'held', note = :reason"],
   '1c': ['C78', 'INSERT INTO holds(client, tier, buyer, qty, amount, expires) VALUES'],
-  '2a': ['C79', 'Err(error) -> unknown(id)'],
+  '2a': ['C79', 'Err(error) -> unknown(id, n: tries)'],
   '2b': ['C79', 'Hold(id, state: "held", expires) -> {'],
   '2c': ['C79', 'RetryIn(after) -> {\n      shown_hold(found: load_hold(id))'],
   '2d': ['C79', 'Hold(state: "refunding") -> ShowHold'],

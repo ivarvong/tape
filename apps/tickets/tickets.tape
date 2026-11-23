@@ -456,6 +456,7 @@ fn charge(hold: Hold) -> Outcome {
   let Hold(id, card, amount, attempt) = hold
   charged(
     id,
+    tries: tries_of(id),
     reply: call(
       to: pay,
       method: "charge",
@@ -467,7 +468,7 @@ fn charge(hold: Hold) -> Outcome {
   )
 }
 
-fn charged(id: Int, reply: Result[Charged, CallError]) -> Outcome {
+fn charged(id: Int, tries: Int, reply: Result[Charged, CallError]) -> Outcome {
   match reply {
     Ok(value) -> confirmed(moved: sql_move(
       row: Hold,
@@ -485,26 +486,22 @@ fn charged(id: Int, reply: Result[Charged, CallError]) -> Outcome {
         id
       )
     )
-    Err(error) -> unknown(id)
+    Err(error) -> unknown(id, n: tries)
   }
 }
 
 // An unknown outcome: the charge may have been made. The timer asks pay again with the same once key, waiting
 // longer each time (std/retry backoff: 5 s, doubling, at most 10 min); after `tries` unknown answers in a row the
 // hold rests in unresolved, its seats still taken, for a person to settle with pay (its last timer then finds it
-// so and sets none). The count moves by compare-and-set, so a run woken twice counts once.
+// so and sets none). The count moves by compare-and-set from the count read before the ask (tries_of), so a run
+// woken twice, or a checkout sent twice at once, counts once (refund_unknown found it first).
 fn pay_retry() -> Backoff {
   Backoff(first: 5000, factor: 2, most: 600000, tries: 10)
 }
 
-fn unknown(id: Int) -> Outcome {
+fn unknown(id: Int, n: Int) -> Outcome {
   // first the shortest wait, so no way out of this run leaves the hold without a timer; ask_again moves it later
   do wake(after: 5000, key: id)
-  let Some(value: Count(n)) = sql_first(
-    row: Count,
-    query: "SELECT tries AS n FROM holds WHERE id = :id",
-    id
-  ) else -> Problem(status: 404, reason: "no such hold")
   match sql_move(
     row: Count,
     query: "UPDATE holds SET tries = :n + 1, note = 'payment outcome unknown; it is asked again' \

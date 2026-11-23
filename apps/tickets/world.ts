@@ -34,7 +34,7 @@ export function compiled(
 }
 
 /** A fault on the pay hop. */
-export type Fault = 'lost-before' | 'lost-after' | 'gate';
+export type Fault = 'lost-before' | 'lost-after' | 'gate' | 'gate-lost';
 /** What a request was answered with: `json` is the body when it is JSON, else null. */
 export type Answer = { status: number; type: string | undefined; json: unknown; text: string };
 type Row = Record<string, Cell>;
@@ -51,6 +51,7 @@ const jsonOf = (text: string): unknown => {
 //   'lost-before'  the call never reaches pay (an unknown outcome to the caller)
 //   'lost-after'   pay runs and commits, and the reply is lost (an unknown outcome; the money moved)
 //   'gate'         the call waits until world.open() (to interleave a timer or another request with it)
+//   'gate-lost'    the call waits until world.open(), then never reaches pay (an unknown outcome, late)
 function wired(tickets: Built, payBuilt: Built) {
   const paySql = nodeSql();
   const sql = nodeSql();
@@ -62,10 +63,11 @@ function wired(tickets: Built, payBuilt: Built) {
     const fault = faults.shift() ?? null;
     calls.push({ method: meta.method, key: meta.key, fault });
     if (fault === 'lost-before') throw new Error('lost before pay');
-    if (fault === 'gate')
+    if (fault === 'gate' || fault === 'gate-lost')
       await new Promise<void>(opened => {
         gates.push(opened);
       });
+    if (fault === 'gate-lost') throw new Error('lost before pay, late');
     const r = await pay.serve({ method: meta.method, fingerprint: meta.fingerprint, key: meta.key }, bytes, {
       transaction: f => paySql.transaction(f),
     });

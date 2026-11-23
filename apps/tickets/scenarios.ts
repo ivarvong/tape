@@ -248,6 +248,31 @@ const sleep = (ms: number): Promise<void> =>
   inv('never answered', w);
 }
 
+// 3c. A checkout sent twice at once, both charges unknown: counted as one unknown answer, as one checkout is (`tape
+// sim`'s repeat check: a request sent again at once must not change where the rows end up). The first's charge is
+// held out while the second runs; then both are lost.
+{
+  const w = await fresh();
+  const h = made(await hold(w, 4, 'kim', 1));
+  w.faults.push('gate-lost', 'lost-before');
+  const first = w.req(`POST /holds/${h.id}/checkout`, { card: 'visa-4242' });
+  await gated(w);
+  const again = await w.req(`POST /holds/${h.id}/checkout`, { card: 'visa-4242' });
+  w.open();
+  const r = await first;
+  T(
+    'checkout sent twice at once, both unknown: 202 twice, paying, tries 1 (one unknown answer), two charges sent',
+    [
+      r.status,
+      again.status,
+      w.row(`SELECT state, tries FROM holds WHERE id = ${h.id}`),
+      w.calls.filter(c => c.method === 'charge').length,
+    ],
+    [202, 202, { state: 'paying', tries: 1 }, 2],
+  );
+  inv('checkout sent twice at once', w);
+}
+
 // 4. Duplicate checkout retries, and a declined card.
 {
   const w = await fresh();
