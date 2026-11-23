@@ -38,6 +38,7 @@ const DOCS: [from: string, to: string][] = [
   ['LANGUAGE.md', 'LANGUAGE.md'],
   ['docs/guide.md', 'guide.md'],
   ['docs/mcp.md', 'mcp.md'],
+  ['docs/std.md', 'std.md'],
 ];
 
 export type Job = { task: string; rep: number; id: string };
@@ -90,8 +91,8 @@ const SYSTEM = (
 
 You have:
 - the task, in TASK.md (also below);
-- Tape's public documentation in ./docs: README.md, LANGUAGE.md, guide.md and mcp.md (links in them to other files of
-  the Tape repository do not resolve here);
+- Tape's public documentation in ./docs: README.md, LANGUAGE.md, guide.md, mcp.md and std.md (the standard library
+  reference) (links in them to other files of the Tape repository do not resolve here);
 - the \`tape\` MCP server's tools: compile, run and feedback.
 There is nothing else: no repository, no shell, no web.
 

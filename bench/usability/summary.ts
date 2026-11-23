@@ -111,7 +111,7 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
     `Run ${info.date} against prod ${info.mcpUrl}: \`tape-version: ${info.tapeVersion}\`, \`tape-mcp-version: ${info.tapeMcpVersion}\`. ` +
       `Agent: \`claude -p\`, model \`${info.model}\`, ${info.n} run(s) per task, ${info.parallel} at a time, ` +
       `budget $${info.budgetUsd} and ${info.timeoutMin} min per run. Bench at \`${info.benchSha}\`. Each agent had only the ` +
-      'task spec, README.md, LANGUAGE.md, docs/guide.md and docs/mcp.md (local copies), and the MCP tools compile, run, feedback.',
+      'task spec, README.md, LANGUAGE.md, docs/guide.md, docs/mcp.md and docs/std.md (local copies), and the MCP tools compile, run, feedback.',
     '',
   );
   put('## Headline', '');
