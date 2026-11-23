@@ -235,9 +235,10 @@ function compileAll(fr: Front, opts: Options, L: layout.Layouts) {
     const f = tables.order[i];
     if (f) compiled.push(compileFn(f));
   }
-  checkUnreached(fr, opts, L, { imports, callsOf, counters }, tables);
+  // a flag read only by a function the exports do not reach (`handle`, when the doc examples are the exports) is read
+  const readUnreached = checkUnreached(fr, opts, L, { imports, callsOf, counters }, tables);
   for (const fl of prog.flags)
-    if (!filled.flagRead.has(fl.name))
+    if (!filled.flagRead.has(fl.name) && !readUnreached.has(fl.name))
       fail(
         fl,
         'C38',
@@ -278,7 +279,7 @@ function levelsOf(compiled: Compiled[]): Map<string, number> {
 /**
  * Every function the exports do not reach, type-checked all the same: compiled into tables of its own and thrown
  * away, so a mistake in a function nothing calls yet is the program's error, at its line, and the module is what it
- * was. A generic function is checked where it is called, for the types it is called with.
+ * was. A generic function is checked where it is called, for the types it is called with. Gives the flags they read.
  */
 function checkUnreached(
   fr: Front,
@@ -286,14 +287,16 @@ function checkUnreached(
   L: layout.Layouts,
   parts: { imports: mod.Imports; callsOf: mod.CallGraph; counters: { lambdas: number } },
   reached: mod.Tables,
-): void {
+): ReadonlySet<string> {
   const { prog } = fr;
   const rest = [...prog.fns.values()].filter(f => f.tparams.length === 0 && !reached.indexOf.has(f.name));
-  if (rest.length === 0) return;
+  if (rest.length === 0) return new Set();
   const tables = mod.tables(prog, parts.imports.FIRST);
-  const kit = toolkit(fr, opts, L, { tables, imports: parts.imports, callsOf: parts.callsOf, filled: filling() });
+  const filled = filling();
+  const kit = toolkit(fr, opts, L, { tables, imports: parts.imports, callsOf: parts.callsOf, filled });
   const check = functionCompiler(kit, parts.counters);
   for (const f of rest) check(f);
+  return filled.flagRead;
 }
 
 /** The JSON Schema of a type the simulator will need, or null when it has none. */

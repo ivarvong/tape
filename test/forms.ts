@@ -578,6 +578,28 @@ T(
       [15, false, 'an example needs what it should give on the next comment line'],
     ],
   );
+  // a program with a flag that only `handle` reads: an example of a pure function compiles without `handle` as an
+  // export, and the flag is still read (it was C38 "flag limit is never read" on every example)
+  const flagged = `flag limit: Int = 3
+fn handle(raw: View) -> Buf {
+  respond(status: 200) |> write_int(value: twice(flags.limit))
+}
+
+//   > twice(4)
+//   8
+fn twice(n: Int) -> Int {
+  n * 2
+}
+`;
+  T(
+    'doctest: a program whose flag only an entry point reads runs its examples',
+    doctests([...std, { name: 'flagged.tape', text: flagged }], 'flagged.tape').map(r => [
+      r.line,
+      r.ok,
+      'error' in r ? r.error : null,
+    ]),
+    [[6, true, null]],
+  );
 }
 
 // ---- 4. timers: wake(timer, after, key), the Timer capability, `woken`, and std/retry.tape on top
