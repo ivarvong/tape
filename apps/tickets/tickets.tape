@@ -89,6 +89,12 @@ migration 3 "payment asks" {
   ALTER TABLE holds ADD COLUMN tries INTEGER NOT NULL DEFAULT 0
 }
 
+// How many times in a row a canceled event's sweep found a charge or refund still out and waited. Before it, the
+// sweep re-armed a 5 s timer for as long as one was out. (holds.tries counts a refund's unknown answers too.)
+migration 4 "sweep waits" {
+  ALTER TABLE events ADD COLUMN waits INTEGER NOT NULL DEFAULT 0
+}
+
 machine events.state {
   "onsale" -> "canceled"
 }
@@ -103,6 +109,7 @@ machine holds.state {
   "confirmed" -> "refunding"
   "refunding" -> "refunded"
   "refunding" -> "refund_failed"
+  "refunding" -> "refund_unresolved"
 }
 
 machine tickets.state {
@@ -752,6 +759,7 @@ fn due(found: Option[Hold]) -> Outcome {
     Hold(state: "refunded") -> ShowHold(status: 200, hold)
     Hold(state: "refund_failed") -> ShowHold(status: 200, hold)
     Hold(state: "unresolved") -> ShowHold(status: 200, hold)
+    Hold(state: "refund_unresolved") -> ShowHold(status: 200, hold)
   }
 }
 
@@ -763,8 +771,8 @@ fn due(found: Option[Hold]) -> Outcome {
 fn refund(id: Int) -> Outcome {
   match sql_move(
     row: Hold,
-    query: "UPDATE holds SET state = 'refunding' WHERE id = :id AND state = 'confirmed' \
-        RETURNING *",
+    query: "UPDATE holds SET state = 'refunding', tries = 0 WHERE id = :id \
+        AND state = 'confirmed' RETURNING *",
     id
   ) {
     Moved(value) -> {
@@ -792,6 +800,7 @@ fn refund_hold(hold: Hold) -> Outcome {
   let Hold(id, card, amount) = hold
   refunded(
     id,
+    tries: tries_of(id),
     reply: call(
       to: pay,
       method: "refund",
@@ -803,6 +812,14 @@ fn refund_hold(hold: Hold) -> Outcome {
   )
 }
 
+// The count of unknown answers as it was before an ask (refund_unknown moves it on from there).
+fn tries_of(id: Int) -> Int {
+  match sql_first(row: Count, query: "SELECT tries AS n FROM holds WHERE id = :id", id) {
+    Some(value: Count(n)) -> n
+    None -> 0
+  }
+}
+
 fn refund_refused(moved: Move[Hold]) -> Outcome {
   match moved {
     Moved(value) -> ShowHold(status: 200, hold: value)
@@ -811,7 +828,7 @@ fn refund_refused(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn refunded(id: Int, reply: Result[Refunded, CallError]) -> Outcome {
+fn refunded(id: Int, tries: Int, reply: Result[Refunded, CallError]) -> Outcome {
   match reply {
     Ok(value) -> settled(moved: sql_move(
       row: Hold,
@@ -829,10 +846,51 @@ fn refunded(id: Int, reply: Result[Refunded, CallError]) -> Outcome {
       reason,
       id
     ))
-    Err(error) -> {
-      do wake(after: 5000, key: id)
+    Err(error) -> refund_unknown(id, n: tries)
+  }
+}
+
+// A refund with an unknown outcome, as unknown() for a charge: the timer asks pay again with the same once key,
+// waiting pay_retry()'s backoff, and after its tries unknown answers in a row the hold rests in refund_unresolved
+// (tickets still valid, seats still taken, the money refunded or not) for a person to settle with pay. Before it the
+// timer asked again every 5 s for ever. `n` is the count read before the ask, so two asks out at once (a request sent
+// twice) count once: the second's compare-and-set loses and takes the first's count (`tape sim` found a duplicate
+// request counting twice when the count was read after the call).
+fn refund_unknown(id: Int, n: Int) -> Outcome {
+  do wake(after: 5000, key: id)
+  match sql_move(
+    row: Count,
+    query: "UPDATE holds SET tries = :n + 1, note = 'refund outcome unknown; it is asked again' \
+        WHERE id = :id AND state = 'refunding' AND tries = :n RETURNING tries AS n",
+    n,
+    id
+  ) {
+    Moved(value: Count(n: asks)) -> refund_ask_again(
+      id,
+      decided: backoff(policy: pay_retry(), failed: asks)
+    )
+    Raced(now: Count(n: seen)) -> refund_ask_again(
+      id,
+      decided: backoff(policy: pay_retry(), failed: seen)
+    )
+    NoRow -> Problem(status: 404, reason: "no such hold")
+  }
+}
+
+fn refund_ask_again(id: Int, decided: Retry) -> Outcome {
+  match decided {
+    RetryIn(after) -> {
+      do wake(after, key: id)
       shown_hold(found: load_hold(id))
     }
+    GaveUp(tries) -> refund_refused(moved: sql_move(
+      row: Hold,
+      query: "UPDATE holds SET state = 'refund_unresolved', note = 'refund outcome still unknown \
+          after ' || :tries || ' asks; settle it with pay' WHERE id = :id \
+          AND state = 'refunding' RETURNING *",
+      tries,
+      id
+    ))
   }
 }
 
@@ -862,8 +920,42 @@ fn cancel_event(id: Int) -> Outcome {
       do wake(after: 0, key: 0 - id)
       ShowEvent(status: 202, event: value)
     }
-    Raced(now) -> ShowEvent(status: 200, event: now)
+    Raced(now) -> resumed(event: now)
     NoRow -> Problem(status: 404, reason: "no such event")
+  }
+}
+
+// Canceling a canceled event again: a sweep that gave up waiting (sweep_retry) starts again from no waits.
+fn resumed(event: Event) -> Outcome {
+  let Event(id) = event
+  let Some(value: Count(n)) = sql_first(
+    row: Count,
+    query: "SELECT waits AS n FROM events WHERE id = :id",
+    id
+  ) else -> Problem(status: 404, reason: "no such event")
+  match {
+    n >= sweep_tries() -> restarted(
+      event,
+      moved: sql_move(
+        row: Count,
+        query: "UPDATE events SET waits = 0 WHERE id = :id AND state = 'canceled' AND waits = :n \
+            RETURNING waits AS n",
+        n,
+        id
+      )
+    )
+    else -> ShowEvent(status: 200, event)
+  }
+}
+
+fn restarted(event: Event, moved: Move[Count]) -> Outcome {
+  let Event(id) = event
+  match moved {
+    Moved -> {
+      do wake(after: 0, key: 0 - id)
+      ShowEvent(status: 202, event)
+    }
+    _ -> ShowEvent(status: 200, event)
   }
 }
 
@@ -880,7 +972,7 @@ fn sweep(event: Int) -> Outcome {
   do sql_exec(
     query: "UPDATE tiers SET left = capacity - (SELECT coalesce(sum(qty), 0) FROM holds \
         WHERE holds.tier = tiers.id AND holds.state IN ('held', 'paying', 'confirmed', \
-        'refunding', 'refund_failed')) WHERE event = :event",
+        'refunding', 'refund_failed', 'unresolved', 'refund_unresolved')) WHERE event = :event",
     event
   )
   do sql_exec(
@@ -888,6 +980,11 @@ fn sweep(event: Int) -> Outcome {
         FROM tiers WHERE event = :event)",
     event
   )
+  let Some(value: Count(n: waits)) = sql_first(
+    row: Count,
+    query: "SELECT waits AS n FROM events WHERE id = :event",
+    event
+  ) else -> Problem(status: 404, reason: "no such event")
   let Some(value: Id(id)) = sql_first(
     row: Id,
     query: "SELECT h.id AS id FROM holds AS h JOIN tiers AS t ON t.id = h.tier \
@@ -896,6 +993,7 @@ fn sweep(event: Int) -> Outcome {
   ) else {
     None -> swept(
       event,
+      waits,
       open: sql_first(
         row: Count,
         query: "SELECT count(*) AS n FROM holds AS h JOIN tiers AS t ON t.id = h.tier \
@@ -904,17 +1002,73 @@ fn sweep(event: Int) -> Outcome {
       )
     )
   }
+  // a refund begun is the sweep moving on: its waits count again from none
+  do moved_on(moved: sql_move(
+    row: Count,
+    query: "UPDATE events SET waits = 0 WHERE id = :event AND state = 'canceled' \
+        AND waits = :waits RETURNING waits AS n",
+    event,
+    waits
+  ))
   do wake(after: 0, key: 0 - event)
   refund(id)
 }
 
-fn swept(event: Int, open: Option[Count]) -> Outcome {
+// Whether the reset was this run's or another's, the count is none or was just counted again: nothing more to do.
+fn moved_on(moved: Move[Count]) -> Int {
+  match moved {
+    Moved -> 1
+    _ -> 0
+  }
+}
+
+// While a charge or refund is out the sweep waits for it, longer each time (5 s doubling to 10 min). Each hold's own
+// timer settles it within pay_retry()'s tries (at most about 31 min of waits), so 20 waits in a row (about 2 h 10
+// min) means something else is wrong: the sweep stops, the event keeps its count, and canceling it again resumes it.
+fn sweep_tries() -> Int {
+  20
+}
+
+fn sweep_retry() -> Backoff {
+  Backoff(first: 5000, factor: 2, most: 600000, tries: sweep_tries())
+}
+
+// The count moves by compare-and-set, as a hold's tries do, so a sweep woken twice counts once.
+fn swept(event: Int, waits: Int, open: Option[Count]) -> Outcome {
   match open {
-    Some(value: Count(n)) if n > 0 -> {
-      do wake(after: 5000, key: 0 - event)
+    Some(value: Count(n)) if n > 0 -> waited(
+      event,
+      moved: sql_move(
+        row: Count,
+        query: "UPDATE events SET waits = :waits + 1 WHERE id = :event AND state = 'canceled' \
+            AND waits = :waits RETURNING waits AS n",
+        waits,
+        event
+      )
+    )
+    _ -> Done(status: 200, what: "every order of this event is refunded")
+  }
+}
+
+fn waited(event: Int, moved: Move[Count]) -> Outcome {
+  match moved {
+    Moved(value: Count(n)) -> wait_more(event, decided: backoff(policy: sweep_retry(), failed: n))
+    Raced(now: Count(n)) -> wait_more(event, decided: backoff(policy: sweep_retry(), failed: n))
+    NoRow -> Problem(status: 404, reason: "no such event")
+  }
+}
+
+fn wait_more(event: Int, decided: Retry) -> Outcome {
+  match decided {
+    RetryIn(after) -> {
+      do wake(after, key: 0 - event)
       Done(status: 202, what: "waiting for charges still out")
     }
-    _ -> Done(status: 200, what: "every order of this event is refunded")
+    GaveUp(tries) -> Done(
+      status: 202,
+      what: "gave up waiting for charges still out after \(tries) waits; cancel the event again \
+          to resume"
+    )
   }
 }
 
@@ -1414,7 +1568,7 @@ fn audit(out: Buf) -> Buf {
 // invariants() runs them on any database.
 
 invariant "a tier's seats left and seats held add up to its capacity" {
-  SELECT t.id, t.left, t.capacity FROM tiers AS t WHERE t.left + (SELECT coalesce(sum(h.qty), 0) FROM holds AS h WHERE h.tier = t.id AND h.state IN ('held', 'paying', 'confirmed', 'refunding', 'refund_failed', 'unresolved')) <> t.capacity
+  SELECT t.id, t.left, t.capacity FROM tiers AS t WHERE t.left + (SELECT coalesce(sum(h.qty), 0) FROM holds AS h WHERE h.tier = t.id AND h.state IN ('held', 'paying', 'confirmed', 'refunding', 'refund_failed', 'unresolved', 'refund_unresolved')) <> t.capacity
 }
 
 invariant "a tier has no fewer than no seats left, and no more than it holds" {
@@ -1422,7 +1576,7 @@ invariant "a tier has no fewer than no seats left, and no more than it holds" {
 }
 
 invariant "only a paid hold has tickets" {
-  SELECT k.id, h.state FROM tickets AS k JOIN holds AS h ON h.id = k.hold WHERE h.state NOT IN ('confirmed', 'refunding', 'refunded', 'refund_failed')
+  SELECT k.id, h.state FROM tickets AS k JOIN holds AS h ON h.id = k.hold WHERE h.state NOT IN ('confirmed', 'refunding', 'refunded', 'refund_failed', 'refund_unresolved')
 }
 
 invariant "a confirmed hold has one valid ticket for each seat" {
@@ -1436,7 +1590,13 @@ invariant "no hold is left held, paying or refunding" settled {
 // A paying hold is asked about at most pay_retry()'s tries times before it rests in unresolved: no timer re-arms
 // for ever (jepsen-tix-c1, before the cap).
 invariant "no hold is asked about its payment more often than the retry policy allows" {
-  SELECT id, state, tries FROM holds WHERE tries > 10 OR (state = 'unresolved' AND tries <> 10)
+  SELECT id, state, tries FROM holds WHERE tries > 10 OR (state LIKE '%unresolved' AND tries <> 10)
+}
+
+// A canceled event's sweep waits at most sweep_tries() times in a row before it stops (before the cap it waited every
+// 5 s for as long as a charge was out).
+invariant "no sweep waits more often than its retry policy allows" {
+  SELECT id, state, waits FROM events WHERE waits > 20 OR (waits > 0 AND state <> 'canceled')
 }
 
 invariant "a canceled event has no paid hold and nobody waiting" settled {
@@ -1446,5 +1606,5 @@ invariant "a canceled event has no paid hold and nobody waiting" settled {
 // Across two programs: what pay's ledger holds for a hold, against the hold. Only the simulator has both programs'
 // rows, so only it runs this one (`tape sim tickets.tape pay.tape`).
 invariant "a hold is charged its amount once it is confirmed, and nothing when it is not" settled with pay {
-  SELECT h.id, h.state, h.amount, (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) AS charged FROM holds AS h WHERE (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) <> CASE WHEN h.state IN ('confirmed', 'refund_failed') THEN h.amount WHEN h.state = 'unresolved' AND (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) = h.amount THEN h.amount ELSE 0 END
+  SELECT h.id, h.state, h.amount, (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) AS charged FROM holds AS h WHERE (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) <> CASE WHEN h.state IN ('confirmed', 'refund_failed') THEN h.amount WHEN h.state IN ('unresolved', 'refund_unresolved') AND (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) = h.amount THEN h.amount ELSE 0 END
 }

@@ -40,9 +40,9 @@ ok(
 );
 ok(
   'no Remote is stood in for when its program is given, and the invariants are found',
-  Object.keys(a.stubs).length === 0 && a.invariants.length === 10,
+  Object.keys(a.stubs).length === 0 && a.invariants.length === 11,
   String(a.invariants.length),
-); // eight of tickets, two of pay
+); // nine of tickets (the ninth bounds a sweep's waits), two of pay
 const alone = autoOf([{ name: 'tickets', text: tickets }], { clients: 4, ops: 10 });
 ok(
   'alone, pay is stood in for by the reply types of charge and refund',
@@ -135,7 +135,7 @@ for (const words of ['a decline without its expiry timer', 'a refund without its
 const REFUSAL = tickets.slice(
   tickets.indexOf('    // A refund the payment service refuses will be refused again'),
   tickets.indexOf(
-    '    Err(error) -> {',
+    '    Err(error) -> refund_unknown(',
     tickets.indexOf('    // A refund the payment service refuses will be refused again'),
   ),
 );
@@ -143,7 +143,16 @@ ok(
   'the refusal arm is where this test expects it',
   REFUSAL.includes('Err(error: Rejected(reason)) -> refund_refused('),
 );
-const before = tickets.replace(REFUSAL, '');
+// and, as it was then, an unknown answer asked about again every 5 s with no cap (apps/tickets/tickets.tape now backs
+// off and gives up, refund_unknown, so without the arm a refused refund ends in refund_unresolved instead)
+const UNCAPPED =
+  '    Err(error) -> {\n      do wake(after: 5000, key: id)\n      shown_hold(found: load_hold(id))\n    }';
+ok('the unknown arm is where this test expects it', tickets.includes('    Err(error) -> refund_unknown(id, n: tries)'));
+const before = tickets
+  .replace(REFUSAL, '')
+  .replace('    Err(error) -> refund_unknown(id, n: tries)', UNCAPPED)
+  .replace('refunded(id, tries: tries_of(id), reply:', 'refunded(id, reply:')
+  .replace('fn refunded(id: Int, tries: Int, reply:', 'fn refunded(id: Int, reply:');
 const strict = problems(before);
 ok(
   'C87: without that arm the program does not build',

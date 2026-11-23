@@ -29,7 +29,7 @@ const want: Record<string, readonly [string, string]> = {
   '1c': ['C78', 'INSERT INTO holds(client, tier, buyer, qty, amount, expires) VALUES'],
   '2a': ['C79', 'Err(error) -> unknown(id)'],
   '2b': ['C79', 'Hold(id, state: "held", expires) -> {'],
-  '2c': ['C79', 'Err(error) -> {\n      shown_hold(found: load_hold(id))'],
+  '2c': ['C79', 'RetryIn(after) -> {\n      shown_hold(found: load_hold(id))'],
   '2d': ['C79', 'Hold(state: "refunding") -> ShowHold'],
   '3a': ['C77', "UPDATE holds SET state = 'refunding'"],
   '3b': ['C77', "UPDATE holds SET state = 'refunding'"],

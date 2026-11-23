@@ -22,7 +22,7 @@ export const mutants: (readonly [string, ...Pair[]])[] = [
   ['1c new hold timer keyed by its tier', ['do wake(after: ms, key: hold.id)', 'do wake(after: ms, key: tier)']],
   ['2a unknown outcome: no timer again', ['  do wake(after: 5000, key: id)\n  let Some(value: Count(n))', '  let Some(value: Count(n))'], ['      do wake(after, key: id)\n      asked(found: load_hold(id))', '      asked(found: load_hold(id))']],
   ['2b due before expiry: no timer again', ['      do wake(after: expires - now(), key: id)\n      ShowHold(status: 200, hold)', '      ShowHold(status: 200, hold)']],
-  ['2c refund failed: no timer again', ['      do wake(after: 5000, key: id)\n      shown_hold(found: load_hold(id))', '      shown_hold(found: load_hold(id))']],
+  ['2c refund failed: no timer again', ['fn refund_unknown(id: Int, n: Int) -> Outcome {\n  do wake(after: 5000, key: id)\n', 'fn refund_unknown(id: Int, n: Int) -> Outcome {\n'], ['      do wake(after, key: id)\n      shown_hold(found: load_hold(id))', '      shown_hold(found: load_hold(id))']],
   ['2d due leaves a refunding hold alone', ['    Hold(state: "refunding") -> refund_hold(hold)\n', '    Hold(state: "refunding") -> ShowHold(status: 200, hold)\n']],
   ['3a refund timer set after the call', ['      do wake(after: 5000, key: id)\n      refund_hold(hold: value)', '      let r = refund_hold(hold: value)\n      do wake(after: 5000, key: id)\n      r']],
   ['3b no refund timer; sweep picks confirmed by a parameter', NOREFUNDWAKE, ["h.state = 'confirmed' ORDER BY h.id LIMIT 1\", event)", "h.state = :state ORDER BY h.id LIMIT 1\", event, state: \"confirmed\")"]],

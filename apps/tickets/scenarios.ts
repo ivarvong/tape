@@ -348,6 +348,49 @@ const sleep = (ms: number): Promise<void> =>
   inv('cut refund', w);
 }
 
+// 5c. A refund that never answers: as 3b for a charge. The timer asks pay again with a wait that doubles to a cap,
+// and after 10 unknown answers the hold rests in refund_unresolved (tickets valid, seats taken) with no timer set.
+// Before the cap the refund's timer re-armed every 5 s for ever.
+{
+  const w = await fresh();
+  const p = made(await hold(w, 2, 'ada', 2));
+  await w.req(`POST /holds/${p.id}/checkout`, { card: 'visa-4242' });
+  w.faults.push(...Array.from({ length: 30 }, () => 'lost-before' as const));
+  const r = await w.req(`POST /holds/${p.id}/refund`);
+  const waits: number[] = [];
+  for (let i = 0; i < 20 && w.app.next() !== null; i++) {
+    const next = w.app.next() ?? 0;
+    waits.push(next - w.now());
+    w.advance(next - w.now());
+    await w.fire();
+  }
+  T(
+    'refund never answered: 200 refunding, then 9 asks waiting 5 s doubling to 10 min, refund_unresolved at the 10th, then no timer; tickets and seats kept',
+    [
+      r.status,
+      said(r).state,
+      waits,
+      w.row(`SELECT state FROM holds WHERE id = ${p.id}`).state,
+      w.app.next(),
+      w.calls.filter(c => c.method === 'refund').length,
+      w.row(`SELECT count(*) AS n FROM tickets WHERE hold = ${p.id} AND state = 'valid'`).n,
+      left(w, 2),
+    ],
+    // the last wait is the timer set before giving up: it finds the hold refund_unresolved and sets none
+    [
+      200,
+      'refunding',
+      [5000, 10000, 20000, 40000, 80000, 160000, 320000, 600000, 600000, 5000],
+      'refund_unresolved',
+      null,
+      10,
+      2,
+      48,
+    ],
+  );
+  inv('refund never answered', w);
+}
+
 // 6. Waitlist promotion when holds expire.
 {
   const w = await fresh();
@@ -433,6 +476,67 @@ const sleep = (ms: number): Promise<void> =>
   );
   T('cancel: event 2 is untouched', w.row('SELECT state FROM events WHERE id = 2').state, 'onsale');
   inv('cancel', w);
+}
+
+/** How many times in a row event 1's sweep has waited (events.waits; a program without the column says so). */
+const waitsOf = (w: World): unknown => {
+  try {
+    return w.row('SELECT waits FROM events WHERE id = 1').waits;
+  } catch {
+    return 'no events.waits';
+  }
+};
+
+// 7b. An event canceled while a charge never answers: the sweep waits for it with a wait that doubles to 10 min, not
+// every 5 s. The hold's own timer gives up at its 10th unknown answer (3b: 1835 s after the checkout) and rests in
+// unresolved, keeping its seat; the next sweep finds nothing out and ends. Sweeps, from the cancel: at 0, then after
+// waits of 5, 10, 20, ... s (std/retry, as 3b): 0, 5, 15, 35, 75, 155, 315, 635, 1235, 1835 (due with the hold's
+// last ask; the sweep runs first and still finds it paying) and 2435 s, when nothing is out. Before the backoff: one
+// every 5 s until 1840 s, 369, and the sweep gave the unresolved hold's seat back (tier 1: 20 left, 1 taken).
+{
+  const w = await fresh();
+  const h = made(await hold(w, 1, 'eve', 1));
+  w.faults.push(...Array.from({ length: 30 }, () => 'lost-before' as const));
+  await w.req(`POST /holds/${h.id}/checkout`, { card: 'visa-4242' });
+  const c = await w.req('POST /events/1/cancel');
+  const t0 = w.now();
+  const sweeps: number[] = [];
+  for (let i = 0; i < 1000 && w.app.next() !== null; i++) {
+    w.advance((w.app.next() ?? 0) - w.now());
+    for (const f of await w.fire()) if (f.key < 0) sweeps.push((w.now() - t0) / 1000);
+  }
+  T(
+    'cancel while a charge never answers: the sweeps wait 5 s doubling to 10 min; the hold unresolved, no timer left',
+    [c.status, sweeps, w.row(`SELECT state FROM holds WHERE id = ${h.id}`).state, w.app.next(), left(w, 1), waitsOf(w)],
+    // each sweep but the last waited: 10, kept as the event's count
+    [202, [0, 5, 15, 35, 75, 155, 315, 635, 1235, 1835, 2435], 'unresolved', null, 19, 10],
+  );
+  inv('cancel, a charge never answers', w);
+}
+
+// 7c. A sweep that waits on a hold nothing will settle (made paying by hand with its timer deleted: a lost timer)
+// gives up at its 20th wait instead of waiting for ever; canceling the event again resumes it.
+{
+  const w = await fresh();
+  const h = made(await hold(w, 1, 'lost', 1));
+  w.sql.exec(`UPDATE holds SET state = 'paying' WHERE id = ${h.id}`);
+  w.sql.exec(`DELETE FROM _wakes WHERE key = ${h.id}`);
+  await w.req('POST /events/1/cancel');
+  let sweeps = 0;
+  for (let i = 0; i < 1000 && w.app.next() !== null; i++) {
+    w.advance((w.app.next() ?? 0) - w.now());
+    sweeps += (await w.fire()).filter(f => f.key < 0).length;
+  }
+  const gaveUp = [sweeps, w.app.next(), waitsOf(w)];
+  const again = await w.req('POST /events/1/cancel');
+  T(
+    'a sweep waiting on a hold nothing settles: 20 sweeps, each a wait, the 20th gives up: no timer; canceling again resumes it',
+    [gaveUp, [again.status, w.app.next() === w.now()]],
+    [
+      [20, null, 20],
+      [202, true],
+    ],
+  );
 }
 
 // 8. The pages: HTML, escaped, through the public route; forms post once per key.
