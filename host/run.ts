@@ -13,7 +13,18 @@ import { Pending, REAL_TIMERS, perform } from './call.ts';
 import type { Service, Timers } from './call.ts';
 import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
 import type { CallEffect, Cell, Effect, Flags, From, Head, Span, Sql, Status, TraceEvent, WakeEffect } from './log.ts';
-import { answerAt, block, copyIn, copyOut, readParams, replyBlock, textAt, writeFlags, writeRows } from './memory.ts';
+import {
+  answerAt,
+  block,
+  copyIn,
+  copyOut,
+  readParams,
+  replyBlock,
+  textAt,
+  textIn,
+  writeFlags,
+  writeRows,
+} from './memory.ts';
 import type { FlagDecl, Mem, Query } from './memory.ts';
 import { direct } from './schema.ts';
 import type { Transaction } from './schema.ts';
@@ -409,7 +420,7 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     // a Float's text: the shortest digits that read back as it (ECMA-262 Number::toString), as interp/float.ts
     float_text: (x: number) => block(get().mem, String(x)),
     // a decimal number's nearest Float (ECMA-262 StringToNumber, correctly rounded), for parse_float; NaN for none
-    float_of: (ptr: number, len: number) => Number(textAt(get().mem, ptr, len)),
+    float_of: (ptr: number, len: number) => Number(textIn(get().mem, ptr, len)),
     allocated: (size: number) => {
       const { heap } = get().o;
       if (heap) allocated(heap, size);

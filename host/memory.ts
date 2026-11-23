@@ -39,6 +39,8 @@ function setInt64(d: DataView, o: number, x: number): void {
 export const copyOut = (m: Mem, ptr: number, len: number): Uint8Array<ArrayBuffer> =>
   new Uint8Array(m.memory.buffer.slice(ptr, ptr + len));
 export const textAt = (m: Mem, ptr: number, len: number): string => utf8.decode(copyOut(m, ptr, len));
+/** The same text, decoded where it lies: no copy, for a host call made once per value (float_of). */
+export const textIn = (m: Mem, ptr: number, len: number): string => utf8.decode(views(m).u.subarray(ptr, ptr + len));
 /** Bytes copied into new room in the module; where they are. */
 export function copyIn(m: Mem, data: Uint8Array): number {
   const at = m.alloc(data.length);
