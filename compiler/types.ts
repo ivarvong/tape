@@ -34,7 +34,7 @@ export function forgetAddedCapabilities(): void {
 }
 /** Each built-in: its parameters by name, or null for one whose arguments the compiler reads by label itself. */
 /**
- * std and built-in functions that went (LANGUAGE.md section 13), with what does their job now: a program written
+ * std and built-in functions that went (docs/changes.md, What went), with what does their job now: a program written
  * against them is told so, not only that the name is unknown.
  */
 export const RETIRED: ReadonlyMap<string, string> = new Map([

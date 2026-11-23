@@ -134,4 +134,4 @@ Three workflow programs (an order, a billing run and an agent loop: `examples/fu
 compile, and the programs long for their workflow logic. What followed was a set of forms that are each a reading of an existing one, so every check still
 applies: steps (`let P = e else { … }`, a match), capabilities by name (an inferred parameter), `*` for a row
 type's columns, mid-path text captures, `do` for a call run for what it does, holes in text, and named query
-values. Each old form is now a compile error that names the new one ([`LANGUAGE.md` section 13](../LANGUAGE.md#13-what-went)).
+values. Each old form is now a compile error that names the new one ([what went](changes.md#what-went)).

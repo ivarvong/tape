@@ -279,8 +279,10 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | Document | What |
 |---|---|
 | [`LANGUAGE.md`](LANGUAGE.md) | The definition, version 0.1. `test/definition.ts` holds the compiler to it. |
-| [`docs/guide.md`](docs/guide.md) | A quickstart: a whole service in one file, worked and tested; then the language one feature at a time: patterns, steps, JSON, rules, machines, invariants, timers, migrations, the simulator. |
-| [`docs/std.md`](docs/std.md) | The standard library and the built-ins: every function with its signature, comment and examples, and common tasks (JSON responses, query parameters, numbers, bodies, lists). Generated from `std/`. |
+| [`docs/guide.md`](docs/guide.md) | A quickstart: a whole service in one file, worked and tested; then the language one feature at a time: patterns, steps, JSON, rules, machines, invariants, timers, migrations. |
+| [`docs/std.md`](docs/std.md) | The standard library and the built-ins: every function meant to be called, with its signature, comment and examples, and common tasks (JSON responses, query parameters, numbers, bodies, lists); the helpers they call are in the source. Generated from `std/`. |
+| [`docs/changes.md`](docs/changes.md) | What each release changed, and each form that went with what replaced it. |
+| [`docs/sim.md`](docs/sim.md) | `tape sim`: programs run together under every order of events a deployment may give them. |
 | [`STATUS.md`](STATUS.md) | Each claim and the check that fails when it breaks; known limitations; what is on trust. |
 | [`docs/mcp.md`](docs/mcp.md) | The hosted compiler and runner (live): connecting over MCP or HTTP, the two tools, limits, logging. |
 | [`docs/service.md`](docs/service.md) | The service's API, authentication and limits; running your own. |

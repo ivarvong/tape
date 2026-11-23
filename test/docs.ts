@@ -17,6 +17,8 @@ const PROSE = [
   'docs/std.md',
   'docs/service.md',
   'docs/mcp.md',
+  'docs/changes.md',
+  'docs/sim.md',
   'docs/design.md',
 ];
 const docs = PROSE.map(path => ({ path, text: raw(path) }));
@@ -139,7 +141,7 @@ for (const l of LIFTED) {
 // when …" read as a call by position, and on the 2026-11-23e bench five runs wrote `every_byte(self, fn …)` (C11)
 // after finding the name there. So a call in backticks, outside a code block, to a std function or built-in of two or
 // more parameters names each argument (`every_byte(v: …, keep: …)`). Not looked at: a function a doc defines
-// itself, LANGUAGE.md's history (section 11 on), which records what each release said, and the one sentence in
+// itself, docs/changes.md, which records what each release said, and the one sentence in
 // std.md that shows the shorthand itself.
 {
   const params = new Map<string, readonly string[]>();
@@ -154,7 +156,8 @@ for (const l of LIFTED) {
   for (const { text } of docs) for (const [, n = ''] of text.matchAll(/\bfn ([a-z_][a-z0-9_]*)\(/g)) params.delete(n);
   const bare: string[] = [];
   for (const { path, text } of docs) {
-    const body = path === 'LANGUAGE.md' ? text.slice(0, text.indexOf('\n## 11.')) : text;
+    if (path === 'docs/changes.md') continue;
+    const body = text;
     let inBlock = false;
     body.split('\n').forEach((line, i) => {
       if (line.startsWith('```')) inBlock = !inBlock;
@@ -167,6 +170,26 @@ for (const l of LIFTED) {
     });
   }
   ok(`a std call in the docs' prose names its arguments: ${bare.join('; ')}`, bare.length === 0);
+}
+
+// ---- what an agent reads before it writes. Haiku reads guide.md, LANGUAGE.md and std.md whole before a first
+// compile (about 160 K characters, whatever the instructions say), so none of them carries what writing a program
+// does not need: std's helpers (a comment that starts `Internal:`; 165 lines, 21 KB of std.md) are not listed, and
+// the history of the language is in docs/changes.md, not LANGUAGE.md.
+{
+  const stdMd = raw('docs/std.md');
+  const helpers = std
+    .flatMap(s => [
+      ...s.text.matchAll(/\/\/ Internal:[^\n]*\n(?:\/\/[^\n]*\n)*(?:export )?(?:fn|type) ([a-z_A-Z0-9]+)/g),
+    ])
+    .map(m => m[1] ?? '')
+    .filter(n => stdMd.includes(`\`fn ${n}(`) || stdMd.includes(`\`type ${n}\``));
+  ok(`std.md lists no helper: ${helpers.slice(0, 5).join(', ')}`, helpers.length === 0);
+  const lang = raw('LANGUAGE.md');
+  ok(
+    'LANGUAGE.md has no history table',
+    !lang.includes('| When | Change |') && !lang.includes('| When | What | Now |'),
+  );
 }
 
 finish();
