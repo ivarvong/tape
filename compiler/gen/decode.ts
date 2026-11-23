@@ -1,5 +1,5 @@
-// compiler/gen/decode.ts: JSON and rows read into values. The host decodes; the code here asks it, with the
-// number of the shape wanted, and reads the fields it wrote back.
+// compiler/gen/decode.ts: JSON and rows read into values. JSON is decoded by Tape source written for each type
+// (compiler/wire.ts); the rows of a query are read from the block the host wrote.
 import type { Call, TypeAst } from '../ast.ts';
 import { F64, I32, I64, fail, sleb, uleb, utf8 } from '../common.ts';
 import { T, VIEW } from '../types.ts';
@@ -49,7 +49,7 @@ export function emitDecode(c: Ctx, e: Call): Type {
   return res;
 }
 
-// wire_decode_T(json) -> Result[T, View]: its Ok fills `out`, its Err is the reason
+// json_decode_T(json) -> Result[T, View] (compiler/wire.ts): its Ok fills `out`, its Err is the reason
 function decodeNested(c: Ctx, t: Type, view: readonly number[], out: readonly number[], at: Place, why: Why): void {
   const res = c.B.adtOf(T('Result', t, VIEW), at);
   if (res.boxed) return;
@@ -60,7 +60,7 @@ function decodeNested(c: Ctx, t: Type, view: readonly number[], out: readonly nu
       ...get(rl[sl] ?? 0),
       ...set(to[j] ?? 0),
     ]);
-  c.code.push(...get(view[0] ?? 0), ...get(view[1] ?? 0), 0x10, ...uleb(c.B.fnIndex(`wire_decode_${t.name}`)));
+  c.code.push(...get(view[0] ?? 0), ...get(view[1] ?? 0), 0x10, ...uleb(c.B.fnIndex(`json_decode_${t.name}`)));
   for (const l of rl.toReversed()) c.code.push(...set(l));
   c.code.push(...get(rl[0] ?? 0), ...i32(okI), 0x46);
   open(c, 0x04, [I32]);
@@ -68,41 +68,17 @@ function decodeNested(c: Ctx, t: Type, view: readonly number[], out: readonly nu
   close(c);
 }
 
-/** The number of a JSON shape in the module's list. The same shape is kept once. */
-function shapeId(c: Ctx, t: Type, at: Place): number {
-  const shape = c.B.shapeOf(t, at, true);
-  const k = JSON.stringify(shape);
-  const had = c.B.shapes.findIndex(x => JSON.stringify(x) === k);
-  return had < 0 ? c.B.shapes.push(shape) - 1 : had;
-}
-
-/** Decodes the JSON bytes in `view` as type t into the locals `out`; leaves an i32: 1 when it is a valid t. */
+/**
+ * Decodes the JSON bytes in `view` as type t into the locals `out`; leaves an i32: 1 when it is a valid t. The
+ * decoder is Tape source written for t (compiler/wire.ts); a type it was not written for cannot be JSON (C09).
+ */
 export function decodeTo(c: Ctx, t: Type, view: readonly number[], out: readonly number[], at: Place, why: Why): void {
   const { B } = c;
-  if (!t.name.startsWith('Wire_') && !Object.hasOwn(B.SIMJSON.decodes, t.name)) B.SIMJSON.decodes[t.name] = [t, at];
-  if (B.WIRE.nested.has(t.name)) return decodeNested(c, t, view, out, at, why);
-  const id = shapeId(c, t, at);
-  const adt = B.adtOf(t, at);
-  const [r, ok, cur, which] = [fresh(c, I32), fresh(c, I32), fresh(c, I32), fresh(c, I32)];
-  // the host returns a pointer to the decoded value, or minus a pointer to the reason (u32 length, bytes)
-  const asked = [...get(view[0] ?? 0), ...get(view[1] ?? 0), ...i32(id), 0x10, ...uleb(B.JSON_IMPORT), 0xfc, 0x02];
-  c.code.push(...asked, 0x22, ...uleb(r), ...i32(0), 0x4a);
-  open(c, 0x04);
-  c.code.push(...i32(1), ...set(ok), ...get(r), 0x28, 0, 0, ...set(which));
-  adt.variants.forEach((variant, i) => {
-    c.code.push(...get(which), ...i32(i), 0x46);
-    open(c, 0x04);
-    c.code.push(...get(r), ...i32(8), 0x6a, ...set(cur));
-    buildVariant(c, adt, i, decodeFields(c, variant.fields, cur, at, ok, why));
-    for (const l of out.toReversed()) c.code.push(...set(l));
-    close(c);
-  });
-  if (why) {
-    const reason = [...i32(0), ...get(r), 0x6b];
-    c.code.push(0x05, ...reason, ...i32(4), 0x6a, ...set(why[0]), ...reason, 0x28, 2, 0, ...set(why[1]));
-  }
-  close(c);
-  c.code.push(...get(r), ...i32(0), 0x4a, ...get(ok), 0x71);
+  if (!Object.hasOwn(B.SIMJSON.decodes, t.name)) B.SIMJSON.decodes[t.name] = [t, at];
+  if (!B.WIRE.decodable.has(t.name)) B.shapeOf(t, at, true);
+  if (!B.WIRE.decodable.has(t.name))
+    fail(at, 'C30', `decode of ${t.name} needs std/json.tape`, 'Compile the program together with std.');
+  decodeNested(c, t, view, out, at, why);
 }
 
 export const decodeRow = (c: Ctx, rowT: Type, cur: number, at: Place): number[] =>

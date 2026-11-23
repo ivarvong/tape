@@ -49,13 +49,13 @@ describe('tools', () => {
     expect((await operator(`/_policy/${A}`, { method: 'PUT', body: '{"sql":true,"remote":["fx"]}' })).status).toBe(200);
     expect((await operator(`/${A}/fx`, { method: 'POST', body: fx })).status).toBe(201);
 
-    // a pure tool: no capabilities, and its module imports only env.json
+    // a pure tool: no capabilities, and its module imports nothing (it decodes its JSON itself)
     const p = await json(await agent(`/tools/${A}/price`, { method: 'POST', body: price }));
     expect(p.status).toBe(201);
     const tool = at(p.body, 'tools', 0);
     expect(tool).toMatchObject({
       name: 'price_quote',
-      capabilities: { pure: true, sql: false, remote: [], imports: ['env.json'] },
+      capabilities: { pure: true, sql: false, remote: [], imports: [] },
       description:
         'Price a basket: unit price times quantity, less an optional discount, plus tax on what is left (rounded down).',
     });

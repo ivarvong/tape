@@ -78,7 +78,6 @@ export type Effect = Head | SqlEffect | CallEffect | NowEffect | RandomEffect | 
 export type TraceEvent =
   | { site: number; what: number }
   | { sql: number; p: SqlParam[]; r?: number | undefined; rows?: Cell[][] | undefined; undone?: true }
-  | { json: string }
   | { call: string; method: string; within: number; status: Status }
   | { flags: Flags }
   | NowEffect

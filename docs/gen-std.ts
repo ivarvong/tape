@@ -174,6 +174,11 @@ const BUILT_INS: BuiltIn[] = [
     sig: 'write_float(out: Buf, value: Float) -> Buf',
     doc: 'Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\\(x)"`, writes).',
   },
+  {
+    name: 'scan_plain',
+    sig: 'scan_plain(v: View, at: Int) -> Int',
+    doc: 'The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. Reads 16 bytes at a time (Wasm SIMD); std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).',
+  },
   { name: 'push', sig: 'push(buf: Buf, byte: Int) -> Buf', doc: 'Appends one byte.' },
   { name: 'append', sig: 'append(buf: Buf, view: View) -> Buf', doc: 'Appends text.' },
   { name: 'freeze', sig: 'freeze(buf: Buf) -> View', doc: 'The bytes written so far, as a View.' },
@@ -186,7 +191,7 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'decode',
     sig: 'decode(json: View, as: T) -> Result[T, View]',
-    doc: 'Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused.',
+    doc: 'Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.',
   },
   {
     name: 'next',

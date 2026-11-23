@@ -552,7 +552,6 @@ export function lineTraceOf(
       const binds = (l.sql?.binds ?? []).map(([k, v]) => `${k}=${v}`).join(' ');
       out.push(`      sql ${l.sql?.query ?? ''}${binds ? `  ${binds}` : ''} -> ${l.sql?.result ?? ''}`);
     } else if ('call' in e) out.push(`      call ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`);
-    else if ('json' in e) out.push(`      json: ${e.json}`);
     else if ('wake' in e) out.push(`      wake ${e.wake} after ${e.after} ms${e.undone ? ', undone' : ''}`);
     else if ('now' in e) out.push(`      now -> ${e.now}`);
     else if ('random' in e) out.push(`      random -> ${e.random}`);

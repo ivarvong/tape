@@ -144,7 +144,6 @@ const split = responseOf;
 /** A trace event's line when it is an effect; null when it is a place in the program. */
 const effectLine = (e: TraceEvent): Line[] | null => {
   if ('flags' in e) return [];
-  if ('json' in e) return [[e.json === 'decoded' ? 'ok' : 'bad', `      json: ${e.json}`]];
   if ('call' in e)
     return [[e.status === 'ok' ? 'ok' : 'bad', `      call ${e.call}.${e.method} within ${e.within} ms → ${e.status}`]];
   if ('wake' in e) return [['mut', `      wake ${e.wake} after ${e.after} ms → due ${new Date(e.due).toISOString()}`]];

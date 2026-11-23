@@ -11,7 +11,6 @@ import { assemble } from './gen/assemble.ts';
 import type { Compiled } from './gen/assemble.ts';
 import type { Build, CallDecl, Place, Site } from './gen/fn.ts';
 import * as layout from './gen/layout.ts';
-import type { Shape } from './gen/layout.ts';
 import * as mod from './gen/module.ts';
 import type { Options, QueryEntry } from './gen/module.ts';
 import { ownedParameters } from './gen/ownership.ts';
@@ -43,7 +42,6 @@ export type Built = {
   /** what the rules found, when the build was asked to go on anyway (`rules: false`) */
   refused: Problem[];
   queries: QueryEntry[];
-  shapes: Shape[];
   sites: Site[];
   flags: { name: string; type: string; default: number | boolean; at: number; pinned?: unknown }[];
   entry: HostParam[];
@@ -106,13 +104,12 @@ function flagsOf(prog: Program, opts: Options) {
 
 /** What the functions add to as they are compiled, beside the module's tables. */
 function filling() {
-  const shapes: Shape[] = [];
   const calls: CallDecl[] = [];
   const sites: Site[] = [];
   const table: string[] = [];
   const replies: SimJson = {};
   const decodes: SimJson = {};
-  return { shapes, calls, sites, table, flagRead: new Set<string>(), SIMJSON: { replies, decodes } };
+  return { calls, sites, table, flagRead: new Set<string>(), SIMJSON: { replies, decodes } };
 }
 
 /** Each function with its types resolved; a generic one is resolved per set of type arguments, when it is called. */
@@ -296,7 +293,7 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
   const { prog, invariants } = fr;
   const L = layout.layouts(prog, fr.WIRE);
   const done = compileAll(fr, opts, L);
-  const { tables, shapes, calls, sites } = done;
+  const { tables, calls, sites } = done;
   const { bytes: flagBytes, flags } = flagsOf(prog, opts);
   const about = describeModule(fr, opts, sources, L, done);
   const queries: QueryEntry[] = tables.queries;
@@ -304,7 +301,6 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
     ['queries', queries],
     ['schema', prog.schema],
     ['migrations', about.migrations],
-    ['shapes', shapes],
     ['flags', flags],
     ['entry', about.entry],
     ['calls', calls],
@@ -321,7 +317,6 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
     errors: [],
     refused: found,
     queries,
-    shapes,
     sites,
     flags,
     entry: about.entry,

@@ -417,25 +417,6 @@ fn hex_digit(d: Int) -> Int {
   }
 }
 
-// ---------- records inside records, and lists ----------
-// decode and write_json take records whose fields are records and lists as well; the compiler writes the functions
-// that do it from the three types and the helpers below. The host hands a nested value over as text for a second
-// decode: an object as it stands (WireObject); an array as its elements, one to a line (WireItems when they are
-// objects, WireValues when they are other values, each then written as {"value": …}).
-// An Int field takes a JSON number that is a whole number within ±(2^53 - 1) (9007199254740991), as JSON.parse
-// reads it (1e3 is 1000); outside that range decode answers Err("<field>: expected a whole number") and never
-// rounds: the host's JSON.parse reads numbers as doubles, which past 2^53 - 1 cannot hold every whole number.
-// Exact large-integer JSON, the whole 64-bit range, is planned for 0.3; until then such a value is sent as text.
-
-// Internal: a nested object as the host hands it to a second decode.
-type WireObject = View where len(self) >= 0
-
-// Internal: an array of objects, one to a line, as the host hands it over.
-type WireItems = View where len(self) >= 0
-
-// Internal: an array of other values, each as {"value": …}, one to a line.
-type WireValues = View where len(self) >= 0
-
 // Appends true or false.
 //
 //   > buf() |> write_bool(value: True) |> freeze
@@ -447,8 +428,487 @@ fn write_bool(out: Buf, value: Bool) -> Buf {
   }
 }
 
-// Internal: A key that was there: its decoded value as Some.
-fn wire_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
+// ---------- decode: JSON read into records ----------
+// decode(json, as: T) runs a decoder the compiler writes for T (compiler/wire.ts) from the pieces below: the
+// bytes are read once into a tree (json_tree), then each constructor's keys are checked against it and its values
+// read. What it accepts and what it says are JSON.parse's and the host's before it, with one difference: a number
+// is read exactly from its text. An Int field takes a JSON number whose value is a whole number within
+// ±(2^53 - 1) (9007199254740991): 1e3 is 1000 and 2.0 is 2, but 1.0000000000000000001 and 1e-400 are not whole
+// numbers (JSON.parse rounds them to 1 and 0). Outside that range decode answers Err("<field>: expected a whole
+// number") and never rounds. Exact large-integer JSON, the whole 64-bit range, is planned for 0.3; until then
+// such a value is sent as text.
+
+// Internal: a JSON value. A string is its decoded bytes; `whole` is False when it holds a lone surrogate (an
+// escape JSON.parse takes, written here as its three bytes of WTF-8). A number is its text.
+type Json_Tree {
+  Json_Null
+  Json_Bool(value: Bool)
+  Json_Num(text: View)
+  Json_Str(text: View, whole: Bool)
+  Json_Arr(items: List[Json_Tree])
+  Json_Obj(members: List[Json_Member])
+}
+
+// Internal: one member of an object, in the order written (a repeated key is there each time).
+type Json_Member { Json_Member(key: View, value: Json_Tree) }
+
+// Internal: an array or an object being read, with what it holds so far, last first.
+type Json_Frame {
+  Json_InArr(items: List[Json_Tree])
+  Json_InObj(members: List[Json_Member], key: View)
+}
+
+// Internal: a string read: its bytes, whether it is well-formed, and where it ends; or not a string.
+type Json_Got {
+  Json_Got(text: View, whole: Bool, next: Int)
+  Json_NoText
+}
+
+// Internal: one character of a string read by json_tree: a code point, and whether it is a lone surrogate.
+type Json_Code {
+  Json_Code(code: Int, lone: Bool, next: Int)
+  Json_NoCode
+}
+
+// Internal: whether an object is a constructor (its fields are there, of their kinds; other keys are left
+// unread): Json_Hit, or how many of its fields fit before the one that does not, and why.
+type Json_Fit {
+  Json_Hit
+  Json_Miss(depth: Int, why: View)
+}
+
+// Internal: the JSON value v holds, whitespace around it allowed; None when it is not JSON. Read in one pass with
+// a stack of the arrays and objects open, so nesting does not grow the Wasm stack.
+fn json_tree(v: View) -> Option[Json_Tree] {
+  tree_value(v, at: json_ws(v, at: 0), stack: Nil)
+}
+
+// Internal: a value starts at `at` (whitespace skipped).
+fn tree_value(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
+  match {
+    at >= len(v) -> None
+    v[at] == 123 -> tree_open_object(v, at: json_ws(v, at: at + 1), stack)
+    v[at] == 91 -> tree_open_array(v, at: json_ws(v, at: at + 1), stack)
+    v[at] == 34 -> tree_string(v, got: tree_text(v, at: at + 1), stack)
+    has(v, at, word: "true") -> tree_done(v, node: Json_Bool(True), at: at + 4, stack)
+    has(v, at, word: "false") -> tree_done(v, node: Json_Bool(False), at: at + 5, stack)
+    has(v, at, word: "null") -> tree_done(v, node: Json_Null, at: at + 4, stack)
+    else -> tree_number(v, at, end: number_end(v, at), stack)
+  }
+}
+
+// Internal: after `{` and whitespace.
+fn tree_open_object(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
+  match {
+    at < len(v) and v[at] == 125 -> tree_done(v, node: Json_Obj(members: Nil), at: at + 1, stack)
+    else -> tree_key(v, at, members: Nil, stack)
+  }
+}
+
+// Internal: after `[` and whitespace.
+fn tree_open_array(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
+  match {
+    at < len(v) and v[at] == 93 -> tree_done(v, node: Json_Arr(items: Nil), at: at + 1, stack)
+    else -> tree_value(v, at, stack: Cons(head: Json_InArr(items: Nil), tail: stack))
+  }
+}
+
+// Internal: a member's key starts at `at`; then its colon and its value.
+fn tree_key(
+  v: View,
+  at: Int,
+  members: List[Json_Member],
+  stack: List[Json_Frame]
+) -> Option[Json_Tree] {
+  match {
+    at < len(v) and v[at] == 34 -> tree_colon(v, got: tree_text(v, at: at + 1), members, stack)
+    else -> None
+  }
+}
+
+// Internal: a member's key, read.
+fn tree_colon(
+  v: View,
+  got: Json_Got,
+  members: List[Json_Member],
+  stack: List[Json_Frame]
+) -> Option[Json_Tree] {
+  match got {
+    Json_Got(text, next) -> tree_member(v, key: text, at: json_ws(v, at: next), members, stack)
+    Json_NoText -> None
+  }
+}
+
+// Internal: at the colon after a member's key.
+fn tree_member(
+  v: View,
+  key: View,
+  at: Int,
+  members: List[Json_Member],
+  stack: List[Json_Frame]
+) -> Option[Json_Tree] {
+  match {
+    at < len(v) and v[at] == 58 -> tree_value(
+      v,
+      at: json_ws(v, at: at + 1),
+      stack: Cons(head: Json_InObj(members, key), tail: stack)
+    )
+    else -> None
+  }
+}
+
+// Internal: a string value, read.
+fn tree_string(v: View, got: Json_Got, stack: List[Json_Frame]) -> Option[Json_Tree] {
+  match got {
+    Json_Got(text, whole, next) -> tree_done(v, node: Json_Str(text, whole), at: next, stack)
+    Json_NoText -> None
+  }
+}
+
+// Internal: a number, if one ends at `end`.
+fn tree_number(v: View, at: Int, end: Option[Int], stack: List[Json_Frame]) -> Option[Json_Tree] {
+  match end {
+    Some(value) -> tree_done(
+      v,
+      node: Json_Num(text: slice(v, from: at, to: value)),
+      at: value,
+      stack
+    )
+    None -> None
+  }
+}
+
+// Internal: a value `node` ended at `at`: it is the whole text's, or the next item or member of what is open.
+fn tree_done(v: View, node: Json_Tree, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
+  let s = json_ws(v, at)
+  match stack {
+    Nil if s == len(v) -> Some(value: node)
+    Nil -> None
+    Cons(head: Json_InArr(items), tail) if s < len(v) and v[s] == 44 -> tree_value(
+      v,
+      at: json_ws(v, at: s + 1),
+      stack: Cons(head: Json_InArr(items: Cons(head: node, tail: items)), tail)
+    )
+    Cons(head: Json_InArr(items), tail) if s < len(v) and v[s] == 93 -> tree_done(
+      v,
+      node: Json_Arr(items: reverse(list: Cons(head: node, tail: items))),
+      at: s + 1,
+      stack: tail
+    )
+    Cons(head: Json_InObj(members, key), tail) if s < len(v) and v[s] == 44 -> tree_key(
+      v,
+      at: json_ws(v, at: s + 1),
+      members: Cons(head: Json_Member(key, value: node), tail: members),
+      stack: tail
+    )
+    Cons(head: Json_InObj(members, key), tail) if s < len(v) and v[s] == 125 -> tree_done(
+      v,
+      node: Json_Obj(
+        members: reverse(list: Cons(head: Json_Member(key, value: node), tail: members))
+      ),
+      at: s + 1,
+      stack: tail
+    )
+    _ -> None
+  }
+}
+
+// Internal: the string whose body starts at `at`. Plain bytes (and well-formed UTF-8) are found 16 at a time
+// (scan_plain); a string without escapes is a view of the input, one with escapes is decoded into new memory.
+fn tree_text(v: View, at: Int) -> Json_Got {
+  let e = text_run(v, at)
+  match {
+    e < len(v) and v[e] == 34 -> Json_Got(text: slice(v, from: at, to: e), whole: True, next: e + 1)
+    e < len(v) and v[e] == 92 -> text_escaped(
+      v,
+      at: e,
+      out: append(buf: buf(), view: slice(v, from: at, to: e)),
+      whole: True
+    )
+    else -> Json_NoText
+  }
+}
+
+// Internal: past plain ASCII and well-formed UTF-8: the first quote, backslash, control byte or byte that is not
+// UTF-8.
+fn text_run(v: View, at: Int) -> Int {
+  let e = scan_plain(v, at)
+  match {
+    e < len(v) and v[e] >= 128 -> utf8_run(v, at: e, found: utf8_at(v, at: e))
+    else -> e
+  }
+}
+
+// Internal: a UTF-8 sequence in a string: past it when it is well-formed.
+fn utf8_run(v: View, at: Int, found: Utf8) -> Int {
+  match found {
+    Utf8(next) -> text_run(v, at: next)
+    BadUtf8 -> at
+  }
+}
+
+// Internal: `at` is a backslash; `out` holds the string so far.
+fn text_escaped(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got {
+  match tree_escape(v, at: at + 1) {
+    Json_Code(code, lone, next) -> text_more(
+      v,
+      at: next,
+      out: write_code(out, code),
+      whole: whole and not lone
+    )
+    Json_NoCode -> no_text(gone: freeze(out))
+  }
+}
+
+// Internal: after an escape.
+fn text_more(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got {
+  let e = text_run(v, at)
+  match {
+    e < len(v) and v[e] == 34 -> Json_Got(
+      text: freeze(append(buf: out, view: slice(v, from: at, to: e))),
+      whole,
+      next: e + 1
+    )
+    e < len(v) and v[e] == 92 -> text_escaped(
+      v,
+      at: e,
+      out: append(buf: out, view: slice(v, from: at, to: e)),
+      whole
+    )
+    else -> no_text(gone: freeze(out))
+  }
+}
+
+// Internal: not a string (what was decoded of it is dropped).
+fn no_text(gone: View) -> Json_Got {
+  Json_NoText
+}
+
+// Internal: the escape whose letter is at `at`. A \u escape of a surrogate without its other half is a lone
+// surrogate, as JSON.parse reads it.
+fn tree_escape(v: View, at: Int) -> Json_Code {
+  match {
+    at >= len(v) -> Json_NoCode
+    v[at] == 117 -> tree_unicode(v, at: at + 5, unit: hex4(v, at: at + 1))
+    else -> tree_simple(code: unescape(v[at]), next: at + 1)
+  }
+}
+
+// Internal: a one-letter escape.
+fn tree_simple(code: Option[Int], next: Int) -> Json_Code {
+  match code {
+    Some(value) -> Json_Code(code: value, lone: False, next)
+    None -> Json_NoCode
+  }
+}
+
+// Internal: `at` is the position after \uXXXX.
+fn tree_unicode(v: View, at: Int, unit: Option[Int]) -> Json_Code {
+  match unit {
+    Some(value) if value >= 55296 and value < 56320 -> tree_pair(
+      high: value,
+      low: low_unit(v, at),
+      at
+    )
+    Some(value) if value >= 56320 and value < 57344 -> Json_Code(code: value, lone: True, next: at)
+    Some(value) -> Json_Code(code: value, lone: False, next: at)
+    None -> Json_NoCode
+  }
+}
+
+// Internal: a high surrogate at the escape before `at`: with the low one after it, one code point; alone, lone.
+fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code {
+  match low {
+    Some(value) if value >= 56320 and value < 57344 -> Json_Code(
+      code: 65536 + ((high - 55296) << 10) + (value - 56320),
+      lone: False,
+      next: at + 6
+    )
+    _ -> Json_Code(code: high, lone: True, next: at)
+  }
+}
+
+// Internal: "empty" or "not JSON", as decode says of bytes that are not JSON.
+fn json_bad(v: View) -> View {
+  match {
+    len(v) == 0 -> "empty"
+    else -> "not JSON"
+  }
+}
+
+// Internal: the value of the last member named `key` (JSON.parse keeps the last).
+fn json_get(list: List[Json_Member], key: View) -> Option[Json_Tree] {
+  json_get_from(list, key, found: None)
+}
+
+// Internal: the loop of json_get.
+fn json_get_from(
+  list: List[Json_Member],
+  key: View,
+  found: Option[Json_Tree]
+) -> Option[Json_Tree] {
+  match list {
+    Cons(head: Json_Member(key: k, value), tail) if k == key -> json_get_from(
+      list: tail,
+      key,
+      found: Some(value)
+    )
+    Cons(tail) -> json_get_from(list: tail, key, found)
+    Nil -> found
+  }
+}
+
+// Internal: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an
+// object, 4 an array); `depth` is how many fields fit before it.
+fn json_check(
+  found: Option[Json_Tree],
+  kind: Int,
+  name: View,
+  optional: Bool,
+  depth: Int
+) -> Json_Fit {
+  match found {
+    None if optional -> Json_Hit
+    None -> Json_Miss(depth, why: "missing key \"" ++ name ++ "\"")
+    Some(value: Json_Str(whole)) if kind == 0 and not whole -> Json_Miss(
+      depth,
+      why: name ++ ": text with a lone surrogate"
+    )
+    Some(value: Json_Str) if kind == 0 -> Json_Hit
+    Some(value: Json_Bool) if kind == 1 -> Json_Hit
+    Some(value: Json_Num(text)) if kind == 2 and is_some(found: json_int(text)) -> Json_Hit
+    Some(value: Json_Obj) if kind == 3 -> Json_Hit
+    Some(value: Json_Arr) if kind == 4 -> Json_Hit
+    _ -> Json_Miss(depth, why: name ++ ": expected " ++ json_kind(kind))
+  }
+}
+
+// Internal: is there a value?
+fn is_some(found: Option[Int]) -> Bool {
+  match found {
+    Some -> True
+    None -> False
+  }
+}
+
+// Internal: what a kind of json_check is called in a reason.
+fn json_kind(kind: Int) -> View {
+  match kind {
+    0 -> "text"
+    1 -> "true or false"
+    2 -> "a whole number"
+    3 -> "an object"
+    _ -> "an array"
+  }
+}
+
+// Internal: the first of two fits that misses, or Json_Hit (a key no field names is left unread).
+fn json_and(a: Json_Fit, b: Json_Fit) -> Json_Fit {
+  match a {
+    Json_Hit -> b
+    _ -> a
+  }
+}
+
+// Internal: is there a member named `key`?
+fn json_has(list: List[Json_Member], key: View) -> Bool {
+  match list {
+    Cons(head: Json_Member(key: k)) if k == key -> True
+    Cons(tail) -> json_has(list: tail, key)
+    Nil -> False
+  }
+}
+
+// Internal: 1 when there is a member named `key`, else 0.
+fn json_one(list: List[Json_Member], key: View) -> Int {
+  match {
+    json_has(list, key) -> 1
+    else -> 0
+  }
+}
+
+// Internal: the constructor at `at` when it names more keys (n) than the best so far (most), else the best.
+fn json_better(best: Int, most: Int, at: Int, n: Int) -> Int {
+  match {
+    n > most -> at
+    else -> best
+  }
+}
+
+// Internal: the text of a value that json_check found to be text.
+fn json_text_of(found: Option[Json_Tree]) -> View {
+  match found {
+    Some(value: Json_Str(text)) -> text
+    _ -> ""
+  }
+}
+
+// Internal: a value that json_check found to be true or false.
+fn json_bool_of(found: Option[Json_Tree]) -> Bool {
+  match found {
+    Some(value: Json_Bool(value)) -> value
+    _ -> False
+  }
+}
+
+// Internal: a value that json_check found to be a whole number.
+fn json_int_of(found: Option[Json_Tree]) -> Int {
+  match found {
+    Some(value: Json_Num(text)) -> int_or_zero(found: json_int(text))
+    _ -> 0
+  }
+}
+
+// Internal: the number, or 0.
+fn int_or_zero(found: Option[Int]) -> Int {
+  match found {
+    Some(value) -> value
+    None -> 0
+  }
+}
+
+// Internal: an optional text field (json_check found it absent or text).
+fn json_maybe_text(found: Option[Json_Tree]) -> Option[View] {
+  match found {
+    Some(value: Json_Str(text)) -> Some(value: text)
+    _ -> None
+  }
+}
+
+// Internal: an optional true or false.
+fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool] {
+  match found {
+    Some(value: Json_Bool(value)) -> Some(value)
+    _ -> None
+  }
+}
+
+// Internal: an optional whole number.
+fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int] {
+  match found {
+    Some(value: Json_Num(text)) -> json_int(text)
+    _ -> None
+  }
+}
+
+// Internal: the members of a value json_check found to be an object.
+fn json_members_of(found: Option[Json_Tree]) -> List[Json_Member] {
+  match found {
+    Some(value: Json_Obj(members)) -> members
+    _ -> Nil
+  }
+}
+
+// Internal: the items of a value json_check found to be an array.
+fn json_items_of(found: Option[Json_Tree]) -> List[Json_Tree] {
+  match found {
+    Some(value: Json_Arr(items)) -> items
+    _ -> Nil
+  }
+}
+
+// Internal: a key that was there: its decoded value as Some.
+fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
   match decoded {
     Ok(value) -> Ok(value: Some(value))
     Err(error) -> Err(error)
@@ -457,52 +917,197 @@ fn wire_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
 
 // Internal: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its
 // index.
-fn wire_each[T](items: View, by: Fn[View, Result[T, View]]) -> Result[List[T], View] {
-  wire_each_from(items, by, at: 0, acc: Nil)
+fn json_each[T](
+  items: List[Json_Tree],
+  by: Fn[Json_Tree, Result[T, View]]
+) -> Result[List[T], View] {
+  json_each_from(items, by, at: 0, acc: Nil)
 }
 
-// Internal: the loop of wire_each.
-fn wire_each_from[T](
-  items: View,
-  by: Fn[View, Result[T, View]],
+// Internal: the loop of json_each.
+fn json_each_from[T](
+  items: List[Json_Tree],
+  by: Fn[Json_Tree, Result[T, View]],
   at: Int,
   acc: List[T]
 ) -> Result[List[T], View] {
   match items {
-    "" -> Ok(value: reverse(list: acc))
-    item ++ "\n" ++ rest -> wire_each_next(decoded: by(item), rest, by, at, acc)
-    _ -> Err(error: ": not an array as the host hands one over")
+    Cons(head, tail) -> json_each_next(decoded: by(head), rest: tail, by, at, acc)
+    Nil -> Ok(value: reverse(list: acc))
   }
 }
 
-// Internal: wire_each, after one element.
-fn wire_each_next[T](
+// Internal: json_each, after one element.
+fn json_each_next[T](
   decoded: Result[T, View],
-  rest: View,
-  by: Fn[View, Result[T, View]],
+  rest: List[Json_Tree],
+  by: Fn[Json_Tree, Result[T, View]],
   at: Int,
   acc: List[T]
 ) -> Result[List[T], View] {
   match decoded {
-    Ok(value) -> wire_each_from(items: rest, by, at: at + 1, acc: Cons(head: value, tail: acc))
-    Err(error) -> Err(error: wire_at(at, error))
+    Ok(value) -> json_each_from(items: rest, by, at: at + 1, acc: Cons(head: value, tail: acc))
+    Err(error) -> Err(error: json_at(at, error))
   }
 }
 
 // Internal: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
-fn wire_at(at: Int, error: View) -> View {
+fn json_at(at: Int, error: View) -> View {
   match error {
     "[" ++ rest -> "[" ++ decimal_text(value: at) ++ "]" ++ error
     _ -> "[" ++ decimal_text(value: at) ++ "]: " ++ error
   }
 }
 
-// Internal: An element that is not an object is handed over as {"value": …}: its reason without that key.
-fn wire_plain(error: View) -> View {
+// Internal: An element that is not an object is read as if it were {"value": …}: its reason without that key.
+fn json_plain(error: View) -> View {
   match error {
     "value: " ++ why -> why
     "value" ++ why -> why
     _ -> error
+  }
+}
+
+// ---------- whole numbers, exactly ----------
+
+// The value of a JSON number's text when it is a whole number within ±(2^53 - 1), read exactly (no rounding);
+// None otherwise. `text` must be a JSON number (number_end found it).
+//
+//   > json_int(text: "1e3")
+//   Some(value: 1000)
+//   > json_int(text: "-2.50e1")
+//   Some(value: -25)
+//   > json_int(text: "1.5")
+//   None
+//   > json_int(text: "9007199254740992")
+//   None
+fn json_int(text: View) -> Option[Int] {
+  let i = skip(v: text, at: 0, byte: 45)
+  let d = digits_end(v: text, at: i)
+  let f = skip(v: text, at: d, byte: 46)
+  let e = digits_end(v: text, at: f)
+  let tail = trailing_zeros(text, from: f, to: e)
+  let tz = match {
+    tail == e - f -> tail + trailing_zeros(text, from: i, to: d)
+    else -> tail
+  }
+  let head = leading_zeros(text, from: i, to: d)
+  let lz = match {
+    head == d - i -> head + leading_zeros(text, from: f, to: e)
+    else -> head
+  }
+  let total = (d - i) + (e - f)
+  int_exact(
+    text,
+    whole: slice(v: text, from: i, to: d),
+    fraction: slice(v: text, from: f, to: e),
+    n: total - lz - tz,
+    cut: total - tz,
+    scale: exponent_of(text, at: e) - (e - f) + tz,
+    neg: i > 0
+  )
+}
+
+// Internal: how many 0 digits end text[from..to].
+fn trailing_zeros(text: View, from: Int, to: Int) -> Int {
+  to - back_past_zeros(text, from, at: to)
+}
+
+// Internal: the loop of trailing_zeros: where the 0 digits that end text[from..at] begin.
+fn back_past_zeros(text: View, from: Int, at: Int) -> Int {
+  match {
+    at > from and text[at - 1] == 48 -> back_past_zeros(text, from, at: at - 1)
+    else -> at
+  }
+}
+
+// Internal: how many 0 digits start text[from..to].
+fn leading_zeros(text: View, from: Int, to: Int) -> Int {
+  past_zeros(text, at: from, to) - from
+}
+
+// Internal: the loop of leading_zeros: the first position at or after `at` that is not a 0 digit.
+fn past_zeros(text: View, at: Int, to: Int) -> Int {
+  match {
+    at < to and text[at] == 48 -> past_zeros(text, at: at + 1, to)
+    else -> at
+  }
+}
+
+// Internal: the first `cut` digits of whole ++ fraction (n of them not leading zeros) times 10^scale, when that is
+// a whole number within ±(2^53 - 1).
+fn int_exact(
+  text: View,
+  whole: View,
+  fraction: View,
+  n: Int,
+  cut: Int,
+  scale: Int,
+  neg: Bool
+) -> Option[Int] {
+  match {
+    n <= 0 -> Some(value: 0)
+    scale < 0 or n + scale > 16 -> None
+    cut <= len(whole) -> in_range(
+      value: times_ten(value: fold_digits(v: whole, at: 0, to: cut, value: 0), n: scale),
+      neg
+    )
+    else -> in_range(
+      value: times_ten(
+        value: fold_digits(
+          v: fraction,
+          at: 0,
+          to: cut - len(whole),
+          value: fold_digits(v: whole, at: 0, to: len(whole), value: 0)
+        ),
+        n: scale
+      ),
+      neg
+    )
+  }
+}
+
+// Internal: value followed by the digits v[at..to].
+fn fold_digits(v: View, at: Int, to: Int, value: Int) -> Int {
+  match {
+    at >= to -> value
+    else -> fold_digits(v, at: at + 1, to, value: value * 10 + (v[at] - 48))
+  }
+}
+
+// Internal: the exponent after `at` (0 when there is none), held to ±1000000000 so it cannot overflow.
+fn exponent_of(text: View, at: Int) -> Int {
+  match {
+    at >= len(text) -> 0
+    text[at + 1] == 45 -> 0 - exponent_digits(text, at: at + 2, value: 0)
+    text[at + 1] == 43 -> exponent_digits(text, at: at + 2, value: 0)
+    else -> exponent_digits(text, at: at + 1, value: 0)
+  }
+}
+
+// Internal: the loop of exponent_of.
+fn exponent_digits(text: View, at: Int, value: Int) -> Int {
+  match {
+    at >= len(text) -> value
+    value > 100000000 -> 1000000000
+    else -> exponent_digits(text, at: at + 1, value: value * 10 + (text[at] - 48))
+  }
+}
+
+// Internal: value * 10^n.
+fn times_ten(value: Int, n: Int) -> Int {
+  match {
+    n <= 0 -> value
+    else -> times_ten(value: value * 10, n: n - 1)
+  }
+}
+
+// Internal: Some(±value) when value is at most 2^53 - 1.
+fn in_range(value: Int, neg: Bool) -> Option[Int] {
+  match {
+    value > 9007199254740991 -> None
+    neg -> Some(value: 0 - value)
+    else -> Some(value)
   }
 }
 

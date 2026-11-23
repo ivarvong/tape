@@ -425,7 +425,7 @@ Appends a record as a JSON object, its fields by name: `Int`, `Float` (the short
 decode(json: View, as: T) -> Result[T, View]
 ```
 
-Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused.
+Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
 
 ### builtin next
 
@@ -1094,6 +1094,25 @@ Appends true or false.
 "true"
 ```
 
+### fn json_int
+
+```tape
+fn json_int(text: View) -> Option[Int]
+```
+
+The value of a JSON number's text when it is a whole number within ±(2^53 - 1), read exactly (no rounding); None otherwise. `text` must be a JSON number (number_end found it).
+
+```
+> json_int(text: "1e3")
+Some(value: 1000)
+> json_int(text: "-2.50e1")
+Some(value: -25)
+> json_int(text: "1.5")
+None
+> json_int(text: "9007199254740992")
+None
+```
+
 ### fn write_rows
 
 ```tape
@@ -1135,15 +1154,67 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn write_chars(out: Buf, text: View, from: Int, at: Int) -> Buf`: Copies runs of plain bytes whole; `from` is the start of the current run.
 - `fn write_escape(out: Buf, b: Int) -> Buf`: one byte of a JSON string as its escape.
 - `fn hex_digit(d: Int) -> Int`: 0-15 as a lowercase hex digit's byte.
-- `type WireObject`: a nested object as the host hands it to a second decode.
-- `type WireItems`: an array of objects, one to a line, as the host hands it over.
-- `type WireValues`: an array of other values, each as {"value": …}, one to a line.
-- `fn wire_some[T](decoded: Result[T, View]) -> Result[Option[T], View]`: A key that was there: its decoded value as Some.
-- `fn wire_each[T](items: View, by: Fn[View, Result[T, View]]) -> Result[List[T], View]`: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
-- `fn wire_each_from[T](items: View, by: Fn[View, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: the loop of wire_each.
-- `fn wire_each_next[T](decoded: Result[T, View], rest: View, by: Fn[View, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: wire_each, after one element.
-- `fn wire_at(at: Int, error: View) -> View`: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
-- `fn wire_plain(error: View) -> View`: An element that is not an object is handed over as {"value": …}: its reason without that key.
+- `type Json_Tree`: a JSON value. A string is its decoded bytes; `whole` is False when it holds a lone surrogate (an escape JSON.parse takes, written here as its three bytes of WTF-8). A number is its text.
+- `type Json_Member`: one member of an object, in the order written (a repeated key is there each time).
+- `type Json_Frame`: an array or an object being read, with what it holds so far, last first.
+- `type Json_Got`: a string read: its bytes, whether it is well-formed, and where it ends; or not a string.
+- `type Json_Code`: one character of a string read by json_tree: a code point, and whether it is a lone surrogate.
+- `type Json_Fit`: whether an object is a constructor (its fields are there, of their kinds; other keys are left unread): Json_Hit, or how many of its fields fit before the one that does not, and why.
+- `fn json_tree(v: View) -> Option[Json_Tree]`: the JSON value v holds, whitespace around it allowed; None when it is not JSON. Read in one pass with a stack of the arrays and objects open, so nesting does not grow the Wasm stack.
+- `fn tree_value(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree]`: a value starts at `at` (whitespace skipped).
+- `fn tree_open_object(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree]`: after `{` and whitespace.
+- `fn tree_open_array(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree]`: after `[` and whitespace.
+- `fn tree_key(v: View, at: Int, members: List[Json_Member], stack: List[Json_Frame]) -> Option[Json_Tree]`: a member's key starts at `at`; then its colon and its value.
+- `fn tree_colon(v: View, got: Json_Got, members: List[Json_Member], stack: List[Json_Frame]) -> Option[Json_Tree]`: a member's key, read.
+- `fn tree_member(v: View, key: View, at: Int, members: List[Json_Member], stack: List[Json_Frame]) -> Option[Json_Tree]`: at the colon after a member's key.
+- `fn tree_string(v: View, got: Json_Got, stack: List[Json_Frame]) -> Option[Json_Tree]`: a string value, read.
+- `fn tree_number(v: View, at: Int, end: Option[Int], stack: List[Json_Frame]) -> Option[Json_Tree]`: a number, if one ends at `end`.
+- `fn tree_done(v: View, node: Json_Tree, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree]`: a value `node` ended at `at`: it is the whole text's, or the next item or member of what is open.
+- `fn tree_text(v: View, at: Int) -> Json_Got`: the string whose body starts at `at`. Plain bytes (and well-formed UTF-8) are found 16 at a time (scan_plain); a string without escapes is a view of the input, one with escapes is decoded into new memory.
+- `fn text_run(v: View, at: Int) -> Int`: past plain ASCII and well-formed UTF-8: the first quote, backslash, control byte or byte that is not UTF-8.
+- `fn utf8_run(v: View, at: Int, found: Utf8) -> Int`: a UTF-8 sequence in a string: past it when it is well-formed.
+- `fn text_escaped(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got`: `at` is a backslash; `out` holds the string so far.
+- `fn text_more(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got`: after an escape.
+- `fn no_text(gone: View) -> Json_Got`: not a string (what was decoded of it is dropped).
+- `fn tree_escape(v: View, at: Int) -> Json_Code`: the escape whose letter is at `at`. A \u escape of a surrogate without its other half is a lone surrogate, as JSON.parse reads it.
+- `fn tree_simple(code: Option[Int], next: Int) -> Json_Code`: a one-letter escape.
+- `fn tree_unicode(v: View, at: Int, unit: Option[Int]) -> Json_Code`: `at` is the position after \uXXXX.
+- `fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code`: a high surrogate at the escape before `at`: with the low one after it, one code point; alone, lone.
+- `fn json_bad(v: View) -> View`: "empty" or "not JSON", as decode says of bytes that are not JSON.
+- `fn json_get(list: List[Json_Member], key: View) -> Option[Json_Tree]`: the value of the last member named `key` (JSON.parse keeps the last).
+- `fn json_get_from(list: List[Json_Member], key: View, found: Option[Json_Tree]) -> Option[Json_Tree]`: the loop of json_get.
+- `fn json_check(found: Option[Json_Tree], kind: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array); `depth` is how many fields fit before it.
+- `fn is_some(found: Option[Int]) -> Bool`: is there a value?
+- `fn json_kind(kind: Int) -> View`: what a kind of json_check is called in a reason.
+- `fn json_and(a: Json_Fit, b: Json_Fit) -> Json_Fit`: the first of two fits that misses, or Json_Hit (a key no field names is left unread).
+- `fn json_has(list: List[Json_Member], key: View) -> Bool`: is there a member named `key`?
+- `fn json_one(list: List[Json_Member], key: View) -> Int`: 1 when there is a member named `key`, else 0.
+- `fn json_better(best: Int, most: Int, at: Int, n: Int) -> Int`: the constructor at `at` when it names more keys (n) than the best so far (most), else the best.
+- `fn json_text_of(found: Option[Json_Tree]) -> View`: the text of a value that json_check found to be text.
+- `fn json_bool_of(found: Option[Json_Tree]) -> Bool`: a value that json_check found to be true or false.
+- `fn json_int_of(found: Option[Json_Tree]) -> Int`: a value that json_check found to be a whole number.
+- `fn int_or_zero(found: Option[Int]) -> Int`: the number, or 0.
+- `fn json_maybe_text(found: Option[Json_Tree]) -> Option[View]`: an optional text field (json_check found it absent or text).
+- `fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool]`: an optional true or false.
+- `fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int]`: an optional whole number.
+- `fn json_members_of(found: Option[Json_Tree]) -> List[Json_Member]`: the members of a value json_check found to be an object.
+- `fn json_items_of(found: Option[Json_Tree]) -> List[Json_Tree]`: the items of a value json_check found to be an array.
+- `fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View]`: a key that was there: its decoded value as Some.
+- `fn json_each[T](items: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]]) -> Result[List[T], View]`: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
+- `fn json_each_from[T](items: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: the loop of json_each.
+- `fn json_each_next[T](decoded: Result[T, View], rest: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: json_each, after one element.
+- `fn json_at(at: Int, error: View) -> View`: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
+- `fn json_plain(error: View) -> View`: An element that is not an object is read as if it were {"value": …}: its reason without that key.
+- `fn trailing_zeros(text: View, from: Int, to: Int) -> Int`: how many 0 digits end text[from..to].
+- `fn back_past_zeros(text: View, from: Int, at: Int) -> Int`: the loop of trailing_zeros: where the 0 digits that end text[from..at] begin.
+- `fn leading_zeros(text: View, from: Int, to: Int) -> Int`: how many 0 digits start text[from..to].
+- `fn past_zeros(text: View, at: Int, to: Int) -> Int`: the loop of leading_zeros: the first position at or after `at` that is not a 0 digit.
+- `fn int_exact(text: View, whole: View, fraction: View, n: Int, cut: Int, scale: Int, neg: Bool) -> Option[Int]`: the first `cut` digits of whole ++ fraction (n of them not leading zeros) times 10^scale, when that is a whole number within ±(2^53 - 1).
+- `fn fold_digits(v: View, at: Int, to: Int, value: Int) -> Int`: value followed by the digits v[at..to].
+- `fn exponent_of(text: View, at: Int) -> Int`: the exponent after `at` (0 when there is none), held to ±1000000000 so it cannot overflow.
+- `fn exponent_digits(text: View, at: Int, value: Int) -> Int`: the loop of exponent_of.
+- `fn times_ten(value: Int, n: Int) -> Int`: value * 10^n.
+- `fn in_range(value: Int, neg: Bool) -> Option[Int]`: Some(±value) when value is at most 2^53 - 1.
 - `fn write_rows_from[T](out: Buf, rows: Rows[T], first: Bool) -> Buf`: the loop of write_rows.
 
 ## std/http.tape

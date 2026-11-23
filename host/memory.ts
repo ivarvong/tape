@@ -4,7 +4,7 @@
 // and a length (text). mode 0 returns the rows written. mode 1 returns a pointer to: u32 row count, 4 bytes of
 // padding, then every cell in row order: Int and Bool as an i64, text as a u32 length and the UTF-8 bytes. The
 // module's `queries` section gives each statement's parameter kinds and row shape; cells are checked against it.
-// env.json(pointer, length, shape id) -> f64 decodes JSON with the platform's JSON.parse (decodeJson below).
+// JSON is decoded by the module itself (std/json.tape, compiler/wire.ts).
 import type { Cell, Flags, SqlParam } from './log.ts';
 import { cellText } from './log.ts';
 
@@ -12,12 +12,9 @@ import { cellText } from './log.ts';
 export type Mem = { readonly memory: WebAssembly.Memory; readonly alloc: (size: number) => number };
 /** A statement as the module lists it. `run`: its text with each Int and Bool parameter read as an integer. */
 export type Query = { sql: string; params: string; row: string | null; columns: string[] | null; run?: string };
-export type FieldShape = { name: string; kind: string; optional: boolean };
-export type Shape = { variants: FieldShape[][] };
 export type FlagDecl = { name: string; type: string; default: number | boolean; at: number; pinned?: unknown };
 
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
-const strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const enc = new TextEncoder();
 // The views over a module's memory, made again only when its buffer changes (memory.grow detaches the old one).
 // A host call makes one or two of these per statement, so a fresh DataView each time was measurable (1.9% of ledger).
@@ -32,7 +29,6 @@ function views(m: Mem): Views {
   return made;
 }
 const view = (m: Mem): DataView => views(m).d;
-const bytes = (m: Mem): Uint8Array => views(m).u;
 /** An i64 at `o`, from a whole number within ±2^53. */
 function setInt64(d: DataView, o: number, x: number): void {
   d.setInt32(o, x | 0, true);
@@ -208,133 +204,4 @@ export function writeRows(m: Mem, q: Query, rows: readonly Cell[][]): number {
   let o = ptr + 8;
   for (const r of rows) for (c = 0; c < r.length; c++) o += writeCell(d, u, o, r[c] ?? null, row[c], wrong);
   return ptr;
-}
-
-// ---- JSON
-// env.json(ptr, len, shape id): JSON.parse, checked against the type's shape. Writes a u32 constructor index,
-// 4 bytes of padding, then that constructor's fields in order (an optional field is an i64 flag, then its value
-// if present). The bytes may not be JSON of that shape: not an object, a missing key, a value of the wrong kind,
-// text that is not well-formed. A key no field names is left unread. Refined types' conditions are checked by the
-// module.
-
-const KIND: Readonly<Record<string, string>> = { t: 'text', b: 'true or false', i: 'a whole number', f: 'a number' };
-const wellFormed = (s: string): boolean => s.isWellFormed();
-const isObject = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x);
-/** Why an object is not one constructor: how many fields in the problem is, and what it is. */
-type Miss = { depth: number; why: string };
-/** An object that is one constructor: the room it needs, and its nested values as the text handed on. */
-type Fit = { size: number; raw: Map<string, string> };
-
-// a nested value is handed over as text for a second decode (std/json.tape): an object as it stands (j); an
-// array as its elements, one to a line: objects as they are (a), other values as {"value": …} (v)
-function nested(f: FieldShape, x: unknown): string | null | undefined {
-  if (f.kind === 'j') return isObject(x) ? JSON.stringify(x) : null;
-  if (f.kind !== 'a' && f.kind !== 'v') return undefined;
-  if (!Array.isArray(x)) return null;
-  return x.map((el: unknown) => `${JSON.stringify(f.kind === 'a' ? el : { value: el })}\n`).join('');
-}
-
-const ofKind = (kind: string, x: unknown): boolean =>
-  kind === 't'
-    ? typeof x === 'string'
-    : kind === 'b'
-      ? typeof x === 'boolean'
-      : kind === 'f'
-        ? Number.isFinite(x)
-        : Number.isSafeInteger(x);
-
-/** Whether the object has this constructor's fields, with values of their kinds (other keys are left unread). */
-function fit(shape: readonly FieldShape[], v: Record<string, unknown>): Fit | Miss {
-  const raw = new Map<string, string>();
-  let size = 8;
-  let depth = 0;
-  for (const f of shape) {
-    const x = v[f.name];
-    if (!Object.hasOwn(v, f.name)) {
-      if (!f.optional) return { depth, why: `missing key ${JSON.stringify(f.name)}` };
-      size += 8;
-      depth++;
-      continue;
-    }
-    const text = nested(f, x);
-    if (text === null) return { depth, why: `${f.name}: expected ${f.kind === 'j' ? 'an object' : 'an array'}` };
-    if (text === undefined && !ofKind(f.kind, x)) return { depth, why: `${f.name}: expected ${KIND[f.kind]}` };
-    if (typeof x === 'string' && f.kind === 't' && !wellFormed(x))
-      return { depth, why: `${f.name}: text with a lone surrogate` };
-    if (text !== undefined) raw.set(f.name, text);
-    const length = text?.length ?? (typeof x === 'string' && f.kind === 't' ? x.length : null);
-    size += 8 + (length === null ? 8 : 4 + 3 * length);
-    depth++;
-  }
-  return { size, raw };
-}
-/** How many of the object's keys a constructor names; -1 when it lacks one of its fields that is not optional. */
-const named = (shape: readonly FieldShape[], v: Record<string, unknown>): number =>
-  shape.some(f => !f.optional && !Object.hasOwn(v, f.name)) ? -1 : shape.filter(f => Object.hasOwn(v, f.name)).length;
-
-/** Constructor `which` with the object's values, written where the module reads it; the pointer. */
-function writeObject(
-  m: Mem,
-  shape: readonly FieldShape[],
-  which: number,
-  v: Record<string, unknown>,
-  { size, raw }: Fit,
-): number {
-  const out = m.alloc(size);
-  const d = view(m);
-  const mem = bytes(m);
-  d.setUint32(out, which, true);
-  d.setUint32(out + 4, 0, true);
-  let o = out + 8;
-  for (const f of shape) {
-    const here = Object.hasOwn(v, f.name);
-    const x = raw.get(f.name) ?? v[f.name];
-    if (f.optional) {
-      setInt64(d, o, here ? 1 : 0);
-      o += 8;
-      if (!here) continue;
-    }
-    if (typeof x === 'string' && (f.kind === 't' || raw.has(f.name))) {
-      const w = enc.encodeInto(x, mem.subarray(o + 4, o + 4 + 3 * x.length)).written;
-      d.setUint32(o, w, true);
-      o += 4 + w;
-    } else {
-      if (f.kind === 'f') d.setFloat64(o, Number(x), true);
-      else setInt64(d, o, f.kind === 'b' ? (x === true ? 1 : 0) : Number(x));
-      o += 8;
-    }
-  }
-  return out;
-}
-
-/**
- * JSON decoded as a type: a pointer to the value, as the constructor that has all its fields among the object's
- * keys and names the most of them (the first such, in declaration order), when its values are of the right kinds;
- * or why not: that constructor's reason, or, when none has its fields, the one that got furthest.
- */
-export function decodeJson(m: Mem, shape: Shape, ptr: number, len: number): { at: number } | { issue: string } {
-  let v: unknown;
-  try {
-    v = JSON.parse(strict.decode(new Uint8Array(m.memory.buffer, ptr, len)));
-  } catch {
-    return { issue: len > 0 ? 'not JSON' : 'empty' };
-  }
-  if (!isObject(v)) return { issue: 'not an object' };
-  let best = -1,
-    most = -1;
-  for (const [which, fields] of shape.variants.entries()) {
-    const n = named(fields, v);
-    if (n > most) [best, most] = [which, n];
-  }
-  const fields = shape.variants[best];
-  if (fields) {
-    const found = fit(fields, v);
-    return 'size' in found ? { at: writeObject(m, fields, best, v, found) } : { issue: found.why };
-  }
-  let furthest: Miss = { depth: -1, why: '' };
-  for (const f of shape.variants) {
-    const found = fit(f, v);
-    if ('depth' in found && found.depth > furthest.depth) furthest = found;
-  }
-  return { issue: furthest.why };
 }

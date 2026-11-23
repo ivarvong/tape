@@ -13,19 +13,8 @@ import { Pending, REAL_TIMERS, perform } from './call.ts';
 import type { Service, Timers } from './call.ts';
 import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
 import type { CallEffect, Cell, Effect, Flags, From, Head, Span, Sql, Status, TraceEvent, WakeEffect } from './log.ts';
-import {
-  answerAt,
-  block,
-  copyIn,
-  copyOut,
-  decodeJson,
-  readParams,
-  replyBlock,
-  textAt,
-  writeFlags,
-  writeRows,
-} from './memory.ts';
-import type { FlagDecl, Mem, Query, Shape } from './memory.ts';
+import { answerAt, block, copyIn, copyOut, readParams, replyBlock, textAt, writeFlags, writeRows } from './memory.ts';
+import type { FlagDecl, Mem, Query } from './memory.ts';
 import { direct } from './schema.ts';
 import type { Transaction } from './schema.ts';
 import { cellText } from './log.ts';
@@ -104,7 +93,6 @@ class Undo extends Error {
 /** A module, its host, and the run in hand. */
 type Linked = {
   readonly Q: Query[];
-  readonly S: Shape[];
   readonly F: FlagDecl[];
   readonly E: HostParam[];
   readonly BUILD: string;
@@ -352,15 +340,8 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     kptr: number,
     klen: number,
   ): number => callOut(get(), remote, id, ptr, len, within, get().C[id]?.keyed ? textAt(get().mem, kptr, klen) : 0);
-  const json = (ptr: number, len: number, id: number): number => {
-    const L = get();
-    const got = decodeJson(L.mem, L.S[id] ?? { variants: [] }, ptr, len);
-    L.o.trace?.push('at' in got ? { json: 'decoded' } : { json: got.issue });
-    return 'at' in got ? got.at : -block(L.mem, got.issue);
-  };
   return {
     sql: (id: number, ptr: number, mode: number) => sqlCall(get(), id, ptr, mode),
-    json,
     call: (remote: number, id: number, ptr: number, len: number, within: number, once: number) =>
       callOut(get(), remote, id, ptr, len, within, once),
     call_key: keyed,
@@ -871,7 +852,6 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     return fail('not a Tape module: it exports no memory or no alloc');
   const L: Linked = {
     Q: listed<Query>(module, 'queries'),
-    S: listed<Shape>(module, 'shapes'),
     F,
     E,
     BUILD: String(section(module, 'build')),

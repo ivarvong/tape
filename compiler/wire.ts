@@ -1,12 +1,13 @@
-// compiler/wire.ts: Tape source generated for nested JSON.
-// Records inside records, and lists, in JSON (decode, write_json, and so every message between programs). The host
-// decodes one flat object at a time (host.ts json), so for each record type T with a field that is a record or a
-// List the compiler writes, as Tape source:
-//   type Wire_T               T with each such field as text for a second decode (std/json.tape: WireObject, …)
-//   wire_decode_T(json)       decode Wire_T, then each nested field, naming the field in the reason when one fails
+// compiler/wire.ts: Tape source generated for JSON. For every record type T a program can decode, a decoder:
+//   json_decode_T(json)     the bytes read once into a tree (std/json.tape json_tree), then json_as_T
+//   json_as_T(members)      the first constructor whose keys and kinds fit the object (or why not, from the one that
+//                           got furthest), its refined fields checked in order, then its records and lists decoded,
+//                           each reason with the path to it
+// and for a record type with a field that is a record or a List (`nested`):
 //   wire_write_T(out, value)  the object, field by field (types with one constructor and no Option, as write_json)
-// and for a list of anything but records, an item type {"value": …} and its decoder. decodeTo and write_json call
-// these for such a T. A field is: Int, Bool, View (or a refinement); a record; List[…] of those; Option[…] of any.
+// decode calls json_decode_T. A field is: Int, Bool, View (or a refinement); a record; List[…] of those; Option[…] of
+// any. What decode accepts and the reasons it gives are those of the host's decode before it (JSON.parse, then the
+// shape), with numbers read exactly (std/json.tape json_int).
 import type { Program, TypeAst, Variant } from './ast.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
@@ -23,6 +24,8 @@ export type Wire = {
   kind: (t: TypeAst, inList: boolean, busy: Set<string>) => WireKind | null;
   /** those of `nested` that can also be written */
   writable: Set<string>;
+  /** the record types that have a decoder (json_decode_T) */
+  decodable: Set<string>;
 };
 // the kind of a field when it is there
 const present = (k: WireKind): WireKind => (k.k === 'opt' ? k.of : k);
@@ -97,60 +100,209 @@ export function wireSource(prog: Program): Wire {
         !!types.get(n)?.variants.some(v => v.fields.some(f => deep(kind(f.type, false, new Set())))),
     ),
   );
-  // the helpers are std/json.tape's: a build without it has no nested JSON (C09, as before)
-  if (nested.size === 0 || !types.has('WireObject') || !prog.fns.has('wire_each') || !prog.fns.has('write_bool'))
-    return { text: '', nested: new Set(), kind, writable: new Set() };
+  const decodable = new Set(
+    [...types.keys()].filter(
+      n =>
+        record(n) &&
+        ![n, ...(types.get(n)?.variants ?? []).map(v => v.name)].some(x => x.startsWith('std.')) &&
+        able(n),
+    ),
+  );
+  // the helpers are std/json.tape's: a build without it decodes nothing (decode says so)
+  if (!prog.fns.has('json_tree') || !prog.fns.has('write_bool'))
+    return { text: '', nested: new Set(), decodable: new Set(), kind, writable: new Set() };
   const out: string[] = [],
-    items = new Map<string, boolean>(),
     lists = new Map<string, boolean>(),
-    maybes = new Map<string, boolean>(),
+    helpers = new Set<string>(),
     mangle = (t: TypeAst): string =>
       text(t)
         .replaceAll(/[^A-Za-z0-9]+/g, '_')
         .replace(/_$/, '');
-  const wireType = (k: WireKind): string =>
-    k.k === 's'
-      ? text(k.t)
-      : k.k === 'rec'
-        ? 'WireObject'
-        : k.k === 'list'
-          ? k.of.k === 'rec'
-            ? 'WireItems'
-            : 'WireValues'
-          : `Option[${k.of.k === 's' ? text(k.of.t) : wireType(k.of)}]`;
-  const lambda = (k: WireKind, body: string): string => `fn(item: View) -> Result[${text(k.t)}, View] { ${body} }`;
-  const dec = (e: string, k: WireKind): string =>
-    k.k === 'rec'
-      ? nested.has(k.name)
-        ? `wire_decode_${k.name}(json: ${e})`
-        : `decode(json: ${e}, as: ${k.name})`
-      : k.k === 'list'
-        ? `wire_each(items: ${e}, by: ${lambda(k.of, k.of.k === 'rec' ? dec('item', k.of) : `${item(k.of)}(json: item)`)})`
-        : k.k === 'opt'
-          ? `${maybe(k)}(found: ${e})`
-          : stop('a scalar is decoded with its record');
-  // a key that may be absent: None, or what its value decodes to
-  function maybe(k: Extract<WireKind, { k: 'opt' }>): string {
-    const m = mangle(k.of.t);
-    if (!maybes.has(m)) {
-      maybes.set(m, true);
-      out.push(
-        `fn wire_maybe_${m}(found: ${wireType(k)}) -> Result[${text(k.t)}, View] {\n  match found {\n    Some(value) -> wire_some(decoded: ${dec('value', k.of)})\n    None -> Ok(value: None)\n  }\n}\n`,
-      );
+  const once = (name: string, src: () => string): string => {
+    if (!helpers.has(name)) {
+      helpers.add(name);
+      out.push(src());
     }
-    return `wire_maybe_${m}`;
+    return name;
+  };
+  // what json_check is told a kind is: 0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array
+  const code = (k: WireKind): number =>
+    k.k === 's'
+      ? k.base === 'View'
+        ? 0
+        : k.base === 'Bool'
+          ? 1
+          : 2
+      : k.k === 'rec'
+        ? 3
+        : k.k === 'list'
+          ? 4
+          : code(k.of);
+  const refined = (t: TypeAst): boolean => !!types.get(t.name)?.refine;
+  const scalarOf = (of: string, found: string): string =>
+    of === 'View'
+      ? `json_text_of(found: ${found})`
+      : of === 'Bool'
+        ? `json_bool_of(found: ${found})`
+        : `json_int_of(found: ${found})`;
+  const maybeOf = (of: string, found: string): string =>
+    of === 'View'
+      ? `json_maybe_text(found: ${found})`
+      : of === 'Bool'
+        ? `json_maybe_bool(found: ${found})`
+        : `json_maybe_int(found: ${found})`;
+  // Option[R] of a refined R, from Option[its base]: None when the value there is not an R
+  const maybeRefined = (t: TypeAst, of: string): string =>
+    once(
+      `json_maybe_${mangle(t)}`,
+      () =>
+        `fn json_maybe_${mangle(t)}(found: Option[${of}]) -> Option[Option[${text(t)}]] {\n  match found {\n    Some(value: ${t.name}(x)) -> Some(value: Some(value: x))\n    None -> Some(value: None)\n    _ -> None\n  }\n}\n`,
+    );
+  // a scalar element's value, its refinement checked
+  function itemValue(k: Extract<WireKind, { k: 's' }>): string {
+    const m = mangle(k.t);
+    return once(`json_value_${m}`, () => {
+      const got = scalarOf(k.base, 'Some(value: item)');
+      const body = refined(k.t)
+        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "not a valid ${k.t.name}")\n  Ok(value: x)\n`
+        : `  Ok(value: ${got})\n`;
+      return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n${body}}\n`;
+    });
   }
-  // an element that is not a record arrives as {"value": …}
+  // one element of a List of k: a record is an object; anything else is read as {"value": …} was
   function item(k: WireKind): string {
     const m = mangle(k.t);
-    if (!items.has(m)) {
-      items.set(m, true);
-      out.push(
-        `type Wire_item_${m} {\n  Wire_item_${m}(value: ${wireType(k)})\n}\n`,
-        `fn wire_item_${m}(json: View) -> Result[${text(k.t)}, View] {\n  match decode(json, as: Wire_item_${m}) {\n    Ok(value: Wire_item_${m}(value)) -> ${k.k === 's' ? 'Ok(value)' : dec('value', k)}\n    Err(error) -> Err(error: wire_plain(error))\n  }\n}\n`,
-      );
+    return once(`json_item_${m}`, () => {
+      if (k.k === 'rec')
+        return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match item {\n    Json_Obj(members) -> json_as_${k.name}(members)\n    _ -> Err(error: "not an object")\n  }\n}\n`;
+      const read =
+        k.k === 'list'
+          ? `${each(k.of)}(items: json_items_of(found: Some(value: item)))`
+          : k.k === 's'
+            ? `${itemValue(k)}(item)`
+            : stop('an Option in a List');
+      return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match json_check(found: Some(value: item), kind: ${code(k)}, name: "value", optional: False, depth: 0) {\n    Json_Hit -> ${read}\n    Json_Miss(why) -> Err(error: json_plain(error: why))\n  }\n}\n`;
+    });
+  }
+  function each(k: WireKind): string {
+    const m = mangle(k.t);
+    if (lists.has(`d${m}`)) return `json_list_${m}`;
+    lists.set(`d${m}`, true);
+    const by = item(k);
+    out.push(
+      `fn json_list_${m}(items: List[Json_Tree]) -> Result[List[${text(k.t)}], View] {\n  json_each(items, by: fn(item: Json_Tree) -> Result[${text(k.t)}, View] { ${by}(item) })\n}\n`,
+    );
+    return `json_list_${m}`;
+  }
+  // a deep field's decoded value (a Result), from the member's value `found`
+  const deepOf = (k: WireKind, found: string): string => {
+    if (k.k === 'rec') return `json_as_${k.name}(members: json_members_of(found: ${found}))`;
+    if (k.k === 'list') return `${each(k.of)}(items: json_items_of(found: ${found}))`;
+    if (k.k !== 'opt') return stop('a scalar is read, not decoded');
+    const inner = k.of;
+    const m = mangle(inner.t);
+    if (inner.k === 'rec')
+      return `${once(`json_maybe_rec_${m}`, () => `fn json_maybe_rec_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value: Json_Obj(members)) -> json_some(decoded: json_as_${inner.name}(members))\n    _ -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
+    if (inner.k === 'list') {
+      const every = each(inner.of);
+      return `${once(`json_maybe_list_${m}`, () => `fn json_maybe_list_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value: Json_Arr(items)) -> json_some(decoded: ${every}(items))\n    _ -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
     }
-    return `wire_item_${m}`;
+    return stop('an Option of a scalar is read, not decoded');
+  };
+  for (const n of decodable) {
+    const d = types.get(n) ?? stop(`no type ${n}`);
+    const kindsOf = (v: Variant): WireKind[] =>
+      v.fields.map(f => kind(f.type, false, new Set()) ?? stop(`${v.name}.${f.name} cannot be JSON`));
+    out.push(
+      `fn json_decode_${n}(json: View) -> Result[${n}, View] {\n  match json_tree(v: json) {\n    Some(value: Json_Obj(members)) -> json_as_${n}(members)\n    None -> Err(error: json_bad(v: json))\n    _ -> Err(error: "not an object")\n  }\n}\n`,
+    );
+    const vs = d.variants;
+    // of several constructors, the one that has all its fields (bar Options) among the keys and names the most of
+    // them, the first on a tie; when none has its fields, the reason of the one that got furthest
+    const steps = vs
+      .slice(1)
+      .map(
+        (_, j) =>
+          `  let b${j + 1} = json_better(best: b${j}, most: m${j}, at: ${j + 1}, n: c${j + 1})\n  let m${j + 1} = max(a: m${j}, b: c${j + 1})\n`,
+      );
+    const last = vs.length - 1;
+    out.push(
+      vs.length === 1
+        ? `fn json_as_${n}(members: List[Json_Member]) -> Result[${n}, View] {\n  json_one_${n}_0(members)\n}\n`
+        : `fn json_as_${n}(members: List[Json_Member]) -> Result[${n}, View] {\n${vs.map((_, i) => `  let c${i} = json_named_${n}_${i}(members)\n`).join('')}  let b0 = 0\n  let m0 = c0\n${steps.join('')}  match {\n    m${last} < 0 -> json_try_${n}_0(members, far: -1, why: "")\n${vs
+            .slice(0, -1)
+            .map((_, i) => `    b${last} == ${i} -> json_one_${n}_${i}(members)\n`)
+            .join('')}    else -> json_one_${n}_${last}(members)\n  }\n}\n`,
+    );
+    vs.forEach((v, i) => {
+      const ks = kindsOf(v);
+      const kAt = (j: number): WireKind => ks[j] ?? stop('kind');
+      out.push(
+        `fn json_one_${n}_${i}(members: List[Json_Member]) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(members) {\n    Json_Hit -> json_build_${n}_${i}(members)\n    Json_Miss(why) -> Err(error: why)\n  }\n}\n`,
+      );
+      if (vs.length > 1) {
+        const required = v.fields
+          .filter((_, j) => kAt(j).k !== 'opt')
+          .map(f => `json_has(list: members, key: "${f.name}")`);
+        const count =
+          v.fields.length > 0 ? v.fields.map(f => `json_one(list: members, key: "${f.name}")`).join(' + ') : '0';
+        out.push(
+          `fn json_named_${n}_${i}(members: List[Json_Member]) -> Int {\n${required.length > 0 ? `  match {\n    ${required.join(' and ')} -> ${count}\n    else -> -1\n  }\n` : `  ${count}\n`}}\n`,
+        );
+        const next = (far: string, why: string): string =>
+          i + 1 < vs.length ? `json_try_${n}_${i + 1}(members, far: ${far}, why: ${why})` : `Err(error: ${why})`;
+        out.push(
+          `fn json_try_${n}_${i}(members: List[Json_Member], far: Int, why: View) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(members) {\n    Json_Hit -> json_build_${n}_${i}(members)\n    Json_Miss(depth, why: reason) if depth > far -> ${next('depth', 'reason')}\n    _ -> ${next('far', 'why')}\n  }\n}\n`,
+        );
+      }
+      const fit = v.fields.reduceRight(
+        (rest, f, j) =>
+          `json_and(a: json_check(found: json_get(list: members, key: "${f.name}"), kind: ${code(kAt(j))}, name: "${f.name}", optional: ${kAt(j).k === 'opt' ? 'True' : 'False'}, depth: ${j}), b: ${rest})`,
+        'Json_Hit',
+      );
+      out.push(`fn json_fit_${n}_${i}(members: List[Json_Member]) -> Json_Fit {\n  ${fit}\n}\n`);
+      // the values: scalars read, then refinements checked in field order, then records and lists decoded
+      const get = (f: string): string => `json_get(list: members, key: "${f}")`;
+      const lines: string[] = [];
+      const as = new Map<string, string>();
+      v.fields.forEach((f, j) => {
+        const k = kAt(j);
+        if (k.k === 's') lines.push(`  let w_${f.name} = ${scalarOf(k.base, get(f.name))}\n`);
+        else if (k.k === 'opt' && k.of.k === 's')
+          lines.push(`  let w_${f.name} = ${maybeOf(k.of.base, get(f.name))}\n`);
+        else return;
+        as.set(f.name, `w_${f.name}`);
+      });
+      v.fields.forEach((f, j) => {
+        const k = kAt(j);
+        if (k.k === 's' && refined(k.t))
+          lines.push(
+            `  let ${k.t.name}(r_${f.name}) = w_${f.name} else -> Err(error: "${f.name}: not a valid ${k.t.name}")\n`,
+          );
+        else if (k.k === 'opt' && k.of.k === 's' && refined(k.of.t))
+          lines.push(
+            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: not a valid ${k.of.t.name}")\n`,
+          );
+        else return;
+        as.set(f.name, `r_${f.name}`);
+      });
+      v.fields.forEach((f, j) => {
+        const k = kAt(j);
+        if (!deep(k)) return;
+        const sep = present(k).k === 'list' ? '' : ': ';
+        lines.push(
+          `  let Ok(value: d_${f.name}) = ${deepOf(k, get(f.name))} else {\n    Err(error) -> Err(error: "${f.name}${sep}" ++ error)\n  }\n`,
+        );
+        as.set(f.name, `d_${f.name}`);
+      });
+      const built =
+        v.fields.length > 0
+          ? `${v.name}(${v.fields.map(f => `${f.name}: ${as.get(f.name) ?? stop(f.name)}`).join(', ')})`
+          : v.name;
+      out.push(
+        `fn json_build_${n}_${i}(members: List[Json_Member]) -> Result[${n}, View] {\n${lines.join('')}  Ok(value: ${built})\n}\n`,
+      );
+    });
   }
   const write = (o: string, e: string, k: WireKind): string =>
     k.k === 's'
@@ -200,23 +352,6 @@ export function wireSource(prog: Program): Wire {
         const all = v.fields.map(f => kind(f.type, false, new Set()));
         return i => all[i] ?? stop(`${v.name} has no field ${i} that can be JSON`);
       };
-    out.push(
-      `type Wire_${n} {\n${d.variants.map(v => `  Wire_${v.name}${v.fields.length > 0 ? `(${v.fields.map((f, i) => `${f.name}: ${wireType(kinds(v)(i))}`).join(', ')})` : ''}`).join('\n')}\n}\n`,
-      `fn wire_decode_${n}(json: View) -> Result[${n}, View] {\n  match decode(json, as: Wire_${n}) {\n${d.variants.map(v => `    Ok(value: Wire_${v.name}${v.fields.length > 0 ? `(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')})` : ''}) -> wire_build_${v.name}(${v.fields.map(f => vr(f.name)).join(', ')})`).join('\n')}\n    Err(error) -> Err(error)\n  }\n}\n`,
-    );
-    for (const v of d.variants) {
-      const ks = kinds(v),
-        steps = v.fields
-          .map((f, i) =>
-            deep(ks(i))
-              ? `  let Ok(value: wire_${f.name}) = ${dec(vr(f.name), ks(i))} else {\n    Err(error) -> Err(error: "${f.name}${present(ks(i)).k === 'list' ? '' : ': '}" ++ error)\n  }\n`
-              : '',
-          )
-          .join('');
-      out.push(
-        `fn wire_build_${v.name}(${v.fields.map((f, i) => `${vr(f.name)}: ${wireType(ks(i))}`).join(', ')}) -> Result[${n}, View] {\n${steps}  Ok(value: ${v.name}${v.fields.length > 0 ? `(${v.fields.map((f, i) => `${f.name}: ${deep(ks(i)) ? `wire_${f.name}` : vr(f.name)}`).join(', ')})` : ''})\n}\n`,
-      );
-    }
     if (canWrite(n)) {
       writable.add(n);
       const v = d.variants[0] ?? stop(`${n} has no constructor`),
@@ -230,5 +365,5 @@ export function wireSource(prog: Program): Wire {
       );
     }
   }
-  return { text: out.join('\n'), nested, kind, writable };
+  return { text: out.join('\n'), nested, decodable, kind, writable };
 }

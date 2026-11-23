@@ -8,7 +8,7 @@ export class Unsupported extends Error {}
 export type Cell = number | string | null;
 
 const enc = new TextEncoder(),
-  strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+  strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 type Kind = 't' | 'i' | 'f' | 'b';
 const KIND: Readonly<Record<Kind, string>> = { t: 'text', b: 'true or false', i: 'a whole number', f: 'a number' };
 
@@ -58,24 +58,59 @@ export const row = (prog: Program, name: string, cells: readonly Cell[]): Adt =>
   );
 };
 
+/** A JSON number as its text, so that it is read exactly (std/json.tape json_int), not as a double. */
+class Num {
+  readonly source: string;
+  constructor(source: string) {
+    this.source = source;
+  }
+}
+/** A JSON number as a finite Float (from its text, as the module reads it), or null. */
+const finiteOf = (x: unknown): number | null => {
+  const v = x instanceof Num ? Number(x.source) : typeof x === 'number' ? x : NaN;
+  return Number.isFinite(v) ? v : null;
+};
+/** A JSON number's value when it is a whole number within ±(2^53 - 1), read exactly from its text; else null. */
+function whole(source: string): bigint | null {
+  const m = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(source);
+  if (!m) return null;
+  const all = (m[2] ?? '') + (m[3] ?? ''),
+    kept = all.replace(/0+$/, '');
+  if (/^0*$/.test(all)) return 0n;
+  const scale = Number(m[4] ?? '0') - (m[3] ?? '').length + (all.length - kept.length),
+    core = kept.replace(/^0+/, '');
+  if (scale < 0 || core.length + scale > 16) return null;
+  const v = BigInt(core) * 10n ** BigInt(scale);
+  return v > 9007199254740991n ? null : m[1] === '-' ? -v : v;
+}
 const wellFormed = (x: string): boolean =>
   !/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(x);
 const isObject = (v: unknown): v is Readonly<Record<string, unknown>> =>
-  v !== null && typeof v === 'object' && !Array.isArray(v);
+  v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Num);
 const err = (why: string): Adt => adt('Err', { error: enc.encode(why) });
 
 /**
  * decode(json:, as:): JSON.parse, then the constructor that has its fields among the object's keys and names the
  * most of them (the first such), its values of the right kinds, then each refined field's condition (`meets`). A
  * key no field names is left unread. When no constructor has its fields, the reason is from the one that got
- * furthest.
+ * furthest. A number is read exactly from its text, as the module reads it (std/json.tape).
  */
 export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t: TypeAst, v: Value) => boolean): Adt {
   let parsed: unknown;
+  let text: string;
   try {
-    parsed = JSON.parse(strict.decode(bytes));
+    text = strict.decode(bytes);
+    parsed = JSON.parse(text);
   } catch {
     return err(bytes.length > 0 ? 'not JSON' : 'empty');
+  }
+  // each number as its text, to be read exactly (a reviver too deep to run leaves them as parsed)
+  try {
+    parsed = JSON.parse(text, (_k, v: unknown, context?: { source?: string }) =>
+      typeof v === 'number' ? new Num(context?.source ?? String(v)) : v,
+    );
+  } catch {
+    // RangeError: nested too deep for the reviver
   }
   if (!isObject(parsed)) return err('not an object');
   const object = parsed;
@@ -110,9 +145,9 @@ export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t
               ? x
               : null
             : k === 'f'
-              ? typeof x === 'number' && Number.isFinite(x)
-                ? x
-                : null
+              ? finiteOf(x)
+              : x instanceof Num
+                ? whole(x.source)
               : typeof x === 'number' && Number.isSafeInteger(x)
                 ? BigInt(x)
                 : null;

@@ -612,9 +612,9 @@ console.log(`orders.tape: ${orders.wasm.length} bytes, stock.tape: ${stockBuild.
         null,
         child?.log ?? [],
       );
-      return [t.error, t.events.flatMap(e => ('json' in e ? [e.json] : []))];
+      return [t.error, t.events.some(e => 'site' in e)];
     })(),
-    [null, ['decoded']],
+    [null, true],
   );
   // a timeout: the caller's span ends with the call timed out; the callee's span arrives later, same trace
   logs.length = 0;

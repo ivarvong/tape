@@ -75,6 +75,7 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     exp: ['x'],
     log: ['x'],
     pow: ['x', 'y'],
+    scan_plain: ['v', 'at'],
   }),
 );
 /** A type as the compiler holds it: a name applied to types. */

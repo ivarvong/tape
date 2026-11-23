@@ -29,7 +29,6 @@ function importList({ imports, opts, tables }: Parts): [string, number][] {
   const wanted: [boolean, string, number[], number[]][] = [
     [opts.profile, 'allocated', [I32], []],
     [imports.usesSql, 'sql', three, [F64]],
-    [imports.usesJson, 'json', three, [F64]],
     [opts.trace, 'trace', [I32, I32], []],
     [imports.usesCall, 'call_key', [I32, I32, I32, I32, F64, I32, I32], [F64]],
     [imports.usesAsk, 'ask', [I32], [F64]],
@@ -41,7 +40,7 @@ function importList({ imports, opts, tables }: Parts): [string, number][] {
   const typed = new Map(
     wanted.flatMap(([on, field, p, r]): [string, number][] => (on ? [[field, sig(tables, p, r)]] : [])),
   );
-  return ['sql', 'json', 'call_key', 'member', 'ask', 'wake', 'float_text', 'trace', 'allocated'].flatMap(
+  return ['sql', 'call_key', 'member', 'ask', 'wake', 'float_text', 'trace', 'allocated'].flatMap(
     (field): [string, number][] => {
       const type = typed.get(field);
       return type === undefined ? [] : [[field, type]];

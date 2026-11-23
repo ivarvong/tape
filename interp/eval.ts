@@ -238,6 +238,7 @@ const INTRINSIC = {
   exp: ['x'],
   log: ['x'],
   pow: ['x', 'y'],
+  scan_plain: ['v', 'at'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -313,6 +314,15 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'atan2':
     case 'pow':
       return finite(mathFn(name)(asFloat(a[0]), asFloat(a[1])));
+    // the first byte at or after `at` that is below 32, 128 or more, a quote or a backslash
+    case 'scan_plain': {
+      const v = asBytes(a[0]),
+        at = asInt(a[1]);
+      if (at < 0n || at > BigInt(v.length)) throw new Trap(TRAP.BOUNDS);
+      let i = Number(at);
+      while (i < v.length && (v[i] ?? 0) >= 32 && (v[i] ?? 0) < 128 && v[i] !== 34 && v[i] !== 92) i++;
+      return BigInt(i);
+    }
     default:
       return unreachable(name, 'intrinsic');
   }

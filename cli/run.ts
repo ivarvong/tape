@@ -28,7 +28,6 @@ function effectLine(plain: Built, e: Effect): string {
 /** What the host did between two sites of a trace; null for what the trace does not show. */
 function hostLine(e: TraceEvent): string | null {
   if ('sql' in e) return `        sql ${JSON.stringify(e.p)} -> ${answer(e)}`;
-  if ('json' in e) return `        json: ${e.json}`;
   return 'call' in e ? `        call ${e.call}.${e.method} -> ${e.status}` : null;
 }
 

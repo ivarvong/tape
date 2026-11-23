@@ -65,7 +65,6 @@ export type Build = Imports & {
   rowKind: (f: { type: Type }) => string | undefined;
   rowOf: (t: Type, at: Place) => FlatAdt;
   shapeOf: (t: Type, at: Place, decoding: boolean) => Shape;
-  shapes: Shape[];
   sig: (params: readonly number[], results: readonly number[]) => number;
   sites: Site[];
   slotsOf: (t: Type, at?: Place) => number[];

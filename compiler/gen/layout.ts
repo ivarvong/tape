@@ -37,7 +37,7 @@ export type BoxedAdt = {
   variants: BoxedVariant[];
 };
 export type Adt = FlatAdt | BoxedAdt;
-/** What a JSON value or a column is: i Int, b Bool, t text; j, a, v the raw text of a nested value. */
+/** What a JSON value or a column is: i Int, b Bool, t text. */
 export type FieldKind = { name: string; kind: string; optional: boolean };
 export type Shape = { variants: FieldKind[][] };
 /** A message through its nested records and lists, for fingerprints. */
@@ -276,17 +276,12 @@ export function rowOf(L: Layouts, t: Type, at: Place): FlatAdt {
   return a;
 }
 
-// A JSON shape: constructors whose fields are Int, Bool, View (or refinements of them), or Option of those for
-// keys that may be absent. With several constructors, the one whose keys are exactly the object's keys is chosen.
-const RAW: Readonly<Record<string, string>> = { WireObject: 'j', WireItems: 'a', WireValues: 'v' };
+// A flat JSON shape, for write_json and for fingerprints: constructors whose fields are Int, Bool, View (or
+// refinements of them), or Option of those for keys that may be absent.
 
-/** What a field is in JSON, or null when it cannot be. A Wire* field is text the host fills: only ever decoded. */
+/** What a field is in JSON, or null when it cannot be. */
 function jsonKind(L: Layouts, ft: Type, decoding: boolean): { kind: string; optional: boolean } | null {
-  const one = (x: Type | undefined): string | undefined => {
-    if (!x) return undefined;
-    if (Object.hasOwn(RAW, x.name)) return decoding ? RAW[x.name] : undefined;
-    return scalar(strip(L, x).name);
-  };
+  const one = (x: Type | undefined): string | undefined => (x ? scalar(strip(L, x).name) : undefined);
   const own = one(ft);
   if (own !== undefined) return { kind: own, optional: false };
   const inner = decoding && ft.name === 'Option' ? one(ft.args[0]) : undefined;

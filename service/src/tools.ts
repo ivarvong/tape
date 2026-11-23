@@ -51,7 +51,7 @@ const skipImport = (b: Uint8Array, at: Cursor): void => {
     limits(b, at);
   } else at.i += 2;
 };
-// The functions a module imports, read from its import section ("env.sql", "env.json", …).
+// The functions a module imports, read from its import section ("env.sql", "env.call_key", …).
 export function importsOf(wasm: Uint8Array | ArrayBuffer): string[] {
   const b = new Uint8Array(wasm),
     out: string[] = [],

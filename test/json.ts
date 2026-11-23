@@ -140,6 +140,11 @@ if (b.wasm !== null) {
     ],
     ['a key missing in an element', { ...good, tiers: [{ name: 'x', qty: 1 }] }, 'tiers[0]: missing key "price"'],
     ['a record that is not an object', { ...good, venue: 'NYC' }, 'venue: expected an object'],
+    [
+      'a lone surrogate inside a record',
+      { ...good, venue: { city: '\uD800', indoor: true } },
+      'venue: city: text with a lone surrogate',
+    ],
     ['a wrong value in a list of text', { ...good, tags: ['a', 5] }, 'tags[1]: expected text'],
     ['a list that is not an array', { ...good, tiers: {} }, 'tiers: expected an array'],
     ['an element that is not an object', { ...good, tiers: [7] }, 'tiers[0]: not an object'],
@@ -254,9 +259,11 @@ const flat = build(
   `type T { T(a: Int, b: View) }\nfn handle(raw: View) -> Buf {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Buf {\n  match d {\n    Ok(value) -> respond(status: 200) |> write_json(value)\n    Err(error) -> respond(status: 400)\n  }\n}\n`,
 );
 ok(
-  'a flat record is decoded as before: one shape, no generated functions',
-  flat.wasm !== null && flat.shapes.length === 1 && !flat.functions.some(n => n.startsWith('wire_')),
-  flat.wasm === null ? codes(flat) : flat.functions.filter(n => n.startsWith('wire_')).join(','),
+  'a flat record is decoded in the module, by the decoder written for it, with no import for JSON',
+  flat.wasm !== null &&
+    flat.functions.includes('json_decode_T') &&
+    !WebAssembly.Module.imports(new WebAssembly.Module(flat.wasm)).some(i => i.name === 'json'),
+  flat.wasm === null ? codes(flat) : flat.functions.filter(n => n.startsWith('json_')).join(','),
 );
 
 // between programs: a nested message and a nested reply, and a disagreement three levels down

@@ -76,13 +76,11 @@ function reachedFrom(fns: ReadonlyMap<string, FnDecl>, callsOf: CallGraph, expor
 /** Which host functions the module imports, and the index of each function: imports first, then the runtime's. */
 export type Imports = {
   usesSql: boolean;
-  usesJson: boolean;
   usesCall: boolean;
   usesMember: boolean;
   usesAsk: boolean;
   usesWake: boolean;
   usesFloat: boolean;
-  JSON_IMPORT: number;
   CALL_IMPORT: number;
   MEMBER_IMPORT: number;
   ASK_IMPORT: number;
@@ -118,13 +116,12 @@ function checkWoken(setter: FnDecl | undefined, served: readonly Served[]): void
     );
 }
 
-type Uses = Pick<Imports, 'usesSql' | 'usesJson' | 'usesCall' | 'usesMember' | 'usesAsk' | 'usesWake' | 'usesFloat'>;
+type Uses = Pick<Imports, 'usesSql' | 'usesCall' | 'usesMember' | 'usesAsk' | 'usesWake' | 'usesFloat'>;
 
 /** The index of each import that is used, in the order the module lists them, and of the functions after them. */
 function numbered(uses: Uses, opts: Options): Imports {
   const n = (b: boolean): number => (b ? 1 : 0);
-  const JSON_IMPORT = n(uses.usesSql);
-  const CALL_IMPORT = JSON_IMPORT + n(uses.usesJson);
+  const CALL_IMPORT = n(uses.usesSql);
   const MEMBER_IMPORT = CALL_IMPORT + n(uses.usesCall);
   const ASK_IMPORT = MEMBER_IMPORT + n(uses.usesMember);
   const WAKE_IMPORT = ASK_IMPORT + n(uses.usesAsk);
@@ -134,7 +131,6 @@ function numbered(uses: Uses, opts: Options): Imports {
   const IMPORTS = PROFILE_IMPORT + n(opts.profile);
   const after = { IMPORTS, ALLOC: IMPORTS, RESET: IMPORTS + 1, RESERVE: IMPORTS + 2, FIRST: IMPORTS + 3 };
   const before = {
-    JSON_IMPORT,
     CALL_IMPORT,
     MEMBER_IMPORT,
     ASK_IMPORT,
@@ -177,7 +173,6 @@ export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, serv
     {
       usesSql: [...callsOf.values()].some(s => [...s].some(x => x.startsWith('sql_'))),
       // decode, and the replies to calls and asks (decoded from JSON), and exported methods' messages
-      usesJson: prog.interfaces.size > 0 || anyCalls('decode', 'call', 'ask'),
       usesCall: prog.interfaces.size > 0 || anyCalls('call', 'ask'),
       usesAsk: anyCalls('now', 'random'),
       // remote(of: family, index): the Remote of one member of a family (the host names it <family>-<index>)

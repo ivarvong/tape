@@ -139,7 +139,6 @@ export function traceLines(
           ...(e.undone ? { undone: true as const } : {}),
         },
       ];
-    if ('json' in e) return [{ kind: e.json === 'decoded' ? 'ok' : 'bad', text: `json: ${e.json}` }];
     if ('call' in e)
       return [
         {
