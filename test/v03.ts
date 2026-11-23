@@ -432,4 +432,139 @@ fn f(n: Int) -> Int {
   );
 }
 
+// ---- 6. C14: a value of one type where another is wanted; the fix says the rewrite for the mistakes agents made
+// (the todo and sales tasks passed an Option[View]; ledger a record to rollback; invoice a List to len)
+{
+  const hint = (src: string): string => fix(src, ['handle']).split(' | ')[1] ?? '';
+  T(
+    'C14 Option for its base: the fix is the step that takes the value out',
+    hint(`fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  respond(status: 200) |> append(view: r.query)
+}
+`),
+    '`r.query` may be None. Take the value out first, with a step that says what happens when it is None: `let Some(value) = r.query else -> …`, then pass `value`. Or match it, with an arm for `Some(value)` and one for `None`.',
+  );
+  // the step the fix shows compiles where the refused call stood
+  T(
+    '…and the step it shows compiles',
+    codes(
+      `fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  let Some(value) = r.query else -> respond(status: 400)
+  respond(status: 200) |> append(view: value)
+}
+`,
+      ['handle'],
+    ),
+    [],
+  );
+  T(
+    'C14 a base where an Option is wanted: wrap it',
+    fix(`fn g(o: Option[Int]) -> Int {
+  0
+}
+
+fn f(n: Int) -> Int {
+  g(o: n)
+}
+`).split(' | ')[1],
+    'An Option is wanted: `Some(value: n)`, or `None`.',
+  );
+  T(
+    'C14 a record where a Buf is wanted: write it into one',
+    /^A Buf is an answer's bytes being written/.test(
+      fix(
+        `type Outcome {
+  Outcome(status: Int)
+}
+
+fn handle(raw: View) -> Buf {
+  rollback(out: Outcome(status: 409))
+}
+`,
+        ['handle'],
+      ).split(' | ')[1] ?? '',
+    ),
+    true,
+  );
+}
+
+// ---- 8. a field matched by a pattern binds its own name when nothing else binds it (the ledger agent wrote
+// `Some(value: Account(balance: b)) if b == balance -> … value …` twice; queue and tickets did the same)
+{
+  const ACC = `type Account {
+  Account(id: Int, balance: Int)
+}
+
+`;
+  T(
+    'a field matched by a pattern is bound by its name',
+    run(
+      `${ACC}fn f(n: Int) -> Int {
+  match Some(value: Account(id: 7, balance: n)) {
+    Some(value: Account(balance: b)) if b == 5 -> value.id * 100 + b
+    Some(value) -> value.id
+    None -> 0
+  }
+}
+`,
+      'f',
+      [5n],
+    ),
+    705,
+  );
+  T(
+    '…in a let … else step too, and the sibling arm that binds the name itself is unchanged',
+    [5n, 6n].map(n =>
+      run(
+        `${ACC}fn f(n: Int) -> Int {
+  let Some(value: Account(balance: 5)) = Some(value: Account(id: n, balance: n)) else {
+    Some(value) -> value.id * 10
+    None -> 0
+  }
+  value.id
+}
+`,
+        'f',
+        [n],
+      ),
+    ),
+    [5, 60],
+  );
+  T(
+    'two fields of one name in scope at once: neither is bound, and C16 says how to bind one',
+    fix(`${ACC}fn f(o: Option[Account], p: Option[Account]) -> Int {
+  match o {
+    Some(value: Account(balance: 1)) -> match p {
+      Some(value: Account(balance: 2)) -> value.id
+      _ -> 0
+    }
+    _ -> 0
+  }
+}
+`),
+    'C16 unknown name value | `Some(value: Pattern)` matches the field value without binding it. To have both, write `Some(value: value = Pattern)` (name = Pattern).',
+  );
+  T(
+    'a name the program binds wins: a parameter of the field’s name is read, not the field',
+    run(
+      `${ACC}fn g(value: Int, o: Option[Account]) -> Int {
+  match o {
+    Some(value: Account(balance: 1)) -> value
+    _ -> 0
+  }
+}
+
+fn f(n: Int) -> Int {
+  g(value: n, o: Some(value: Account(id: 9, balance: 1)))
+}
+`,
+      'f',
+      [3n],
+    ),
+    3,
+  );
+}
+
 finish();

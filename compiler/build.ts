@@ -25,6 +25,7 @@ import { resolvePipes } from './pipes.ts';
 import { rowColumns } from './rows.ts';
 import { sha256 } from './sha256.ts';
 import { shadow } from './shadow.ts';
+import { bindFieldNames } from './fieldbind.ts';
 import { chainOf } from './sqltext.ts';
 import { tidy } from './tidy.ts';
 import { addCapability, key } from './types.ts';
@@ -67,6 +68,7 @@ function front(sources: readonly Source[]) {
   const prog = emptyProgram();
   for (const s of sources) parse(s.name, s.text, prog);
   shadow(prog);
+  bindFieldNames(prog);
   resolvePipes(prog);
   ambient(prog);
   rowColumns(prog);

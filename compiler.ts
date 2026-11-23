@@ -72,6 +72,7 @@ import { CompileError, DEFAULTS } from './compiler/common.ts';
 import type { Problem } from './compiler/common.ts';
 import { parse } from './compiler/parse.ts';
 import { shadow } from './compiler/shadow.ts';
+import { bindFieldNames } from './compiler/fieldbind.ts';
 import { resolvePipes } from './compiler/pipes.ts';
 import { ambient } from './compiler/ambient.ts';
 import { rowColumns } from './compiler/rows.ts';
@@ -115,6 +116,7 @@ export function parseProgram(sources: Sources): Program {
   const prog = emptyProgram();
   for (const s of named(sources)) parse(s.name, s.text, prog);
   shadow(prog);
+  bindFieldNames(prog);
   resolvePipes(prog);
   ambient(prog);
   rowColumns(prog);

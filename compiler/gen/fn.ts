@@ -1,6 +1,7 @@
 // compiler/gen/fn.ts: what one function's compilation keeps (its code, its locals, the names in scope), and the
 // small emitters every part of the function compiler uses.
 import type { Arg, At, Call, Expr, FnDecl, Program } from '../ast.ts';
+import { showExpr } from '../../rules/origins.ts';
 import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
 import type { Problem } from '../common.ts';
 import { shadowedHint } from '../shadow.ts';
@@ -127,7 +128,34 @@ export function store(c: Ctx, t: Type): number[] {
 export function need(c: Ctx, got: Type, want: Type, at: Place, what: string): Type {
   if (same(got, want) || same(c.B.strip(got), want)) return got;
   const sh = shadowedHint(got, want);
-  return fail(at, sh ? 'C76' : 'C14', `${what} should be ${key(want)} but is ${key(got)}`, sh ?? '');
+  return fail(
+    at,
+    sh ? 'C76' : 'C14',
+    `${what} should be ${key(want)} but is ${key(got)}`,
+    sh ?? mismatchHint(c, got, want, at),
+  );
+}
+
+const isExpr = (v: unknown): v is Expr => typeof v === 'object' && v !== null && 'k' in v;
+/** The expression a place is, when it is an argument: how a fix can name it. */
+const argText = (at: Place): string => {
+  const v: unknown = at && 'value' in at ? at.value : null;
+  const text = isExpr(v) ? showExpr(v) : '';
+  return text === '' || text === '…' ? 'it' : text;
+};
+/** What to write when a value of one type stands where another is wanted, for the mistakes agents make. */
+function mismatchHint(c: Ctx, got: Type, want: Type, at: Place): string {
+  const e = argText(at),
+    inner = got.args[0];
+  if (got.name === 'Option' && inner && (same(inner, want) || same(c.B.strip(inner), want)))
+    return `${e === 'it' ? 'The value' : `\`${e}\``} may be None. Take the value out first, with a step that says what happens when it is None: \`let Some(value) = ${e === 'it' ? 'e' : e} else -> …\`, then pass \`value\`. Or match it, with an arm for \`Some(value)\` and one for \`None\`.`;
+  if (want.name === 'Option' && want.args[0] && (same(want.args[0], got) || same(want.args[0], c.B.strip(got))))
+    return `An Option is wanted: \`Some(value: ${e === 'it' ? '…' : e})\`, or \`None\`.`;
+  if (want.name === 'Buf' && !BUILTIN_TYPES.has(got.name))
+    return `A Buf is an answer's bytes being written (\`respond(status)\`, \`buf()\`), and ${key(got)} is not: write the value into one first (a function from ${key(got)} to Buf, or \`respond(status: 200) |> write_json(value: …)\` for a record).`;
+  if (want.name === 'View' && got.name === 'List')
+    return 'A List is not text: `length(list: …)` counts it, and `write_json(value: …)` writes it.';
+  return '';
 }
 
 /** A place a trace names; -1 in a build that is not traced. */

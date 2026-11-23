@@ -139,12 +139,15 @@ const fixOf = (text: string): string => {
   return e ? `${e.code}: ${e.hint}` : 'compiled';
 };
 same(
-  'C16 for a field a nested pattern matched without binding it shows `name: name = Pattern`',
+  'C16 for a field a nested pattern matched without binding it (two of one name in scope, 0.3) shows `name: name = Pattern`',
   fixOf(`type T { T(n: Int) }
 
 fn f() -> Int {
   match Some(value: T(n: 1)) {
-    Some(value: T(n)) -> n + g(t: value)
+    Some(value: T(n)) -> match Some(value: T(n: 2)) {
+      Some(value: T(n: k)) -> n + k + g(t: value)
+      None -> 0
+    }
     None -> 0
   }
 }
