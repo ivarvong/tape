@@ -1,6 +1,6 @@
-// The shortener task's acceptance requests, written from tasks/shortener.md alone. `run` does not give back response
-// headers, so the Location header cannot be checked; the 302 and the body's `url` are.
-import { field, json, problem, req, skip, status } from '../lib.ts';
+// The shortener task's acceptance requests, written from tasks/shortener.md alone: the 302, its Location header
+// (run gives back the headers a program set) and the body's `url`.
+import { check, field, headerOf, json, problem, req, skip, status } from '../lib.ts';
 import type { Grader } from '../lib.ts';
 
 const link = (slug: string, url: string) => (j: unknown) => field(j, 'slug') === slug && field(j, 'url') === url;
@@ -41,6 +41,11 @@ export const grader: Grader = {
         json('the same slug and URL again: 200', r[1], [200], link('my-page', A)),
         problem('a slug taken by another URL: 409', r[2], 409),
         json('GET /{slug}: 302 with the URL in the body', r[3], [302], j => field(j, 'url') === A),
+        check(
+          'GET /{slug}: the URL in the Location header',
+          headerOf(r[3], 'location') === A,
+          `location ${JSON.stringify(headerOf(r[3], 'location'))}`,
+        ),
         status('again: 302', r[4], 302),
         json('two redirects, two hits', r[5], [200], j => link('my-page', A)(j) && field(j, 'hits') === 2),
         json('GET /links counts no hit', r[6], [200], j => field(j, 'hits') === 2),
@@ -86,6 +91,11 @@ export const grader: Grader = {
               return [skip('a generated slug redirects', 'the slug differs between two calls')];
             return [
               json('a generated slug redirects: 302', r[2], [302], j => field(j, 'url') === LONG),
+              check(
+                'and its Location header is the URL',
+                headerOf(r[2], 'location') === LONG,
+                `location ${JSON.stringify(headerOf(r[2], 'location'))}`,
+              ),
               json('and counts a hit', r[3], [200], j => field(j, 'hits') === 1),
             ];
           },

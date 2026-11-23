@@ -549,6 +549,32 @@ const tests: Test[] = [
     },
   },
   {
+    name: 'response headers',
+    run: async m => {
+      const out: string[] = [];
+      // a 302's Location is the redirect; written here as std/http.tape documents header(), not from tools.ts
+      const text = `fn handle(raw: View) -> Buf {
+  match request(raw).path {
+    "/go/" ++ code -> respond(status: 302) |> header(name: "Location", value: "https://example.com/" ++ code)
+    _ -> respond(status: 200) |> append(view: "plain")
+  }
+}
+`;
+      const args = { files: [{ name: 'go.tape', text }], requests: ['GET /go/ab', 'GET /x'] };
+      const { out: r } = await tool(m, 'run', args);
+      const [go, plain] = RESULTS(r);
+      if (go?.['status'] !== 302) out.push(`redirect: status ${String(go?.['status'])}`);
+      if (JSON.stringify(go?.['headers']) !== '[{"name":"location","value":"https://example.com/ab"}]')
+        out.push(`redirect: headers ${JSON.stringify(go?.['headers'])}`);
+      // compact: a response that set no header has no headers field at all
+      if (plain === undefined || 'headers' in plain) out.push(`plain: headers ${JSON.stringify(plain?.['headers'])}`);
+      const http = await post(m, '/v1/run', JSON.stringify(args));
+      if (http.status !== 200 || !same(http.body, r))
+        out.push(`POST /v1/run is not what the tool gives: ${http.status}`);
+      return out;
+    },
+  },
+  {
     name: 'effects',
     run: async m => {
       const out: string[] = [];
@@ -1350,6 +1376,13 @@ const PLANTS: Plant[] = [
     what: 'nosniff is not sent',
     file: 'serve.ts',
     from: "'x-content-type-options': 'nosniff',",
+    to: '',
+  },
+  {
+    test: 'response headers',
+    what: "a run's result leaves out the headers the program set",
+    file: 'tools.ts',
+    from: '...(ran.failed || !res || res.headers.length === 0 ? {} : { headers: res.headers }),',
     to: '',
   },
   {

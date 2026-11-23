@@ -8,6 +8,8 @@ export type Effect = { kind: string; [k: string]: unknown };
 export type Res = {
   request: string;
   status: number;
+  /** the response headers the program set, names in lower case (run leaves them out when there are none) */
+  headers: { name: string; value: string }[];
   body: string;
   json: unknown;
   error: string | null;
@@ -93,6 +95,7 @@ export const run = async (files: File[], requests: string[]): Promise<RunAnswer>
   const results = recs(a['results']).map((x): Res => ({
     request: str(x['request']),
     status: Number(x['status']),
+    headers: recs(x['headers']).map(h => ({ name: str(h['name']).toLowerCase(), value: str(h['value']) })),
     body: str(x['body']),
     json: parsed(str(x['body'])),
     error: typeof x['error'] === 'string' ? x['error'] : null,
@@ -115,6 +118,9 @@ export const run = async (files: File[], requests: string[]): Promise<RunAnswer>
 
 // Predicates. Every grader is written from its task's spec, never from a solution.
 export const field = (v: unknown, k: string): unknown => (isObj(v) ? v[k] : undefined);
+/** A response header's value by name (any case), or null when the response did not set it. */
+export const headerOf = (r: Res | undefined, name: string): string | null =>
+  r?.headers.find(h => h.name === name.toLowerCase())?.value ?? null;
 export const check = (name: string, pass: boolean, detail?: string): Check =>
   pass ? { name, pass } : { name, pass, detail: detail ?? '' };
 const shown = (r: Res | undefined): string =>

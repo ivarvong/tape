@@ -8,7 +8,7 @@
 import { compile } from '../../compiler.ts';
 import type { Built, Source } from '../../compiler.ts';
 import { isHead } from '../../host.ts';
-import type { Effect } from '../../host.ts';
+import type { Effect, Header } from '../../host.ts';
 import { responseOf } from '../../host.ts';
 import { effectLine, queryNames } from '../../apps/playground/src/lines.ts';
 import { otlp } from '../../service/src/view.ts';
@@ -111,6 +111,8 @@ export type RunResultOne = {
   woken?: { key: number; due_ms: number };
   status: number;
   content_type: string | null;
+  /** the headers the program set (std/http's header), in its order; left out when it set none */
+  headers?: Header[];
   body: string;
   body_bytes: number;
   truncated: boolean;
@@ -468,6 +470,7 @@ function resultOf(
     ...(ran.woken ? { woken: ran.woken } : {}),
     status,
     content_type: ran.failed ? null : (res?.type ?? null),
+    ...(ran.failed || !res || res.headers.length === 0 ? {} : { headers: res.headers }),
     body,
     body_bytes: bytes,
     truncated: cut,

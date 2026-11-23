@@ -105,6 +105,10 @@ one's write. Two optional arguments say how much comes back: `trace` (`"summary"
     "trace": { "trace_id": "4bf9…", "spans": [{ "name": "GET /hello/ada", "status": "ok", "duration_us": 412, "events": 1 }] } }] }
 ```
 
+- `headers` is the response headers the program set with std/http's `header` (a 302's `location`, say), as
+  `[{"name": "location", "value": "/links/7"}]`, names in lower case, in the order set. A response that set none has
+  no `headers` field (the example above). The host's own headers (content-type, which is `content_type`, and the
+  security headers) are not in it.
 - `effects` is the request's effect log: each SQL statement as the program wrote it (its `:name` placeholders),
   the value bound to each name, and what it did: `rows_written` for a statement that wrote, `rows_returned` and the
   `rows` themselves for one that returned rows (an INSERT, UPDATE or DELETE with `RETURNING` has both); calls to
@@ -256,6 +260,6 @@ retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-v
 (cd service && npm ci) && (cd mcp && npm ci)
 printf 'IP_SALT=dev-salt\nTOKEN=dev-token\n' > service/.dev.vars   # your own copy's secrets (.dev.vars is not tracked)
 (cd service && npm run site && npx cf dev)   # the tape Worker; then POST to /mcp at the address it prints
-node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 43 bugs, each caught
+node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 44 bugs, each caught
 (cd mcp && npx vitest run)  # mcp/src in workerd, with the real Loader and rate limiter
 ```
