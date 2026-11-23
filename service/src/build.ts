@@ -13,6 +13,9 @@ import list from '../../std/list.tape?raw';
 import map from '../../std/map.tape?raw';
 import retry from '../../std/retry.tape?raw';
 
+/** The compiler built in (scripts/sha.ts, vite.config.ts), or "dev" in the tests. A stored build says which compiler
+ * made it; one made by another is made again from its source (name.ts, #fresh). */
+export const COMPILER = typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev';
 /** The standard library as the compiler takes it (std.ts in Node); mcp/ uses the same list. */
 export const STD = Object.entries({ core, text, json, http, list, map, retry }).map(([n, t]) => ({
   name: `std/${n}.tape`,
@@ -42,17 +45,18 @@ export type Stored = {
 };
 export const isRefusal = (b: Stored | Refusal): b is Refusal => 'status' in b;
 
-// Source to the row an upload stores, or the reason it cannot be stored.
-export const build = (source: string): Stored | Refusal => {
+// Source to the row an upload stores, or the reason it cannot be stored. `rules: false` builds a version already
+// accepted, whose source today's rules may refuse (rulesNow says so in its listing): a rebuild keeps it running.
+export const build = (source: string, { rules = true }: { rules?: boolean } = {}): Stored | Refusal => {
   const sources = withStd(source),
-    plain = compile(sources);
+    plain = compile(sources, { rules });
   if (plain.wasm === null)
     return {
       status: 400,
       error: 'does not compile',
       errors: plain.errors.map(({ code, line, message, hint }) => ({ code, line, message, hint })),
     };
-  const traced = compile(sources, { trace: true });
+  const traced = compile(sources, { trace: true, rules });
   // A Worker cannot compile Wasm, but it can validate it: a module the Loader would refuse is never stored.
   if (traced.wasm === null || !WebAssembly.validate(plain.wasm) || !WebAssembly.validate(traced.wasm))
     return {
@@ -78,8 +82,9 @@ export const build = (source: string): Stored | Refusal => {
 
 // What the compiler deployed now says of a stored version's source: [] when it passes, else the problems (its
 // rules, rules.ts C51-C56, or anything else it no longer accepts). A version uploaded before a rule existed keeps
-// running as it was built; this is how its listing, an upload beside it, and its KV cluster say that it would not
-// be accepted today. Cached by hash and source, per isolate.
+// running (rebuilt without the rules when the compiler changes, name.ts #fresh); this is how its listing, an
+// upload beside it, and its KV cluster say that it would not be accepted today. Cached by hash and source, per
+// isolate.
 const today = new Map<string, Reported[]>();
 export const rulesNow = (hash: string, source: string): Reported[] => {
   const at = `${hash}:${source}`;

@@ -648,8 +648,8 @@ checked: the host answers a repeated `once` key from the reply it stored. A repe
 call finds the key claimed and waits for that run's reply; when it does not come within the repeat's budget the
 answer is `Unreachable`, and sending it again is safe.
 
-The service runs the same compiler on every upload. A version uploaded before a rule existed keeps running as it was
-built; `GET /:account/:name?rules` shows, for each version, `"passes"` or the problems that would refuse it today,
+The service runs the same compiler on every upload. A version uploaded before a rule existed keeps running: when a
+newer compiler is deployed it is rebuilt from its source without asking the rules again; `GET /:account/:name?rules` shows, for each version, `"passes"` or the problems that would refuse it today,
 and an upload beside such a version says so in `live_failing_rules`.
 
 ## Machines: the moves a status column may make

@@ -47,7 +47,16 @@ curl -i -H "$A" $URL/me/hello/v/1/hello/ada                          # 200 Hello
 curl -H "$A" $URL/me/hello/trace/1/<id>
 ```
 
-An upload is an immutable, numbered version. Every version of a name shares the name's tables. Migrations
+An upload is an immutable, numbered version: its source, hash and migrations never change. Its builds are a cache of
+its source, and that changes the promise this page used to make, that a version is kept as built: when the
+deployed compiler is not the one that made a version's builds (each build records the compiler's hash, the
+`tape-compiler` header; a build from before that is recorded counts as another compiler's), the version is built
+again from its source the first time it is loaded, once, and the new builds are stored. The rules are not asked
+again, so a version accepted once is not refused later for a rule that came after it. The listing shows
+`rebuilt_from` (the old compiler's hash, or `unknown`) and `rebuilt_at`, and the log has a `tape.rebuilt` line. If
+the current compiler cannot build the source, the version answers 503 `{"error": "rebuild_failed", "errors": […]}`
+with the compiler's diagnostics (logged as `tape.rebuild_failed`, tried again only under another compiler) and its
+old build is never run; the other versions are unaffected. Every version of a name shares the name's tables. Migrations
 (`migration n "…" { … }`) are applied before the first request after an upload; one that removes something must be
 marked `contract` and waits until every older live version is retired. An upload whose migrations would break a
 live version, or whose machine the stored rows do not satisfy, is refused with 409. A program's `Remote`

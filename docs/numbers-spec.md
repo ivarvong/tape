@@ -646,7 +646,7 @@ engine is recorded by its run, and "unverified on device" is stated for any engi
 |---|---|
 | Source | none. `1.5` is a parse error today (P01, **checked**), so no program changes meaning. `Dec`, `Float` and `Rounding` and its six constructors become built-in or std names, and no `.tape` file in the tree defines them (**checked**, grep) |
 | `min`/`max` | `apps/trace/trace.tape` defines both; they are deleted when the intrinsics land (F7). Before landing, check how a user function named like an intrinsic resolves today (a user `len` compiled without complaint in a quick test) |
-| Wasm and host ABI | additive: new shape kinds, parameter kind `d`, two imports. Old modules keep running as built (LANGUAGE.md §11) |
+| Wasm and host ABI | additive: new shape kinds, parameter kind `d`, two imports. A version built by an older compiler is rebuilt from its source (LANGUAGE.md §11) |
 | Service | upload check learns `column`. Old versions have none, so nothing changes for them |
 | Examples converted | ledger and payments move to Dec[2]. Their stored data in the service is test data, and the migration multiplies nothing because the INTEGER values already are cents |
 

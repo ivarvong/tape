@@ -5,6 +5,8 @@
 // and data: images and post its forms to itself, and runs sandboxed, so it has no origin and runs no script. Every
 // response names the commit it was built from (tape-version) and the Worker version (tape-worker-version).
 // (Not in index.ts: with static assets, the main module may export only entrypoints.)
+import { COMPILER } from './build.ts';
+
 export const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
 export const TRACE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox";
 export const PROGRAM_CSP =
@@ -12,8 +14,6 @@ export const PROGRAM_CSP =
 const PROGRAM_PATH = /^\/p\/|^\/[^/]+\/[^/]+\/v\/\d+(\/|$)/;
 /** The commit this Worker was built from (vite.config.ts), or "dev" in the tests. */
 const SHA = typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev';
-/** The compiler built in (scripts/sha.ts), or "dev" in the tests. */
-const COMPILER = typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev';
 export const secured = (res: Response, path: string, version?: string): Response => {
   const out = new Response(res.body, res),
     h = out.headers,

@@ -12,7 +12,7 @@ import hostSchema from '../../host/schema.ts?erased';
 import programSrc from './program.ts?erased';
 import recordsSrc from './records.ts?erased';
 import type { CallEffect } from '../../host/log.ts';
-import { failing, machinesFor, rulesNow } from './build.ts';
+import { COMPILER, build, failing, isRefusal, machinesFor, rulesNow } from './build.ts';
 import type { Note, Refusal, Reported, Stored, VersionRow } from './build.ts';
 import { FAULTY, HOP_KINDS, decide, hopOf, planOf as faultPlanOf } from './faults.ts';
 import type { Fault, Plan as FaultPlan } from './faults.ts';
@@ -79,6 +79,23 @@ const chainIn = (text: unknown): Chain =>
       hash: str(m.hash),
     }));
 /** Run a statement that may already have been run: adding a column that is there. */
+/** A rebuild_failed column: the compiler that could not build the source, and why. */
+const failedOf = (text: string): { compiler: string; errors: Reported[] } => {
+  const v: unknown = JSON.parse(text);
+  const o = typeof v === 'object' && v !== null ? v : {};
+  const compiler: unknown = Reflect.get(o, 'compiler');
+  const errors: unknown = Reflect.get(o, 'errors');
+  return {
+    compiler: typeof compiler === 'string' ? compiler : '',
+    errors: Array.isArray(errors) ? errors.filter(isReported) : [],
+  };
+};
+const isReported = (x: unknown): x is Reported =>
+  typeof x === 'object' &&
+  x !== null &&
+  typeof Reflect.get(x, 'code') === 'string' &&
+  typeof Reflect.get(x, 'line') === 'number' &&
+  typeof Reflect.get(x, 'message') === 'string';
 const attempt = (run: () => unknown): void => {
   try {
     run();
@@ -98,6 +115,11 @@ export type Listed = {
   live: boolean;
   migrations: number;
   source?: string;
+  /** the compiler that had made its builds (`unknown`: one from before that was kept), when they were made again */
+  rebuilt_from?: string;
+  rebuilt_at?: number;
+  /** today's compiler could not build its source: it answers 503 rebuild_failed */
+  rebuild_failed?: { compiler: string; errors: Reported[] };
   rules?: 'passes' | { fails: Reported[]; note: string };
 };
 /** What changing the live versions came to. */
@@ -252,6 +274,11 @@ export class Name extends DurableObject {
     sql.exec(
       'CREATE TABLE IF NOT EXISTS _tape_versions(version INTEGER PRIMARY KEY AUTOINCREMENT, hash TEXT NOT NULL, source TEXT NOT NULL, plain BLOB NOT NULL, traced BLOB NOT NULL, sites TEXT NOT NULL, created_at INTEGER NOT NULL)',
     );
+    // which compiler made a version's builds (NULL: one from before this was kept), and when they were made again
+    // from its source because another compiler had made them (#fresh); rebuild_failed: the compiler that could not,
+    // and why, so a version is tried once per compiler
+    for (const col of ['compiler TEXT', 'rebuilt_from TEXT', 'rebuilt_at INTEGER', 'rebuild_failed TEXT'])
+      attempt(() => sql.exec(`ALTER TABLE _tape_versions ADD COLUMN ${col}`));
     sql.exec('CREATE TABLE IF NOT EXISTS _tape_chain(version INTEGER PRIMARY KEY, migrations TEXT NOT NULL)');
     sql.exec('CREATE TABLE IF NOT EXISTS _tape_retired(version INTEGER PRIMARY KEY, at INTEGER NOT NULL)');
     // timers: which account/name this object is (an alarm arrives with neither), and the woken runs it started
@@ -451,13 +478,14 @@ export class Name extends DurableObject {
     if (found.length > 0) return dataRefusal(found, candidate, check, account, name);
     const [row] = this.#sql
       .exec(
-        'INSERT INTO _tape_versions(hash, source, plain, traced, sites, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING version, created_at',
+        'INSERT INTO _tape_versions(hash, source, plain, traced, sites, created_at, compiler) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING version, created_at',
         hash,
         source,
         plain,
         traced,
         JSON.stringify(sites),
         Date.now(),
+        COMPILER,
       )
       .toArray();
     const version = int(row?.version);
@@ -518,7 +546,7 @@ export class Name extends DurableObject {
     ];
     return this.#sql
       .exec(
-        `SELECT version, hash, length(plain) AS bytes, created_at${rules || source ? ', source' : ''} FROM _tape_versions ORDER BY version`,
+        `SELECT version, hash, length(plain) AS bytes, created_at, rebuilt_from, rebuilt_at, rebuild_failed${rules || source ? ', source' : ''} FROM _tape_versions ORDER BY version`,
       )
       .toArray()
       .map((r): Listed => {
@@ -533,6 +561,10 @@ export class Name extends DurableObject {
           live: !retired.has(version),
           migrations: (chains.get(version) ?? []).length,
           ...(source ? { source: str(r.source) } : {}),
+          ...(r.rebuilt_from === null || r.rebuilt_from === undefined
+            ? {}
+            : { rebuilt_from: str(r.rebuilt_from), rebuilt_at: int(r.rebuilt_at) }),
+          ...(typeof r.rebuild_failed === 'string' ? { rebuild_failed: failedOf(r.rebuild_failed) } : {}),
           ...(rules ? { rules: failed.length > 0 ? { fails: failed, note: NOTE_OLD } : 'passes' } : {}),
         };
       });
@@ -551,6 +583,56 @@ export class Name extends DurableObject {
     };
     return { name: own, data: own.versions > 0 ? await this.data(account, name).storageUse() : null };
   }
+  // A stored build is a cache of the version's source. One another compiler made (or one from before builds said
+  // which compiler made them) is made again from the source the first time the version is loaded, and stored, so
+  // once per version: the version keeps its source, hash and migrations, and records rebuilt_from and rebuilt_at.
+  // The rules are not asked again (build, rules: false): a version accepted once keeps running, and its listing
+  // says what today's rules refuse. A source this compiler cannot build is recorded (once per compiler) and the
+  // version answers 503 rebuild_failed with the diagnostics; its stale build is never run. null: it is current.
+  #fresh(version: number): Reported[] | null {
+    const [row] = this.#sql
+      .exec('SELECT source, compiler, rebuild_failed FROM _tape_versions WHERE version = ?1', version)
+      .toArray();
+    if (!row || row.compiler === COMPILER) return null;
+    const known = typeof row.rebuild_failed === 'string' ? failedOf(row.rebuild_failed) : null;
+    if (known?.compiler === COMPILER) return known.errors;
+    const from = strOrNull(row.compiler) ?? 'unknown',
+      made = build(str(row.source), { rules: false });
+    if (isRefusal(made)) {
+      const errors = made.errors ?? [{ code: 'C99', line: 0, message: made.error }];
+      this.#sql.exec(
+        'UPDATE _tape_versions SET rebuild_failed = ?2 WHERE version = ?1',
+        version,
+        JSON.stringify({ compiler: COMPILER, errors }),
+      );
+      console.error(JSON.stringify({ 'tape.rebuild_failed': { version, from, compiler: COMPILER, errors } }));
+      return errors;
+    }
+    const at = Date.now();
+    this.#sql.exec(
+      'UPDATE _tape_versions SET plain = ?2, traced = ?3, sites = ?4, compiler = ?5, rebuilt_from = ?6, rebuilt_at = ?7, rebuild_failed = NULL WHERE version = ?1',
+      version,
+      made.plain,
+      made.traced,
+      JSON.stringify(made.sites),
+      COMPILER,
+      from,
+      at,
+    );
+    console.log(JSON.stringify({ 'tape.rebuilt': { version, from, compiler: COMPILER, at } }));
+    return null;
+  }
+  /** The live versions whose builds are current (each made current first, #fresh), and what names their builds. */
+  #current(live: readonly number[]): { built: number[]; key: string } {
+    const built = live.filter(v => this.#fresh(v) === null);
+    const stamps = this.#sql
+      .exec(
+        `SELECT version, rebuilt_at FROM _tape_versions WHERE version IN (${built.join(',') || 'NULL'}) ORDER BY version`,
+      )
+      .toArray()
+      .map(r => `${int(r.version)}.${int(r.rebuilt_at)}`);
+    return { built, key: `${COMPILER}:${stamps.join(',')}` };
+  }
   // One build of one version, for the cached Wasm entrypoint.
   wasm(version: number, kind: string | undefined): Uint8Array | null {
     const [row] = this.#sql
@@ -559,11 +641,19 @@ export class Name extends DurableObject {
     return row?.wasm instanceof ArrayBuffer ? new Uint8Array(row.wasm) : null;
   }
   /** The code of the name's data: program.ts and the host, with every live version's builds as modules. */
-  async #code(account: string, name: string, plan: Required<Plan>): Promise<WorkerLoaderWorkerCode> {
+  async #code(
+    account: string,
+    name: string,
+    plan: Required<Plan>,
+    built: readonly number[],
+    key: string,
+  ): Promise<WorkerLoaderWorkerCode> {
+    // the URL names the builds (key), so a rebuilt version's Wasm is not the cached one of before
     const read = async (v: number, kind: string): Promise<ArrayBuffer> =>
-      (await this.ctx.exports.Wasm.fetch(`http://wasm/${account}/${name}/${v}/${kind}`)).arrayBuffer();
+      (await this.ctx.exports.Wasm.fetch(`http://wasm/${account}/${name}/${v}/${kind}/${key}`)).arrayBuffer();
+    // a version whose source today's compiler cannot build is left out: it answers rebuild_failed (#invoke)
     const rows = this.#sql
-      .exec(`SELECT version, source, sites FROM _tape_versions WHERE version IN (${plan.live.join(',') || 'NULL'})`)
+      .exec(`SELECT version, source, sites FROM _tape_versions WHERE version IN (${built.join(',') || 'NULL'})`)
       .toArray()
       .map(r => ({ v: int(r.version), source: str(r.source), sites: listIn(r.sites) }));
     const modules: Record<string, WorkerLoaderModule> = {};
@@ -597,12 +687,14 @@ export class Name extends DurableObject {
       },
     };
   }
-  // The name's data, with every live version's builds loaded. The Loader caches the code by its live set.
+  // The name's data, with every live version's builds loaded (each made current first, #fresh). The Loader caches
+  // the code by its live set and the builds in it.
   data(account: string, name: string): Fetcher<Program> {
     const plan = this.plan();
+    const { built, key } = this.#current(plan.live);
     return this.ctx.facets.get<Program>('data', () => ({
-      class: this.env.LOADER.get(`${account}/${name}/data@${plan.live.join(',')}`, () =>
-        this.#code(account, name, plan),
+      class: this.env.LOADER.get(`${account}/${name}/data@${plan.live.join(',')}#${key}`, () =>
+        this.#code(account, name, plan, built, key),
       ).getDurableObjectClass<Program>('Program'),
     }));
   }
@@ -715,6 +807,20 @@ export class Name extends DurableObject {
       opened();
       note({ status: retired ? 410 : 404, error });
       return reply({ error }, retired ? 410 : 404);
+    }
+    const unbuilt = this.#fresh(version);
+    if (unbuilt) {
+      const error = 'rebuild_failed';
+      opened();
+      note({ status: 503, error });
+      return reply(
+        {
+          error,
+          message: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
+          errors: unbuilt,
+        },
+        503,
+      );
     }
     if (faulty === 'reset_callee_before') this.reset('jepsen: the shard was reset before it ran the request');
     opened();

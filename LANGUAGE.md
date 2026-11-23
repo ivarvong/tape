@@ -7,8 +7,8 @@ every edit it shows, and fails when the compiler does not say what the file says
 
 This is version 0.3. A form that is here has one meaning and one way to be written, and the tests hold the
 compiler to it. Before 1.0 a form may still go: when one does, the old way is a compile error that says the new
-one, and the last section says what went and when. A program is tied to the compiler it was built with; the
-service runs the same compiler on every upload and keeps old versions as built.
+one, and the last section says what went and when. The service runs the same compiler on every upload, and a
+version built by an older compiler is rebuilt from its source when it is next loaded.
 
 ## 1. What a program is
 
@@ -625,6 +625,8 @@ what went before.
 | 23 November 2026 | a Float in JSON (a finite number in, the shortest digits out, in records and lists) and in SQL (bound as a number, kept REAL by SQLite; a REAL column reads into a Float field) |
 | 23 November 2026 | `sin`, `cos`, `atan2`, `exp`, `log`, `pow` on Float: musl's libm ported to Wasm (compiler/math), only what a program calls goes into its module; never the host's `Math`, whose results differ between engines |
 | 23 November 2026 | `Float`: a finite 64-bit IEEE 754 number for measurements. Literals end in `f` (`1.5f`; `1.5` is L06, kept for an exact decimal); `+ - * /` and comparisons; trap 8 (float not finite) where IEEE would give NaN or an infinity; `float(n)` and `trunc(x)` the only conversions; `floor`, `ceil`, `abs`, `sqrt`; `abs`, `min`, `max` built in for Int and Float (std's `min` and `max` of Ints, and `apps/trace`'s own, are gone); a hole writes the shortest digits, as JavaScript's `String` does (env.float_text) |
+| 23 November 2026 | `decode` reads the JSON in the module (std/json.tape), once, and reads a number exactly from its text: `1e-400` and `1.0000000000000000001`, which JSON.parse rounds to 0 and 1, are no longer whole numbers. Modules no longer import `env.json` |
+| 23 November 2026 | a version built by an older compiler is rebuilt from its source the first time it is loaded, once (a stored build is a cache; the source is the version). Its listing says `rebuilt_from` and `rebuilt_at`. A source this compiler cannot build answers 503 `rebuild_failed` with the diagnostics, and the old build is not run. Before, a version kept running as built, whatever compiler came after |
 | 23 November 2026 | std `digits(v)` is gone: `decimal` reads an id (no sign, no leading zero), `parse_int` a number as people write one (a sign, leading zeros) |
 | 23 November 2026 | `respond_as(status, content: Csv)` answers `text/csv` (the sales task, 3 of 3 Haiku runs) |
 | 23 November 2026 | std: `isqrt(n)`, the square root rounded down (None below 0), exact up to the largest Int, for fixed point (feedback 20261123T015153.800Z-7782f1b2045b) |
@@ -636,7 +638,7 @@ what went before.
 
 ## 12. Not defined yet
 
-- What a version built by an older compiler may rely on. Today: it keeps running as built, and nothing more.
+- What a version built by an older compiler may rely on. Today: its source is built again by the current compiler (the rules not asked again), and it runs if that builds; it has no claim to what the old build did.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
 - Who is calling. A program is handed the request; identity is its own business.
 - JSON for bytes and maps; writing a record with an `Option` field.
