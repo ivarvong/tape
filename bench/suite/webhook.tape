@@ -116,7 +116,6 @@ fn pay(id: Id, account: Account, amount: Int) -> Int {
     query: "INSERT INTO customers(account, total, note) VALUES (:account, :amount, '') \
         ON CONFLICT(account) DO UPDATE SET total = total + excluded.total",
     account,
-    amount,
-    repeat: True
+    amount
   )
 }
