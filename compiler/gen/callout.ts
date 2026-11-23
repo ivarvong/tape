@@ -81,7 +81,8 @@ function named(e: CallOut): Named {
 
 // ---- the key of a command (once): text, or a record that names the command; the host scopes it by this object
 // and the method, and the callee refuses it for another message (host.ts serve). An Int is refused (C64): it names
-// nothing, and a key made only of what the message carries makes two commands with one message one (C65)
+// nothing, and one that is the same every time makes every command one (C65; a key made only of what the message
+// carries is C65 in rules/commands.ts, which knows the rows a command is for)
 
 /** `a.b.c` for a variable or a field of one; null for anything else. */
 const pathOf = (n: Expr): string | null => {
@@ -102,24 +103,7 @@ function leaves(x: Expr): Set<string> {
   return out;
 }
 
-// what the message carries: the values its fields are, as written (a field computed from a value, such as
-// len(raw), does not carry that value), through nested records; a key's value is carried when it is one of
-// them or a field of one
-function carriedBy(send: Expr): Set<string> {
-  const carried = new Set<string>();
-  const direct = (n: Expr): void => {
-    const path = pathOf(n);
-    if (path !== null) carried.add(path);
-    else if (n.k === 'ctor') for (const a of n.args) direct(a.value);
-  };
-  direct(send);
-  return carried;
-}
-
-const shape = (x: Expr): string =>
-  JSON.stringify(x, (k, v: unknown) => (k === 'line' || k === 'file' || k === 'pos' ? undefined : v));
-
-function checkKey(c: Ctx, once: Arg, send: Arg, kt: Type): void {
+function checkKey(c: Ctx, once: Arg, kt: Type): void {
   const { prog } = c.B;
   const kadt = !BUILTIN_TYPES.has(kt.name) && prog.types.has(kt.name) ? c.B.adtOf(kt, once) : null;
   const wrapper = ['Option', 'Result', 'Move', stdName(prog, 'types', 'Step')].includes(kt.name);
@@ -132,21 +116,12 @@ function checkKey(c: Ctx, once: Arg, send: Arg, kt: Type): void {
       `Name the command: \`once: ${kt.name === 'Int' ? 'Charge(order: id)' : 'Charge(order: …)'}\` (a record of your own: type Charge { Charge(order: Int) }), or text such as \`once: "charge-" ++ decimal_text(value: id)\`. A bare number says nothing of what it is the key of, and the same number used for another command is taken for a repeat of it.`,
     );
   const kl = leaves(once.value);
-  const carried = carriedBy(send.value);
-  const isCarried = (x: string): boolean => [...carried].some(held => x === held || x.startsWith(`${held}.`));
   if (kl.size === 0)
     fail(
       once,
       'C65',
       'this command has the same key every time it is sent: the first is run, and every later one is answered with its reply',
       'Key it by what makes this command one of its kind: the id of the row it is for, or a key the client sent.',
-    );
-  if ([...kl].every(isCarried) && shape(once.value) !== shape(send.value))
-    fail(
-      once,
-      'C65',
-      `this command's key is made only of what its message carries (${[...kl].join(', ')}), so two commands with the same message are one: the second is answered with the first's reply (the ledger keyed its charge by the amount)`,
-      `A key of ${[...kl].join(', ')} alone says nothing the message does not. If the message itself names the command (an event and its id), key it by the message: \`once:\` the same record as \`send:\`. Otherwise add what the message does not carry and that makes this command one of its kind: a record of the row's id and a key the client sent (\`ForOrder(order: order.id, key: order.order_key)\`).`,
     );
 }
 
@@ -205,7 +180,7 @@ export function emitCallOut(c: Ctx, e: CallOut): Type {
   const sent = inLocals(c, send.value, e.sendType ?? null);
   if (e.sendType) need(c, sent.type, e.sendType, send, 'argument send');
   const keyHeld = once ? inLocals(c, once.value, null) : null;
-  if (once && keyHeld) checkKey(c, once, send, B.strip(keyHeld.type));
+  if (once && keyHeld) checkKey(c, once, B.strip(keyHeld.type));
   // for the simulator: what a reply to this method looks like, so a Remote nobody supplied can be stood in for
   B.SIMJSON.replies[`${'name' in to.value ? to.value.name : ''}.${methodName}`] = [replyT, e];
   const fingerprint = B.fingerprint(methodName, sent.type, replyT, e);

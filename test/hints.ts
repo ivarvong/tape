@@ -14,9 +14,13 @@ const said = (text: string): Said => {
 const code = (s: Said): string => (s === 'compiled' ? s : `${s.code}:${s.line}`);
 const hint = (s: Said): string => (s === 'compiled' ? '' : s.hint);
 
-// ---- C65 when the message carries the row's id: its fix once said "key it by the id of the row it is for", which
-// is the key it had just refused. A key of that id alone adds nothing the message does not say; the forms that
-// pass are the message itself, or the row's id with what the message does not carry (C71 wants the id).
+// ---- C65 and C71 together, when the message carries the row's id (a payment API asks for it). C71 asks that a
+// command built from a row name that row in its key; C65 refused a key made only of what the message carries; so
+// `once: ForOrder(order: id)` was C65, and its fix, "key it by the id of the row it is for", was the key it had
+// refused. A key that names the row by its primary key names the command (same order, same charge): C65 takes it,
+// held as a field (`order.id`) or bound by the row's pattern (`Order(id, …)`). A key of the amount alone is
+// still C65, the defect the rule is for (the ledger keyed its charge by the amount), and so is an id that is not
+// read from a row (test/calls.ts).
 {
   const ORDERS = `migration 1 "t" {
   CREATE TABLE orders(id INTEGER PRIMARY KEY, order_key TEXT NOT NULL UNIQUE, amount INTEGER NOT NULL)
@@ -26,7 +30,7 @@ type Order { Order(id: Int, order_key: View, amount: Int) }
 type Charge { Charge(order_id: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
-type ForOrderKey { ForOrderKey(order: Int, key: View) }
+type ForAmount { ForAmount(amount: Int) }
 
 fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
   let Some(value: order) = sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") else -> respond(status: 404)
@@ -37,25 +41,43 @@ fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
 }
 `;
   const keyed = (k: string): string => ORDERS.replace('@KEY', k);
-  const refused = said(keyed('ForOrder(order: order.id)'));
-  same('C65: a key of the row id the message carries is refused', code(refused), 'C65:13');
   same(
-    "C65's fix does not offer the key it refused (the row's id alone)",
-    /the id of the row it is for/.test(hint(refused)),
-    false,
+    'C65 takes a key of the row id the message carries (held as a field)',
+    said(keyed('ForOrder(order: order.id)')),
+    'compiled',
   );
+  const BOUND = `migration 1 "t" {
+  CREATE TABLE orders(id INTEGER PRIMARY KEY, amount INTEGER NOT NULL)
+}
+
+type Order { Order(id: Int, amount: Int) }
+type Charge { Charge(order_id: Int, amount: Int) }
+type Charged { Charged(payment: Int) }
+type ForOrder { ForOrder(order: Int) }
+type ForAmount { ForAmount(amount: Int) }
+
+fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+  match sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") {
+    Some(value: Order(id, amount)) -> charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, within: 100, once: @KEY))
+    None -> respond(status: 404)
+  }
+}
+
+fn charged(reply: Result[Charged, CallError]) -> Buf {
+  match reply {
+    Ok(value) -> respond(status: 201)
+    Err(error) -> respond(status: 502)
+  }
+}
+`;
+  same("…and bound by the row pattern, C71's form", said(BOUND.replace('@KEY', 'ForOrder(order: id)')), 'compiled');
+  const refused = said(keyed('ForAmount(amount: order.amount)'));
+  same('a key of the amount alone is still C65', code(refused), 'C65:13');
+  same('…bound by the pattern too', code(said(BOUND.replace('@KEY', 'ForAmount(amount)'))), 'C65:13');
   same(
-    "C65's fix names both forms that pass: the message itself, and the row's id with a key the client sent",
-    [/the same record as `send:`/.test(hint(refused)), /the row's id and/.test(hint(refused))],
+    "C65's fix names forms that pass: the row's primary key, and the message itself",
+    [/its primary key/.test(hint(refused)), /the same record as `send:`/.test(hint(refused))],
     [true, true],
-  );
-  same(
-    'each form the fix names compiles (C65 and C71 alike)',
-    [
-      said(keyed('Charge(order_id: order.id, amount: order.amount)')),
-      said(keyed('ForOrderKey(order: order.id, key: order.order_key)')),
-    ],
-    ['compiled', 'compiled'],
   );
 }
 

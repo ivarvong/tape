@@ -346,7 +346,7 @@ type Key = View where len(self) >= 1 and len(self) <= 64
 type Amount = Int where self >= 1 and self <= 1000000
 type NewOrder { NewOrder(key: Key, amount: Amount) }
 type Order { Order(id: Int, amount: Int, state: View, note: View) }
-type Charge { Charge(amount: Int) }
+type Charge { Charge(order: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
 
@@ -401,7 +401,7 @@ fn charge(order: Order) -> Outcome {
       let Ok(value: Charged) = call(
         to: payments,
         method: "charge",
-        send: Charge(amount),
+        send: Charge(order: id, amount),
         reply: Charged,
         within: 2000,
         once: ForOrder(order: id)
@@ -482,7 +482,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves; the write may be in a function every call of which comes after the claim), or `repeat: True` on the call when every attempt should count | C54 |
 | Pass a value to a query | `:name` in the query, and an argument of that name | C11, C13, C32 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
-| Command another program | `call` with `within:` and a `once:` key that names the row and says more than the message: the row's id and the client's key, or the message itself | C39, C41, C64, C65, C71 |
+| Command another program | `call` with `within:` and a `once:` key that names the row (its primary key: `ForOrder(order: id)`, even when the message carries the id too), a key the client sent, or the message itself | C39, C41, C64, C65, C71 |
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |
@@ -724,6 +724,7 @@ what went before.
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | a `once:` key of the row's id was C65 when the message carried that id too (a payment API asks for it), and C65's fix said to key by that id; C71 asks for the id | C65 takes a key that names the row by its primary key; a key made only of other values the message carries (the amount) is still C65 |
 | 23 November 2026 | std `write_each(out, list, by)`, a second fold for a Buf | `fold(list, from: out, by)`: a Buf is handed from item to item as any accumulator is |
 | 23 November 2026 | `write_json_list(list, by:)`, and JSON written by hand for an `Option` field, a type with several constructors or a list on its own (C09 refused them) | `write_json(value)` of the value itself, which `decode` reads back; computed items are `map`ped into a record type |
 | 23 November 2026 | no response headers (a redirect had no Location) and no request headers | `header(name:, value:)` on an answer and `header_of(request:, name:)`; the status line carries them, `STATUS CR name: value LF BODY`, checked by the host (host.ts responseOf) |

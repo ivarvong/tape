@@ -319,7 +319,8 @@ T(
 
 // ---- 6. C71: a command built from a row names the row, and what the move before it wrote (a retry key that two
 // different operations share, planted in three programs; C65 does not see the last two: their keys are not made
-// only of what the message carries)
+// only of what the message carries. The first is both: keyed by the card alone, it names no row and says nothing
+// the message does not, and both rules say so)
 {
   const b2 = [
     {
@@ -351,7 +352,7 @@ T(
     T(
       `C71/C65 ${pl.program} B2 (${pl.what})`,
       r.errors.map(e => e.code),
-      [pl.program === 'order' ? 'C65' : 'C71'],
+      pl.program === 'order' ? ['C65', 'C71'] : ['C71'],
     );
     T(
       `${pl.program} unplanted compiles`,

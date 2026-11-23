@@ -1,5 +1,5 @@
 // rules/commands.ts: what a program's matches say about the replies it handles and the rows it reads (C71, C81, C87).
-import { eachExpr, eachPattern, patternsIn } from '../compiler/ast.ts';
+import { eachExpr, eachPattern, partsOf, patternsIn } from '../compiler/ast.ts';
 import type { Call, Expr, FnDecl, Match, Pattern, Program } from '../compiler/ast.ts';
 import { conjunctsOf } from '../sql/tree.ts';
 import { rowTablesOf } from './model.ts';
@@ -257,9 +257,102 @@ function commandKeys(r: Reading, rowTable: ReadonlyMap<string, string | null>): 
     });
 }
 
+// ---- C65: a command's key made only of what its message carries makes two commands with one message one (the
+// ledger keyed its charge by the amount). A key that names the row the command is for, its whole primary key (what
+// C71 asks of a command built from a row), names the command, even when the message carries that id too: same row,
+// same command. (A key that is the same every time is C65 too, in compiler/gen/callout.ts.)
+
+/** `a.b.c` for a variable or a field of one; null for anything else. */
+const pathOf = (n: Expr): string | null => {
+  if (n.k === 'var') return n.name;
+  const base = n.k === 'field' ? pathOf(n.e) : null;
+  return base !== null && n.k === 'field' ? `${base}.${n.name}` : null;
+};
+/** The variables, and fields of variables, a key is made of. */
+function keyLeaves(x: Expr): Set<string> {
+  const out = new Set<string>();
+  const go = (n: Expr): void => {
+    const path = pathOf(n);
+    if (path === null) partsOf(n).forEach(go);
+    else out.add(path);
+  };
+  go(x);
+  return out;
+}
+/** What the message carries: its fields' values as written, through nested records. */
+function carriedBy(send: Expr): Set<string> {
+  const carried = new Set<string>();
+  const direct = (n: Expr): void => {
+    const path = pathOf(n);
+    if (path !== null) carried.add(path);
+    else if (n.k === 'ctor') for (const a of n.args) direct(a.value);
+  };
+  direct(send);
+  return carried;
+}
+const shape = (x: Expr): string =>
+  JSON.stringify(x, (k, v: unknown) =>
+    k === 'line' || k === 'file' || k === 'pos' ? undefined : typeof v === 'bigint' ? String(v) : v,
+  );
+
+/** For each way f holds a row, the paths that name it by its primary key: `id` bound by Order(id, …), `order.id`. */
+function rowKeys(r: Reading, f: FnDecl, rowTable: ReadonlyMap<string, string | null>): string[][] {
+  const pkOf = (table: string): string[] =>
+    (r.tables.get(table) ?? [...r.tables].find(([n]) => lc(n) === lc(table))?.[1])?.pk ?? [];
+  const out: string[][] = [];
+  const held = (pat: Pattern, value: Expr | null): void => {
+    const row = rowOf(pat, rowTable);
+    if (row) {
+      const pk = pkOf(row.table);
+      const names = pk.flatMap(col => row.binds.get(lc(col)) ?? []);
+      if (pk.length > 0 && names.length === pk.length) out.push(names);
+    }
+    // Some(value: x) or Moved(value: x), or x, on a query that reads rows of one table
+    const p = bare(pat),
+      only = p.k === 'ctor' && (p.name === 'Some' || p.name === 'Moved') && p.subs.length === 1 ? p.subs[0]?.pat : p;
+    const rowArg = value?.k === 'call' ? value.args.find(a => a.label === 'row')?.value : undefined;
+    const table = rowArg?.k === 'ctor' ? rowTable.get(rowArg.name) : null;
+    if (only?.k === 'bind' && table) {
+      const pk = pkOf(table);
+      if (pk.length > 0) out.push(pk.map(col => `${only.name}.${col}`));
+    }
+  };
+  eachExpr(f.body, e => {
+    if (e.k === 'match' && e.subject) for (const a of e.arms) held(a.pat, e.subject);
+    if (e.k === 'block') for (const l of e.lets) if (l.pat) held(l.pat, l.value);
+  });
+  return out;
+}
+
+function carriedKeys(r: Reading, rowTable: ReadonlyMap<string, string | null>): void {
+  for (const f of r.prog.fns.values()) {
+    if (!own(f)) continue;
+    let keys: string[][] | null = null;
+    eachExpr(f.body, c => {
+      if (c.k !== 'call' || c.name !== 'call') return;
+      const send = c.args.find(a => a.label === 'send')?.value,
+        once = c.args.find(a => a.label === 'once');
+      if (!send || !once) return;
+      const kl = keyLeaves(once.value),
+        carried = carriedBy(send);
+      const isCarried = (x: string): boolean => [...carried].some(h => x === h || x.startsWith(`${h}.`));
+      if (kl.size === 0 || ![...kl].every(isCarried) || shape(once.value) === shape(send)) return;
+      keys ??= rowKeys(r, f, rowTable);
+      if (keys.some(names => names.every(n => kl.has(n)))) return;
+      r.bad(
+        'C65',
+        once,
+        `this command's key is made only of what its message carries (${[...kl].join(', ')}), so two commands with the same message are one: the second is answered with the first's reply (the ledger keyed its charge by the amount)`,
+        'Key it by the row it is for: its primary key, from the row read from the table (`ForOrder(order: order.id)`), or by a key the client sent. If the message itself names the command (an event and its id), key it by the message: `once:` the same record as `send:`.',
+      );
+    });
+  }
+}
+
 export function commandRules(r: Reading): void {
   const rowTable = rowTablesOf(r.queries);
   refusalsAsked(r);
   patternStates(r, rowTable);
   commandKeys(r, rowTable);
+  carriedKeys(r, rowTable);
 }
