@@ -147,7 +147,9 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   "unreachable"]}}`, by the name of the program's `Remote` parameter and the method. Each call takes the next answer
   for its method, across the run's requests and timers: the reply's value as JSON (`Ok`), a refusal (`Rejected`, its
   `reason`), `"timeout"` (no answer in time: `Timeout`), `"unreachable"`; once they run out, Unreachable. A repeated
-  `once` key gets the answer its first send got, as a program that keeps its replies answers. Each call is in the
+  `once` key gets the reply or refusal it got before, as a program that keeps its replies answers; after a
+  `"timeout"` or `"unreachable"` nothing was kept (the callee did not answer), so the same key sent again, from a
+  timer that retries, takes the next answer. Each call is in the
   effect log with what it got, and the replay answers it from there, so a request replays to the same bytes.
   [`mcp/test/remote.tape`](../mcp/test/remote.tape) answers each outcome; at most 200 answers a run.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got

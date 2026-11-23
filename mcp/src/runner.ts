@@ -136,6 +136,8 @@ const unreachable: Service = (): ServiceReply => ({ status: 'unreachable', body:
  */
 export type Scripts = Readonly<Record<string, Readonly<Record<string, readonly unknown[]>>>>;
 export const SCRIPTED_OUT = "run's remotes have no more answers for this method: the call answers Unreachable";
+const isStatusReply = (r: ServiceReply): r is { status: string } =>
+  !(r instanceof Uint8Array) && !(r instanceof ArrayBuffer);
 /** One answer as the host takes a service's: the reply's bytes, or a status and its body; 'timeout' for none. */
 function replyOf(answer: unknown): ServiceReply | 'timeout' {
   if (answer === undefined) return { status: 'unreachable', body: enc.encode(SCRIPTED_OUT) };
@@ -145,23 +147,26 @@ function replyOf(answer: unknown): ServiceReply | 'timeout' {
     return { status: 'rejected', body: enc.encode(String('reason' in answer ? answer.reason : '')) };
   return enc.encode(JSON.stringify(answer));
 }
-/** The services of a run: the scripted ones answer in order, and a repeated `once` key as its first send was. */
+/**
+ * The services of a run: the scripted ones answer in order, and a repeated `once` key as its first answer was. Only
+ * an answer that came back is kept under the key (a reply, a refusal), as a callee stores only the answer of a run
+ * that reached one (host/run.ts runServed): after no answer in time, or none at all, the same key sent again is run
+ * again and takes the next answer.
+ */
 function servicesOf(scripts: Scripts): Readonly<Record<string, Service>> {
   const used = new Map<string, number>();
-  const kept = new Map<string, ServiceReply | 'timeout'>();
+  const kept = new Map<string, ServiceReply>();
   const scripted =
     (to: string, methods: Readonly<Record<string, readonly unknown[]>>): Service =>
     (_bytes, o) => {
       const held = o.key === null ? undefined : kept.get(o.key);
-      let reply = held;
-      if (reply === undefined) {
-        const at = `${to}.${o.method}`,
-          n = used.get(at) ?? 0;
-        used.set(at, n + 1);
-        reply = replyOf(Object.hasOwn(methods, o.method) ? methods[o.method]?.[n] : undefined);
-        if (o.key !== null) kept.set(o.key, reply);
-      }
+      if (held !== undefined) return held;
+      const at = `${to}.${o.method}`,
+        n = used.get(at) ?? 0;
+      used.set(at, n + 1);
+      const reply = replyOf(Object.hasOwn(methods, o.method) ? methods[o.method]?.[n] : undefined);
       if (reply === 'timeout') throw new TimedOut();
+      if (o.key !== null && !(isStatusReply(reply) && reply.status === 'unreachable')) kept.set(o.key, reply);
       return reply;
     };
   return new Proxy(

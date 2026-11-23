@@ -31,6 +31,7 @@ const LIMITS_TAPE = readFileSync(`${HERE}test/limits.tape`, 'utf8');
 const UNDONE_TAPE = readFileSync(`${HERE}test/undone.tape`, 'utf8');
 const CLOCK_TAPE = readFileSync(`${HERE}test/clock.tape`, 'utf8');
 const REMOTE_TAPE = readFileSync(`${HERE}test/remote.tape`, 'utf8');
+const RETRY_TAPE = readFileSync(`${HERE}test/retry.tape`, 'utf8');
 const README = readFileSync(`${ROOT}README.md`, 'utf8');
 
 type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM; feedback: typeof FeedbackM };
@@ -1049,6 +1050,26 @@ const tests: Test[] = [
         out.push(`replies: ${JSON.stringify(calls[0]?.['reply'])} ${JSON.stringify(calls[1]?.['reply'])}`);
       if (!rs.every(x => x['replayed'] === true))
         out.push(`replayed: ${JSON.stringify(rs.map(x => x['replay_error'] ?? x['replayed']))}`);
+      // no answer is not an answer: a send that timed out or was unreachable leaves nothing under its once key, so
+      // the same key sent again (a timer's retry) takes the next answer, as a callee that never ran would give
+      const retry = await tool(m, 'run', {
+        files: [{ name: 'retry.tape', text: RETRY_TAPE }],
+        requests: [
+          { request: 'POST /pay/1', at_ms: 0 },
+          { request: 'POST /pay/1', at_ms: 0 },
+          { request: 'POST /pay/1', at_ms: 2000 },
+        ],
+        remotes: { payments: { charge: ['timeout', 'unreachable', { payment: 9 }] } },
+      });
+      const again = RESULTS(retry.out).map(x => `${String(x['request'])} ${String(x['status'])} ${String(x['body'])}`);
+      const wantAgain = [
+        'POST /pay/1 202 ',
+        'POST /pay/1 503 ',
+        'woken {"key":1} 200 {"payment":9}',
+        'POST /pay/1 201 9',
+      ];
+      if (JSON.stringify(again) !== JSON.stringify(wantAgain))
+        out.push(`a retry after no answer: ${JSON.stringify(again)}`);
       // with no remotes, every call is Unreachable, as before
       const none = RESULTS((await tool(m, 'run', { files, requests: ['POST /pay/1'] })).out)[0];
       if (none?.['status'] !== 503) out.push(`without remotes: ${String(none?.['status'])}`);

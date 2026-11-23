@@ -217,7 +217,7 @@ export const REQUESTS_SCHEMA = {
 export const REMOTES_SCHEMA = {
   type: 'object',
   description:
-    'Answers for calls to other programs, which otherwise answer Unreachable: {"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout", "unreachable"]}}, by the Remote parameter\'s name and the method. Each call takes the next answer for its method: the reply\'s value as JSON, a refusal, no answer in time, or none; once they run out, Unreachable. A repeated `once` key gets the answer its first send got.',
+    'Answers for calls to other programs, which otherwise answer Unreachable: {"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout", "unreachable"]}}, by the Remote parameter\'s name and the method. Each call takes the next answer for its method: the reply\'s value as JSON, a refusal, no answer in time, or none; once they run out, Unreachable. A repeated `once` key gets the reply or refusal it got before; after a timeout or none, it takes the next answer.',
   additionalProperties: { type: 'object', additionalProperties: { type: 'array', items: {} } },
 } as const;
 export const TRACE_MODES = ['lines', 'full', 'none'] as const;
