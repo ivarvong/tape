@@ -174,9 +174,10 @@ real clock (no `at_ms`), timers are set but never run here.
 
 Runs the doc examples in the program's comments, as `node tape.ts test` does ([`doctest.ts`](../doctest.ts)): a
 comment line `//   > expression` is an example, and the next comment line is what it should give, as a pattern (a
-literal, a constructor, `_` for a part that does not matter, `"prefix" ++ _`). Each example is compiled with its
-file and called in the compiled code, in the Dynamic Worker that runs programs; an example that needs a capability
-(`Sql`, `Clock`, …) cannot be called. Also `POST /v1/test` with the same JSON. For
+literal, a constructor, `_` for a part that does not matter, `"prefix" ++ _`), or a Dec or Float literal (`0.50`,
+`0.25f`), compared with `==` since neither has a pattern. Each example is compiled with its file and called in the
+compiled code, in the Dynamic Worker that runs programs; an example that needs a capability (`Sql`, `Clock`, …)
+cannot be called. A library with no `handle` is tested as it is: examples never call it. Also `POST /v1/test` with the same JSON. For
 [`testdata/doctest-failures.tape`](../testdata/doctest-failures.tape):
 
 ```json

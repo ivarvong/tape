@@ -2,7 +2,8 @@
 // tool (mcp/src/tools.ts).
 //
 // In any comment, a line `//   > expression` is an example and the next comment line is what it should give,
-// written as a pattern (a literal, a constructor, `_` for parts that do not matter, `"prefix" ++ _`, …):
+// written as a pattern (a literal, a constructor, `_` for parts that do not matter, `"prefix" ++ _`, …), or a Dec or
+// Float literal, which has no pattern and is compared with `==`:
 //
 //   // The text before the first `byte`, or all of it.
 //   //
@@ -19,6 +20,7 @@
 // in Node (cli/test.ts) or, for tape-mcp, in its Dynamic Worker, as a Worker cannot compile Wasm itself. So this file
 // compiles no module and runs in either.
 import { compile } from './compiler.ts';
+import { decText } from './compiler/common.ts';
 import type { Problem } from './compiler/common.ts';
 import type { Called } from './host/examples.ts';
 import { interpret } from './interp.ts';
@@ -58,6 +60,7 @@ function shown(v: Value): string {
   if (typeof v === 'bigint') return String(v);
   if (typeof v === 'number') return `${v}f`;
   if (typeof v === 'boolean') return v ? 'True' : 'False';
+  if (!(v instanceof Uint8Array) && v.k === 'dec') return decText(v.m, v.s);
   if (v instanceof Uint8Array) return text(v);
   if (v.k === 'buf') return `Buf ${text(v.buf)}`;
   if (v.k !== 'adt') return `<${v.k}>`;
@@ -72,8 +75,12 @@ const ended = (source: string): string => source.replace(/\n*$/, '\n');
 const withAppended = (sources: readonly Source[], target: Source, extra: string): Source[] =>
   sources.map(s => (s === target ? { name: s.name, text: ended(target.text) + extra } : s));
 
+// a Dec or a Float has no literal pattern (C19): an example that should give one is compared by value, `==`
+const NUMBER = /^-?\d+\.\d+$|^-?\d+(\.\d+)?(e[+-]?\d+)?f$/;
 const asMatch = (r: Runnable): string =>
-  `\nfn ${r.fn}() -> Bool {\n  match ${r.expr} {\n    ${r.want} -> True\n    _ -> False\n  }\n}\n`;
+  NUMBER.test(r.want)
+    ? `\nfn ${r.fn}() -> Bool {\n  ${r.expr} == ${r.want}\n}\n`
+    : `\nfn ${r.fn}() -> Bool {\n  match ${r.expr} {\n    ${r.want} -> True\n    _ -> False\n  }\n}\n`;
 
 const build = (sources: readonly Source[], target: Source, rs: readonly Runnable[]): Built =>
   compile(withAppended(sources, target, rs.map(asMatch).join('')), { exports: rs.map(r => r.fn) });

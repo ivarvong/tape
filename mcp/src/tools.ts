@@ -727,7 +727,10 @@ export async function testTool(
   const c = compiled(args, deps, fieldsOfSchema(TEST_INPUT));
   if (isRefusal(c)) return { result: c, usage: null };
   const usage = usageOf(c);
-  if (!c.built) return { result: { ok: false, diagnostics: c.diagnostics, examples: [], passed: 0, failed: 0 }, usage };
+  // examples never call handle: a library of pure functions, with none, is tested as it is (C30 is for a program)
+  const library = !c.built && c.diagnostics.length > 0 && c.diagnostics.every(d => d.code === 'C30');
+  if (!c.built && !library)
+    return { result: { ok: false, diagnostics: c.diagnostics, examples: [], passed: 0, failed: 0 }, usage };
   const sources = [...deps.std, ...c.files];
   const t0 = Date.now();
   const prepared = c.files.map(f => prepare(sources, f.name));

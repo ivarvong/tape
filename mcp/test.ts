@@ -714,6 +714,12 @@ const tests: Test[] = [
       const g = await tool(m, 'test', { files: [{ name: 'next.tape', text: good }] });
       if (g.out['ok'] !== true || seen(g.out) !== '[[3,true,null,null]]')
         out.push(`next.tape: ${JSON.stringify(g.out)}`);
+      // a library: examples and no handle (C30 for a program, nothing for examples, which never call it); and an
+      // expected Dec or Float, which cannot be a pattern (C19), compared by value, the value it gave shown
+      const lib = `// Half, to cents.\n//\n//   > half(x: 1.00)\n//   0.50\n//   > half(x: 1.01)\n//   0.51\n//   > quarter(n: 1)\n//   0.25f\nfn half(x: Dec[2]) -> Dec[2] {\n  div(a: x, by: 2, scale: 2, rounding: HalfEven)\n}\n\nfn quarter(n: Int) -> Float {\n  float(n) / 4f\n}\n`;
+      const l = await tool(m, 'test', { files: [{ name: 'lib.tape', text: lib }] });
+      if (seen(l.out) !== '[[3,true,null,null],[5,false,"0.50",null],[7,true,null,null]]')
+        out.push(`lib.tape: ${JSON.stringify(l.out).slice(0, 400)}`);
       // a program that does not compile: its diagnostics, as compile gives them, and no examples run
       const bad = await tool(m, 'test', {
         files: [{ name: 'bad.tape', text: good.replace('respond(status: 200)', 'respond(status: "200")') }],
