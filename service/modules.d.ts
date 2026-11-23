@@ -53,3 +53,4 @@ declare namespace WebAssembly {
 
 // The commit the Worker was built from (vite.config.ts define); a build without it (the tests) has none.
 declare const TAPE_VERSION: string | undefined;
+declare const TAPE_COMPILER: string | undefined;

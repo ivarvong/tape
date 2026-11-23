@@ -19,6 +19,9 @@ declare module '*.wasm' {
 }
 
 // What the runtime gives this Worker (cloudflare.config.ts), and what it exports.
+/** The commit and the compiler built in (vite.config.ts); undefined in the tests. */
+declare const TAPE_VERSION: string | undefined;
+declare const TAPE_COMPILER: string | undefined;
 declare namespace Cloudflare {
   interface Env {
     LOADER: WorkerLoader;

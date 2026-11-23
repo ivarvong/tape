@@ -91,6 +91,9 @@ export default {
     });
     // which version of tape-mcp answered: for the deploy's pinned smoke, and through the tape Worker's binding
     if (env.VERSION) res.headers.set('tape-mcp-version', env.VERSION.id);
+    // the commit and the compiler built in (vite.config.ts), as the tape Worker names its own (parity.ts)
+    res.headers.set('tape-version', typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev');
+    res.headers.set('tape-compiler', typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev');
     return res;
   },
 } satisfies ExportedHandler<Env>;

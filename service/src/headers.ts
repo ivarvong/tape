@@ -12,12 +12,16 @@ export const PROGRAM_CSP =
 const PROGRAM_PATH = /^\/p\/|^\/[^/]+\/[^/]+\/v\/\d+(\/|$)/;
 /** The commit this Worker was built from (vite.config.ts), or "dev" in the tests. */
 const SHA = typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev';
+/** The compiler built in (scripts/sha.ts), or "dev" in the tests. */
+const COMPILER = typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev';
 export const secured = (res: Response, path: string, version?: string): Response => {
   const out = new Response(res.body, res),
     h = out.headers,
     type = h.get('content-type') ?? '',
     active = /^(text\/html|image\/svg\+xml)\b/.test(type);
   h.set('tape-version', SHA);
+  // tape-mcp's answers through the binding keep the compiler it names: the deploy's parity check compares the two
+  if (!h.has('tape-compiler')) h.set('tape-compiler', COMPILER);
   if (version !== undefined) h.set('tape-worker-version', version);
   h.set('x-content-type-options', 'nosniff');
   h.set('x-frame-options', 'DENY');
