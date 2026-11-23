@@ -819,4 +819,51 @@ fn moved(id: View, from: View, amount: Int) -> Buf {
   );
 }
 
+// ---- 4. a JSON list of computed items (the invoice task kept a Buf in a record to fold over its lines, C08):
+// write_json_list hands the Buf from item to item; a nested Cons needs nothing around it to say its type
+{
+  const INV = `type Line {
+  Line(name: View, qty: Int, cents: Int)
+}
+
+fn handle(raw: View) -> Buf {
+  let lines = Cons(head: Line(name: "a", qty: 2, cents: 150), tail: Cons(head: Line(name: "b\\"", qty: 1, cents: 5), tail: Nil))
+  let total = fold(list: lines, from: 0, by: fn(sum: Int, l: Line) -> Int { sum + l.qty * l.cents })
+  respond(status: 200)
+    |> append(view: "{\\"lines\\":")
+    |> write_json_list(list: lines, by: fn(out: Buf, l: Line) -> Buf {
+      out
+        |> append(view: "{\\"name\\":")
+        |> write_json_string(text: l.name)
+        |> append(view: ",\\"total\\":")
+        |> write_int(value: l.qty * l.cents)
+        |> append(view: "}")
+    })
+    |> append(view: ",\\"total\\":\\(total),\\"names\\":")
+    |> write_json_string(text: join(list: map(list: lines, by: fn(l: Line) -> View { l.name }), sep: "+"))
+    |> append(view: "}")
+}
+`;
+  const out = served(INV)('GET /');
+  T(
+    'write_json_list, fold and join: the answer is the JSON JavaScript reads back',
+    out.startsWith('200\n') ? JSON.parse(out.slice(4)) : out,
+    {
+      lines: [
+        { name: 'a', total: 300 },
+        { name: 'b"', total: 5 },
+      ],
+      total: 305,
+      names: 'a+b"',
+    },
+  );
+  T(
+    'C08 on a Buf in a record says how to write a list',
+    fix('type Acc {\n  Acc(out: Buf, n: Int)\n}\n\nfn f(n: Int) -> Int {\n  let a = Acc(out: buf(), n)\n  a.n\n}\n')
+      .split(' | ')[1]
+      ?.includes('write_json_list'),
+    true,
+  );
+}
+
 finish();

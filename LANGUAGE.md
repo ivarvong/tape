@@ -396,6 +396,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 |---|---|---|
 | Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors. A field the type does not have is refused, and so is `null` for an `Option` field: it is there or it is not. An `Int` field takes a JSON number that is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), as `JSON.parse` reads it, so `1e3` is 1000; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded: the host reads JSON with `JSON.parse`, whose numbers are doubles, and past 2^53 - 1 a double cannot hold every whole number exactly. Send such a value as text until exact large-integer JSON, the whole 64-bit range, comes (planned for 0.3) | C35 |
 | Write a record, or the rows of a query | `write_json(value)`, `write_rows(rows)` | |
+| Write a list of computed items | `out \|> write_json_list(list, by: fn(out: Buf, item: T) -> Buf { … })`: the Buf is handed from item to item, never kept in a record (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
 | Run something for what it does | `do f(…)` | C83-C85 |
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
@@ -577,6 +578,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | a JSON list of computed items needed a Buf kept in a record (C08), and `Cons(head: 1, tail: Nil)` in a `let` could not tell its type (C21) | std: `write_json_list`, `write_each`, `join`; a constructor's later fields take the type parameters its earlier ones gave |
 | 23 November 2026 | a debit after its transfer id was inserted (`ON CONFLICT DO NOTHING`, the row required by a step) was C54, and agents marked it `repeat: True` | the claim is an op-id guard: C54 takes a write that runs only once the claim inserted its row |
 | 23 November 2026 | byte classes, a number with a sign or leading zeros, min and max written by hand in each program | std: `is_digit is_alpha is_alnum is_space is_lower is_upper`, `every_byte(v, keep)`, `parse_int(text)`, `min`, `max` |
 | 23 November 2026 | `Some("")` as a pattern was P01 (a name expected), though `Some("")` builds one; parse errors named only the token | the one field of a constructor takes its pattern unnamed; a backtick, `;`, `&&`, `!`, a single quote, `if`, `return` and `let x: T` are each named for what they are, with what Tape writes instead |

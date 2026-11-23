@@ -1,6 +1,6 @@
 // compiler/gen/expr.ts: an expression checked and written as Wasm; its type is what the emitter gives back.
-import { eachExpr, eachPattern, patternsIn, unreachable } from '../ast.ts';
-import type { Arg, Expr, Pattern, Variant } from '../ast.ts';
+import { eachExpr, eachPattern, eachType, patternsIn, unreachable } from '../ast.ts';
+import type { Arg, Expr, Pattern, TypeAst, Variant } from '../ast.ts';
 import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
 import { BOOL, CAPABILITIES, INT, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
@@ -402,6 +402,16 @@ function emitBin(c: Ctx, e: Of<'bin'>): Type {
 /** The fields of a constructor, emitted in order: their types, their locals, and what each type parameter became. */
 type Built = { got: Type[]; ls: number[]; bound: Map<string, Type> };
 
+/** A field's type once the fields before it have said what each type parameter in it is (`tail: List[T]` after
+ * `head: 1`), so `Cons(head: 2, tail: Nil)` needs nothing around it; null while one is not known. */
+function boundIn(c: Ctx, params: readonly string[], t: TypeAst, bound: ReadonlyMap<string, Type>): Type | null {
+  const used: string[] = [];
+  eachType(t, x => {
+    if (params.includes(x.name)) used.push(x.name);
+  });
+  return used.length > 0 && used.every(p => bound.has(p)) ? c.B.resolve(t, bound) : null;
+}
+
 function emitFields(c: Ctx, e: Of<'ctor'>, v: Variant, args: readonly Arg[], type: Type | null): Built {
   const { decl, vi } =
     c.B.ctors.get(e.name) ??
@@ -421,7 +431,9 @@ function emitFields(c: Ctx, e: Of<'ctor'>, v: Variant, args: readonly Arg[], typ
         `constructor ${e.name} is missing argument ${fl.name}`,
         `Give every field: ${e.name}(${v.fields.map(x => `${x.name}: …`).join(', ')}).`,
       );
-    const known = type ? (c.B.adtOf(type, e).variants[vi]?.fields[i]?.type ?? null) : null;
+    const known = type
+      ? (c.B.adtOf(type, e).variants[vi]?.fields[i]?.type ?? null)
+      : boundIn(c, decl.params, fl.type, out.bound);
     const t = c.emit(arg.value, known, false);
     const param = decl.params.includes(fl.type.name) && fl.type.args.length === 0 ? fl.type.name : null;
     const first = param === null ? undefined : out.bound.get(param);

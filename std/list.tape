@@ -81,3 +81,61 @@ fn fold[A, B](list: List[A], from: B, by: Fn2[B, A, B]) -> B {
     Nil -> from
   }
 }
+
+// Write each item into a Buf, first to last. A Buf has one owner, so it is not kept in a record or a list while a
+// list is walked: it is handed from item to item. For a total as well, fold the list a second time.
+//
+//   > buf() |> write_each(list: Cons(head: 1, tail: Cons(head: 2, tail: Nil)), by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n * 10) }) |> freeze
+//   "1020"
+fn write_each[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf {
+  match list {
+    Cons(head, tail) -> write_each(out: by(out, head), list: tail, by)
+    Nil -> out
+  }
+}
+
+// A JSON array of the items, each written by `by`, with the commas between them: for items that are not records
+// as they stand (a line with a computed total, a value formatted by hand). A list of records is `write_json`.
+//
+//   > buf() |> write_json_list(list: Cons(head: "a", tail: Cons(head: "b", tail: Nil)), by: fn(out: Buf, s: View) -> Buf { out |> write_json_string(text: s) }) |> freeze
+//   "[\"a\",\"b\"]"
+//   > buf() |> write_json_list(list: Nil, by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n) }) |> freeze
+//   "[]"
+fn write_json_list[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf {
+  match list {
+    Cons(head, tail) -> json_rest(out: by(push(buf: out, byte: 91), head), list: tail, by)
+      |> push(byte: 93)
+    Nil -> out |> append(view: "[]")
+  }
+}
+
+fn json_rest[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf {
+  match list {
+    Cons(head, tail) -> json_rest(out: by(push(buf: out, byte: 44), head), list: tail, by)
+    Nil -> out
+  }
+}
+
+// The texts with `sep` between each two.
+//
+//   > join(list: Cons(head: "a", tail: Cons(head: "b", tail: Cons(head: "c", tail: Nil))), sep: ", ")
+//   "a, b, c"
+//   > join(list: Nil, sep: ", ")
+//   ""
+fn join(list: List[View], sep: View) -> View {
+  match list {
+    Cons(head, tail) -> freeze(buf: join_rest(out: buf() |> append(view: head), list: tail, sep))
+    Nil -> ""
+  }
+}
+
+fn join_rest(out: Buf, list: List[View], sep: View) -> Buf {
+  match list {
+    Cons(head, tail) -> join_rest(
+      out: out |> append(view: sep) |> append(view: head),
+      list: tail,
+      sep
+    )
+    Nil -> out
+  }
+}
