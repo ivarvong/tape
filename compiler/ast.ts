@@ -141,7 +141,13 @@ export type SuffixPat = At & { k: 'suffix'; head: Pattern; bytes: number[] };
 export type SplitPat = At & { k: 'split'; head: Pattern; bytes: number[]; rest: Pattern };
 /** `decimal(n)`: a function from text to an Option, matched when it gives Some. */
 export type FnPat = At & { k: 'fn'; name: string; sub: Pattern };
-export type CtorPat = At & { k: 'ctor'; name: string; subs: { field: string; pat: Pattern; pun?: true }[] };
+/** `positional`: a pattern written without its field's name, `Some("")`; the build names the field (a constructor with
+ * one field), or refuses it. */
+export type CtorPat = At & {
+  k: 'ctor';
+  name: string;
+  subs: { field: string; pat: Pattern; pun?: true; positional?: true }[];
+};
 export type Pattern = AnyPat | BindPat | AsPat | IntPat | StrPat | PrefixPat | SuffixPat | SplitPat | FnPat | CtorPat;
 
 /** The patterns written directly inside p. */

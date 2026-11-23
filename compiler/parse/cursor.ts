@@ -17,7 +17,15 @@ export const shown = (t: Token): string =>
         ? 'a text literal'
         : `\`${t.v}\``;
 const wanted = (kind: Token['t'], v?: string): string =>
-  v ? `\`${v}\`` : kind === 'id' ? 'a name' : kind === 'Id' ? 'a capitalized name' : kind;
+  v
+    ? `\`${v}\``
+    : kind === 'id'
+      ? 'a name'
+      : kind === 'Id'
+        ? 'a capitalized name'
+        : kind === 'nl'
+          ? 'a new line'
+          : kind;
 
 export class Cursor {
   readonly file: string;
@@ -68,7 +76,10 @@ export class Cursor {
         this.peek(),
         'P01',
         `expected ${wanted(kind, v)} but found ${shown(this.peek())}`,
-        hint || `Write ${wanted(kind, v)} here.`,
+        hint ||
+          (kind === 'nl'
+            ? `One step to a line: start a new line before ${shown(this.peek())}.`
+            : `Write ${wanted(kind, v)} here.`),
       )
     );
   }

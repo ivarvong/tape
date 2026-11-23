@@ -6,7 +6,8 @@
 // name. Otherwise the name is left as written,
 // and a read of it is C16, whose fix says `value: name = Pattern`. A name the program binds itself always wins, so
 // a program that compiled before means what it meant.
-import { eachPattern, partsOf } from './ast.ts';
+import { eachExpr, eachPattern, partsOf, patternsIn } from './ast.ts';
+import { fail } from './common.ts';
 import type { Block, CtorPat, Expr, FnDecl, Pattern, Program } from './ast.ts';
 import { INTRINSICS } from './types.ts';
 
@@ -94,7 +95,38 @@ function bindFields(f: FnDecl, isFunction: (n: string) => boolean): void {
     if (!clash.has(s.field)) s.pat = { k: 'as', name: s.field, pat: s.pat, line: s.pat.line, file: s.pat.file };
 }
 
+/** A pattern written without its field's name (`Some("")`) is for the one field of its constructor; a constructor
+ * with more than one is refused, with the fields to name. */
+function namePositional(prog: Program, f: FnDecl): void {
+  eachExpr(f.body, e => {
+    for (const p of patternsIn(e))
+      eachPattern(p, q => {
+        if (q.k !== 'ctor' || prog.types.get(q.name)?.refine) return;
+        for (const s of q.subs) {
+          if (!s.positional) continue;
+          const c = prog.ctors.get(q.name),
+            fields = c?.decl.variants[c.vi]?.fields ?? [];
+          const [only] = fields;
+          if (only && fields.length === 1 && q.subs.length === 1) {
+            s.field = only.name;
+            delete s.positional;
+            continue;
+          }
+          fail(
+            q,
+            'C10',
+            `a pattern for a field of ${q.name} names the field`,
+            c
+              ? `${q.name} has the fields (${fields.map(x => x.name).join(', ')}): write \`${q.name}(${fields.map(x => `${x.name}: …`).join(', ')})\`, leaving out the ones not looked at. Only a constructor with one field takes its pattern unnamed, \`Some("")\`.`
+              : `Write \`${q.name}(field: pattern)\`.`,
+          );
+        }
+      });
+  });
+}
+
 export function bindFieldNames(prog: Program): void {
+  for (const f of prog.fns.values()) namePositional(prog, f);
   const isFunction = (n: string): boolean =>
     n === 'flags' || prog.fns.has(n) || INTRINSICS.has(n) || [...prog.byFile.values()].some(m => m.has(n));
   for (const f of prog.fns.values()) bindFields(f, isFunction);

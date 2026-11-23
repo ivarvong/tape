@@ -176,15 +176,42 @@ function sql(sc: Scan): void {
   sc.toks.push({ t: 'sql', v: sc.text.slice(sc.i + 1, j - 1), line: at, file: sc.file });
   sc.i = j;
 }
+// what a character Tape does not have usually meant, in the language it came from
+const MEANT: Readonly<Record<string, [string, string]>> = {
+  '`': [
+    'a backtick: Tape has no quoted names',
+    'A name is written as it is, a reserved word too where it names a field (`Event(type: View)`, `e.type`); text is in double quotes, `"…"`.',
+  ],
+  "'": [
+    'a single quote: Tape text is in double quotes',
+    'Text is in double quotes: `"text"`. Single quotes are for SQL text inside a query.',
+  ],
+  ';': ['a semicolon: a new line ends a step in Tape', 'Put the next step on its own line.'],
+  '!': ['a `!`: Tape negates with `not`', 'Write `not` for negation, and `!=` for not equal: `not done`, `n != 0`.'],
+  '?': [
+    'a question mark: Tape has no `?` operator',
+    'An Option is taken apart with a step: `let Some(value) = e else -> …`.',
+  ],
+  '&&': ['&& for and: Tape writes `and`', 'Write `a and b`.'],
+  '||': ['|| for or: Tape writes `or`', 'Write `a or b`.'],
+};
 function operator(sc: Scan): void {
+  const two = sc.text.slice(sc.i, sc.i + 2),
+    meant = two === '&&' || two === '||' ? MEANT[two] : undefined;
+  if (meant) return fail(here(sc), 'L01', meant[0], meant[1]);
   const op = OPS.find(o => sc.text.startsWith(o, sc.i));
-  if (!op)
+  if (!op) {
+    const ch = sc.text[sc.i] ?? '',
+      known = Object.hasOwn(MEANT, ch) ? MEANT[ch] : undefined;
     return fail(
       here(sc),
       'L01',
-      `unexpected character ${JSON.stringify(sc.text[sc.i])}`,
-      'Tape has no such character outside a text literal or a comment. Put it in a text literal, or after `//`.',
+      known ? known[0] : `unexpected character ${JSON.stringify(ch)}`,
+      known
+        ? known[1]
+        : 'Tape has no such character outside a text literal or a comment. Put it in a text literal, or after `//`.',
     );
+  }
   if (op === '(' || op === '[' || op === '{') sc.open.push(op);
   if (op === ')' || op === ']' || op === '}') sc.open.pop();
   // a line that starts with |> carries on the step before it

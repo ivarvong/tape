@@ -567,4 +567,75 @@ fn f(n: Int) -> Int {
   );
 }
 
+// ---- 7. a parse or lex error names the problem and what to write (todo: `Some("")` in a pattern; webhook: a
+// backtick to quote `type`, a reserved word as a field; and the forms other languages have that Tape does not)
+{
+  const said = (src: string): string => fix(src).replace(/ \| .*/, '');
+  T(
+    'a pattern alone for the one field of a constructor is that field’s, as an argument is',
+    run(
+      `fn f(n: Int) -> Int {
+  let o = match n {
+    0 -> Some(value: "")
+    _ -> Some(value: "x")
+  }
+  match o {
+    Some("") -> 1
+    Some(decimal(k)) -> k
+    _ -> 2
+  }
+}
+`,
+      'f',
+      [0n],
+    ),
+    1,
+  );
+  T(
+    'a pattern alone for a constructor of two fields: C10 names them',
+    fix(`type P {
+  P(a: Int, b: Int)
+}
+
+fn f(p: P) -> Int {
+  match p {
+    P(1, b) -> b
+    _ -> 0
+  }
+}
+`),
+    'C10 a pattern for a field of P names the field | P has the fields (a, b): write `P(a: …, b: …)`, leaving out the ones not looked at. Only a constructor with one field takes its pattern unnamed, `Some("")`.',
+  );
+  T(
+    'the characters and words other languages have',
+    [
+      'type E {\n  E(`type`: View)\n}\n\nfn f(n: Int) -> Int {\n  1\n}\n',
+      'fn f(n: Int) -> Int {\n  let a = 1;\n  a\n}\n',
+      'fn f(n: Int) -> Bool {\n  n > 1 && n < 3\n}\n',
+      'fn f(n: Int) -> Bool {\n  !(n > 1)\n}\n',
+      "fn f(n: Int) -> View {\n  'x'\n}\n",
+      'fn f(n: Int) -> Int {\n  if n > 1 { 1 } else { 2 }\n}\n',
+      'fn f(n: Int) -> Int {\n  return n\n}\n',
+      'fn f(n: Int) -> Int {\n  let x: Int = n\n  x\n}\n',
+      'fn f(n: Int) -> Int {\n  let a = 1 let b = 2\n  a\n}\n',
+    ].map(said),
+    [
+      'L01 a backtick: Tape has no quoted names',
+      'L01 a semicolon: a new line ends a step in Tape',
+      'L01 && for and: Tape writes `and`',
+      'L01 a `!`: Tape negates with `not`',
+      'L01 a single quote: Tape text is in double quotes',
+      'P02 Tape has no `if`: a condition match branches',
+      'P02 Tape has no `return`: a block is worth its last expression',
+      'P01 a `let` names a value without a type',
+      'P01 expected a new line but found `let`',
+    ],
+  );
+  T(
+    'C22 of a method call on a value says Tape has no methods',
+    fix('fn f(n: Int) -> Int {\n  n.to_string()\n}\n').split(' | ')[1]?.startsWith('`n` is a value, not a capability'),
+    true,
+  );
+}
+
 finish();

@@ -171,6 +171,7 @@ A pattern can fail, and binds what it proves.
 | `Ctor(field, other: P)` | that constructor; a field named bare is bound, fields left out are not looked at. A field given a pattern binds its own name too, where the arm reads it and nothing else binds it: `Some(value: Account(balance: 0)) -> value.id` |
 | `"text"`, `42`, `-1`, `True` | that value |
 | `"prefix" ++ rest` | bytes that start so; `rest` is matched against what follows |
+| `Some("")`, `Some(decimal(n))` | a constructor of one field, with a pattern for that field: as its one argument is passed bare, its one pattern needs no name. A constructor of two or more fields names each (C10) |
 | `Key(k)` | a value for which the refined type's condition holds; `k` has the type |
 | `decimal(n)` | any one-parameter function returning `Option[…]`, when it returns `Some` |
 | `name = P` | `P`, and binds the whole value |
@@ -576,6 +577,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | `Some("")` as a pattern was P01 (a name expected), though `Some("")` builds one; parse errors named only the token | the one field of a constructor takes its pattern unnamed; a backtick, `;`, `&&`, `!`, a single quote, `if`, `return` and `let x: T` are each named for what they are, with what Tape writes instead |
 | 23 November 2026 | a field given a pattern bound only what the pattern bound, so `Some(value: Account(…)) -> value` was C16 | the field's name is bound too, where the arm reads it and nothing else binds it |
 | 23 November 2026 | a `let` whose pattern opened with a name (`let head ++ "&" ++ rest = q else …`) read as a plain `let` (P01) | every pattern a match arm takes stands there; a `STRICT` table's PRIMARY KEY is known NOT NULL (C69), and C69's fix is the declaration to write |
 | 23 November 2026 | a reserved word could not name a field (P01), so a JSON key such as `"type"` could not be decoded | it can: `Event(type: View)`, `e.type`, `Event(type: kind)` |

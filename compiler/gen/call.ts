@@ -379,8 +379,13 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
   if (held && (held.type.name === 'Fn' || held.type.name === 'Fn2')) return emitHeldCall(c, e, held);
   if (INTRINSICS.has(e.name)) return emitIntrinsic(c, e);
   const suggestion = (): string => {
+    const value = dot > 0 ? e.name.slice(0, dot) : null;
+    if (value !== null && c.env.has(value))
+      return `\`${value}\` is a value, not a capability bound to an interface, and Tape has no methods: pass it to a function, \`${e.name.slice(dot + 1)}(…)\` with it as an argument.`;
     const n = B.nearest(e.name, [...B.fns.keys(), ...INTRINSICS.keys()]);
-    return n ? `Did you mean \`${n}\`?` : '';
+    return n
+      ? `Did you mean \`${n}\`?`
+      : `Neither the program nor std has a function \`${e.name}\`; docs/std.md lists std's.`;
   };
   const named = B.find(e.name, c.f.file, e) ?? fail(e, 'C22', `unknown function ${e.name}`, suggestion());
   const args = B.orderArgs(

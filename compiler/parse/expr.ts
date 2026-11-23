@@ -137,6 +137,13 @@ function atom(c: Cursor, t: Token): Expr {
   if (t.t === 'Id') return { k: 'ctor', name: t.v, args: c.eat('op', '(') ? args(c) : [], ...at };
   // a match is an expression like any other: a value, an argument, the left side of a pipe
   if (t.t === 'kw' && t.v === 'match') return match(c, t);
+  if (t.t === 'kw' && t.v === 'if')
+    return fail(
+      t,
+      'P02',
+      'Tape has no `if`: a condition match branches',
+      'Write `match {`, then an arm a line for each condition (`n > 1 -> 1`), the last `else -> 2`, then `}`.',
+    );
   return fail(
     t,
     'P02',
@@ -276,8 +283,15 @@ function namedPattern(c: Cursor, t: Token & { t: 'id' }, inLet: boolean): Patter
   c.expect('op', ')', 'A function pattern takes one pattern: `decimal(n)`.');
   return { k: 'fn', name: t.v, sub, ...at };
 }
-// one field of a constructor pattern: `field: pattern`, or a bare name, which binds the field under its own name
-function fieldPattern(c: Cursor): { field: string; pat: Pattern; pun?: true } {
+// one field of a constructor pattern: `field: pattern`, or a bare name, which binds the field under its own name, or
+// a pattern alone (`Some("")`), which the build gives the field of a constructor with one
+function fieldPattern(c: Cursor): { field: string; pat: Pattern; pun?: true; positional?: true } {
+  const t = c.peek(),
+    after = c.peek(1);
+  const named = (t.t === 'id' || t.t === 'kw') && after.t === 'op' && after.v === ':';
+  const pun = t.t === 'id' && after.t === 'op' && (after.v === ',' || after.v === ')');
+  if (!named && !pun && !(t.t === 'kw' && after.t === 'op' && (after.v === ',' || after.v === ')')))
+    return { field: '', pat: pattern(c), positional: true };
   const f = c.fieldName();
   if (c.eat('op', ':')) return { field: f.v, pat: pattern(c) };
   if (f.t === 'kw')
@@ -319,7 +333,7 @@ function arms<A>(c: Cursor, arm: (c: Cursor) => A): A[] {
   const out: A[] = [];
   while (!c.is('op', '}')) {
     out.push(arm(c));
-    c.expect('nl', undefined, 'Put each arm on its own line.');
+    c.expect('nl', undefined, 'Put each arm on its own line, and the `}` that closes the arms on a line of its own.');
     c.skipNl();
   }
   c.next();
@@ -387,6 +401,8 @@ function letElse(c: Cursor, at: { line: number; file: string }, pat: Pattern, va
 // `let name = e`
 function plainLet(c: Cursor): Let {
   const n = c.expect('id');
+  if (c.is('op', ':'))
+    fail(c.peek(), 'P01', 'a `let` names a value without a type', `Write \`let ${n.v} = …\`: its type is the value's.`);
   c.expect('op', '=');
   const value = expr(c);
   c.expect('nl');
@@ -430,6 +446,13 @@ export function block(c: Cursor): Block {
   const t = c.expect('op', '{');
   c.skipNl();
   const { lets, result } = steps(c);
+  if (result.k === 'var' && result.name === 'return' && !c.is('op', '}'))
+    fail(
+      result,
+      'P02',
+      'Tape has no `return`: a block is worth its last expression',
+      'Write the value alone as the last line. To leave early, use a step: `let Some(value) = e else -> answer`.',
+    );
   c.skipNl();
   c.expect('op', '}', 'A block is `let` lines followed by one expression.');
   return { k: 'block', lets, result, ...c.at(t) };
