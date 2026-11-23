@@ -10,31 +10,73 @@ for (let n = 2; PRIMES.length < 64; n++) if (PRIMES.every(p => n % p !== 0)) PRI
 const K: readonly number[] = PRIMES.map(p => frac(Math.cbrt(p)));
 const H0: readonly number[] = PRIMES.slice(0, 8).map(p => frac(Math.sqrt(p)));
 
-export function sha256(bytes: ArrayLike<number>): string {
-  const H = [...H0];
-  const len = bytes.length,
-    m = new Uint8Array(((len + 72) >> 6) << 6),
-    d = new DataView(m.buffer),
-    w = new Int32Array(64),
-    at = (words: ArrayLike<number>, i: number): number => words[i] ?? 0,
-    r = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
-  m.set(bytes);
-  m[len] = 0x80;
-  d.setUint32(m.length - 8, Math.floor(len / 536870912));
-  d.setUint32(m.length - 4, len << 3);
-  for (let o = 0; o < m.length; o += 64) {
-    for (let i = 0; i < 16; i++) w[i] = d.getInt32(o + 4 * i);
+const rot = (x: number, n: number): number => (x >>> n) | (x << (32 - n));
+
+/** SHA-256 a part at a time: update with bytes, clone to go on from here twice, hex for the digest. */
+export class Sha256 {
+  #h = Int32Array.from(H0);
+  #block = new Uint8Array(64);
+  #view = new DataView(this.#block.buffer);
+  #filled = 0;
+  #length = 0;
+  static #w = new Int32Array(64);
+
+  update(bytes: ArrayLike<number>): this {
+    this.#length += bytes.length;
+    for (let i = 0; i < bytes.length;) {
+      const n = Math.min(64 - this.#filled, bytes.length - i);
+      if (bytes instanceof Uint8Array) this.#block.set(bytes.subarray(i, i + n), this.#filled);
+      else for (let k = 0; k < n; k++) this.#block[this.#filled + k] = bytes[i + k] ?? 0;
+      this.#filled += n;
+      i += n;
+      if (this.#filled === 64) {
+        this.#compress();
+        this.#filled = 0;
+      }
+    }
+    return this;
+  }
+
+  clone(): Sha256 {
+    const c = new Sha256();
+    c.#h.set(this.#h);
+    c.#block.set(this.#block);
+    c.#filled = this.#filled;
+    c.#length = this.#length;
+    return c;
+  }
+
+  /** The digest, as hex; this hasher is spent after it. */
+  hex(): string {
+    const len = this.#length;
+    this.update([0x80]);
+    while (this.#filled !== 56) this.update([0]);
+    this.#view.setUint32(56, Math.floor(len / 536870912));
+    this.#view.setUint32(60, len << 3);
+    this.#compress();
+    return [...this.#h].map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+
+  #compress(): void {
+    const w = Sha256.#w,
+      d = this.#view,
+      H = this.#h,
+      at = (words: ArrayLike<number>, i: number): number => words[i] ?? 0;
+    for (let i = 0; i < 16; i++) w[i] = d.getInt32(4 * i);
     for (let i = 16; i < 64; i++) {
       const s0 = at(w, i - 15),
         s1 = at(w, i - 2);
       w[i] =
-        (at(w, i - 16) + (r(s0, 7) ^ r(s0, 18) ^ (s0 >>> 3)) + at(w, i - 7) + (r(s1, 17) ^ r(s1, 19) ^ (s1 >>> 10))) |
+        (at(w, i - 16) +
+          (rot(s0, 7) ^ rot(s0, 18) ^ (s0 >>> 3)) +
+          at(w, i - 7) +
+          (rot(s1, 17) ^ rot(s1, 19) ^ (s1 >>> 10))) |
         0;
     }
     let [a = 0, b = 0, c = 0, e4 = 0, e = 0, f = 0, g = 0, h = 0] = H;
     for (let i = 0; i < 64; i++) {
-      const t1 = (h + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + at(K, i) + at(w, i)) | 0,
-        t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
+      const t1 = (h + (rot(e, 6) ^ rot(e, 11) ^ rot(e, 25)) + ((e & f) ^ (~e & g)) + at(K, i) + at(w, i)) | 0,
+        t2 = ((rot(a, 2) ^ rot(a, 13) ^ rot(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;
       h = g;
       g = f;
       f = e;
@@ -44,9 +86,15 @@ export function sha256(bytes: ArrayLike<number>): string {
       b = a;
       a = (t1 + t2) | 0;
     }
-    [a, b, c, e4, e, f, g, h].forEach((x, i) => {
-      H[i] = (at(H, i) + x) | 0;
-    });
+    H[0] = (at(H, 0) + a) | 0;
+    H[1] = (at(H, 1) + b) | 0;
+    H[2] = (at(H, 2) + c) | 0;
+    H[3] = (at(H, 3) + e4) | 0;
+    H[4] = (at(H, 4) + e) | 0;
+    H[5] = (at(H, 5) + f) | 0;
+    H[6] = (at(H, 6) + g) | 0;
+    H[7] = (at(H, 7) + h) | 0;
   }
-  return H.map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
 }
+
+export const sha256 = (bytes: ArrayLike<number>): string => new Sha256().update(bytes).hex();

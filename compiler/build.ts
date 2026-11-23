@@ -4,7 +4,7 @@
 import { emptyProgram } from './ast.ts';
 import type { FnDecl, Program } from './ast.ts';
 import { ambient, granted } from './ambient.ts';
-import { CompileError, fail, utf8 } from './common.ts';
+import { CompileError, fail } from './common.ts';
 import type { Problem } from './common.ts';
 import { functionCompiler } from './function.ts';
 import { assemble } from './gen/assemble.ts';
@@ -23,7 +23,7 @@ import { parse } from './parse.ts';
 import { resolvePipes } from './pipes.ts';
 import { fuseRanges } from './fuse.ts';
 import { rowColumns } from './rows.ts';
-import { sha256 } from './sha256.ts';
+import { Sha256, sha256 } from './sha256.ts';
 import { shadow } from './shadow.ts';
 import { bindFieldNames } from './fieldbind.ts';
 import { chainOf } from './sqltext.ts';
@@ -35,6 +35,31 @@ import { rules } from '../rules/driver.ts';
 import { stateFields } from '../rules/model.ts';
 
 export type Source = { readonly name: string; readonly text: string };
+
+const UTF8 = new TextEncoder();
+/** The hasher after `[[` and the standard library's entries, kept while the same std files lead the sources. */
+let stdPrefix: { files: readonly Source[]; h: Sha256 } | null = null;
+/**
+ * The build's name: the first 16 hex characters of the SHA-256 of JSON.stringify([sources.map(x => [x.name,
+ * x.text]), pin]). The standard library's files lead every compile's sources (82 KB); the hash of their part is
+ * kept while they are the same objects, so a compile hashes its own files and the pin only. Hashing all of it,
+ * from a copy of every byte as a number in an array, was 7% of what a hosted compile allocated (heap profiles of
+ * tape ff30a865, 2026-11-23). test/sha256.ts checks it against the formula.
+ */
+export function buildName(sources: readonly Source[], pin: unknown): string {
+  let k = 0;
+  while (k < sources.length && (sources[k]?.name.startsWith('std/') ?? false)) k++;
+  const std = sources.slice(0, k);
+  const entry = (x: Source): string => JSON.stringify([x.name, x.text]);
+  let kept = stdPrefix;
+  if (kept === null || kept.files.length !== k || std.some((x, i) => x !== kept?.files[i])) {
+    kept = { files: std, h: new Sha256().update(UTF8.encode(`[[${std.map(entry).join(',')}`)) };
+    stdPrefix = kept;
+  }
+  const rest = sources.slice(k).map(entry).join(',');
+  const tail = `${k > 0 && k < sources.length ? ',' : ''}${rest}],${JSON.stringify([pin]).slice(1, -1)}]`;
+  return kept.h.clone().update(UTF8.encode(tail)).hex().slice(0, 16);
+}
 type HostParam = { name: string; type: string };
 /** What a build gives: the module, and what the host and the tools read beside it. */
 export type Built = {
@@ -134,7 +159,10 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
   const find = (n: string, file: string, at?: Place): FnDecl | null => mod.find(prog, n, file, at);
   const ownedParams = ownedParameters(fns, find, opts.reuse);
   const fingerprint = (method: string, send: Type, reply: Type, at: Place): string =>
-    sha256(utf8(JSON.stringify([method, layout.describe(L, send, at), layout.describe(L, reply, at)]))).slice(0, 16);
+    sha256(UTF8.encode(JSON.stringify([method, layout.describe(L, send, at), layout.describe(L, reply, at)]))).slice(
+      0,
+      16,
+    );
   for (const n of Object.keys(opts.pin))
     if (!prog.flags.some(x => x.name === n))
       fail(
@@ -279,7 +307,7 @@ function describeModule(
     schemas,
     // The build's name: a hash of the sources and the pinned flags. A traced build of the same sources has the
     // same name, so its replays are accepted; any other change to the program gives another.
-    build: sha256(utf8(JSON.stringify([sources.map(x => [x.name, x.text]), opts.pin]))).slice(0, 16),
+    build: buildName(sources, opts.pin),
     migrations: chainOf(prog.migrations),
     // the machines as the host installs them: `start` is where a row starts, `moves` the pairs [from, to] allowed
     machines: prog.machines.map(m => ({
