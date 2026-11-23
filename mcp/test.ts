@@ -458,6 +458,11 @@ const tests: Test[] = [
           'form_field(body: q, name: "limit")',
           'decode(json: body, as: NewItem)',
           ':name',
+          // numbers, stated: an agent assumed floats and guessed (LANGUAGE.md section 2; the traps' own words)
+          'Int is a 64-bit signed integer',
+          '"trap 6: integer overflow"',
+          '"trap 4: division by zero"',
+          'no floats yet',
         ])
           if (!d.includes(said)) out.push(`${String(t?.['name'])}: its description does not say ${said}`);
         const sheet = d.slice(d.indexOf('Tape in brief'), d.indexOf('examples/hello.tape, the program'));
