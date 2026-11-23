@@ -6,7 +6,7 @@ import { stdName } from '../shadow.ts';
 import { BUF, FLOAT, INT, INTRINSICS, REMOTE, T, VIEW, key, scaleOf } from '../types.ts';
 import { written } from './text.ts';
 import type { Type } from '../types.ts';
-import { buildVariant, close, fresh, get, inLocals, need, open, set, trapIf } from './fn.ts';
+import { buildVariant, close, fresh, get, inLocals, mathIndex, need, open, set, trapIf } from './fn.ts';
 import type { Ctx } from './fn.ts';
 import { emitCallOut } from './callout.ts';
 import { decodeRow, emitDecode } from './decode.ts';
@@ -486,7 +486,8 @@ function scanPlain(u: Use): Type {
 /**
  * parse_float(text): Some of the Float nearest the decimal number `text` (ECMA-262's StringToNumber, the host's
  * env.float_of: correctly rounded, the same everywhere), or None when that is not finite (1e400) or `text` is not a
- * number.
+ * number. A plain decimal of at most 2^53 in its digits and 22 after the point is read in the module, exactly as
+ * the host would; the rest is the host's.
  */
 function parseFloat(u: Use): Type {
   const { c } = u;
@@ -495,8 +496,11 @@ function parseFloat(u: Use): Type {
   const opt = T('Option', FLOAT);
   const adt = c.B.adtOf(opt, u.e);
   const which = (name: string): number => adt.variants.findIndex(v => v.name === name);
-  // the host's Float, then whether it is finite: x - x is 0 (NaN for NaN and the infinities)
-  const read = [...get(p), ...get(n), 0x10, ...uleb(c.B.FLOAT_OF_IMPORT), ...set(x)];
+  // the module's own reading of a plain decimal (compiler/math/decimal.ts), NaN when it is not one; then the host's
+  const fast = [...get(p), ...get(n), 0x10, ...uleb(mathIndex(c.B, 'parse_decimal')), 0x22, ...uleb(x)];
+  const host = [...get(p), ...get(n), 0x10, ...uleb(c.B.FLOAT_OF_IMPORT), ...set(x)];
+  const read = [...fast, ...get(x), 0x62, 0x04, 0x40, ...host, 0x0b];
+  // then whether it is finite: x - x is 0 (NaN for NaN and the infinities)
   c.code.push(...read, ...get(x), ...get(x), 0xa1, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0x61);
   open(c, 0x04, adt.slots);
   buildVariant(c, adt, which('Some'), [x]);
