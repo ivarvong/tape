@@ -219,7 +219,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`join`](#fn-join)
-- [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
+- [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 
 ## Built-ins
@@ -1725,13 +1725,30 @@ fn before(a: View, b: View) -> Bool
 
 Does a sort before b, byte by byte?
 
+### fn compare
+
+```tape
+fn compare(a: View, b: View) -> Int
+```
+
+Where a sorts against b, byte by byte: -1 before it, 0 the same text, 1 after it. A text sorts before every longer text it starts.
+
+```
+> compare(a: "desk", b: "lamp")
+-1
+> compare(a: "lamp", b: "lam")
+1
+> compare(a: "rug", b: "rug")
+0
+```
+
 ### fn get
 
 ```tape
 fn get[V](map: Map[V], key: View) -> Option[V]
 ```
 
-The value under `key`, if there is one.
+The value under `key`, if there is one. One comparison of the keys at each node.
 
 ```
 > Empty |> put(key: "lamp", value: 3) |> put(key: "desk", value: 1) |> get(key: "lamp")
@@ -1746,7 +1763,7 @@ None
 fn put[V](map: Map[V], key: View, value: V) -> Map[V]
 ```
 
-A map with `key` set to `value`; the old map is unchanged. Setting a key again replaces its value.
+A map with `key` set to `value`; the old map is unchanged. Setting a key again replaces its value. One comparison of the keys at each node.
 
 ```
 > Empty |> put(key: "a", value: 1) |> put(key: "a", value: 2) |> get(key: "a")
@@ -1768,7 +1785,7 @@ How many keys.
 
 Helpers (called by the functions above; callable, but not meant to be):
 
-- `fn before_from(a: View, b: View, at: Int) -> Bool`: the loop of before.
+- `fn compare_from(a: View, b: View, at: Int) -> Int`: the loop of compare.
 - `fn height[V](map: Map[V]) -> Int`: a tree's height.
 - `fn node[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V]`: a node with its height computed.
 - `fn balance[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V]`: a node, rotated when one side is more than one taller.

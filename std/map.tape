@@ -10,21 +10,35 @@ type Map[V] {
 
 // Does a sort before b, byte by byte?
 fn before(a: View, b: View) -> Bool {
-  before_from(a, b, at: 0)
+  compare(a, b) < 0
 }
 
-// Internal: the loop of before.
-fn before_from(a: View, b: View, at: Int) -> Bool {
+// Where a sorts against b, byte by byte: -1 before it, 0 the same text, 1 after it. A text sorts before every
+// longer text it starts.
+//
+//   > compare(a: "desk", b: "lamp")
+//   -1
+//   > compare(a: "lamp", b: "lam")
+//   1
+//   > compare(a: "rug", b: "rug")
+//   0
+fn compare(a: View, b: View) -> Int {
+  compare_from(a, b, at: 0)
+}
+
+// Internal: the loop of compare.
+fn compare_from(a: View, b: View, at: Int) -> Int {
   match {
-    at >= len(b) -> False
-    at >= len(a) -> True
-    a[at] < b[at] -> True
-    a[at] > b[at] -> False
-    else -> before_from(a, b, at: at + 1)
+    at >= len(b) and at >= len(a) -> 0
+    at >= len(b) -> 1
+    at >= len(a) -> -1
+    a[at] < b[at] -> -1
+    a[at] > b[at] -> 1
+    else -> compare_from(a, b, at: at + 1)
   }
 }
 
-// The value under `key`, if there is one.
+// The value under `key`, if there is one. One comparison of the keys at each node.
 //
 //   > Empty |> put(key: "lamp", value: 3) |> put(key: "desk", value: 1) |> get(key: "lamp")
 //   Some(value: 3)
@@ -33,32 +47,33 @@ fn before_from(a: View, b: View, at: Int) -> Bool {
 fn get[V](map: Map[V], key: View) -> Option[V] {
   match map {
     Empty -> None
-    Node(left, key: k) if before(a: key, b: k) -> get(map: left, key)
-    Node(key: k, right) if before(a: k, b: key) -> get(map: right, key)
-    Node(value) -> Some(value)
+    Node(left, key: k, value, right) -> {
+      let order = compare(a: key, b: k)
+      match {
+        order < 0 -> get(map: left, key)
+        order > 0 -> get(map: right, key)
+        else -> Some(value)
+      }
+    }
   }
 }
 
-// A map with `key` set to `value`; the old map is unchanged. Setting a key again replaces its value.
+// A map with `key` set to `value`; the old map is unchanged. Setting a key again replaces its value. One
+// comparison of the keys at each node.
 //
 //   > Empty |> put(key: "a", value: 1) |> put(key: "a", value: 2) |> get(key: "a")
 //   Some(value: 2)
 fn put[V](map: Map[V], key: View, value: V) -> Map[V] {
   match map {
     Empty -> Node(left: Empty, key, value, right: Empty, height: 1)
-    Node(left, key: k, value: v, right) if before(a: key, b: k) -> balance(
-      left: put(map: left, key, value),
-      key: k,
-      value: v,
-      right
-    )
-    Node(left, key: k, value: v, right) if before(a: k, b: key) -> balance(
-      left,
-      key: k,
-      value: v,
-      right: put(map: right, key, value)
-    )
-    Node(left, key: k, right, height) -> Node(left, key: k, value, right, height)
+    Node(left, key: k, value: v, right, height) -> {
+      let order = compare(a: key, b: k)
+      match {
+        order < 0 -> balance(left: put(map: left, key, value), key: k, value: v, right)
+        order > 0 -> balance(left, key: k, value: v, right: put(map: right, key, value))
+        else -> Node(left, key: k, value, right, height)
+      }
+    }
   }
 }
 
