@@ -1,7 +1,19 @@
 // tape test: the examples in comments (doctest.ts), file by file. With no files: std and examples.
 import { readFileSync, readdirSync } from 'node:fs';
-import { doctests } from '../doctest.ts';
+import { finish, prepare } from '../doctest.ts';
+import type { Result } from '../doctest.ts';
+import { callExamples } from '../host/examples.ts';
+import type { Source } from '../interp.ts';
 import { std } from '../std.ts';
+
+/** sources: every file of the program (std first); file: the one whose examples run. One result per example. */
+export function doctests(sources: readonly Source[], file: string): Result[] {
+  const p = prepare(sources, file);
+  return finish(
+    p,
+    p.batches.map(b => callExamples(new WebAssembly.Module(b.wasm), b.fns)),
+  );
+}
 
 export function testFiles(args: string[]): never {
   const files =

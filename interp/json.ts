@@ -8,7 +8,7 @@ export class Unsupported extends Error {}
 export type Cell = number | string | null;
 
 const enc = new TextEncoder(),
-  strict = new TextDecoder('utf-8', { fatal: true });
+  strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 type Kind = 't' | 'i' | 'b';
 const KIND: Readonly<Record<Kind, string>> = { t: 'text', b: 'true or false', i: 'a whole number' };
 

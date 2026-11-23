@@ -16,6 +16,7 @@ import { std } from '../std.ts';
 import { INTRINSICS } from '../compiler/types.ts';
 import { Workbench } from '../apps/playground/src/workbench.ts';
 import { nodeSql } from '../apps/playground/src/sqlite.ts';
+import { callExamples } from '../host/examples.ts';
 import type * as RunnerM from './src/runner.ts';
 import type * as ToolsM from './src/tools.ts';
 import type * as ServeM from './src/serve.ts';
@@ -95,6 +96,7 @@ const depsOf = (m: Mods, over: Partial<Deps> = {}): Deps => ({
       program.traced ? new WebAssembly.Module(program.traced) : null,
     );
   },
+  examples: (wasm, fns) => Promise.resolve(callExamples(new WebAssembly.Module(wasm), fns)),
   ...over,
 });
 type Answer = { status: number; headers: Headers; body: unknown; text: string; logs: Fields[] };
@@ -512,9 +514,9 @@ const tests: Test[] = [
     run: async m => {
       const out: string[] = [];
       const tools = L(F(F((await rpc(m, 'tools/list', {})).body)['result'])['tools']).map(F);
-      if (JSON.stringify(tools.map(t => t['name'])) !== '["compile","run","feedback"]')
+      if (JSON.stringify(tools.map(t => t['name'])) !== '["compile","run","test","feedback"]')
         out.push(`tools: ${tools.map(t => String(t['name'])).join(', ')}`);
-      const fb = tools[2];
+      const fb = tools.find(t => t['name'] === 'feedback');
       const fd = String(fb?.['description']);
       for (const said of ['surprising', 'minimal program', 'stored', 'read by the maintainers', 'secrets', 'TERMS.md'])
         if (!fd.includes(said)) out.push(`feedback: its description does not say ${said}`);
@@ -612,10 +614,13 @@ const tests: Test[] = [
           ? m.tools.compileTool(args, deps).result
           : name === 'run'
             ? (await m.tools.runTool(args, deps)).result
-            : (await m.feedback.feedbackTool(args, deps, meta, store)).result;
+            : name === 'test'
+              ? (await m.tools.testTool(args, deps)).result
+              : (await m.feedback.feedbackTool(args, deps, meta, store)).result;
       // each tool's arguments with every field set, and each word of each enum used
       const samples: Record<string, Fields[]> = {
         compile: [{ files }],
+        test: [{ files }],
         run: [
           { files, requests, trace: 'lines', effects: 'compact' },
           { requests, trace: 'full', effects: 'full' },
@@ -660,6 +665,58 @@ const tests: Test[] = [
             out.push(`${name}: the tool takes ${JSON.stringify(a).slice(0, 120)}`);
         }
       }
+      return out;
+    },
+  },
+  {
+    name: 'test',
+    // the examples of testdata/doctest-failures.tape: what each gives is stated by hand in test/forms.ts (section 3),
+    // not taken from doctest.ts (report 1fdd40f44552: a way to run a program's examples through the MCP)
+    run: async m => {
+      const out: string[] = [];
+      const text = readFileSync(`${ROOT}testdata/doctest-failures.tape`, 'utf8');
+      const files = [{ name: 'doctest-failures.tape', text }];
+      const want = [
+        [5, true, null, null],
+        [7, false, '4', null],
+        [9, false, 'Order(id: 6, state: "done")', null],
+        [11, false, null, 'C14 argument n should be Int but is View'],
+        [13, false, null, 'trapped (division by zero)'],
+        [15, false, null, 'an example needs what it should give on the next comment line'],
+      ];
+      const seen = (r: Fields): string =>
+        JSON.stringify(
+          L(r['examples'])
+            .map(F)
+            .map(e => [e['line'], e['ok'], e['got'] ?? null, e['error'] ?? null]),
+        );
+      const { out: r, isError } = await tool(m, 'test', { files });
+      if (isError || r['ok'] !== false || seen(r) !== JSON.stringify(want))
+        out.push(`doctest-failures: ${JSON.stringify(r).slice(0, 400)}`);
+      if (r['passed'] !== 1 || r['failed'] !== 5)
+        out.push(`passed ${String(r['passed'])}, failed ${String(r['failed'])}`);
+      const second = L(r['examples']).map(F)[1];
+      if (
+        second?.['file'] !== 'doctest-failures.tape' ||
+        second['example'] !== 'double(n: 2)' ||
+        second['expected'] !== '5'
+      )
+        out.push(`line 7: ${JSON.stringify(second)}`);
+      // the same as plain JSON
+      const http = await post(m, '/v1/test', JSON.stringify({ files }));
+      if (http.status !== 200 || seen(F(http.body)) !== JSON.stringify(want))
+        out.push(`/v1/test: ${http.status} ${http.text.slice(0, 200)}`);
+      // every example holds: ok
+      const good = `// Add one.\n//\n//   > next(n: 41)\n//   42\nfn next(n: Int) -> Int {\n  n + 1\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+      const g = await tool(m, 'test', { files: [{ name: 'next.tape', text: good }] });
+      if (g.out['ok'] !== true || seen(g.out) !== '[[3,true,null,null]]')
+        out.push(`next.tape: ${JSON.stringify(g.out)}`);
+      // a program that does not compile: its diagnostics, as compile gives them, and no examples run
+      const bad = await tool(m, 'test', {
+        files: [{ name: 'bad.tape', text: good.replace('respond(status: 200)', 'respond(status: "200")') }],
+      });
+      if (bad.out['ok'] !== false || L(bad.out['diagnostics']).length === 0 || L(bad.out['examples']).length > 0)
+        out.push(`bad.tape: ${JSON.stringify(bad.out).slice(0, 300)}`);
       return out;
     },
   },
@@ -1463,6 +1520,27 @@ const PLANTS: Plant[] = [
     file: 'feedback.ts',
     from: "requests: { ...REQUESTS_SCHEMA, description: 'The requests that show it, as run takes them.' },",
     to: "requests: { type: 'array', items: { type: 'string' } },",
+  },
+  {
+    test: 'test',
+    what: "a failing example's value is left out",
+    file: 'tools.ts',
+    from: '...(r.ok ? {} : r.error === null ? { got: r.got } : { error: r.error }),',
+    to: '...(r.ok || r.error === null ? {} : { error: r.error }),',
+  },
+  {
+    test: 'test',
+    what: 'the test tool is ok when only some examples hold',
+    file: 'tools.ts',
+    from: 'ok: passed === examples.length,',
+    to: 'ok: passed > 0,',
+  },
+  {
+    test: 'test',
+    what: '/v1/test is not routed',
+    file: 'serve.ts',
+    from: "  '/v1/test': 'test',\n",
+    to: '',
   },
   {
     test: 'schema',

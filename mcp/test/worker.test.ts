@@ -8,6 +8,7 @@ import worker from '../src/index.ts';
 import hello from '../../examples/hello.tape?raw';
 import limits from './limits.tape?raw';
 import clock from './clock.tape?raw';
+import failures from '../../testdata/doctest-failures.tape?raw';
 
 type Fields = Record<string, unknown>;
 const isFields = (v: unknown): v is Fields => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -60,7 +61,7 @@ describe('tape-mcp in workerd', () => {
     await expect(WebAssembly.compile(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]))).rejects.toThrow();
   });
 
-  it('answers the MCP handshake and lists two tools', async () => {
+  it('answers the MCP handshake and lists its four tools', async () => {
     const init = await rpc('initialize', {
       protocolVersion: '2025-06-18',
       capabilities: {},
@@ -72,8 +73,26 @@ describe('tape-mcp in workerd', () => {
       capabilities: { tools: {} },
     });
     const tools = L((await rpc('tools/list'))['tools']).map(F);
-    expect(tools.map(t => t['name'])).toEqual(['compile', 'run', 'feedback']);
+    expect(tools.map(t => t['name'])).toEqual(['compile', 'run', 'test', 'feedback']);
     expect(String(tools[1]?.['description'])).toContain('Hello again, ada #2!');
+  });
+
+  it('runs the doc examples in a Dynamic Worker, each as test/forms.ts says it comes out', async () => {
+    const { out, isError } = await call('test', { files: [{ name: 'doctest-failures.tape', text: failures }] });
+    expect(isError).toBe(false);
+    expect(
+      L(out['examples'])
+        .map(F)
+        .map(e => [e['line'], e['ok'], e['got'] ?? null, e['error'] ?? null]),
+    ).toEqual([
+      [5, true, null, null],
+      [7, false, '4', null],
+      [9, false, 'Order(id: 6, state: "done")', null],
+      [11, false, null, 'C14 argument n should be Int but is View'],
+      [13, false, null, 'trapped (division by zero)'],
+      [15, false, null, 'an example needs what it should give on the next comment line'],
+    ]);
+    expect([out['ok'], out['passed'], out['failed']]).toEqual([false, 1, 5]);
   });
 
   it('compiles hello.tape, and refuses it without repeat: True with C54 and its fix', async () => {

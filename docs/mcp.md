@@ -1,14 +1,15 @@
 # The hosted compiler and runner (MCP and HTTP)
 
 **Live** at https://tape.ivar.workers.dev/mcp (MCP) and https://tape.ivar.workers.dev/v1/compile,
-https://tape.ivar.workers.dev/v1/run (JSON), served by the `tape` Worker.
+https://tape.ivar.workers.dev/v1/run, https://tape.ivar.workers.dev/v1/test (JSON), served by the `tape` Worker.
 You can also run it yourself ([below](#running-it-yourself)).
 
 `tape-mcp` compiles a Tape program you post and runs HTTP requests against it, and gives back what the compiler said,
 each response, its effect log, whether a replay from that log matched, and its trace (a summary, or OTLP/JSON). It
 is meant for AI agents that want to try Tape and check it for themselves, over MCP, and for anything that can POST
-JSON. Compile and run keep nothing: every call compiles from scratch and runs on a fresh in-memory SQLite database that is gone when
-the call returns. The third tool, [`feedback`](#feedback), stores the report you send for the maintainers.
+JSON. Compile, run and test keep nothing: every call compiles from scratch and runs on a fresh in-memory SQLite database that is gone when
+the call returns; send the files every time. [`test`](#test) runs the examples in the program's comments. The fourth
+tool, [`feedback`](#feedback), stores the report you send for the maintainers.
 
 Alpha: anything can change at any time. **Calls are logged** ([what is logged](#what-is-logged)); the rules for the
 public service are in [`TERMS.md`](../TERMS.md).
@@ -61,13 +62,13 @@ curl -s https://tape.ivar.workers.dev/v1/compile -H 'content-type: application/j
 
 ## The tools
 
-`compile` and `run` are below; [`feedback`](#feedback) sends what you found to the maintainers.
+`compile`, `run` and `test` are below; [`feedback`](#feedback) sends what you found to the maintainers.
 The descriptions of `compile` and `run` carry a cheat sheet of the language (the entry point, `Request`'s fields and
 the query, `respond_as` and JSON out, `decode`, the SQL calls with `:name`) and link [the std reference](std.md)
 and [the guide's worked REST service](guide.md#a-whole-rest-service-worked); each is about 1,100 (compile) and 1,300
 (run) tokens.
 
-Both take `files`, the program: at most 8 `{name, text}`, each name like `hello.tape` (letters, digits, `_`, `-`,
+All three take `files`, the program: at most 8 `{name, text}`, each name like `hello.tape` (letters, digits, `_`, `-`,
 then `.tape`). The files are one program, as [`LANGUAGE.md`](../LANGUAGE.md) describes, with the standard library
 before them. Leave `files` out and the program is [`examples/hello.tape`](../examples/hello.tape). An argument
 the tool does not take is refused, so a misspelt one is not silently ignored.
@@ -161,6 +162,31 @@ make `ok` false. To see a timer that is due after the last request, send one mor
 answer then has `"timers": {"fired": 1, "pending": 0}`: how many ran, and how many are still set at the end. On the
 real clock (no `at_ms`), timers are set but never run here.
 
+### test
+
+Runs the doc examples in the program's comments, as `node tape.ts test` does ([`doctest.ts`](../doctest.ts)): a
+comment line `//   > expression` is an example, and the next comment line is what it should give, as a pattern (a
+literal, a constructor, `_` for a part that does not matter, `"prefix" ++ _`). Each example is compiled with its
+file and called in the compiled code, in the Dynamic Worker that runs programs; an example that needs a capability
+(`Sql`, `Clock`, …) cannot be called. Also `POST /v1/test` with the same JSON. For
+[`testdata/doctest-failures.tape`](../testdata/doctest-failures.tape):
+
+```json
+{ "ok": false, "diagnostics": [],
+  "examples": [
+    { "file": "doctest-failures.tape", "line": 5, "example": "double(n: 21)", "expected": "42", "ok": true },
+    { "file": "doctest-failures.tape", "line": 7, "example": "double(n: 2)", "expected": "5", "ok": false, "got": "4" },
+    { "file": "doctest-failures.tape", "line": 13, "example": "10 / (double(n: 0))", "expected": "0", "ok": false,
+      "error": "trapped (division by zero)" },
+    …],
+  "passed": 1, "failed": 5 }
+```
+
+`ok` is true when the program compiles and every example holds. `got` is what a failing example gave instead (from
+the reference interpreter); `error` is why one could not hold: a compile error of the example, a trap, or no
+expected line under it. If the program does not compile, `ok` is false, `diagnostics` says why, as compile gives
+it, and no example runs.
+
 ### feedback
 
 Report anything surprising, wrong, confusing or missing about Tape: the language, the compiler and its
@@ -243,8 +269,8 @@ day at most. The rate limit keys on the same hash.
 
 ## How it works
 
-[`mcp/`](../mcp/) is a library the `tape` Worker serves in-process at `/mcp`, `/v1/compile`, `/v1/run` and
-`/v1/feedback` ([`service/src/index.ts`](../service/src/index.ts) calls `mcp/src/index.ts` with its own bindings,
+[`mcp/`](../mcp/) is a library the `tape` Worker serves in-process at `/mcp`, `/v1/compile`, `/v1/run`, `/v1/test`
+and `/v1/feedback` ([`service/src/index.ts`](../service/src/index.ts) calls `mcp/src/index.ts` with its own bindings,
 before any token check). It uses no Durable Objects and one private R2 bucket, `tape-feedback`, which only the feedback
 tool writes. (Until 2026-11-22 it was a Worker of its own, `tape-mcp`, behind a service binding; that Worker is
 retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-version`, the same id as
@@ -252,7 +278,7 @@ retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-v
 
 - `src/serve.ts`: the routes, the checks before a tool runs, the log line. MCP is the service's transport,
   [`service/src/mcp.ts`](../service/src/mcp.ts).
-- `src/tools.ts`: the two tools as functions of their arguments. They compile with the repository's compiler.
+- `src/tools.ts`: compile, run and test as functions of their arguments. They compile with the repository's compiler.
 - A Worker cannot compile Wasm at run time, so a build runs in a Dynamic Worker (the Worker Loader): it is given the
   program's module, sql.js's module, the host ([`host.ts`](../host.ts)) and `src/runner.ts`, with no network and a
   CPU limit, and is cached by the build's hash. The database is [sql.js](https://github.com/sql-js/sql.js) through
@@ -277,6 +303,6 @@ retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-v
 (cd service && npm ci) && (cd mcp && npm ci)
 printf 'IP_SALT=dev-salt\nTOKEN=dev-token\n' > service/.dev.vars   # your own copy's secrets (.dev.vars is not tracked)
 (cd service && npm run site && npx cf dev)   # the tape Worker; then POST to /mcp at the address it prints
-node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 47 bugs, each caught
+node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 50 bugs, each caught
 (cd mcp && npx vitest run)  # mcp/src in workerd, with the real Loader and rate limiter
 ```

@@ -206,9 +206,9 @@ has a `test.ts` whose oracles are not the program under test, and a friction log
 ## The public service
 
 **Live.** A hosted MCP server and API at https://tape.ivar.workers.dev/mcp: post a program, and it is compiled and
-run, and its results and OTLP traces come back. Three tools, `compile`, `run` and `feedback` (tell the maintainers
+run, and its results and OTLP traces come back. Four tools, `compile`, `run`, `test` (the examples in its comments) and `feedback` (tell the maintainers
 what you found; it is stored and read), over MCP (`claude mcp add
---transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`, `POST /v1/feedback`); how to
+--transport http tape https://tape.ivar.workers.dev/mcp`) or as JSON (`POST /v1/compile`, `POST /v1/run`, `POST /v1/test`, `POST /v1/feedback`); how to
 connect, the limits and what is logged are in [`docs/mcp.md`](docs/mcp.md), and the Worker is [`mcp/`](mcp/).
 How it works:
 
@@ -274,7 +274,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | `tape.ts`, `cli/` | The command line: run requests, `fmt`, `test`, `sim`. |
 | `sim.ts`, `sim/` | The simulator behind `tape sim`. |
 | `service/` | Tape as a service on Workers, with its tests, fault harnesses and protocol models. |
-| `mcp/` | the hosted compiler and runner, served by the `tape` Worker at `/mcp`, `/v1/compile`, `/v1/run`, `/v1/feedback`. |
+| `mcp/` | the hosted compiler and runner, served by the `tape` Worker at `/mcp`, `/v1/compile`, `/v1/run`, `/v1/test`, `/v1/feedback`. |
 | `adapters/` | Host-side adapters; `ply.ts` makes a git repository a `Git` capability using [ply](https://github.com/ivarvong/ply). |
 | `examples/`, `apps/` | Example programs, and applications written as a user would, each with its friction log; `apps/playground/` is the homepage and playground. |
 | `test/`, `proof/` | The tests, one file per subject, and the checks that are more than a test; `proof/all.ts` runs everything. |

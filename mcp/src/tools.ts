@@ -1,10 +1,10 @@
-// tools.ts: the two tools, compile and run, as functions of their JSON arguments (the third, feedback, is feedback.ts). The same functions answer MCP's
-// tools/call and POST /v1/compile and /v1/run (serve.ts). They use no Workers API: how a program is run is given
-// (Deps.run: in production a Dynamic Worker, index.ts; in test.ts, runner.ts in Node), so test.ts runs them as
-// they are.
+// tools.ts: three tools, compile, run and test, as functions of their JSON arguments (the fourth, feedback, is
+// feedback.ts). The same functions answer MCP's tools/call and POST /v1/compile, /v1/run and /v1/test (serve.ts).
+// They use no Workers API: how a program is run is given (Deps.run and Deps.examples: in production a Dynamic
+// Worker, index.ts; in test.ts, Node), so test.ts runs them as they are.
 //
-// Two tools on purpose. Others an agent could use (fmt, the simulator, a trace as text, a program's tables) would
-// each be a field of these or a third tool; they wait until someone asks, so the list an agent reads stays short.
+// Few tools on purpose. Others an agent could use (fmt, the simulator, a program's tables) would each be a field of
+// these or a tool of its own; they wait until someone asks (test did: report 1fdd40f44552), so the list stays short.
 import { compile } from '../../compiler.ts';
 import type { Built, Source } from '../../compiler.ts';
 import { isHead } from '../../host.ts';
@@ -14,6 +14,8 @@ import { effectLine, queryNames } from '../../apps/playground/src/lines.ts';
 import { otlp } from '../../service/src/view.ts';
 import type { Otlp } from '../../service/src/view.ts';
 import type { Entry, Joined, JoinedCall, RunHead } from '../../service/src/records.ts';
+import { finish, prepare } from '../../doctest.ts';
+import type { Called } from '../../host/examples.ts';
 import { NAME, TRACE_STEPS, UNREACHABLE } from './runner.ts';
 import type { Ran, RanAll, RunRequest } from './runner.ts';
 
@@ -61,6 +63,8 @@ export type Deps = {
   /** examples/hello.tape, the program used when no files are given */
   hello: Source;
   run: (program: Program, requests: readonly RunRequest[]) => Promise<RanAll>;
+  /** call a doc examples build's functions (doctest.ts), where Wasm can be instantiated: host/examples.ts */
+  examples: (wasm: Uint8Array, fns: readonly string[]) => Promise<Called[]>;
   /** the wall-clock guard on a run call (LIMITS.wallMs; a test shortens it) */
   wallMs?: number;
 };
@@ -199,6 +203,7 @@ export const COMPILE_INPUT = {
   properties: { files: FILES_SCHEMA },
   additionalProperties: false,
 } as const;
+export const TEST_INPUT = COMPILE_INPUT;
 export const RUN_INPUT = {
   type: 'object',
   properties: {
@@ -685,6 +690,87 @@ export async function runTool(
       results,
       ...(all.timers ? { timers: all.timers } : {}),
     },
+    usage,
+  };
+}
+
+// ---- test
+
+/** One doc example (doctest.ts): where it is, what it says, and how it came out. */
+export type ExampleOut = {
+  file: string;
+  line: number;
+  example: string;
+  expected: string | null;
+  ok: boolean;
+  /** what it gave instead, when it gave something else */
+  got?: string;
+  /** why it could not hold: a compile error, a trap, no expected line */
+  error?: string;
+};
+export type TestResult = {
+  ok: boolean;
+  diagnostics: Diagnostic[];
+  examples: ExampleOut[];
+  passed: number;
+  failed: number;
+};
+
+/** test: the doc examples in the program's files, as `tape test` runs them (doctest.ts), each called in deps.examples. */
+export async function testTool(
+  args: unknown,
+  deps: Deps,
+): Promise<{ result: TestResult | Refusal; usage: Usage | null }> {
+  if (!isFields(args)) return { result: refused(400, 'bad_arguments', 'the arguments are a JSON object'), usage: null };
+  const c = compiled(args, deps, fieldsOfSchema(TEST_INPUT));
+  if (isRefusal(c)) return { result: c, usage: null };
+  const usage = usageOf(c);
+  if (!c.built) return { result: { ok: false, diagnostics: c.diagnostics, examples: [], passed: 0, failed: 0 }, usage };
+  const sources = [...deps.std, ...c.files];
+  const t0 = Date.now();
+  const prepared = c.files.map(f => prepare(sources, f.name));
+  usage.compile_ms += Date.now() - t0;
+  const t1 = Date.now();
+  const calls = async (): Promise<Called[][][]> => {
+    const out: Called[][][] = [];
+    // oxlint-disable-next-line no-await-in-loop -- one Dynamic Worker at a time
+    for (const p of prepared) out.push(await Promise.all(p.batches.map(b => deps.examples(b.wasm, b.fns))));
+    return out;
+  };
+  let called: Called[][][] | 'timeout';
+  try {
+    called = await within(calls(), deps.wallMs ?? LIMITS.wallMs);
+  } catch (e) {
+    usage.run_ms = Date.now() - t1;
+    return {
+      result: refused(
+        503,
+        'run_failed',
+        `the examples' run stopped before it finished (${messageOf(e).slice(0, 300)}); its CPU per call is limited to ${LIMITS.cpuMs} ms and its memory to 128 MB`,
+      ),
+      usage,
+    };
+  }
+  usage.run_ms = Date.now() - t1;
+  if (called === 'timeout')
+    return {
+      result: refused(504, 'run_timeout', `the examples took more than ${deps.wallMs ?? LIMITS.wallMs} ms together`),
+      usage,
+    };
+  const done = called;
+  const examples = prepared.flatMap((p, i) =>
+    finish(p, done[i] ?? []).map((r): ExampleOut => ({
+      file: r.file,
+      line: r.line,
+      example: r.expr,
+      expected: r.want,
+      ok: r.ok,
+      ...(r.ok ? {} : r.error === null ? { got: r.got } : { error: r.error }),
+    })),
+  );
+  const passed = examples.filter(e => e.ok).length;
+  return {
+    result: { ok: passed === examples.length, diagnostics: [], examples, passed, failed: examples.length - passed },
     usage,
   };
 }

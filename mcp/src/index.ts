@@ -15,6 +15,7 @@ import runnerSrc from './runner.ts?erased';
 import sqliteSrc from '../../apps/playground/src/sqlite.ts?erased';
 import hostSrc from '../../host.ts?erased';
 import hostCall from '../../host/call.ts?erased';
+import hostExamples from '../../host/examples.ts?erased';
 import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
@@ -24,6 +25,7 @@ import { LIMITS } from './tools.ts';
 import type { Deps, Program } from './tools.ts';
 import type { RanAll, RunRequest } from './runner.ts';
 import type { Runner } from './loaded.ts';
+import type { Called } from '../../host/examples.ts';
 import type { Store } from './feedback.ts';
 
 const MODULES = {
@@ -36,6 +38,7 @@ const MODULES = {
   'sql-wasm.js': `var module;\nvar process;\n${sqlJsText}\nexport default initSqlJs;\n`,
   'host.js': hostSrc,
   'host/call.js': hostCall,
+  'examples.js': hostExamples,
   'host/log.js': hostLog,
   'host/memory.js': hostMemory,
   'host/run.js': hostRun,
@@ -52,29 +55,39 @@ const codeOf = (): Promise<string> =>
     .digest('SHA-256', enc.encode(Object.values(MODULES).join('\0')))
     .then(b => hexOf(b).slice(0, 16)));
 
+/** The Dynamic Worker that runs a build (and, for a line trace, its traced build), by their hash: warm when sent again. */
+async function runnerOf(env: Env, program: Uint8Array, traced: Uint8Array) {
+  const both = new Uint8Array(program.length + traced.length);
+  both.set(program);
+  both.set(traced, program.length);
+  const wasm = hexOf(await crypto.subtle.digest('SHA-256', both)).slice(0, 32);
+  const worker = env.LOADER.get(`tape-mcp/${await codeOf()}/${wasm}`, () => ({
+    compatibilityDate: '2026-11-13',
+    mainModule: 'loaded.js',
+    globalOutbound: null,
+    limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 },
+    modules: {
+      ...MODULES,
+      'sqlite3.wasm': { wasm: sqlite3 },
+      'program.wasm': { wasm: program },
+      'traced.wasm': { wasm: traced },
+    },
+  }));
+  return worker.getEntrypoint<Runner>('Runner', { limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 } });
+}
+
 const runIn =
   (env: Env) =>
   async (program: Program, requests: readonly RunRequest[]): Promise<RanAll> => {
     const traced = program.traced ?? program.wasm;
-    const both = new Uint8Array(program.wasm.length + traced.length);
-    both.set(program.wasm);
-    both.set(traced, program.wasm.length);
-    const wasm = hexOf(await crypto.subtle.digest('SHA-256', both)).slice(0, 32);
-    const worker = env.LOADER.get(`tape-mcp/${await codeOf()}/${wasm}`, () => ({
-      compatibilityDate: '2026-11-13',
-      mainModule: 'loaded.js',
-      globalOutbound: null,
-      limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 },
-      modules: {
-        ...MODULES,
-        'sqlite3.wasm': { wasm: sqlite3 },
-        'program.wasm': { wasm: program.wasm },
-        'traced.wasm': { wasm: traced },
-      },
-    }));
-    const runner = worker.getEntrypoint<Runner>('Runner', { limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 } });
+    const runner = await runnerOf(env, program.wasm, traced);
     return runner.run([...requests], program.traced !== undefined);
   };
+/** A doc examples build (doctest.ts), its functions called in a Dynamic Worker: this Worker cannot compile Wasm. */
+const examplesIn =
+  (env: Env) =>
+  async (wasm: Uint8Array, fns: readonly string[]): Promise<Called[]> =>
+    (await runnerOf(env, wasm, wasm)).examples([...fns]);
 
 /** Feedback reports: one private R2 object each (feedback.ts), behind their own rate limit. */
 const feedbackStore = (bucket: R2Bucket, limiter: RateLimit | null): Store => ({
@@ -87,7 +100,12 @@ const feedbackStore = (bucket: R2Bucket, limiter: RateLimit | null): Store => ({
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     void ctx;
-    const deps: Deps = { std: STD, hello: { name: 'hello.tape', text: helloText }, run: runIn(env) };
+    const deps: Deps = {
+      std: STD,
+      hello: { name: 'hello.tape', text: helloText },
+      run: runIn(env),
+      examples: examplesIn(env),
+    };
     const res = await serve(request, deps, {
       killSwitch: env.KILL_SWITCH,
       salt: env.IP_SALT,

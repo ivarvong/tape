@@ -1,5 +1,5 @@
 // serve.ts: the HTTP face of tape-mcp. POST /mcp is MCP over streamable HTTP (the service's transport,
-// service/src/mcp.ts); POST /v1/compile, POST /v1/run and POST /v1/feedback are the same three tools as plain JSON. Every answer is
+// service/src/mcp.ts); POST /v1/compile, /v1/run, /v1/test and /v1/feedback are the same four tools as plain JSON. Every answer is
 // JSON with nosniff and a sandboxing CSP, and nothing a caller sends is ever served back as a page.
 //
 // Before a call reaches a tool: the kill switch, the Origin check, the method and content type, the body's size,
@@ -11,7 +11,18 @@
 // origin needs a preflight, which gets no CORS headers, so the browser never sends it.
 import { fieldsOf, serveMcp } from '../../service/src/mcp.ts';
 import type { Fields, McpServer } from '../../service/src/mcp.ts';
-import { COMPILE_INPUT, LIMITS, RUN_INPUT, TRACE_LINES, compileTool, isRefusal, refused, runTool } from './tools.ts';
+import {
+  COMPILE_INPUT,
+  LIMITS,
+  RUN_INPUT,
+  TEST_INPUT,
+  TRACE_LINES,
+  compileTool,
+  isRefusal,
+  refused,
+  runTool,
+  testTool,
+} from './tools.ts';
 import type { Deps, Refusal, Usage } from './tools.ts';
 import { FEEDBACK, FEEDBACK_INPUT, feedbackTool } from './feedback.ts';
 import type { CallMeta, Store } from './feedback.ts';
@@ -146,7 +157,8 @@ export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a
   Its error names the field. Refined types validate: \`type Qty = Int where self >= 1 and self <= 100\`. An Option field may be absent.
 - SQL: \`sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)\` gives Option[Item]; \`sql_all\` gives Rows[Item]; \`sql_exec(query: "UPDATE items SET qty = :qty WHERE id = :id", qty, id)\` the rows changed. Each :name takes the argument of that name. Tables: \`migration 1 "items" { CREATE TABLE … }\` (a TEXT PRIMARY KEY needs NOT NULL; an INTEGER PRIMARY KEY does not). A POST that makes a row takes the client's key: UNIQUE, \`ON CONFLICT(key) DO NOTHING RETURNING *\`.
 - Text and numbers: \`decimal(v)\` gives Option[Int] (strict, for ids; \`parse_int(text)\` takes a sign and leading zeros); \`is_digit\`, \`is_alpha\`, \`every_byte(v, keep)\` check bytes; holes \`"\\(n) items"\`; \`a ++ b\`; \`v[i]\` is a byte, \`len(v)\` the length. Steps: \`let P = e else { arms }\`; a match is an expression anywhere: \`let fee = match { … }\`, an argument, an operand.
-- Numbers: Int is a 64-bit signed integer; + - * overflow traps ("trap 6: integer overflow"), so does division by zero ("trap 4: division by zero"); no floats yet (Dec, Float planned): use fixed point, cents.`;
+- Numbers: Int is a 64-bit signed integer; + - * overflow traps ("trap 6: integer overflow"), so does division by zero ("trap 4: division by zero"); no floats yet (Dec, Float planned): use fixed point, cents.
+- Examples: \`//   > decimal(v: "42")\`, next line \`//   Some(42)\`; the test tool runs them.`;
 
 /** The tools' descriptions: what each does, and examples/hello.tape with what it gives, to check in one call. */
 export function listing(deps: Deps): Fields[] {
@@ -182,7 +194,7 @@ ${limits}`,
     {
       name: 'run',
       title: 'Run HTTP requests against a Tape program',
-      description: `Compile a Tape program and send it HTTP requests, in order, on one fresh in-memory SQLite database for this call. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} to send it on the run's own clock: now() is the run's start plus at_ms (a request without one keeps the time before it), and each timer due by then runs first, as a result of its own (woken), so a 60 s window or a retry is tested at once.
+      description: `Compile a Tape program and send it HTTP requests, in order, on one fresh in-memory SQLite database for this call. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} on the run's own clock: now() is its start plus at_ms (none: the time before), and each timer due by then runs first, as a result of its own (woken).
 
 Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects, the effect log (each SQL statement as written, its :name params, rows_written or rows_returned, and rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay from that log alone gave the same bytes; steps; trace: "lines" (default: the line trace, each arm tried, ✓ or ✗, at its file:line with its effects and a trap at its line; at most ${TRACE_LINES} lines), "full" (OTLP/JSON) or "none". If it does not compile: ok false, with diagnostics. random() is seeded alike on every call. Calls to other programs answer Unreachable.
 
@@ -201,6 +213,41 @@ ${limits}`,
           diagnostics: DIAGNOSTICS_SCHEMA,
           results: { type: 'array', items: { type: 'object' } },
           timers: { type: 'object' },
+          ...refusalFields,
+        },
+        required: ['ok'],
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+    },
+    {
+      name: 'test',
+      title: "Run the examples in a Tape program's comments",
+      description: `Run the doc examples in a Tape program's comments, as \`tape test\` does (https://github.com/ivarvong/tape/blob/main/doctest.ts). An example is a comment line \`//   > expression\`, and the next comment line is what it should give, as a pattern: a literal, a constructor, \`_\` for a part that does not matter, \`"prefix" ++ _\`:
+
+\`\`\`tape
+// Greet someone.
+//
+//   > greet(name: "ada")
+//   "Hello, ada"
+//   > greet(name: "bo")
+//   "Hello, " ++ _
+fn greet(name: View) -> View {
+  "Hello, " ++ name
+}
+\`\`\`
+
+Each example is compiled with its file and called on its own, in the compiled code; one that needs a capability (Sql, Clock, …) cannot be called. Returns ok (the program compiles and every example holds), diagnostics as compile gives them when it does not compile, and each example as {file, line, example, expected, ok}, with got (what it gave instead) or error (a compile error, a trap, no expected line); passed and failed count them. With no files, examples/hello.tape (it has none).
+
+${limits}`,
+      inputSchema: TEST_INPUT,
+      outputSchema: {
+        type: 'object',
+        properties: {
+          ok: { type: 'boolean' },
+          diagnostics: DIAGNOSTICS_SCHEMA,
+          examples: { type: 'array', items: { type: 'object' } },
+          passed: { type: 'integer' },
+          failed: { type: 'integer' },
           ...refusalFields,
         },
         required: ['ok'],
@@ -229,12 +276,14 @@ type Tool = (args: unknown, deps: Deps, meta: CallMeta, store: Store | null) => 
 const TOOLS: Readonly<Record<string, Tool>> = {
   compile: compileTool,
   run: runTool,
+  test: testTool,
   feedback: feedbackTool,
 };
 /** The tool each plain-JSON route is. */
 const HTTP_TOOLS: Readonly<Record<string, string>> = {
   '/v1/compile': 'compile',
   '/v1/run': 'run',
+  '/v1/test': 'test',
   '/v1/feedback': 'feedback',
 };
 /** A tool's answer as MCP's CallToolResult: the JSON as text, and as structuredContent; a refusal is an error. */
@@ -354,7 +403,7 @@ async function route(
     return json({
       name: 'tape-mcp',
       version: VERSION,
-      what: 'Compile Tape programs and run requests against them, and report what you find: MCP at POST /mcp, or JSON at POST /v1/compile, POST /v1/run and POST /v1/feedback.',
+      what: 'Compile Tape programs, run requests against them and run their doc examples, and report what you find: MCP at POST /mcp, or JSON at POST /v1/compile, POST /v1/run, POST /v1/test and POST /v1/feedback.',
       docs: 'https://github.com/ivarvong/tape/blob/main/docs/mcp.md',
       terms: 'https://github.com/ivarvong/tape/blob/main/TERMS.md',
       limits: LIMITS,
@@ -362,7 +411,11 @@ async function route(
   }
   if (!known)
     return no(
-      refused(404, 'not_found', `no route ${path}: POST /mcp, POST /v1/compile, POST /v1/run or POST /v1/feedback`),
+      refused(
+        404,
+        'not_found',
+        `no route ${path}: POST /mcp, POST /v1/compile, POST /v1/run, POST /v1/test or POST /v1/feedback`,
+      ),
     );
   // a browser's request (DNS rebinding, a page using its visitors as clients): MCP clients and HTTP tools send none
   if (request.headers.has('origin'))
@@ -431,7 +484,7 @@ function mcpCall(text: string, deps: Deps, seen: Seen, meta: CallMeta, store: St
     name: 'tape',
     version: VERSION,
     instructions:
-      'Tape is a small language for durable services, compiled to WebAssembly; it runs in the browser, in Node and on Cloudflare Workers, and every effect is recorded (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. If anything about Tape surprises you, looks wrong or is missing, report it with feedback, with the smallest program that shows it: the maintainers read every report. Alpha; calls are logged (TERMS.md).',
+      'Tape is a small language for durable services, compiled to WebAssembly; it runs in the browser, in Node and on Cloudflare Workers, and every effect is recorded (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; test runs the examples in its comments (`//   > expression`, then what it should give); run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. If anything about Tape surprises you, looks wrong or is missing, report it with feedback, with the smallest program that shows it: the maintainers read every report. Alpha; calls are logged (TERMS.md).',
     list: () => listing(deps),
     call: async (name, args) => {
       seen.tool = typeof name === 'string' ? name.slice(0, 40) : null;

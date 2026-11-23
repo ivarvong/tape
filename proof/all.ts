@@ -111,9 +111,9 @@ const slow: Part[] = [
     6,
   ],
   [
-    'mcp/test.ts --plants: 47 bugs planted in tape-mcp, each caught by its test',
+    'mcp/test.ts --plants: 50 bugs planted in tape-mcp, each caught by its test',
     [node, 'mcp/test.ts', '--plants'],
-    /^all 47 plants caught$/m,
+    /^all 50 plants caught$/m,
   ],
   ...service,
   mcpSuite,
@@ -228,7 +228,7 @@ const all: Part[] = [
   [
     "mcp/test.ts: tape-mcp's tools and HTTP face, in Node, against README.md and the playground's traces",
     [node, 'mcp/test.ts'],
-    /^all 23 tests pass$/m,
+    /^all 24 tests pass$/m,
   ],
   [
     'apps/trace/test.ts: trace.tape against what the OTLP alone says the picture should show',

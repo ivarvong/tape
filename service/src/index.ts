@@ -29,9 +29,9 @@
 //   POST /mcp/:account              MCP (streamable HTTP, JSON responses): initialize, tools/list, tools/call
 //
 // The hosted compiler and runner, with no token (mcp/src, docs/mcp.md), served in this Worker.
-//   POST /mcp                       MCP: the tools compile and run, over any program posted, and feedback
-//   POST /v1/compile, POST /v1/run  the same two tools as plain JSON
-//   POST /v1/feedback               the third, feedback: a report to the maintainers, stored in the tape-feedback bucket
+//   POST /mcp                       MCP: the tools compile, run and test, over any program posted, and feedback
+//   POST /v1/compile, POST /v1/run, POST /v1/test  the tools compile, run and test (doc examples) as plain JSON
+//   POST /v1/feedback               the fourth, feedback: a report to the maintainers, stored in the tape-feedback bucket
 //
 // One Durable Object per account/name (Name). Each upload is a row in its SQLite: source, the plain and traced
 // Wasm, the trace sites, the hash, its migration chain and the time; the row id is the version. The data is per
@@ -521,7 +521,7 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
 // it was a Worker of its own, tape-mcp, behind a service binding). Its routes need no token, so they are served
 // before the token check, with the request as it came: it keys its rate limit and log on the client's address
 // (cf-connecting-ip) and refuses a request with an Origin. /mcp/:account is not one of them: it is an account's tools.
-const HOSTED: ReadonlySet<string> = new Set(['/mcp', '/v1/compile', '/v1/run', '/v1/feedback']);
+const HOSTED: ReadonlySet<string> = new Set(['/mcp', '/v1/compile', '/v1/run', '/v1/test', '/v1/feedback']);
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

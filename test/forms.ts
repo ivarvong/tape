@@ -7,7 +7,7 @@ import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { parseProgram } from '../compiler.ts';
 import { format } from '../fmt.ts';
-import { doctests } from '../doctest.ts';
+import { doctests } from '../cli/test.ts';
 import { readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { std } from '../std.ts';

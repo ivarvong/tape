@@ -2,13 +2,14 @@
 //   node scripts/mcp-smoke.ts <mcp-url> [--pin <worker>=<version-id>] [--mcp-version <version-id>]
 // <mcp-url> is https://tape.ivar.workers.dev/mcp (served in the tape Worker); /v1/run and /v1/compile are beside it. With --pin every
 // request carries Cloudflare-Workers-Version-Overrides for that Worker. With --mcp-version every answer must name that
-// version (the tape-mcp-version header: the tape Worker's version id). Eight calls of tape-mcp's 60 a minute, one of feedback's 5. Exits 1 if any check fails.
+// version (the tape-mcp-version header: the tape Worker's version id). Nine calls of tape-mcp's 60 a minute, one of feedback's 5. Exits 1 if any check fails.
 //
-// Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run, feedback]; a feedback report
+// Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run, test, feedback]; a feedback report
 // (stored under smoke/: delete with node mcp/scripts/feedback.ts --delete-smoke); run with no files and
 // GET /hello/ada twice: 200 "Hello, ada" then 200 "Hello again, ada #2!", both replayed, with an OTLP trace (MCP,
 // trace: "full") and the default line trace (/v1/run: line 25 taken, then line 26);
-// compile of hello.tape without `repeat: True,` is C54 at line 11; the same run as plain JSON at /v1/run; a request
+// compile of hello.tape without `repeat: True,` is C54 at line 11; the same run as plain JSON at /v1/run; /v1/test of
+// testdata/doctest-failures.tape: 1 of its 6 examples holds, line 7 gives 4 (test/forms.ts says so); a request
 // with an Origin is 403 origin_refused; every answer is JSON, nosniff, no-store and sandboxed.
 import '../../node25.ts';
 import { readFileSync } from 'node:fs';
@@ -101,7 +102,7 @@ check(obj(result['serverInfo'])['name'] === 'tape', `initialize: serverInfo ${JS
 check(str(result['instructions'] ?? '').includes('TERMS.md'), 'initialize: the instructions');
 const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
-check(JSON.stringify(names) === '["compile","run","feedback"]', `tools/list: ${JSON.stringify(names)}`);
+check(JSON.stringify(names) === '["compile","run","test","feedback"]', `tools/list: ${JSON.stringify(names)}`);
 
 // trace: 'full', the OTLP; the default (lines) on /v1/run
 const twice = { requests: ['GET /hello/ada', 'GET /hello/ada'], trace: 'full' };
@@ -149,6 +150,13 @@ check(fb['ok'] === true && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}$/.test(fbId), `fee
 const v1 = await post('/v1/run', { requests: twice.requests });
 check(v1.r.status === 200, `/v1/run: ${v1.r.status}`);
 sees('/v1/run', v1.j, 'lines');
+const examples = readFileSync(new URL('../../testdata/doctest-failures.tape', import.meta.url), 'utf8');
+const t = await post('/v1/test', { files: [{ name: 'doctest-failures.tape', text: examples }] });
+const line7 = arr(t.j['examples']).map(obj)[1];
+check(
+  t.r.status === 200 && t.j['passed'] === 1 && t.j['failed'] === 5 && line7?.['got'] === '4',
+  `/v1/test: ${t.r.status} passed ${str(t.j['passed'])} failed ${str(t.j['failed'])}, line 7 got ${str(line7?.['got'])}`,
+);
 const origin = await post(
   '/mcp',
   { jsonrpc: '2.0', id: ++id, method: 'tools/list' },

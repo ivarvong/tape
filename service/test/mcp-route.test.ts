@@ -39,7 +39,12 @@ describe('the hosted compiler and runner, in this Worker', () => {
       body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
     });
     const tools = fields(fields(await list.json())['result'])['tools'];
-    expect(Array.isArray(tools) ? tools.map(t => fields(t)['name']) : tools).toEqual(['compile', 'run', 'feedback']);
+    expect(Array.isArray(tools) ? tools.map(t => fields(t)['name']) : tools).toEqual([
+      'compile',
+      'run',
+      'test',
+      'feedback',
+    ]);
   });
 
   it('compiles hello.tape at /v1/compile, and runs it at /v1/run in a Dynamic Worker', async () => {
@@ -56,7 +61,7 @@ describe('the hosted compiler and runner, in this Worker', () => {
   });
 
   it('refuses a request with an Origin, even with the operator token, and drains its body', async () => {
-    for (const path of ['/mcp', '/v1/compile', '/v1/run', '/v1/feedback']) {
+    for (const path of ['/mcp', '/v1/compile', '/v1/run', '/v1/test', '/v1/feedback']) {
       const r = await call(path, { method: 'POST', headers: { ...client, origin: 'https://a.example' }, body: '{}' });
       expect([path, r.status, fields(await r.json())['error']]).toEqual([path, 403, 'origin_refused']);
       expect(r.headers.get('content-security-policy')).toBe(API_CSP);

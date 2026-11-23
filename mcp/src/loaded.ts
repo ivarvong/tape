@@ -8,12 +8,18 @@ import program from './program.wasm';
 import traced from './traced.wasm';
 import { runAll, startSqlite } from './runner.ts';
 import type { RanAll, RunRequest } from './runner.ts';
+import { callExamples } from './examples.ts';
+import type { Called } from './examples.ts';
 
 export class Runner extends WorkerEntrypoint {
   /** `trace`: replay each request through traced.wasm (the build with { trace: true }) for its line trace */
   async run(requests: RunRequest[], trace = false): Promise<RanAll> {
     await startSqlite(initSqlJs, sqlite3);
     return runAll(program, requests, trace ? traced : null);
+  }
+  /** program.wasm is a build of doc examples (doctest.ts): call each named one (the test tool) */
+  examples(fns: string[]): Called[] {
+    return callExamples(program, fns);
   }
 }
 export default {
