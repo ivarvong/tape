@@ -108,9 +108,9 @@ const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
 check(JSON.stringify(names) === '["compile","run","test","feedback"]', `tools/list: ${JSON.stringify(names)}`);
 
-// trace: 'full', the OTLP; the default (lines) on /v1/run
+// trace: 'full', the OTLP; on /v1/run: the default for more than one request (none), and trace: 'lines'
 const twice = { requests: ['GET /hello/ada', 'GET /hello/ada'], trace: 'full' };
-const sees = (where: string, ran: J, trace: 'full' | 'lines' = 'full'): string => {
+const sees = (where: string, ran: J, trace: 'full' | 'lines' | 'none' = 'full'): string => {
   const rs = arr(ran['results']).map(obj);
   check(ran['ok'] === true, `${where}: ok ${String(ran['ok'])}`);
   check(rs.length === 2, `${where}: ${rs.length} results`);
@@ -130,6 +130,11 @@ const sees = (where: string, ran: J, trace: 'full' | 'lines' = 'full'): string =
     check(
       rs.every(x => arr(obj(x['trace'])['resourceSpans']).length > 0),
       `${where}: OTLP traces`,
+    );
+  else if (trace === 'none')
+    check(
+      rs.every(x => x['trace'] === null || x['trace'] === undefined),
+      `${where}: no traces ${JSON.stringify(rs.map(x => x['trace'])).slice(0, 200)}`,
     );
   else
     check(
@@ -153,7 +158,10 @@ const fbId = str(fb['id']);
 check(fb['ok'] === true && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}$/.test(fbId), `feedback: ${JSON.stringify(fb)}`);
 const v1 = await post('/v1/run', { requests: twice.requests });
 check(v1.r.status === 200, `/v1/run: ${v1.r.status}`);
-sees('/v1/run', v1.j, 'lines');
+sees('/v1/run', v1.j, 'none');
+const v1l = await post('/v1/run', { requests: twice.requests, trace: 'lines' });
+check(v1l.r.status === 200, `/v1/run trace lines: ${v1l.r.status}`);
+sees('/v1/run trace lines', v1l.j, 'lines');
 const examples = readFileSync(new URL('../../testdata/doctest-failures.tape', import.meta.url), 'utf8');
 const t = await post('/v1/test', { files: [{ name: 'doctest-failures.tape', text: examples }] });
 const line7 = arr(t.j['examples']).map(obj)[1];
