@@ -215,7 +215,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 - [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`parse_dec`](#builtin-parse_dec), [`write_dec`](#builtin-write_dec), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
-- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
+- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`join`](#fn-join)
@@ -922,6 +922,21 @@ True
 False
 ```
 
+### fn char_count
+
+```tape
+fn char_count(v: View) -> Int
+```
+
+How many characters v holds: its code points, each UTF-8 sequence counted once, where `len` counts bytes ("é" is 2 bytes and 1 character). For a limit a spec states in characters: `type Name = View where char_count(v: self) <= 64`. Text that is not valid UTF-8 counts each byte that does not continue a sequence.
+
+```
+> char_count(v: "日本語")
+3
+> char_count(v: "é!")
+2
+```
+
 ### fn isqrt
 
 ```tape
@@ -1055,6 +1070,7 @@ The code point that starts at `at` (a byte of 128 or more), and where the next o
 Helpers (called by the functions above; callable, but not meant to be):
 
 - `fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool`: every_byte from position `at`.
+- `fn chars_from(v: View, at: Int, n: Int) -> Int`: char_count from position `at`, n counted so far.
 - `fn root_between(n: Int, lo: Int, hi: Int) -> Int`: isqrt's search; the root is in lo..hi, and hi * hi never overflows.
 - `fn decimal_value(v: View, at: Int, value: Int) -> Int`: the loop of decimal.
 - `fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the least Int fits.

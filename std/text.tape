@@ -116,6 +116,27 @@ fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool {
   }
 }
 
+// How many characters v holds: its code points, each UTF-8 sequence counted once, where `len` counts bytes ("é" is
+// 2 bytes and 1 character). For a limit a spec states in characters: `type Name = View where char_count(v: self)
+// <= 64`. Text that is not valid UTF-8 counts each byte that does not continue a sequence.
+//
+//   > char_count(v: "日本語")
+//   3
+//   > char_count(v: "é!")
+//   2
+fn char_count(v: View) -> Int {
+  chars_from(v, at: 0, n: 0)
+}
+
+// Internal: char_count from position `at`, n counted so far.
+fn chars_from(v: View, at: Int, n: Int) -> Int {
+  match {
+    at >= len(v) -> n
+    (v[at] & 192) == 128 -> chars_from(v, at: at + 1, n)
+    else -> chars_from(v, at: at + 1, n: n + 1)
+  }
+}
+
 // The square root of `n`, rounded down: the largest r with r * r <= n. None when n is negative. Exact for every
 // Int, up to the largest (whose root is 3037000499). For fixed point, scale first: the root of 2 to 3 places is
 // isqrt(2 * 1000 * 1000), 1414 thousandths.
