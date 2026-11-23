@@ -172,17 +172,8 @@ function atom(c: Cursor, t: Token): Expr {
       'Write `match {`, then an arm a line for each condition (`n > 1 -> 1`), the last `else -> 2`, then `}`.',
     );
   const before = c.toks[c.pos - 2];
-  if (t.t === 'nl' && before?.t === 'op' && before.v === '->')
-    return fail(
-      t,
-      'P02',
-      "an arm's value starts on the line of its arrow",
-      "Write the value after the arrow, on the same line. A long one can open there and go on below: a call's opening parenthesis, or a block's brace and its `let` lines.",
-    );
   if (t.t === 'nl' && before && (before.t === 'op' || before.t === 'kw') && isBinOp(before.v))
     return fail(t, 'P02', `an expression does not go on past the end of a line after \`${before.v}\``, ONE_LINE);
-  if ((t.t === 'op' || t.t === 'kw') && isBinOp(t.v) && before?.t === 'nl')
-    return fail(t, 'P02', `an expression does not go on to a line that starts with \`${t.v}\``, ONE_LINE);
   // a reserved word called as a function (`flag(x)`, before any definition of it is read)
   if (t.t === 'kw' && c.is('op', '('))
     return fail(
@@ -199,20 +190,17 @@ function atom(c: Cursor, t: Token): Expr {
   );
 }
 const ONE_LINE =
-  'An expression with operators stays on one line (only a pipe may start the next). Name its parts with `let` lines first, `let part = a * b`, or put it in parentheses, which may span lines.';
-/** A condition or guard at the end of its line, when the next line starts with an operator that was to go on with it. */
-function continuedBelow(c: Cursor): void {
-  let k = 0;
-  while (c.peek(k).t === 'nl') k++;
-  const t = c.peek(k);
-  if (k > 0 && (t.t === 'op' || t.t === 'kw') && isBinOp(t.v))
-    fail(t, 'P02', `an expression does not go on to a line that starts with \`${t.v}\``, ONE_LINE);
-}
-/** A line that starts with a binary operator, where the expression before it has ended. */
-function leadingOperator(c: Cursor, minus: boolean): void {
+  'Start the next line with the operator instead, as with a pipe: a line that starts with a binary operator carries the expression on. Or name its parts with `let` lines first, `let part = a * b`, or put it in parentheses.';
+/** A line that starts with `-` where a block's value has ended: `-` starts a value, so it does not carry a line on. */
+function leadingMinus(c: Cursor): void {
   const t = c.peek();
-  if ((t.t === 'op' || t.t === 'kw') && isBinOp(t.v) && (minus || t.v !== '-') && c.toks[c.pos - 1]?.t === 'nl')
-    fail(t, 'P02', `an expression does not go on to a line that starts with \`${t.v}\``, ONE_LINE);
+  if (t.t === 'op' && t.v === '-' && c.toks[c.pos - 1]?.t === 'nl')
+    fail(
+      t,
+      'P02',
+      'a line that starts with `-` is a new value, not the rest of the one before',
+      'Every other binary operator at the start of a line carries the expression on; `-` does not, since it also starts a value (`-x`). Keep `a - b` on one line, or put it in parentheses.',
+    );
 }
 // an atom and what follows it: `.field`, `file.name(…)`, `[index]`
 function primary(c: Cursor): Expr {
@@ -409,12 +397,15 @@ function simplePattern(c: Cursor, inLet: boolean): Pattern {
 }
 
 // ---- match
-const armBody = (c: Cursor): Expr => (c.is('op', '{') ? block(c) : expr(c));
+// the value after an arm's or a step's `->`: on its line, or on the next (a line that ends with `->` goes on)
+const armBody = (c: Cursor): Expr => {
+  c.eat('nl');
+  return c.is('op', '{') ? block(c) : expr(c);
+};
 // arms, each on its own line, up to and past the closing brace
 function arms<A>(c: Cursor, arm: (c: Cursor) => A): A[] {
   const out: A[] = [];
   while (!c.is('op', '}')) {
-    leadingOperator(c, false);
     out.push(arm(c));
     c.expect('nl', undefined, 'Put each arm on its own line, and the `}` that closes the arms on a line of its own.');
     c.skipNl();
@@ -433,7 +424,6 @@ function patArm(c: Cursor): PatArm {
   const at = c.at(c.peek()),
     pat = pattern(c),
     guard = c.eat('kw', 'if') ? binary(c, 1) : undefined;
-  if (guard) continuedBelow(c);
   if (!guard && c.is('op', '[')) {
     const i = c.peek(1),
       byte = pat.k === 'str' && i.t === 'int' ? pat.bytes[Number(i.v)] : undefined;
@@ -457,7 +447,6 @@ function condArm(c: Cursor): CondArm {
     );
   const at = c.at(c.peek()),
     cond = c.eat('kw', 'else') ? null : binary(c, 1);
-  if (cond) continuedBelow(c);
   c.expect('op', '->', 'An arm is `condition -> expression`, and the last arm is `else -> expression`.');
   return cond ? { ...at, cond, body: armBody(c) } : { ...at, else: true, body: armBody(c) };
 }
@@ -564,7 +553,7 @@ export function block(c: Cursor): Block {
       'Write the value alone as the last line. To leave early, use a step: `let Some(value) = e else -> answer`.',
     );
   c.skipNl();
-  leadingOperator(c, true);
+  leadingMinus(c);
   c.expect('op', '}', 'A block is `let` lines followed by one expression.');
   return { k: 'block', lets, result, ...c.at(t) };
 }

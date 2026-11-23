@@ -35,8 +35,13 @@ of each expression in its place, a View as it is, an Int in decimal, a Dec with 
 the point (`12.30`, `-0.05`), and a Float in the shortest digits that read
 back as it (`0.1`, `5`, `1e+21`, as JavaScript's `String` writes a number). A hole holds one expression with no text
 literal in it (L05); a value of any other type is refused (C19). Appended to a Buf, the text is written straight
-into it. A newline ends a declaration or a step, except inside `( )` and `[ ]`, and
-except before a line that starts with `|>`, which carries the step on. A backslash at the end of a line inside a
+into it. A newline ends a declaration or a step, except inside `( )` and `[ ]`;
+before a line that starts with `|>` or a binary operator (`and`, `or`, `++`, `+`, `*`, `/`, `%`, `==`, `!=`, `<`,
+`<=`, `>`, `>=`, `&`, `|`, `^`, `<<`, `>>`), which carries the step on; and after a line that ends with an arm's or a
+step's `->`, whose value may start on the next line. No statement starts with one of those operators, so a line that
+does is the rest of the one before. `-` is not one of them, as it also starts a value (`-x`): `a - b` stays on one
+line or in parentheses (P02 says so). The formatter breaks a line that is too long before each `|>`, then before each
+`and` and `or`, and indents a carried line once more. A backslash at the end of a line inside a
 text literal carries the text on after the next line's indentation.
 
 Reserved words: `fn export type schema migration flag match with let do if else and or not`. Words with a meaning
@@ -728,6 +733,7 @@ what went before.
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | a long condition or sum wrapped onto a line starting with `and`, `+`, … (P02), and an arm's value on the line after its `->` (P02) | a line that starts with a binary operator carries the expression on, as `|>` does, and an arm's or step's value may start on the line after `->` |
 | 23 November 2026 | a `once:` key of the row's id was C65 when the message carried that id too (a payment API asks for it), and C65's fix said to key by that id; C71 asks for the id | C65 takes a key that names the row by its primary key; a key made only of other values the message carries (the amount) is still C65 |
 | 23 November 2026 | std `write_each(out, list, by)`, a second fold for a Buf | `fold(list, from: out, by)`: a Buf is handed from item to item as any accumulator is |
 | 23 November 2026 | `write_json_list(list, by:)`, and JSON written by hand for an `Option` field, a type with several constructors or a list on its own (C09 refused them) | `write_json(value)` of the value itself, which `decode` reads back; computed items are `map`ped into a record type |

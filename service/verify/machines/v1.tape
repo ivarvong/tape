@@ -31,7 +31,7 @@ fn handle(raw: View, db: Sql) -> Buf {
       row: Text,
       query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master \
           WHERE type = 'trigger'"
-      ) |> shown)
+    ) |> shown)
     _ -> respond(status: 404)
   }
 }

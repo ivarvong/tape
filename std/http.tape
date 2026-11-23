@@ -156,11 +156,11 @@ fn header(out: Buf, name: View, value: View) -> Buf {
 // Internal: `name: value`, or, for a name or a value the host would refuse, a part it refuses with the reason.
 fn header_text(name: View, value: View) -> View {
   match {
-    len(name) == 0 or len(name) > 64 or not every_byte(
-      v: name,
-      keep: token_byte
-    ) -> "!invalid header name"
-    len(value) > 4096 or not every_byte(
+    len(name) == 0
+      or len(name) > 64
+      or not every_byte(v: name, keep: token_byte) -> "!invalid header name"
+    len(value) > 4096
+      or not every_byte(
       v: value,
       keep: value_byte
     ) -> "!invalid header value for \(lower(text: name))"
@@ -271,16 +271,11 @@ fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
     at >= len(raw) -> n == len(name)
     n >= len(name) -> False
     raw[at] == 43 -> name[n] == 32 and form_named(raw, name, at: at + 1, n: n + 1)
-    raw[at] == 37 and at + 2 < len(raw) and is_hex(raw[at + 1]) and is_hex(
-      raw[at + 2]
-    ) -> name[n] == (
-      hex(raw[at + 1]) << 4
-    ) | hex(raw[at + 2]) and form_named(
-      raw,
-      name,
-      at: at + 3,
-      n: n + 1
-    )
+    raw[at] == 37
+      and at + 2 < len(raw)
+      and is_hex(raw[at + 1])
+      and is_hex(raw[at + 2]) -> name[n] == (hex(raw[at + 1]) << 4) | hex(raw[at + 2])
+      and form_named(raw, name, at: at + 3, n: n + 1)
     else -> name[n] == raw[at] and form_named(raw, name, at: at + 1, n: n + 1)
   }
 }
@@ -295,9 +290,10 @@ fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
   match {
     at >= len(raw) -> out
     raw[at] == 43 -> form_bytes(out: push(buf: out, byte: 32), raw, at: at + 1)
-    raw[at] == 37 and at + 2 < len(raw) and is_hex(raw[at + 1]) and is_hex(
-      raw[at + 2]
-    ) -> form_bytes(
+    raw[at] == 37
+      and at + 2 < len(raw)
+      and is_hex(raw[at + 1])
+      and is_hex(raw[at + 2]) -> form_bytes(
       out: push(buf: out, byte: (hex(raw[at + 1]) << 4) | hex(raw[at + 2])),
       raw,
       at: at + 3

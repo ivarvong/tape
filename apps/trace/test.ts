@@ -1353,8 +1353,8 @@ const PLANTS: { gate: string; why: string; from: string; to: string }[] = [
   {
     gate: 'edges',
     why: 'a repeated resourceSpans added to, not replaced',
-    from: '      got: resources(v, at: inside(v, at: k.value), acc: Nil)',
-    to: '      got: resources(v, at: inside(v, at: k.value), acc: res)',
+    from: 'top_read(v, got: resources(v, at: inside(v, at: k.value), acc: Nil))',
+    to: 'top_read(v, got: resources(v, at: inside(v, at: k.value), acc: res))',
   },
   {
     gate: 'edges',
@@ -1377,8 +1377,8 @@ const PLANTS: { gate: string; why: string; from: string; to: string }[] = [
   {
     gate: 'random',
     why: 'the fourth byte of a run not checked',
-    from: 'ascii(b: v[at + 2]) and ascii(\n      b: v[at + 3]\n    )',
-    to: 'ascii(b: v[at + 2]) and ascii(\n      b: v[at + 2]\n    )',
+    from: '      and ascii(b: v[at + 3]) -> string_valid(v, at: at + 4)',
+    to: '      and ascii(b: v[at + 2]) -> string_valid(v, at: at + 4)',
   },
   {
     gate: 'edges',
@@ -1390,8 +1390,8 @@ const PLANTS: { gate: string; why: string; from: string; to: string }[] = [
   {
     gate: 'fixtures',
     why: 'a call and its callee not one row',
-    from: 'if f.span.kind == 3 and k.kind == 2 and not (',
-    to: 'if f.span.kind == 3 and k.kind == 5 and not (',
+    from: 'if f.span.kind == 3\n      and k.kind == 2\n',
+    to: 'if f.span.kind == 3\n      and k.kind == 5\n',
   },
   {
     gate: 'fixtures',

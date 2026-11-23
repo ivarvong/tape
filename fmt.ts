@@ -1,9 +1,10 @@
 // fmt.ts: the canonical layout of a Tape file. `node tape.ts fmt [--check] files…`
 //
 // A statement, an arm or a step starts a line, as the language already requires. A line longer than 100 columns is
-// broken, and in one way: before each `|>` of the line; failing that, inside its widest pair of brackets, one
-// argument to a line. A text literal is never broken, so a line may still be long for the text it holds. Breaks the
-// author put inside brackets or before a `|>` are kept. `flat` is the other direction: every step on one line.
+// broken, and in one way: before each `|>` of the line; failing that, before each `and` and `or` outside brackets;
+// failing that, inside its widest pair of brackets, one argument to a line. A text literal is never broken, so a
+// line may still be long for the text it holds. A line that starts with an operator, or follows one that ends with
+// `->`, is indented once more, as a `|>` line is. `flat` is the other direction: every step on one line.
 // Within a line, spacing is fixed: one space around binary operators, `->`, `<-`, `=`, `|>` and `++`; one after `,` and `:`;
 // none inside brackets, before `(` or `[` of a call, a constructor, a type argument or an index, or around `.`.
 // Indentation is two spaces per line that left a bracket open, and two more for a line that starts with `|>`. At most one blank line in a row, none after an
@@ -13,6 +14,7 @@
 // A file that does not parse is not formatted: the parse error is thrown, as the compiler reports it.
 import { readFileSync } from 'node:fs';
 import { parseProgram } from './compiler.ts';
+import { CONTINUES } from './compiler/lex.ts';
 
 // longest first, so `->` is not read as `-`
 const OPS = [
@@ -200,7 +202,7 @@ function layOut(toks: readonly Tok[]): (Line | null)[] {
     if (!line) {
       if (blank > 0 && lines.length > 0) lines.push(null);
       blank = 0;
-      const carriesOn = x.t === 'op' && x.v === '|>' ? 1 : 0;
+      const carriesOn = carries(x) || arrowBefore(toks, k) ? 1 : 0;
       line = { indent: indentAt(toks, k, stack) + carriesOn, out: '', prev: null, before: null, from: k, to: k };
     }
     line.out += space(line.prev, x, line.before) + x.v;
@@ -214,6 +216,17 @@ function layOut(toks: readonly Tok[]): (Line | null)[] {
   return lines;
 }
 
+// a line that starts with `|>`, a binary operator, `and` or `or` carries the step on, and so does one after a line
+// that ends with `->` (compiler/lex.ts CONTINUES): indented once more, and joined back by `flat`
+const carries = (x: Tok | undefined): boolean => !!x && (x.t === 'op' || x.t === 'word') && CONTINUES.has(x.v);
+function arrowBefore(toks: readonly Tok[], k: number): boolean {
+  for (let j = k - 1; j >= 0; j--) {
+    const y = toks[j];
+    if (y?.t === 'nl') continue;
+    return y?.t === 'op' && y.v === '->';
+  }
+  return false;
+}
 const WIDTH = 100;
 const NL: Tok = { t: 'nl', v: '' };
 const opens = (x: Tok | undefined): boolean => x?.t === 'op' && (x.v === '(' || x.v === '[' || x.v === '{');
@@ -280,6 +293,11 @@ function breaksOf(toks: readonly Tok[], indent: number): number[] {
   const depth = depths(toks);
   const pipes = toks.flatMap((x, k) => (k > 0 && depth[k] === 0 && x.t === 'op' && x.v === '|>' ? [k] : []));
   if (pipes.length > 0) return pipes;
+  // a long condition: before each `and` and `or` outside brackets, which carry the line on as `|>` does
+  const logic = toks.flatMap((x, k) =>
+    k > 0 && depth[k] === 0 && x.t === 'word' && (x.v === 'and' || x.v === 'or') ? [k] : [],
+  );
+  if (logic.length > 0) return logic;
   // the widest pair of brackets, one argument to a line: only where that makes every line narrower than this one,
   // and either the arguments then fit or there are several of them (one long text is better left where it is)
   const whole = 2 * indent + textOf(toks).length;
@@ -347,7 +365,7 @@ function joined(toks: readonly Tok[]): Tok[] {
     const inList = open.length > 0 && open.at(-1) !== '{';
     const next = toks.slice(k + 1).find(y => y.t !== 'nl');
     const afterComment = out.at(-1)?.t === 'comment';
-    if (x.t === 'nl' && !afterComment && (inList || (next?.t === 'op' && next.v === '|>'))) continue;
+    if (x.t === 'nl' && !afterComment && (inList || carries(next) || arrowBefore(toks, k + 1))) continue;
     if (opens(x)) open.push(x.v);
     else if (closes(x)) open.pop();
     out.push(x.t === 'str' ? { t: 'str', v: x.v.replaceAll(CARRY, '') } : x);

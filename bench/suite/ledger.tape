@@ -70,9 +70,9 @@ fn transfer(t: Transfer) -> Int {
     query: "SELECT payer, payee, amount FROM transfers WHERE key = :key",
     key
   ) else {
-    Some(
-      value: Done(payer, payee, amount: a)
-    ) if payer == from and payee == to and a == amount -> 200
+    Some(value: Done(payer, payee, amount: a)) if payer == from
+      and payee == to
+      and a == amount -> 200
     Some(value) -> 422
   }
   let Some(value: Named(name)) = sql_first(

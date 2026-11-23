@@ -40,18 +40,11 @@ fn row(line: View, tally: Tally) -> Tally {
   let country = after(v: past_user, byte: 44)
   match {
     len(line) == 0 -> tally
-    commas(
-      v: line,
-      at: 0,
-      acc: 0
-    ) == 3 and digits(
-      v: ts,
-      most: 19
-    ) and len(user) > 0 and number(v: amount) and country_code(v: country) -> accept(
-      tally,
-      country,
-      amount: signed(v: amount)
-    )
+    commas(v: line, at: 0, acc: 0) == 3
+      and digits(v: ts, most: 19)
+      and len(user) > 0
+      and number(v: amount)
+      and country_code(v: country) -> accept(tally, country, amount: signed(v: amount))
     else -> Tally(rows: tally.rows, rejected: tally.rejected + 1, by: tally.by)
   }
 }

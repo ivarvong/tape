@@ -43,7 +43,8 @@ fn token(src: View, at: Int, out: Buf, state: Scan, ch: Int) -> Buf {
   match {
     ch == 10 -> scan(src, at: at + 1, out: push(buf: out, byte: 10), state: newline(state))
     ch == 32 or ch == 9 or ch == 13 -> scan(src, at: at + 1, out: push(buf: out, byte: ch), state)
-    ch == 47 and byte_at(src, at: at + 1) == 47 -> scan(
+    ch == 47
+      and byte_at(src, at: at + 1) == 47 -> scan(
       src,
       at: find(v: src, byte: 10, at),
       out: span(out, class: "c", src, from: at, to: find(v: src, byte: 10, at)),
@@ -51,20 +52,16 @@ fn token(src: View, at: Int, out: Buf, state: Scan, ch: Int) -> Buf {
     )
     ch == 34 -> text(src, at, out, state, end: text_end(src, at: at + 1))
     ch >= 48 and ch <= 57 -> number(src, at, out, state, end: number_end(src, at))
-    letter(b: ch) or (ch == 95 and word_byte(b: byte_at(src, at: at + 1))) -> word(
+    letter(b: ch)
+      or (ch == 95 and word_byte(b: byte_at(src, at: at + 1))) -> word(
       src,
       at,
       out,
       state,
       end: word_end(src, at: at + 1)
     )
-    ch == 123 and opens_sql(state) -> block(
-      src,
-      at,
-      out,
-      state,
-      end: sql_end(src, at: at + 1, depth: 1)
-    )
+    ch == 123
+      and opens_sql(state) -> block(src, at, out, state, end: sql_end(src, at: at + 1, depth: 1))
     else -> operator(src, at, out, state, size: op_size(src, at))
   }
 }
@@ -100,14 +97,8 @@ fn after_inv(inv: Int, kind: Int, last: Int) -> Int {
 fn newline(state: Scan) -> Scan {
   let Scan(stack, depth, last, mig, inv, held) = state
   match {
-    (depth == 0 or (stack & 1) == 1) and last == 2 -> Scan(
-      stack,
-      depth,
-      last: 1,
-      mig: after_mig(mig, kind: 0),
-      inv: -1,
-      held: inv
-    )
+    (depth == 0 or (stack & 1) == 1)
+      and last == 2 -> Scan(stack, depth, last: 1, mig: after_mig(mig, kind: 0), inv: -1, held: inv)
     else -> state
   }
 }
@@ -213,7 +204,8 @@ fn contextual(w: View) -> Bool {
 // more than 20 significant digits or beyond the largest Float. `end` is where the digits, point and exponent end.
 fn number(src: View, at: Int, out: Buf, state: Scan, end: Int) -> Buf {
   match {
-    byte_at(src, at: end) == 102 and not word_byte(b: byte_at(src, at: end + 1)) -> scan(
+    byte_at(src, at: end) == 102
+      and not word_byte(b: byte_at(src, at: end + 1)) -> scan(
       src,
       at: end + 1,
       out: span(out, class: float_class(src, at, f: end), src, from: at, to: end + 1),
@@ -394,7 +386,8 @@ fn operator(src: View, at: Int, out: Buf, state: Scan, size: Int) -> Buf {
       out: span(out, class: "x", src, from: at, to: utf8_end(src, at: at + 1)),
       state
     )
-    ch == 40 or ch == 91 -> scan(
+    ch == 40
+      or ch == 91 -> scan(
       src,
       at: at + 1,
       out: span(out, class: "o", src, from: at, to: at + 1),
@@ -406,13 +399,16 @@ fn operator(src: View, at: Int, out: Buf, state: Scan, size: Int) -> Buf {
       out: span(out, class: "o", src, from: at, to: at + 1),
       state: opened(state, brace: 1)
     )
-    size == 1 and (ch == 41 or ch == 93 or ch == 125) -> scan(
+    size == 1
+      and (ch == 41 or ch == 93 or ch == 125) -> scan(
       src,
       at: at + 1,
       out: span(out, class: "o", src, from: at, to: at + 1),
       state: closed(state)
     )
-    size == 2 and ch == 124 and src[at + 1] == 62 -> scan(
+    size == 2
+      and ch == 124
+      and src[at + 1] == 62 -> scan(
       src,
       at: at + 2,
       out: span(out, class: "o", src, from: at, to: at + 2),
@@ -501,7 +497,8 @@ fn text_end(src: View, at: Int) -> End {
   match {
     at >= len(src) or src[at] == 10 -> Open(at)
     src[at] == 34 -> Closed(at: at + 1)
-    src[at] == 92 and byte_at(src, at: at + 1) == 40 -> text_end(
+    src[at] == 92
+      and byte_at(src, at: at + 1) == 40 -> text_end(
       src,
       at: past(end: hole_end(src, at: at + 2, depth: 1))
     )
@@ -594,39 +591,16 @@ fn open_text(out: Buf, sql: Bool, bad: Bool) -> Buf {
 
 // Does the text at `at` start like an SQL statement?
 fn statement(src: View, at: Int) -> Bool {
-  has(v: src, at, word: "SELECT ") or has(v: src, at, word: "INSERT ") or has(
-    v: src,
-    at,
-    word: "UPDATE "
-  ) or has(
-    v: src,
-    at,
-    word: "DELETE "
-  ) or has(
-    v: src,
-    at,
-    word: "WITH "
-  ) or has(
-    v: src,
-    at,
-    word: "CREATE "
-  ) or has(
-    v: src,
-    at,
-    word: "ALTER "
-  ) or has(
-    v: src,
-    at,
-    word: "DROP "
-  ) or has(
-    v: src,
-    at,
-    word: "REPLACE "
-  ) or has(
-    v: src,
-    at,
-    word: "PRAGMA "
-  )
+  has(v: src, at, word: "SELECT ")
+    or has(v: src, at, word: "INSERT ")
+    or has(v: src, at, word: "UPDATE ")
+    or has(v: src, at, word: "DELETE ")
+    or has(v: src, at, word: "WITH ")
+    or has(v: src, at, word: "CREATE ")
+    or has(v: src, at, word: "ALTER ")
+    or has(v: src, at, word: "DROP ")
+    or has(v: src, at, word: "REPLACE ")
+    or has(v: src, at, word: "PRAGMA ")
 }
 
 // The inside of a text literal, from `at` to `to`: escapes as spans, SQL keywords too when it is a statement, and
@@ -634,28 +608,36 @@ fn statement(src: View, at: Int) -> Bool {
 fn body(src: View, at: Int, to: Int, out: Buf, sql: Bool) -> Buf {
   match {
     at >= to -> out
-    src[at] == 92 and at + 1 < to and src[at + 1] == 40 -> body(
+    src[at] == 92
+      and at + 1 < to
+      and src[at + 1] == 40 -> body(
       src,
       at: past(end: hole_end(src, at: at + 2, depth: 1)),
       to,
       out: hole(src, at, out, end: hole_end(src, at: at + 2, depth: 1)),
       sql
     )
-    src[at] == 92 and at + 1 < to and src[at + 1] == 10 -> body(
+    src[at] == 92
+      and at + 1 < to
+      and src[at + 1] == 10 -> body(
       src,
       at: at + 1,
       to,
       out: span(out, class: "e", src, from: at, to: at + 1),
       sql
     )
-    src[at] == 92 and at + 1 < to and escape(b: src[at + 1]) -> body(
+    src[at] == 92
+      and at + 1 < to
+      and escape(b: src[at + 1]) -> body(
       src,
       at: at + 2,
       to,
       out: span(out, class: "e", src, from: at, to: at + 2),
       sql
     )
-    src[at] == 92 and at + 1 < to and src[at + 1] < 128 -> body(
+    src[at] == 92
+      and at + 1 < to
+      and src[at + 1] < 128 -> body(
       src,
       at: at + 2,
       to,
@@ -669,7 +651,8 @@ fn body(src: View, at: Int, to: Int, out: Buf, sql: Bool) -> Buf {
       out: span(out, class: "e x", src, from: at, to: at + 1),
       sql
     )
-    sql and placeholder_at(src, at, to) -> body(
+    sql
+      and placeholder_at(src, at, to) -> body(
       src,
       at: word_end(src: slice(v: src, from: 0, to), at: at + 1),
       to,
@@ -682,7 +665,8 @@ fn body(src: View, at: Int, to: Int, out: Buf, sql: Bool) -> Buf {
       ),
       sql
     )
-    sql and keyword_at(src, at, to) -> body(
+    sql
+      and keyword_at(src, at, to) -> body(
       src,
       at: upper_end(src, at, to),
       to,
@@ -747,11 +731,8 @@ fn escape(b: Int) -> Bool {
 fn sql_end(src: View, at: Int, depth: Int) -> End {
   match {
     at >= len(src) -> Open(at: len(src))
-    src[at] == 39 or src[at] == 34 -> sql_end(
-      src,
-      at: find(v: src, byte: src[at], at: at + 1) + 1,
-      depth
-    )
+    src[at] == 39
+      or src[at] == 34 -> sql_end(src, at: find(v: src, byte: src[at], at: at + 1) + 1, depth)
     src[at] == 123 -> sql_end(src, at: at + 1, depth: depth + 1)
     src[at] == 125 and depth == 1 -> Closed(at: at + 1)
     src[at] == 125 -> sql_end(src, at: at + 1, depth: depth - 1)
@@ -825,18 +806,18 @@ fn quoted_end(src: View, at: Int, to: Int) -> Int {
 // A named placeholder, `:name`: the value a query takes by that name (LANGUAGE.md 0.1). A colon that follows a word
 // or another colon is not one.
 fn placeholder_at(src: View, at: Int, to: Int) -> Bool {
-  src[at] == 58 and at + 1 < to and (letter(b: src[at + 1]) or src[at + 1] == 95) and (
-    at == 0 or (not word_byte(b: src[at - 1]) and src[at - 1] != 58)
-  )
+  src[at] == 58
+    and at + 1 < to
+    and (letter(b: src[at + 1]) or src[at + 1] == 95)
+    and (at == 0 or (not word_byte(b: src[at - 1]) and src[at - 1] != 58))
 }
 
 // An SQL keyword, as far as colour goes: two or more capitals (or _) standing alone.
 fn keyword_at(src: View, at: Int, to: Int) -> Bool {
-  upper(b: src[at]) and (
-    at == 0 or not word_byte(b: src[at - 1])
-  ) and upper_end(src, at, to) >= at + 2 and (
-    upper_end(src, at, to) >= to or not word_byte(b: src[upper_end(src, at, to)])
-  )
+  upper(b: src[at])
+    and (at == 0 or not word_byte(b: src[at - 1]))
+    and upper_end(src, at, to) >= at + 2
+    and (upper_end(src, at, to) >= to or not word_byte(b: src[upper_end(src, at, to)]))
 }
 
 fn upper(b: Int) -> Bool {

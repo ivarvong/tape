@@ -94,12 +94,10 @@ fn list(query: View) -> Buf {
 
 fn create(body: Result[NewTodo, View]) -> Buf {
   match body {
-    Ok(
-      value: NewTodo(key, title, done: None)
-    ) if titled(title) and keyed(key) -> insert(key, text: title, done: False)
-    Ok(
-      value: NewTodo(key, title, done: Some(value: done))
-    ) if titled(title) and keyed(key) -> insert(key, text: title, done)
+    Ok(value: NewTodo(key, title, done: None)) if titled(title)
+      and keyed(key) -> insert(key, text: title, done: False)
+    Ok(value: NewTodo(key, title, done: Some(value: done))) if titled(title)
+      and keyed(key) -> insert(key, text: title, done)
     _ -> error(status: 400)
   }
 }

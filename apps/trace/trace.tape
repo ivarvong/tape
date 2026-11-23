@@ -214,9 +214,11 @@ fn string_valid(v: View, at: Int) -> Int {
   match {
     at >= len(v) -> -1
     v[at] == 34 -> at + 1
-    at + 4 <= len(v) and ascii(b: v[at]) and ascii(b: v[at + 1]) and ascii(b: v[at + 2]) and ascii(
-      b: v[at + 3]
-    ) -> string_valid(v, at: at + 4)
+    at + 4 <= len(v)
+      and ascii(b: v[at])
+      and ascii(b: v[at + 1])
+      and ascii(b: v[at + 2])
+      and ascii(b: v[at + 3]) -> string_valid(v, at: at + 4)
     ascii(b: v[at]) -> string_valid(v, at: at + 1)
     else -> string_char(v, found: json_char(v, at))
   }
@@ -428,10 +430,8 @@ fn top(v: View, at: Int, res: List[Pend], found: Int) -> Top {
 
 fn top_member(v: View, k: Key, res: List[Pend], found: Int) -> Top {
   match {
-    k.name == "resourceSpans" and v[k.value] == 91 -> top_read(
-      v,
-      got: resources(v, at: inside(v, at: k.value), acc: Nil)
-    )
+    k.name == "resourceSpans"
+      and v[k.value] == 91 -> top_read(v, got: resources(v, at: inside(v, at: k.value), acc: Nil))
     k.name == "resourceSpans" -> top(v, at: skipped(v, at: k.value), res: Nil, found: 2)
     else -> top(v, at: skipped(v, at: k.value), res, found)
   }
@@ -467,13 +467,15 @@ fn resource(v: View, at: Int, service: View, spans: List[Span]) -> Got[Pend] {
 
 fn resource_member(v: View, k: Key, service: View, spans: List[Span]) -> Got[Pend] {
   match {
-    k.name == "resource" and v[k.value] == 123 -> resource_named(
+    k.name == "resource"
+      and v[k.value] == 123 -> resource_named(
       v,
       got: described(v, at: inside(v, at: k.value), name: ""),
       spans
     )
     k.name == "resource" -> resource(v, at: skipped(v, at: k.value), service: "", spans)
-    k.name == "scopeSpans" and v[k.value] == 91 -> resource_scoped(
+    k.name == "scopeSpans"
+      and v[k.value] == 91 -> resource_scoped(
       v,
       got: scopes(v, at: inside(v, at: k.value), acc: Nil),
       service
@@ -501,7 +503,8 @@ fn described(v: View, at: Int, name: View) -> Got[View] {
 
 fn described_member(v: View, k: Key, name: View) -> Got[View] {
   match {
-    k.name == "attributes" and v[k.value] == 91 -> described_read(
+    k.name == "attributes"
+      and v[k.value] == 91 -> described_read(
       v,
       got: service_in(v, at: inside(v, at: k.value), name: "")
     )
@@ -561,7 +564,8 @@ fn scope(v: View, at: Int, base: List[Span], spans: List[Span]) -> Got[List[Span
 
 fn scope_member(v: View, k: Key, base: List[Span], spans: List[Span]) -> Got[List[Span]] {
   match {
-    k.name == "spans" and v[k.value] == 91 -> scope_read(
+    k.name == "spans"
+      and v[k.value] == 91 -> scope_read(
       v,
       got: span_items(v, at: inside(v, at: k.value), acc: base),
       base
@@ -976,7 +980,8 @@ fn attr(v: View, at: Int, key: View, text: View) -> Got[Attr] {
 fn attr_member(v: View, k: Key, key: View, text: View) -> Got[Attr] {
   match {
     k.name == "key" -> attr_key(v, got: text_val(v, at: k.value), text)
-    k.name == "value" and v[k.value] == 123 -> attr_value(
+    k.name == "value"
+      and v[k.value] == 123 -> attr_value(
       v,
       got: any_value(v, at: inside(v, at: k.value), text: "", best: 99),
       key
@@ -1506,7 +1511,8 @@ fn walk(
 ) -> Walked {
   match stack {
     Nil -> Walked(rows, seen, count, nrows)
-    Cons(head: Frame(span), tail) if check and seen_has(seen, idx: span.idx) -> walk(
+    Cons(head: Frame(span), tail) if check
+      and seen_has(seen, idx: span.idx) -> walk(
       stack: tail,
       seen,
       rows,
@@ -1549,9 +1555,9 @@ fn visit(
   check: Bool
 ) -> Walked {
   match mine {
-    Cons(head: k, tail: Nil) if f.span.kind == 3 and k.kind == 2 and not (
-      check and seen_has(seen, idx: k.idx)
-    ) -> walk(
+    Cons(head: k, tail: Nil) if f.span.kind == 3
+      and k.kind == 2
+      and not (check and seen_has(seen, idx: k.idx)) -> walk(
       stack: framed(
         list: sorted(list: held_kids(s: k, byid, kids), lo),
         byid,
@@ -2098,7 +2104,8 @@ fn legend(out: Buf, acc: Acc, rows: List[Frame], sum: Summary, color: Int) -> Bu
       |> append(view: "<tspan class=\"ek\" dx=\"18\">")
       |> event_key(kinds: event_kinds(list: rows, kinds: 0))
       |> append(view: "</tspan>")
-    color == 8 and acc.services > 8 -> legend(
+    color == 8
+      and acc.services > 8 -> legend(
       out: out |> append(view: "<tspan class=\"c7\" dx=\"14\">■</tspan> \(acc.services - 7) more"),
       acc,
       rows,
@@ -2617,10 +2624,8 @@ fn pair_markers(out: Buf, pair: Option[Span], axis: Axis, lo: Int) -> Buf {
 // of the track after its end, or ends within 15% before its start (the label would run into the gap's band).
 fn room(list: List[Gap], edge: Int, after: Bool, axis: Axis) -> Bool {
   match list {
-    Cons(head, tail) -> clear(
-      at: gap_side(gap: head, after, axis) - edge,
-      after
-    ) and room(list: tail, edge, after, axis)
+    Cons(head, tail) -> clear(at: gap_side(gap: head, after, axis) - edge, after)
+      and room(list: tail, edge, after, axis)
     Nil -> True
   }
 }
@@ -2960,16 +2965,14 @@ fn write_xml(out: Buf, v: View, at: Int, to: Int) -> Buf {
     v[at] == 62 -> write_xml(out: append(buf: out, view: "&gt;"), v, at: at + 1, to)
     v[at] == 34 -> write_xml(out: append(buf: out, view: "&quot;"), v, at: at + 1, to)
     v[at] == 39 -> write_xml(out: append(buf: out, view: "&#39;"), v, at: at + 1, to)
-    v[at] == 9 or v[at] == 10 or v[at] == 13 -> write_xml(
-      out: push(buf: out, byte: 32),
-      v,
-      at: at + 1,
-      to
-    )
+    v[at] == 9
+      or v[at] == 10
+      or v[at] == 13 -> write_xml(out: push(buf: out, byte: 32), v, at: at + 1, to)
     v[at] < 32 -> write_xml(out: append(buf: out, view: "�"), v, at: at + 1, to)
-    v[at] == 239 and at + 2 < to and v[at + 1] == 191 and (
-      v[at + 2] == 190 or v[at + 2] == 191
-    ) -> write_xml(
+    v[at] == 239
+      and at + 2 < to
+      and v[at + 1] == 191
+      and (v[at + 2] == 190 or v[at + 2] == 191) -> write_xml(
       out: append(buf: out, view: "�"),
       v,
       at: at + 3,

@@ -68,9 +68,8 @@ fn json_end(v: View, at: Int) -> Bool {
 // Internal: the first position at or after `at` that is not JSON whitespace.
 fn json_ws(v: View, at: Int) -> Int {
   match {
-    at < len(v) and (
-      v[at] == 32 or v[at] == 10 or v[at] == 13 or v[at] == 9
-    ) -> json_ws(v, at: at + 1)
+    at < len(v)
+      and (v[at] == 32 or v[at] == 10 or v[at] == 13 or v[at] == 9) -> json_ws(v, at: at + 1)
     else -> at
   }
 }
@@ -103,10 +102,8 @@ fn member_key(v: View, key: JsonText) -> JsonStep {
 // Internal: a member, at the colon after its key.
 fn member_colon(v: View, key: View, at: Int) -> JsonStep {
   match {
-    at < len(v) and v[at] == 58 -> member_value(
-      key,
-      value: json_value(v, at: json_ws(v, at: at + 1))
-    )
+    at < len(v)
+      and v[at] == 58 -> member_value(key, value: json_value(v, at: json_ws(v, at: at + 1)))
     else -> Malformed
   }
 }
@@ -303,11 +300,8 @@ fn simple(code: Option[Int], next: Int) -> JsonChar {
 // Internal: `at` is the position after \uXXXX. A high surrogate needs a low surrogate escape right after it.
 fn unicode(v: View, at: Int, unit: Option[Int]) -> JsonChar {
   match unit {
-    Some(value) if value >= 55296 and value < 56320 -> low_half(
-      high: value,
-      low: low_unit(v, at),
-      next: at + 6
-    )
+    Some(value) if value >= 55296
+      and value < 56320 -> low_half(high: value, low: low_unit(v, at), next: at + 6)
     Some(value) if value >= 56320 and value < 57344 -> BadChar
     Some(value) -> Char(code: value, next: at, escaped: True)
     None -> BadChar
@@ -325,7 +319,8 @@ fn low_unit(v: View, at: Int) -> Option[Int] {
 // Internal: a surrogate pair as one code point.
 fn low_half(high: Int, low: Option[Int], next: Int) -> JsonChar {
   match low {
-    Some(value) if value >= 56320 and value < 57344 -> Char(
+    Some(value) if value >= 56320
+      and value < 57344 -> Char(
       code: 65536 + ((high - 55296) << 10) + (value - 56320),
       next,
       escaped: True
@@ -337,9 +332,11 @@ fn low_half(high: Int, low: Option[Int], next: Int) -> JsonChar {
 // Internal: four hex digits at `at`, as a number.
 fn hex4(v: View, at: Int) -> Option[Int] {
   match {
-    at + 4 <= len(v) and is_hex(v[at]) and is_hex(v[at + 1]) and is_hex(v[at + 2]) and is_hex(
-      v[at + 3]
-    ) -> Some(
+    at + 4 <= len(v)
+      and is_hex(v[at])
+      and is_hex(v[at + 1])
+      and is_hex(v[at + 2])
+      and is_hex(v[at + 3]) -> Some(
       (hex(v[at]) << 12) | (hex(v[at + 1]) << 8) | (hex(v[at + 2]) << 4) | hex(v[at + 3])
     )
     else -> None
@@ -548,7 +545,8 @@ fn tree_member(
   stack: List[Json_Frame]
 ) -> Option[Json_Tree] {
   match {
-    at < len(v) and v[at] == 58 -> tree_value(
+    at < len(v)
+      and v[at] == 58 -> tree_value(
       v,
       at: json_ws(v, at: at + 1),
       stack: Cons(head: Json_InObj(members, key), tail: stack)
@@ -584,24 +582,28 @@ fn tree_done(v: View, node: Json_Tree, at: Int, stack: List[Json_Frame]) -> Opti
   match stack {
     Nil if s == len(v) -> Some(value: node)
     Nil -> None
-    Cons(head: Json_InArr(items), tail) if s < len(v) and v[s] == 44 -> tree_value(
+    Cons(head: Json_InArr(items), tail) if s < len(v)
+      and v[s] == 44 -> tree_value(
       v,
       at: json_ws(v, at: s + 1),
       stack: Cons(head: Json_InArr(items: Cons(head: node, tail: items)), tail)
     )
-    Cons(head: Json_InArr(items), tail) if s < len(v) and v[s] == 93 -> tree_done(
+    Cons(head: Json_InArr(items), tail) if s < len(v)
+      and v[s] == 93 -> tree_done(
       v,
       node: Json_Arr(items: reverse(list: Cons(head: node, tail: items))),
       at: s + 1,
       stack: tail
     )
-    Cons(head: Json_InObj(members, key), tail) if s < len(v) and v[s] == 44 -> tree_key(
+    Cons(head: Json_InObj(members, key), tail) if s < len(v)
+      and v[s] == 44 -> tree_key(
       v,
       at: json_ws(v, at: s + 1),
       members: Cons(head: Json_Member(key, value: node), tail: members),
       stack: tail
     )
-    Cons(head: Json_InObj(members, key), tail) if s < len(v) and v[s] == 125 -> tree_done(
+    Cons(head: Json_InObj(members, key), tail) if s < len(v)
+      and v[s] == 125 -> tree_done(
       v,
       node: Json_Obj(
         members: reverse(list: Cons(head: Json_Member(key, value: node), tail: members))
@@ -619,7 +621,8 @@ fn tree_text(v: View, at: Int) -> Json_Got {
   let e = text_run(v, at)
   match {
     e < len(v) and v[e] == 34 -> Json_Got(text: slice(v, from: at, to: e), whole: True, next: e + 1)
-    e < len(v) and v[e] == 92 -> text_escaped(
+    e < len(v)
+      and v[e] == 92 -> text_escaped(
       v,
       at: e,
       out: append(buf: buf(), view: slice(v, from: at, to: e)),
@@ -664,12 +667,14 @@ fn text_escaped(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got {
 fn text_more(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got {
   let e = text_run(v, at)
   match {
-    e < len(v) and v[e] == 34 -> Json_Got(
+    e < len(v)
+      and v[e] == 34 -> Json_Got(
       text: freeze(append(buf: out, view: slice(v, from: at, to: e))),
       whole,
       next: e + 1
     )
-    e < len(v) and v[e] == 92 -> text_escaped(
+    e < len(v)
+      and v[e] == 92 -> text_escaped(
       v,
       at: e,
       out: append(buf: out, view: slice(v, from: at, to: e)),
@@ -705,11 +710,8 @@ fn tree_simple(code: Option[Int], next: Int) -> Json_Code {
 // Internal: `at` is the position after \uXXXX.
 fn tree_unicode(v: View, at: Int, unit: Option[Int]) -> Json_Code {
   match unit {
-    Some(value) if value >= 55296 and value < 56320 -> tree_pair(
-      high: value,
-      low: low_unit(v, at),
-      at
-    )
+    Some(value) if value >= 55296
+      and value < 56320 -> tree_pair(high: value, low: low_unit(v, at), at)
     Some(value) if value >= 56320 and value < 57344 -> Json_Code(code: value, lone: True, next: at)
     Some(value) -> Json_Code(code: value, lone: False, next: at)
     None -> Json_NoCode
@@ -719,7 +721,8 @@ fn tree_unicode(v: View, at: Int, unit: Option[Int]) -> Json_Code {
 // Internal: a high surrogate at the escape before `at`: with the low one after it, one code point; alone, lone.
 fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code {
   match low {
-    Some(value) if value >= 56320 and value < 57344 -> Json_Code(
+    Some(value) if value >= 56320
+      and value < 57344 -> Json_Code(
       code: 65536 + ((high - 55296) << 10) + (value - 56320),
       lone: False,
       next: at + 6
@@ -826,10 +829,8 @@ fn json_check(
   match found {
     None if optional -> Json_Hit
     None -> Json_Miss(depth, why: "missing key \"" ++ name ++ "\"")
-    Some(value: Json_Str(whole)) if kind == 0 and not whole -> Json_Miss(
-      depth,
-      why: name ++ ": text with a lone surrogate"
-    )
+    Some(value: Json_Str(whole)) if kind == 0
+      and not whole -> Json_Miss(depth, why: name ++ ": text with a lone surrogate")
     Some(value: Json_Str) if kind == 0 -> Json_Hit
     Some(value: Json_Bool) if kind == 1 -> Json_Hit
     Some(value: Json_Num(text)) if kind == 2 and is_some(found: json_int(text)) -> Json_Hit

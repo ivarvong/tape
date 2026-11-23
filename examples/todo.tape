@@ -50,10 +50,9 @@ fn handle(raw: View, db: Sql) -> Buf {
       path: item(id),
       query: blank(_)
     ) -> deleted(id, count: sql_exec(query: "DELETE FROM todos WHERE id = :id", id))
-    Request(
-      method,
-      path: item(id)
-    ) if method == "GET" or method == "PATCH" or method == "DELETE" -> error(status: 400)
+    Request(method, path: item(id)) if method == "GET"
+      or method == "PATCH"
+      or method == "DELETE" -> error(status: 400)
     Request(path: item(id)) -> error(status: 405)
     _ -> error(status: 404)
   }

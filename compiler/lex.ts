@@ -63,7 +63,34 @@ const runEnd = (src: string, from: number, test: (c: string | undefined) => bool
   return j;
 };
 
-// A newline ends a statement unless a ( or [ is open; several in a row are one.
+/**
+ * The words that carry a statement on from the line before when a line starts with one, as `|>` does: the binary
+ * operators, `and` and `or`. Not `-`, which also starts an expression (`-x`); not `not`, which only starts one. No
+ * statement starts with any of these, so a line that does is always the rest of the one before.
+ */
+export const CONTINUES: ReadonlySet<string> = new Set([
+  '|>',
+  '++',
+  '==',
+  '!=',
+  '<=',
+  '>=',
+  '<<',
+  '>>',
+  '+',
+  '*',
+  '/',
+  '%',
+  '<',
+  '>',
+  '&',
+  '|',
+  '^',
+  'and',
+  'or',
+]);
+// A newline ends a statement unless a ( or [ is open; several in a row are one. (A line after one that ends with
+// `->` holds that arm's or step's value: the parser reads past the newline there, compiler/parse/expr.ts armBody.)
 function newline(sc: Scan): void {
   const inList = sc.open.length > 0 && sc.open.at(-1) !== '{';
   if (!inList && sc.toks.length > 0 && sc.toks.at(-1)?.t !== 'nl') sc.toks.push({ t: 'nl', ...here(sc) });
@@ -194,6 +221,7 @@ function number(sc: Scan): void {
 function word(sc: Scan): void {
   const end = runEnd(sc.text, sc.i, wordChar),
     w = sc.text.slice(sc.i, end);
+  if ((w === 'and' || w === 'or') && sc.toks.at(-1)?.t === 'nl') sc.toks.pop();
   sc.toks.push({ t: KEYWORDS.has(w) ? 'kw' : /^[A-Z]/.test(w) ? 'Id' : 'id', v: w, ...here(sc) });
   sc.i = end;
 }
@@ -267,8 +295,8 @@ function operator(sc: Scan): void {
   }
   if (op === '(' || op === '[' || op === '{') sc.open.push(op);
   if (op === ')' || op === ']' || op === '}') sc.open.pop();
-  // a line that starts with |> carries on the step before it
-  if (op === '|>' && sc.toks.at(-1)?.t === 'nl') sc.toks.pop();
+  // a line that starts with |> or a binary operator carries on the step before it
+  if (CONTINUES.has(op) && sc.toks.at(-1)?.t === 'nl') sc.toks.pop();
   sc.toks.push({ t: 'op', v: op, ...here(sc) });
   sc.i += op.length;
 }

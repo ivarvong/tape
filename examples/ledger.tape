@@ -34,9 +34,9 @@ fn transfer(body: View) -> Buf {
   }
   // A key seen before is that transfer again: the same one answers as it did, another one is refused.
   let None = sql_first(row: Done, query: "SELECT * FROM transfers WHERE key = :key", key) else {
-    Some(
-      value: Done(payer, payee, amount: a)
-    ) if payer == from and payee == to and a == amount -> moved()
+    Some(value: Done(payer, payee, amount: a)) if payer == from
+      and payee == to
+      and a == amount -> moved()
     Some(value) -> problem(status: 422, reason: "the key was already used for another transfer")
   }
   let 1 = sql_exec(

@@ -258,9 +258,11 @@ fn once_with(once: View, tail: View) -> Asked {
 fn op_bytes(v: View, at: Int) -> Bool {
   match {
     at >= len(v) -> True
-    (v[at] >= 48 and v[at] <= 57) or (v[at] >= 65 and v[at] <= 90) or (
-      v[at] >= 97 and v[at] <= 122
-    ) or v[at] == 45 or v[at] == 95 -> op_bytes(v, at: at + 1)
+    (v[at] >= 48 and v[at] <= 57)
+      or (v[at] >= 65 and v[at] <= 90)
+      or (v[at] >= 97 and v[at] <= 122)
+      or v[at] == 45
+      or v[at] == 95 -> op_bytes(v, at: at + 1)
     else -> False
   }
 }
@@ -305,11 +307,9 @@ fn skew_of(tail: View) -> Int {
 fn digits_until(v: View, at: Int, n: Int) -> Int {
   match {
     at >= 18 and at < len(v) and v[at] >= 48 and v[at] <= 57 -> -1
-    at < len(v) and v[at] >= 48 and v[at] <= 57 -> digits_until(
-      v,
-      at: at + 1,
-      n: n * 10 + v[at] - 48
-    )
+    at < len(v)
+      and v[at] >= 48
+      and v[at] <= 57 -> digits_until(v, at: at + 1, n: n * 10 + v[at] - 48)
     at == 0 -> -1
     else -> n
   }
@@ -318,11 +318,17 @@ fn digits_until(v: View, at: Int, n: Int) -> Int {
 // Set once: the first placement is kept (the CHECKs refuse an impossible one), and the reply is what is stored.
 fn place(shard: Int, shards: Int, window: Int, skew: Int) -> Buf {
   match {
-    shards < 1 or shards > 64 or shard < 0 or shard >= shards -> problem(
+    shards < 1
+      or shards > 64
+      or shard < 0
+      or shard >= shards -> problem(
       status: 400,
       reason: "a placement is shard i of n, 0 <= i < n <= 64"
     )
-    window < 1000 or window > 86400000 or skew < 1000 or skew > 600000 -> problem(
+    window < 1000
+      or window > 86400000
+      or skew < 1000
+      or skew > 600000 -> problem(
       status: 400,
       reason: "the op window is 1000 to 86400000 ms and the clock allowance 1000 to 600000 ms"
     )
@@ -385,7 +391,9 @@ fn owned(op: Op, once: View, place: Option[Placement]) -> Buf {
 
 fn mine(op: Op, once: View, shard: Int, at: Int) -> Buf {
   match {
-    at == shard and len(once) == 0 and unconditional(op) -> problem(
+    at == shard
+      and len(once) == 0
+      and unconditional(op) -> problem(
       status: 428,
       reason: "an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"
     )
@@ -726,9 +734,14 @@ fn key_bytes(v: View, at: Int) -> Bool {
 }
 
 fn key_byte(b: Int) -> Bool {
-  (b >= 48 and b <= 58) or (b >= 65 and b <= 90) or (
-    b >= 97 and b <= 122
-  ) or b == 45 or b == 46 or b == 95 or b == 126 or b == 37
+  (b >= 48 and b <= 58)
+    or (b >= 65 and b <= 90)
+    or (b >= 97 and b <= 122)
+    or b == 45
+    or b == 46
+    or b == 95
+    or b == 126
+    or b == 37
 }
 
 // Valid UTF-8, the whole of v from `at`.
