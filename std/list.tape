@@ -109,6 +109,7 @@ fn write_json_list[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf {
   }
 }
 
+// Internal: write_json_list's items after the first, each after a comma.
 fn json_rest[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf {
   match list {
     Cons(head, tail) -> json_rest(out: by(push(buf: out, byte: 44), head), list: tail, by)
@@ -129,6 +130,7 @@ fn join(list: List[View], sep: View) -> View {
   }
 }
 
+// Internal: join's texts after the first, each after `sep`.
 fn join_rest(out: Buf, list: List[View], sep: View) -> Buf {
   match list {
     Cons(head, tail) -> join_rest(

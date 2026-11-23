@@ -481,8 +481,8 @@ fn advance(run: Run) -> Outcome {
 
 It is read as `match e { P -> rest of the block, arms… }`, so the arms are checked like any match: with `P` they
 must cover every value (C24). There is nothing new to trust: exhaustiveness, ownership and the rules see the
-match. A `match` (and so a step) may be the value of a match arm as well as the last expression of a function;
-it is still not an argument (C40). There are no loops: a workflow that repeats is a function that calls itself
+match. A `match` (and so a step) is an expression wherever a value is (0.3): a function's or an arm's value, a
+`let`'s value, an argument, an operand. There are no loops: a workflow that repeats is a function that calls itself
 with what the step left (`advance` above, through `carry`), which compiles to a jump.
 
 ## JSON: records, lists, and records inside records

@@ -1189,7 +1189,7 @@ const PLANTS: Plant[] = [
     what: 'the cheat sheet names a function std does not have',
     file: 'serve.ts',
     from: 'decimal(v)',
-    to: 'parse_int(v)',
+    to: 'parse_number(v)',
   },
   {
     test: 'compile',

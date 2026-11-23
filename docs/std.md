@@ -178,10 +178,10 @@ Uses: [`Request`](#type-request).
 
 - [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
-- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`digits`](#fn-digits), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
+- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`min`](#fn-min), [`max`](#fn-max), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`digits`](#fn-digits), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`write_rows`](#fn-write_rows)
-- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`respond`](#fn-respond), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
-- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold)
+- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
+- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`write_json_list`](#fn-write_json_list), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 
@@ -582,6 +582,112 @@ True
 False
 ```
 
+### fn is_lower
+
+```tape
+fn is_lower(b: Int) -> Bool
+```
+
+Is the byte an ASCII lower-case letter, a-z?
+
+```
+> is_lower(b: "a"[0])
+True
+```
+
+### fn is_upper
+
+```tape
+fn is_upper(b: Int) -> Bool
+```
+
+Is the byte an ASCII upper-case letter, A-Z?
+
+```
+> is_upper(b: "a"[0])
+False
+```
+
+### fn is_alpha
+
+```tape
+fn is_alpha(b: Int) -> Bool
+```
+
+Is the byte an ASCII letter, a-z or A-Z?
+
+```
+> is_alpha(b: "_"[0])
+False
+```
+
+### fn is_alnum
+
+```tape
+fn is_alnum(b: Int) -> Bool
+```
+
+Is the byte an ASCII letter or digit?
+
+```
+> is_alnum(b: "Z"[0])
+True
+```
+
+### fn is_space
+
+```tape
+fn is_space(b: Int) -> Bool
+```
+
+Is the byte white space: a space, a tab, a line feed or a carriage return?
+
+```
+> is_space(b: 9)
+True
+```
+
+### fn every_byte
+
+```tape
+fn every_byte(v: View, keep: Fn[Int, Bool]) -> Bool
+```
+
+Does every byte of v pass `keep`? True for "" (nothing fails). For a slug, a key or a code of a fixed alphabet:
+
+```
+> every_byte(v: "order-17", keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == 45 })
+True
+> every_byte(v: "Order 17", keep: is_alnum)
+False
+```
+
+### fn min
+
+```tape
+fn min(a: Int, b: Int) -> Int
+```
+
+The smaller of two numbers.
+
+```
+> min(a: 3, b: -2)
+-2
+```
+
+### fn max
+
+```tape
+fn max(a: Int, b: Int) -> Int
+```
+
+The larger of two numbers.
+
+```
+> max(a: 3, b: -2)
+3
+```
+
 ### fn digits_end
 
 ```tape
@@ -604,6 +710,31 @@ Some(value: 42)
 > decimal(v: "042")
 None
 > decimal(v: "12a")
+None
+```
+
+### fn parse_int
+
+```tape
+fn parse_int(text: View) -> Option[Int]
+```
+
+An integer as people write one: an optional sign (`-` or `+`), then one or more digits, leading zeros and all; None for anything else, and for a number an Int cannot hold. For a value from a form, a query or a CSV field. `decimal` is the strict one, for ids in a path: no sign, no leading zero, so "/orders/007" is not order 7.
+
+```
+> parse_int(text: "007")
+Some(value: 7)
+> parse_int(text: "-42")
+Some(value: -42)
+> parse_int(text: "+5")
+Some(value: 5)
+> parse_int(text: "-9223372036854775808")
+Some(value: -9223372036854775808)
+> parse_int(text: "9223372036854775808")
+None
+> parse_int(text: "1.5")
+None
+> parse_int(text: "-")
 None
 ```
 
@@ -687,7 +818,10 @@ The code point that starts at `at` (a byte of 128 or more), and where the next o
 
 Helpers (called by the functions above; callable, but not meant to be):
 
+- `fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool`: every_byte from position `at`.
 - `fn decimal_value(v: View, at: Int, value: Int) -> Int`: the loop of decimal.
+- `fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the least Int fits.
+- `fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits after the first.
 - `fn digits_value(v: View, at: Int, value: Int) -> Int`: the loop of digits.
 - `fn write_digits(out: Buf, value: Int, last: Int) -> Buf`: the loop of write_int.
 - `fn cont(v: View, at: Int) -> Bool`: is the byte at `at` a UTF-8 continuation byte?
@@ -896,7 +1030,7 @@ Helpers (called by the functions above; callable, but not meant to be):
 
 ## std/http.tape
 
-A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY. A request that came through a published name's public route (no token: anyone) ends its line with a word, METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests.
+A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY. A request that came through a published name's public route (no token: anyone) ends its line with a word, METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. The request headers the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case. `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests.
 
 ### type Caller
 
@@ -913,11 +1047,11 @@ Who sent a request: the operator (with the token), or Anyone, through a publishe
 
 ```tape
 type Request {
-  Request(method: View, path: View, query: Option[View], body: View, caller: Caller)
+  Request(method: View, path: View, query: Option[View], body: View, caller: Caller, headers: View)
 }
 ```
 
-A request as `request(raw)` gives it. `path` is the target before `?`, as sent (percent-encoding is not undone); `query` the raw text after `?` (read one parameter with `form_field(body: q, name: "limit")`); `body` what follows the first line feed. There are no headers.
+A request as `request(raw)` gives it. `path` is the target before `?`, as sent (percent-encoding is not undone); `query` the raw text after `?` (read one parameter with `form_field(body: q, name: "limit")`); `body` what follows the first line feed; `headers` the request headers the host passed, read with `header_of`.
 
 ```
 match request(raw) {
@@ -943,6 +1077,38 @@ Request(path: "/k/a b", caller: Operator)
 Request(path: "/items", query: Some(value: ""))
 > request(raw: "GET /items\n")
 Request(path: "/items", query: None)
+> request(raw: "GET /k\raccept: text/html\n") |> header_of(name: "Accept")
+Some(value: "text/html")
+```
+
+### fn header_of
+
+```tape
+fn header_of(request: Request, name: View) -> Option[View]
+```
+
+The value of a request header, by its name in any case; the first one when there are several. A host passes only the headers it means a program to see (the service: accept, content-type, if-match, if-none-match, idempotency-key and x-…, never cookie or authorization).
+
+```
+> request(raw: "POST /\rcontent-type: text/csv\ridempotency-key: 7\nbody") |> header_of(name: "Idempotency-Key")
+Some(value: "7")
+> request(raw: "GET /\n") |> header_of(name: "accept")
+None
+> request(raw: "GET /\rx-a: 1\n") |> header_of(name: "accept")
+None
+```
+
+### fn lower
+
+```tape
+fn lower(text: View) -> View
+```
+
+ASCII letters in lower case; every other byte as it is.
+
+```
+> lower(text: "Content-Type")
+"content-type"
 ```
 
 ### fn respond
@@ -952,6 +1118,21 @@ fn respond(status: Int) -> Buf
 ```
 
 A response: the status, a line feed, then the body written by the caller. It is served as text/plain.
+
+### fn header
+
+```tape
+fn header(out: Buf, name: View, value: View) -> Buf
+```
+
+A response header, on an answer begun by respond or respond_as: `respond(status: 302) |> header(name: "location", value: url)`. The status line carries it, after a carriage return: STATUS[ SP TYPE](CR name: value)* LF BODY. A name is 1 to 64 token characters (letters, digits, and !#$%&'*+-.^_`|~) and a value up to 4096 bytes with no CR, LF or NUL; the host refuses any other (the request is answered 500 and says why), and those it sets itself (content-type, which is respond_as's, content-length, set-cookie, the security headers…).
+
+```
+> respond(status: 302) |> header(name: "Location", value: "/links/7") |> freeze
+"302\rlocation: /links/7\n"
+> respond(status: 200) |> append(view: "hi") |> header(name: "cache-control", value: "no-store") |> freeze
+"200\rcache-control: no-store\nhi"
+```
 
 ### type Content
 
@@ -1023,9 +1204,15 @@ Text into HTML, as text: & < > " and ' are written as entities, so a value from 
 
 Helpers (called by the functions above; callable, but not meant to be):
 
+- `fn header_from(lines: View, name: View) -> Option[View]`: header_of's search of the header lines.
+- `fn lower_from(out: Buf, text: View, at: Int) -> Buf`: lower from position `at`.
 - `fn opened(open: Bool) -> Int`: only the last word, and only `public`, names the caller: a target with a space in it (never sent by the service, which passes the URL's percent-encoded path) is read as before.
 - `fn caller_of(open: Bool) -> Caller`: Anyone when the request line ended with ` public`.
 - `fn asked(target: View) -> Option[View]`: the query of a target: None without a `?`, else what follows the first `?`.
+- `fn header_text(name: View, value: View) -> View`: `name: value`, or, for a name or a value the host would refuse, a part it refuses with the reason.
+- `fn token_byte(b: Int) -> Bool`: a token character (RFC 9110): a letter, a digit, or one of !#$%&'*+-.^_`|~.
+- `fn token_mark(b: Int) -> Bool`: the marks among the token characters.
+- `fn value_byte(b: Int) -> Bool`: a byte a header value may hold.
 - `fn form_from(body: View, name: View, at: Int) -> Option[View]`: form_field, from the pair that starts at `at`.
 - `fn form_decoded(raw: View) -> View`: one name or value of a form, `+` and %XX decoded.
 - `fn form_bytes(out: Buf, raw: View, at: Int) -> Buf`: the loop of form_decoded.
@@ -1111,12 +1298,57 @@ Combine the items left to right, starting from `from`: by(by(from, first), secon
 93
 ```
 
+### fn write_each
+
+```tape
+fn write_each[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf
+```
+
+Write each item into a Buf, first to last. A Buf has one owner, so it is not kept in a record or a list while a list is walked: it is handed from item to item. For a total as well, fold the list a second time.
+
+```
+> buf() |> write_each(list: Cons(head: 1, tail: Cons(head: 2, tail: Nil)), by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n * 10) }) |> freeze
+"1020"
+```
+
+### fn write_json_list
+
+```tape
+fn write_json_list[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf
+```
+
+A JSON array of the items, each written by `by`, with the commas between them: for items that are not records as they stand (a line with a computed total, a value formatted by hand). A list of records is `write_json`.
+
+```
+> buf() |> write_json_list(list: Cons(head: "a", tail: Cons(head: "b", tail: Nil)), by: fn(out: Buf, s: View) -> Buf { out |> write_json_string(text: s) }) |> freeze
+"[\"a\",\"b\"]"
+> buf() |> write_json_list(list: Nil, by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n) }) |> freeze
+"[]"
+```
+
+### fn join
+
+```tape
+fn join(list: List[View], sep: View) -> View
+```
+
+The texts with `sep` between each two.
+
+```
+> join(list: Cons(head: "a", tail: Cons(head: "b", tail: Cons(head: "c", tail: Nil))), sep: ", ")
+"a, b, c"
+> join(list: Nil, sep: ", ")
+""
+```
+
 Helpers (called by the functions above; callable, but not meant to be):
 
 - `fn length_from[T](list: List[T], acc: Int) -> Int`: the loop of length.
 - `fn reverse_onto[T](list: List[T], acc: List[T]) -> List[T]`: the loop of reverse.
 - `fn map_onto[A, B](list: List[A], by: Fn[A, B], acc: List[B]) -> List[B]`: the loop of map, last item first.
 - `fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A]`: the loop of filter, last item first.
+- `fn json_rest[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf`: write_json_list's items after the first, each after a comma.
+- `fn join_rest(out: Buf, list: List[View], sep: View) -> Buf`: join's texts after the first, each after `sep`.
 
 ## std/map.tape
 
