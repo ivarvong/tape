@@ -27,7 +27,6 @@ import type { Deps, Refusal, Usage } from './tools.ts';
 import { FEEDBACK, FEEDBACK_INPUT, feedbackTool } from './feedback.ts';
 import type { CallMeta, Store } from './feedback.ts';
 
-export const VERSION = '0.1.0';
 /** What the Worker is given besides the tools' dependencies (index.ts, from env). */
 export type Gate = {
   /** "on" refuses every call (503) */
@@ -40,6 +39,11 @@ export type Gate = {
   feedback?: Store | null;
   /** this version's id (tape-mcp-version), stored with each report */
   version?: string | null;
+  /**
+   * the tape-version of this deploy (the commit it was built from): MCP's serverInfo.version, so a client can tell a
+   * new deploy from the one whose tools it listed, and the log line's and GET /'s version
+   */
+  release: string;
 };
 
 const HEADERS = {
@@ -309,10 +313,17 @@ type Seen = {
 /** The log line of one call: what was done and how it went; never the source, a request's body or a response. */
 export const logLine = (
   seen: Seen,
-  meta: { ip_hash: string; user_agent: string; rate_limited: boolean; status: number; total_ms: number },
+  meta: {
+    ip_hash: string;
+    user_agent: string;
+    rate_limited: boolean;
+    status: number;
+    total_ms: number;
+    release: string;
+  },
 ): Fields => ({
   event: 'tape-mcp.call',
-  version: VERSION,
+  version: meta.release,
   via: seen.via,
   mcp_method: seen.method,
   tool: seen.tool,
@@ -361,6 +372,7 @@ export async function serve(request: Request, deps: Deps, gate: Gate): Promise<R
     rate_limited: false,
     status: 0,
     total_ms: 0,
+    release: gate.release,
   };
   const res = secured(await route(request, url, deps, gate, seen, meta));
   // a call refused before its body was read still finishes with the body: reached through the tape Worker's service
@@ -402,7 +414,7 @@ async function route(
     if (request.method !== 'GET') return no(refused(405, 'method_not_allowed', `${path} is GET`));
     return json({
       name: 'tape-mcp',
-      version: VERSION,
+      version: gate.release,
       what: 'Compile Tape programs, run requests against them and run their doc examples, and report what you find: MCP at POST /mcp, or JSON at POST /v1/compile, POST /v1/run, POST /v1/test and POST /v1/feedback.',
       docs: 'https://github.com/ivarvong/tape/blob/main/docs/mcp.md',
       terms: 'https://github.com/ivarvong/tape/blob/main/TERMS.md',
@@ -458,7 +470,7 @@ async function route(
     smoke: request.headers.has('x-tape-synthetic'),
   };
   const store = gate.feedback ?? null;
-  if (path === '/mcp') return mcpCall(text, deps, seen, call, store);
+  if (path === '/mcp') return mcpCall(text, deps, seen, call, store, gate.release);
   let args: unknown;
   try {
     args = JSON.parse(text);
@@ -473,7 +485,14 @@ async function route(
   return json(called.result);
 }
 
-function mcpCall(text: string, deps: Deps, seen: Seen, meta: CallMeta, store: Store | null): Promise<Response> {
+function mcpCall(
+  text: string,
+  deps: Deps,
+  seen: Seen,
+  meta: CallMeta,
+  store: Store | null,
+  release: string,
+): Promise<Response> {
   try {
     const method: unknown = fieldsOf(JSON.parse(text))['method'];
     seen.method = typeof method === 'string' ? method.slice(0, 64) : null;
@@ -482,7 +501,7 @@ function mcpCall(text: string, deps: Deps, seen: Seen, meta: CallMeta, store: St
   }
   const server: McpServer = {
     name: 'tape',
-    version: VERSION,
+    version: release,
     instructions:
       'Tape is a small language for durable services, compiled to WebAssembly; it runs in the browser, in Node and on Cloudflare Workers, and every effect is recorded (https://github.com/ivarvong/tape). compile reports what the compiler says of a program; test runs the examples in its comments (`//   > expression`, then what it should give); run compiles it and sends it HTTP requests against a fresh in-memory SQLite database, and returns each response with its effect log, whether a replay from that log matched, and its OTLP trace. With no files, both use examples/hello.tape, and their descriptions say what it gives. If anything about Tape surprises you, looks wrong or is missing, report it with feedback, with the smallest program that shows it: the maintainers read every report. Alpha; calls are logged (TERMS.md).',
     list: () => listing(deps),

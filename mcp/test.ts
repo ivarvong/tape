@@ -127,6 +127,7 @@ async function post(
     {
       killSwitch: 'off',
       salt: 'test-salt',
+      release: 'test-release',
       limiter: null,
       log: l => {
         logs.push({ ...l });
@@ -326,7 +327,9 @@ const tests: Test[] = [
       const r = F(F(opened.body)['result']);
       if (opened.status !== 200) out.push(`initialize: ${opened.status}`);
       if (r['protocolVersion'] !== '2025-06-18') out.push(`protocolVersion ${String(r['protocolVersion'])}`);
-      if (F(r['serverInfo'])['name'] !== 'tape') out.push(`serverInfo ${JSON.stringify(r['serverInfo'])}`);
+      // the deploy's tape-version, so a client can tell a new deploy (it was the constant 0.1.0 until 2026-11-23)
+      if (F(r['serverInfo'])['name'] !== 'tape' || F(r['serverInfo'])['version'] !== 'test-release')
+        out.push(`serverInfo ${JSON.stringify(r['serverInfo'])}`);
       if (!isFields(F(r['capabilities'])['tools'])) out.push('no tools capability');
       const said = r['instructions'];
       if (typeof said !== 'string' || !said.includes('TERMS.md')) out.push('instructions do not mention TERMS.md');
@@ -1176,6 +1179,7 @@ const tests: Test[] = [
         await m.serve.serve(req, depsOf(m), {
           killSwitch: 'off',
           salt: 'test-salt',
+          release: 'test-release',
           limiter: null,
           log: line => {
             void line;

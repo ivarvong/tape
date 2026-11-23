@@ -89,6 +89,9 @@ const examplesIn =
   async (wasm: Uint8Array, fns: readonly string[]): Promise<Called[]> =>
     (await runnerOf(env, wasm, wasm)).examples([...fns]);
 
+/** The commit this deploy was built from (vite.config.ts), as the tape-version header and MCP's serverInfo.version. */
+const RELEASE = typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev';
+
 /** Feedback reports: one private R2 object each (feedback.ts), behind their own rate limit. */
 const feedbackStore = (bucket: R2Bucket, limiter: RateLimit | null): Store => ({
   put: async (key, body) => {
@@ -112,6 +115,7 @@ export default {
       limiter: env.RATE,
       feedback: feedbackStore(env.FEEDBACK, env.FEEDBACK_RATE),
       version: env.VERSION?.id ?? null,
+      release: RELEASE,
       log: line => {
         console.log(JSON.stringify(line));
       },
@@ -119,7 +123,7 @@ export default {
     // which version of tape-mcp answered: for the deploy's pinned smoke, and through the tape Worker's binding
     if (env.VERSION) res.headers.set('tape-mcp-version', env.VERSION.id);
     // the commit and the compiler built in (vite.config.ts), as the tape Worker names its own (parity.ts)
-    res.headers.set('tape-version', typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev');
+    res.headers.set('tape-version', RELEASE);
     res.headers.set('tape-compiler', typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev');
     return res;
   },

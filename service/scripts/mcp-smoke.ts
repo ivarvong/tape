@@ -4,7 +4,7 @@
 // request carries Cloudflare-Workers-Version-Overrides for that Worker. With --mcp-version every answer must name that
 // version (the tape-mcp-version header: the tape Worker's version id). Nine calls of tape-mcp's 60 a minute, one of feedback's 5. Exits 1 if any check fails.
 //
-// Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run, test, feedback]; a feedback report
+// Checks: initialize (serverInfo tape, its version the deploy's tape-version, the instructions); tools/list is [compile, run, test, feedback]; a feedback report
 // (stored under smoke/: delete with node mcp/scripts/feedback.ts --delete-smoke); run with no files and
 // GET /hello/ada twice: 200 "Hello, ada" then 200 "Hello again, ada #2!", both replayed, with an OTLP trace (MCP,
 // trace: "full") and the default line trace (/v1/run: line 25 taken, then line 26);
@@ -98,7 +98,11 @@ const init = await rpc('initialize', {
 });
 const result = obj(init.j['result']);
 check(init.r.status === 200, `initialize: ${init.r.status}`);
-check(obj(result['serverInfo'])['name'] === 'tape', `initialize: serverInfo ${JSON.stringify(result['serverInfo'])}`);
+check(
+  obj(result['serverInfo'])['name'] === 'tape' &&
+    obj(result['serverInfo'])['version'] === init.r.headers.get('tape-version'),
+  `initialize: serverInfo ${JSON.stringify(result['serverInfo'])}, tape-version ${String(init.r.headers.get('tape-version'))}`,
+);
 check(str(result['instructions'] ?? '').includes('TERMS.md'), 'initialize: the instructions');
 const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);

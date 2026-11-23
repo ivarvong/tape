@@ -24,7 +24,10 @@ describe('the hosted compiler and runner, in this Worker', () => {
       }),
     });
     expect(init.status).toBe(200);
-    expect(fields(fields(await init.json())['result'])).toMatchObject({ serverInfo: { name: 'tape' } });
+    // serverInfo.version is the deploy's tape-version, so a client can tell a new deploy
+    expect(fields(fields(await init.json())['result'])).toMatchObject({
+      serverInfo: { name: 'tape', version: init.headers.get('tape-version') },
+    });
     for (const [k, v] of Object.entries({
       'x-content-type-options': 'nosniff',
       'x-frame-options': 'DENY',
