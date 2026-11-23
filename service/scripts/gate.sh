@@ -3,6 +3,8 @@
 #   service/scripts/gate.sh
 # Runs `npm run check` (node proof/all.ts, every part, ~10 min) at the repository's root on a clean tree; on success
 # writes ~/.local/state/tape/gate/<full sha> with its last lines. The tree must still be clean when it ends.
+# proof/all.ts takes the machine's gate lock ($STATE/gate.lock, proof/lock.ts) first: while another gate runs, this
+# one waits for it, and says so here and in its log.
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 STATE=${TAPE_STATE:-$HOME/.local/state/tape}
@@ -12,6 +14,7 @@ SHA=$(git rev-parse HEAD)
 mkdir -p "$STATE/gate"
 LOG="$STATE/gate/$SHA.log"
 echo "== gate @ $(git rev-parse --short=12 HEAD), log $LOG"
+[ ! -f "$STATE/gate.lock" ] || echo "== the gate lock is held ($(cat "$STATE/gate.lock")): waiting for it"
 start=$(date +%s)
 if ! NODE_NO_WARNINGS=1 npm run check > "$LOG" 2>&1; then
   tail -40 "$LOG"

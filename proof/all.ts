@@ -6,9 +6,14 @@
 //   --jobs <n>                   how many parts run at once (default: the machine's cores; --jobs 1 is one at a time)
 //   --keep-going                 run every part even after one failed (the default stops at the first failure)
 //   --changed                    only the parts whose inputs changed since the last passing gate (see below)
+//   --no-lock                    run without the machine's gate lock (below)
 // Exit 0 only when every row passed. A row passes when its command exits 0 and, where a number is recorded below
 // (how many planted bugs are caught, and by what), the number is the one recorded: a check that quietly got weaker
 // fails here as surely as one that broke.
+// One gate at a time on a machine: a run first takes ~/.local/state/tape/gate.lock (proof/lock.ts; under TAPE_STATE
+// when that is set), and a second run started meanwhile prints whose it is and waits. Several agents' gates at once
+// drove the load past 30 and the fault-injection seams test failed for that alone. service/scripts/gate.sh runs this
+// file, so it waits the same way. A lock whose process is gone is stale and taken.
 // Order: the cheap parts (format, types, lint, the fix texts and the definition) run first, all at once, and a
 // failure among them ends the run before anything slow starts; then the rest, longest first (by the times the last
 // run recorded in proof/results/all-times.json), --jobs at a time. No two parts share mutable state: each writes
@@ -18,6 +23,7 @@ import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { availableParallelism, homedir } from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
+import { acquire } from './lock.ts';
 
 const root = new URL('..', import.meta.url).pathname,
   node = process.execPath;
@@ -453,6 +459,16 @@ function selectChanged(list: readonly Part[]): Part[] {
   return keep;
 }
 const chosen = process.argv.includes('--changed') ? selectChanged(parts) : parts;
+if (!process.argv.includes('--no-lock')) {
+  const release = await acquire();
+  // a run stopped by a signal lets go of the lock (and stops its parts) instead of leaving it to look stale
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const)
+    process.on(signal, () => {
+      for (const c of children) kill(c);
+      release();
+      process.exit(128 + (signal === 'SIGINT' ? 2 : signal === 'SIGTERM' ? 15 : 1));
+    });
+}
 const wallStart = Date.now();
 const first = chosen.filter(p => cheap(p[0])),
   rest = chosen.filter(p => !cheap(p[0])).toSorted((a, b) => (times[b[0]] ?? 1e9) - (times[a[0]] ?? 1e9));
