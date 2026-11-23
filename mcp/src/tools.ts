@@ -213,7 +213,7 @@ export const RUN_INPUT = {
       type: 'string',
       enum: TRACE_MODES,
       description:
-        'lines (the default): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none.',
+        'lines (the default for one request): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none (the default for more than one request: ask for lines to see them).',
     },
     effects: {
       type: 'string',
@@ -640,7 +640,10 @@ export async function runTool(
   if (isRefusal(c)) return { result: c, usage: null };
   const requests = requestsOf(args);
   if (isRefusal(requests)) return { result: requests, usage: null };
-  const trace = modeOf<TraceMode>(args, 'trace', TRACE_MODES, 'lines');
+  // the line trace by default for one request only: 50 requests' traces made answers of 50,000 to 62,000
+  // characters, more than a client shows (the usability bench, twice), and a run of many requests is read for its
+  // statuses, bodies and effects; a trace is still there for the asking
+  const trace = modeOf<TraceMode>(args, 'trace', TRACE_MODES, requests.length === 1 ? 'lines' : 'none');
   if (isRefusal(trace)) return { result: trace, usage: null };
   const effects = modeOf<EffectsMode>(args, 'effects', EFFECTS_MODES, 'compact');
   if (isRefusal(effects)) return { result: effects, usage: null };

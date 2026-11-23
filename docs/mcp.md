@@ -120,7 +120,7 @@ mode.
   `rows_returned`).
 - A write or a timer that the request's `rollback(out)` or a trap undid has `undone: true`: it did not stay. Its
   trace event has `tape.sql.undone` (or `tape.timer.undone`), and the span's `tape.sql.rows_written` leaves it out.
-- `trace`: with `"lines"` (the default), the request's line trace as text, as `node tape.ts` prints it: each
+- `trace`: with `"lines"` (the default when the call has one request), the request's line trace as text, as `node tape.ts` prints it: each
   function entered; each arm or step tried in your files, `✓` taken or `✗` tried and not taken, with its `file:line`
   and source; each effect under the line that made it (a query in your words with its `:name` values and what came
   back, a call, a timer). It is made from the effect log, by replaying the request through the program built with
@@ -128,7 +128,9 @@ mode.
   (`✗ trap 4: division by zero at limits.tape:7  …`). At most 200 lines, then `… N more lines`; a request of more
   than 200,000 steps gets no line trace (it says so). `"full"` gives the trace as OTLP/JSON (`resourceSpans`), made by the same `otlp()` the service uses
   ([`service/src/view.ts`](../service/src/view.ts)) from the same log; the playground shows the same spans. `"none"`
-  gives `trace: null`. A full trace is most of an answer's size: ask for it when you need the spans themselves.
+  gives `trace: null`, and is the default when the call has more than one request (fifty line traces made answers
+  of 50,000 characters and more, which clients do not show): ask for `"lines"` to see them. A full trace is most
+  of an answer's size: ask for it when you need the spans themselves.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got
   the same bytes back (or, for a trap, the same trap). `replay_error` says why when it did not.
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive
@@ -142,8 +144,9 @@ mode.
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not
   compile, `ok` is false, `diagnostics` says why and nothing runs.
 
-The same input gives the same output except trace ids and times. On purpose, `random(from: entropy)` is seeded
-the same way on every call: an agent that sends the same program and requests again gets the same answer, so it can
+The same input gives the same output except trace ids and times. On purpose, `random(from: entropy)` starts
+from the same seed on every call, and its stream goes on across the call's requests (the second request's draws
+follow the first's): an agent that sends the same program and requests again gets the same answer, so it can
 check what changed.
 
 #### The clock, and timers

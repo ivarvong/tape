@@ -1266,8 +1266,15 @@ const tests: Test[] = [
     // wanted are read off examples/hello.tape and test/limits.tape, not off this code
     run: async m => {
       const out: string[] = [];
-      const { out: h } = await tool(m, 'run', { requests: ['GET /hello/ada', 'GET /hello/ada'] });
+      const { out: h } = await tool(m, 'run', { requests: ['GET /hello/ada', 'GET /hello/ada'], trace: 'lines' });
       const [first, second] = RESULTS(h).map(x => x['trace']);
+      // the default: the line trace for one request, none for more (fifty traces made answers no client showed)
+      const one = RESULTS((await tool(m, 'run', { requests: ['GET /hello/ada'] })).out).map(x => typeof x['trace']);
+      const two = RESULTS((await tool(m, 'run', { requests: ['GET /hello/ada', 'GET /nope'] })).out).map(
+        x => x['trace'],
+      );
+      if (JSON.stringify(one) !== '["string"]' || JSON.stringify(two) !== '[null,null]')
+        out.push(`default trace: one request ${JSON.stringify(one)}, two ${JSON.stringify(two)}`);
       if (typeof first !== 'string' || typeof second !== 'string')
         out.push(`the default trace is text: ${JSON.stringify(first).slice(0, 120)}`);
       const a = String(first).split('\n'),
@@ -1290,7 +1297,7 @@ const tests: Test[] = [
       // a trap ends the trace with its reason, at the arm it happened in: 100 / len("") in the arm of line 7
       const files = [{ name: 'limits.tape', text: LIMITS_TAPE }];
       const requests = ['GET /div/', 'GET /dice'];
-      const { out: r } = await tool(m, 'run', { files, requests });
+      const { out: r } = await tool(m, 'run', { files, requests, trace: 'lines' });
       const div = String(RESULTS(r)[0]?.['trace']).split('\n');
       const last = div.at(-1) ?? '';
       if (

@@ -145,6 +145,7 @@ describe('tape-mcp in workerd', () => {
     const at = (request: string, at_ms: number): Fields => ({ request, at_ms });
     const { out } = await call('run', {
       files: [{ name: 'clock.tape', text: clock }],
+      trace: 'lines',
       requests: [
         at('POST /hit', 1000),
         at('POST /later/7', 1000),
@@ -175,7 +176,8 @@ describe('tape-mcp in workerd', () => {
       );
     expect(nowOf(rs[3]) - nowOf(rs[0])).toBe(59_500);
     expect(out['timers']).toEqual({ fired: 1, pending: 0 });
-    // and the line trace is the default: made in the Dynamic Worker from the log, by the traced build
+    // and the line trace, asked for (several requests have none by default): made in the Dynamic Worker from the
+    // log, by the traced build
     expect(String(rs[0]?.['trace'])).toMatch(/^handle\n/);
     expect(String(rs[0]?.['trace'])).toContain('✓ clock.tape:');
   });
