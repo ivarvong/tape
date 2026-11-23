@@ -3,6 +3,8 @@
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { std } from '../std.ts';
+import { instantiate } from '../host.ts';
+import { nodeSql } from '../nodesql.ts';
 import { finish, same } from './harness.ts';
 
 const said = (text: string): string => {
@@ -30,5 +32,66 @@ same(
   ],
   ['compiled', 'compiled'],
 );
+
+// ---- C54 across a call (the webhook task, C54 on all 3 Haiku runs, 7 refusals): the caller claims the delivery
+// id (`let 1 = sql_exec("INSERT … ON CONFLICT DO NOTHING") else …`), then calls the helper that credits. Every
+// call of the helper is after a claim, so its write runs once per claim. A helper also called where nothing was
+// claimed is still refused: the reason 0.3 kept the claim to one function (apps/tickets' "promotion without its
+// op-id guard" plant, proof/all.ts).
+{
+  const WEBHOOK = `migration 1 "c" {
+  CREATE TABLE d(id TEXT PRIMARY KEY NOT NULL, n INTEGER NOT NULL);
+  CREATE TABLE a(k TEXT PRIMARY KEY NOT NULL, b INTEGER NOT NULL)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let r = request(raw)
+  match r.path {
+    "/in/" ++ id -> received(id)
+    OTHER
+    _ -> respond(status: 404)
+  }
+}
+
+fn received(id: View) -> Buf {
+  let 1 = sql_exec(query: "INSERT INTO d(id, n) VALUES (:id, 1) ON CONFLICT(id) DO NOTHING", id) else -> respond(status: 200) |> append(view: "dup")
+  match id {
+    "refund" -> credit(k: "acme", by: -5)
+    _ -> credit(k: "acme", by: 5)
+  }
+}
+
+fn credit(k: View, by: Int) -> Buf {
+  do sql_exec(query: "INSERT INTO a(k, b) VALUES (:k, :by) ON CONFLICT(k) DO UPDATE SET b = b + :by", k, by)
+  respond(status: 200) |> append(view: "ok")
+}
+`;
+  const codesOf = (text: string): string[] =>
+    compile([...std, { name: 't.tape', text }]).errors.map(e => `${e.code}:${e.line}`);
+  const claimed = WEBHOOK.replace('    OTHER\n', '');
+  same('C54: a write in a helper every call of which comes after a claim is taken', codesOf(claimed), []);
+  same(
+    '…and it runs once: the same delivery twice credits once',
+    (() => {
+      const r = compile([...std, { name: 't.tape', text: claimed }]);
+      if (!r.wasm) return 'does not compile';
+      const sql = nodeSql();
+      const app = instantiate(new WebAssembly.Module(r.wasm), { sql, log: false });
+      const send = (): string => new TextDecoder().decode(app.handle(new TextEncoder().encode('POST /in/x1\n')));
+      return [send(), send(), sql.exec("SELECT b FROM a WHERE k = 'acme'").toArray()[0]?.['b']];
+    })(),
+    ['200\nok', '200\ndup', 5],
+  );
+  same(
+    'C54: the same helper also called with no claim before it is refused',
+    codesOf(WEBHOOK.replace('    OTHER\n', '    "/adjust" -> credit(k: "acme", by: 1)\n')),
+    ['C54:24'],
+  );
+  same(
+    'C54: a call where the claim failed (its else) is refused',
+    codesOf(claimed.replace('else -> respond(status: 200) |> append(view: "dup")', 'else -> credit(k: "acme", by: 1)')),
+    ['C54:23'],
+  );
+}
 
 finish();

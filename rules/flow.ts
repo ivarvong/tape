@@ -26,19 +26,26 @@ export function witnessed(cs: readonly Expr[], q: Query, calls: Calls): boolean 
       countOfGuarded(q.args[String(c.l.n)], q.fn, calls, 0)
     )
       return true;
-  return underMoved(q.at, q.fn, calls, 0) || claimedArms(q.fn).has(q.at);
+  return underMoved(q.at, q.fn, calls, 0) || underClaim(q.at, q.fn, calls, 0);
 }
 // An INSERT … ON CONFLICT DO NOTHING (or INSERT OR IGNORE) whose row a step requires (`let Some(value: t) =
 // sql_first(… RETURNING …) else …`, `let 1 = sql_exec(…) else …`) claims an op id: a second run of the request meets
 // the first one's row, inserts nothing, and leaves through the else. What runs only after the claim runs once per
-// op id (the ledger's debit after its transfer-id insert). The claim must be in the write's own function: a claim
-// in a caller says only that this call runs once, not that the function, called from elsewhere too, writes once.
+// op id (the ledger's debit after its transfer-id insert). The claim is in the write's own function, or every call
+// of that function is after one (the webhook's credit helper, called once its delivery id is claimed): a claim in
+// one caller says only that this call runs once, not that the function, called from elsewhere too, writes once.
 function claims(e: TapeExpr | undefined): boolean {
   if (e?.k !== 'call' || (e.name !== 'sql_first' && e.name !== 'sql_exec')) return false;
   const qq = e.args.find(a => a.label === 'query')?.value;
   if (qq?.k !== 'str') return false;
   const ast = treeOf(dec(qq.bytes)).ast;
   return ast?.k === 'insert' && (ast.upsert?.action === 'nothing' || ast.or === 'IGNORE') && !!ast.cols;
+}
+function underClaim(node: Node, fn: FnDecl, calls: Calls, depth: number): boolean {
+  if (depth > 4) return false;
+  if (claimedArms(fn).has(node)) return true;
+  const sites = calls.get(fn.name) ?? [];
+  return sites.length > 0 && sites.every(({ from, node: n }) => underClaim(n, from, calls, depth + 1));
 }
 const CLAIMED = new WeakMap<FnDecl, Set<Node>>();
 function claimedArms(fn: FnDecl): Set<Node> {

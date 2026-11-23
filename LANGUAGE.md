@@ -402,7 +402,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made | C55 |
 | Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
-| Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves), or `repeat: True` on the call when every attempt should count | C54 |
+| Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves; the write may be in a function every call of which comes after the claim), or `repeat: True` on the call when every attempt should count | C54 |
 | Pass a value to a query | `:name` in the query, and an argument of that name | C11, C13, C32 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
 | Command another program | `call` with `within:` and a `once:` key that names the row | C39, C41, C71 |
@@ -568,7 +568,19 @@ fn hash(h: Int, byte: Int) -> Int {
 // hash(-3750763034362895579, 97) is -5808556873153909620
 ```
 
-## 11. Not defined yet
+## 11. Changes in 0.4
+
+What 0.4 changed, from the 0.3 usability benchmark (48 agent runs) and its feedback, newest first. Section 13 has
+what went before.
+
+| When | Change |
+|---|---|
+| 23 November 2026 | C54 takes a write in a helper when every call of the helper comes after a claim of an op id (the webhook's credit, called once its delivery id is inserted). A helper also called where nothing was claimed is still refused |
+| 23 November 2026 | the capabilities the compiler adds (`db` of a function that reads the database) are not written parameters: `load(order.id)` for `fn load(id: Int)` takes its argument bare, no refusal lists them, and C11 shows the call with the parameter's name |
+| 23 November 2026 | `_ ->` in a match with no subject, and `else ->` in a match on a value, say which fallback arm that match takes |
+| 23 November 2026 | the docs say nothing the compiler contradicts (headers, `is_alpha`, a sign in `parse_int`): `test/docs.ts` compiles every code block in them |
+
+## 12. Not defined yet
 
 - What a version built by an older compiler may rely on. Today: it keeps running as built, and nothing more.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
@@ -576,7 +588,7 @@ fn hash(h: Int, byte: Int) -> Int {
 - JSON for bytes, maps and floats; writing a record with an `Option` field.
 - Numbers other than `Int`.
 
-## 12. What went
+## 13. What went
 
 | When | What | Now |
 |---|---|---|

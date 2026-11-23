@@ -74,7 +74,7 @@ Bugs that are reproduced and not fixed, and gaps in the checks that can hide one
 9. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
     it (`:name`).**
 
-The language's own limits are in [`LANGUAGE.md` section 11](LANGUAGE.md#11-not-defined-yet). In short: no floats;
+The language's own limits are in [`LANGUAGE.md` section 12](LANGUAGE.md#12-not-defined-yet). In short: no floats;
 call keys (`once:`) are integers; stored replies to keyed calls never expire; JSON has no bytes, no maps with
 arbitrary keys and no floats, and a record with an `Option` field can be decoded but not written; function values
 take one or two parameters and cannot capture a `Buf` or a capability; each file is a namespace for its functions,
