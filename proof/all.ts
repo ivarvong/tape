@@ -141,6 +141,11 @@ const all: Part[] = [
   ...tests.map((t): Part => [t, [node, t]]),
   ['doc examples in std and examples', [node, 'tape.ts', 'test'], /\d+ examples, 0 failed/],
   [
+    'docs/gen-std.ts --check: docs/std.md is current, every std function and type has a doc comment, every built-in an entry, every common task compiles',
+    [node, 'docs/gen-std.ts', '--check'],
+    /^docs\/std\.md is current/m,
+  ],
+  [
     'proof/verify.ts: the interpreter against three builds, and the rest of its table',
     [node, 'proof/verify.ts', '300'],
   ],
