@@ -1,6 +1,7 @@
 // compiler/gen/expr.ts: an expression checked and written as Wasm; its type is what the emitter gives back.
 import { eachExpr, eachPattern, eachType, patternsIn, unreachable } from '../ast.ts';
 import type { Arg, Expr, Pattern, TypeAst, Variant } from '../ast.ts';
+import { showExpr } from '../../rules/origins.ts';
 import { I32, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
@@ -228,12 +229,25 @@ function emitConcat(c: Ctx, e: Of<'bin'>, lt: Type): Type {
   return VIEW;
 }
 
+/**
+ * C19's fix. An Option against None (`title != None`) is asked with a match, written out for that value, or with
+ * the step that goes on with the value; any other value is taken apart with `match`.
+ */
+function compareHint(e: Of<'bin'>, lt: Type): string {
+  const none = (x: Expr): boolean => x.k === 'ctor' && x.name === 'None' && x.args.length === 0;
+  const other = none(e.r) ? e.l : none(e.l) ? e.r : null;
+  if (lt.name !== 'Option' || other === null) return 'Use `match` to take the value apart.';
+  const v = showExpr(other),
+    has = e.op === '!=';
+  return `An Option is asked what it holds, not compared: write \`match ${v}\` with the arms \`Some -> ${has ? 'True' : 'False'}\` and \`None -> ${has ? 'False' : 'True'}\`, each on its own line; to go on only when it holds a value, \`let Some(value) = ${v} else -> …\`.`;
+}
+
 function emitEquals(c: Ctx, e: Of<'bin'>, lt: Type): Type {
   const { op } = e;
   if (lt.name === 'Float') return emitFloatBin(c, e);
   if (lt.name === 'Dec') return emitDecBin(c, e, lt);
   if (!['Int', 'Bool', 'View'].includes(lt.name))
-    fail(e, 'C19', `${key(lt)} values cannot be compared with ${op}`, 'Use `match` to take the value apart.');
+    fail(e, 'C19', `${key(lt)} values cannot be compared with ${op}`, compareHint(e, lt));
   need(c, c.emit(e.r, lt, false), lt, e, `the right side of ${op}`);
   if (lt.name === 'View') c.code.push(0x10, ...uleb(c.B.fnIndex('same')));
   else c.code.push(lt.name === 'Int' ? 0x51 : 0x46);

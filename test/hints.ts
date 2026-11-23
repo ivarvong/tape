@@ -555,4 +555,30 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   same('…which compiles', said(prog(fixed)), 'compiled');
 }
 
+// ---- an Option compared with None. `let True = title != None or done != None else -> …` (2 runs on the 2026-11-23f
+// bench) was C19 "Option[View] values cannot be compared with !=", fix "Use `match`". The fix now writes the match
+// for that value (`match title` with `Some -> True` and `None -> False`; for `==` the other way round) and the step
+// that goes on with the value, and each, written in, compiles.
+{
+  const prog = (body: string): string =>
+    `fn wants(title: Option[View]) -> Bool {\n${body}\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+  const ne = said(prog('  title != None'));
+  same('title != None: C19', code(ne), 'C19:2');
+  same(
+    '…whose fix is the match for title',
+    ['`match title`', '`Some -> True`', '`None -> False`', '`let Some(value) = title else -> …`'].every(w =>
+      hint(ne).includes(w),
+    ),
+    true,
+  );
+  same('…the match compiles', said(prog('  match title {\n    Some -> True\n    None -> False\n  }')), 'compiled');
+  same('…the step compiles', said(prog('  let Some(value) = title else -> False\n  len(value) > 0')), 'compiled');
+  const eq = said(prog('  title == None'));
+  same(
+    'title == None: the match the other way round',
+    [code(eq), hint(eq).includes('`Some -> False`') && hint(eq).includes('`None -> True`')],
+    ['C19:2', true],
+  );
+}
+
 finish();
