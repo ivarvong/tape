@@ -34,12 +34,15 @@ const wanted = (kind: Token['t'], v?: string): string =>
 export class Cursor {
   readonly file: string;
   readonly toks: readonly Token[];
+  /** the file's text, for a diagnostic that writes a line back corrected ('' over a hole's tokens) */
+  private readonly text: string;
   private readonly end: Token;
   pos = 0;
   /** over a file's text, or over tokens already read (a hole of a text literal) */
   constructor(file: string, text: string | readonly Token[]) {
     this.file = file;
     this.toks = typeof text === 'string' ? lexed(file, text) : text;
+    this.text = typeof text === 'string' ? text : '';
     // lex ends every file with this token: reading past it gives it again
     this.end = this.toks.at(-1) ?? { t: 'eof', line: 1, file };
   }
@@ -85,6 +88,25 @@ export class Cursor {
             ? `One step to a line: start a new line before ${shown(this.peek())}.`
             : `Write ${wanted(kind, v)} here.`),
       )
+    );
+  }
+  /**
+   * `true` or `false` where a name stands (a value, a `let`, a pattern): written as Bool literals they are `True` and
+   * `False`, so this refuses them, with the line written back that way. Not a field's name, which is never a variable.
+   */
+  boolWord(t: Token): void {
+    if (t.t !== 'id' || (t.v !== 'true' && t.v !== 'false')) return;
+    const line = (this.text.split('\n')[t.line - 1] ?? '')
+      .trim()
+      .replaceAll(/\btrue\b/g, 'True')
+      .replaceAll(/\bfalse\b/g, 'False');
+    fail(
+      t,
+      'P01',
+      'Bool literals are `True` and `False`',
+      line
+        ? `Write the line as \`${line}\`. A step that goes on only when a condition holds is \`let True = cond else -> …\`.`
+        : 'Write `True` or `False`.',
     );
   }
   /** a record field's name: any name, a reserved word too (`type`, `match`), since it is never a variable */

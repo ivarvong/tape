@@ -157,6 +157,7 @@ function atom(c: Cursor, t: Token): Expr {
     c.expect('op', ')');
     return inner;
   }
+  if (t.t === 'id' && !c.is('op', '(')) c.boolWord(t);
   if (t.t === 'id')
     return c.eat('op', '(')
       ? numberedCall({ k: 'call', name: t.v, args: args(c), ...at })
@@ -332,6 +333,7 @@ export function pattern(c: Cursor, inLet = false): Pattern {
 // a pattern that opens with a name: `name = Pattern` (the whole value, once it matches), `decimal(n)`, or a binding
 function namedPattern(c: Cursor, t: Token & { t: 'id' }, inLet: boolean): Pattern {
   const at = c.at(t);
+  if (!c.is('op', '(')) c.boolWord(t);
   if (!inLet && c.eat('op', '=')) return { k: 'as', name: t.v, pat: pattern(c), ...at };
   if (!c.eat('op', '(')) return { k: 'bind', name: t.v, ...at };
   const sub = pattern(c);
@@ -500,6 +502,7 @@ function letElse(c: Cursor, at: { line: number; file: string }, pat: Pattern, va
 }
 // `let name = e`
 function plainLet(c: Cursor): Let {
+  c.boolWord(c.peek());
   const n = c.expect('id');
   if (c.is('op', ':'))
     fail(c.peek(), 'P01', 'a `let` names a value without a type', `Write \`let ${n.v} = …\`: its type is the value's.`);

@@ -501,4 +501,32 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   );
 }
 
+// ---- `true` and `false` for Bool literals. An agent wrote `let true = from != to else -> …` (P01 "expected a new
+// line but found `else`") and `true` as a value (C16 "unknown name true: `let true = …`"), and a pattern arm `true ->`
+// bound a variable named true, taking every value. Each is now P01 "Bool literals are True and False", with the line
+// written back with them, and that line compiles.
+{
+  const fn = (body: string): string =>
+    `fn f(a: Int, b: Bool) -> Int {\n${body}\n}\n\nfn g(on: Bool) -> Bool {\n  on\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+  const cases: readonly (readonly [string, string, string])[] = [
+    ['a step', '  let true = a > 1 else -> 0\n  a', '  let True = a > 1 else -> 0\n  a'],
+    [
+      'a value',
+      '  match g(on: false) {\n    True -> 1\n    False -> 0\n  }',
+      '  match g(on: False) {\n    True -> 1\n    False -> 0\n  }',
+    ],
+    ['a pattern', '  match b {\n    true -> 1\n    _ -> 0\n  }', '  match b {\n    True -> 1\n    _ -> 0\n  }'],
+  ];
+  for (const [what, wrong, right] of cases) {
+    const s = said(fn(wrong));
+    const line = right.split('\n')[wrong.split('\n').findIndex(l => /\b(true|false)\b/.test(l))]?.trim() ?? '';
+    same(
+      `true/false in ${what}: P01 that says Bool literals are True and False, and writes the line back`,
+      [s === 'compiled' ? '' : s.code, s === 'compiled' ? '' : s.message, hint(s).includes(`\`${line}\``)],
+      ['P01', 'Bool literals are `True` and `False`', true],
+    );
+    same(`…and that line compiles (${what})`, said(fn(right)), 'compiled');
+  }
+}
+
 finish();
