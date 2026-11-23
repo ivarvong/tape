@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { std } from '../std.ts';
+import { INTRINSICS } from '../compiler/types.ts';
 import { Workbench } from '../apps/playground/src/workbench.ts';
 import { nodeSql } from '../apps/playground/src/sqlite.ts';
 import type * as RunnerM from './src/runner.ts';
@@ -440,6 +441,37 @@ const tests: Test[] = [
         if (F(t['outputSchema'])['type'] !== 'object') out.push(`${String(t['name'])}: no outputSchema`);
       }
       const [compile, run] = tools;
+      // the cheat sheet: in both, linking the std reference and the guide, naming what the usability benchmark's
+      // agents could not find; every function it names is one std/ defines or a built-in; and short
+      const stdFns = new Set(std.flatMap(f => [...f.text.matchAll(/^fn ([a-z_][a-z0-9_]*)/gm)].map(x => x[1] ?? '')));
+      for (const t of [compile, run]) {
+        const d = String(t?.['description']);
+        for (const said of [
+          'docs/std.md',
+          'docs/guide.md#a-whole-rest-service-worked',
+          'respond_as(status: 200, content: Json)',
+          'query: Option[View]',
+          'form_field(body: q, name: "limit")',
+          'decode(json: body, as: NewItem)',
+          ':name',
+        ])
+          if (!d.includes(said)) out.push(`${String(t?.['name'])}: its description does not say ${said}`);
+        const sheet = d.slice(d.indexOf('Tape in brief'), d.indexOf('examples/hello.tape, the program'));
+        const named = [...sheet.matchAll(/\b([a-z_][a-z0-9_]*)\(/g)].map(x => x[1] ?? '');
+        const unknown = [...new Set(named)].filter(
+          n => !stdFns.has(n) && !INTRINSICS.has(n) && n !== 'handle' && n !== 'f',
+        );
+        if (named.length < 10 || unknown.length > 0)
+          out.push(
+            `${String(t?.['name'])}: the cheat sheet names ${named.length} functions; not in std: ${unknown.join(', ')}`,
+          );
+        if (d.length > 6000) out.push(`${String(t?.['name'])}: its description is ${d.length} characters, over 6000`);
+      }
+      for (const said of ['at_ms', 'woken', '"summary"', '"compact"'])
+        if (!String(run?.['description']).includes(said)) out.push(`run: its description does not say ${said}`);
+      const props = F(F(run?.['inputSchema'])['properties']);
+      if (JSON.stringify(F(props['trace'])['enum']) !== '["summary","full","none"]') out.push('run: no trace enum');
+      if (JSON.stringify(F(props['effects'])['enum']) !== '["compact","full"]') out.push('run: no effects enum');
       if (!String(compile?.['description']).includes('C54')) out.push('compile: its description does not say C54');
       if (!String(run?.['description']).includes('Hello again, ada #2!'))
         out.push('run: its description does not give the second body');
@@ -1144,6 +1176,20 @@ const PLANTS: Plant[] = [
     file: 'serve.ts',
     from: 'and no files. Both are status 200; the first body is "Hello, ada", the second "Hello again, ada #2!"; each has one sql effect, the INSERT with params {":name": "ada"} and rows [[1]] then [[2]]; both are replayed: true.\n\n${hello}',
     to: 'and no files. Both are status 200; the first body is "Hello, ada", the second "Hello again, ada #2!"; each has one sql effect, the INSERT with params {":name": "ada"} and rows [[1]] then [[2]]; both are replayed: true.',
+  },
+  {
+    test: 'list',
+    what: "run's description leaves out the cheat sheet",
+    file: 'serve.ts',
+    from: 'Calls to other programs answer Unreachable.\n\n${CHEAT_SHEET}',
+    to: 'Calls to other programs answer Unreachable.',
+  },
+  {
+    test: 'list',
+    what: 'the cheat sheet names a function std does not have',
+    file: 'serve.ts',
+    from: 'decimal(v)',
+    to: 'parse_int(v)',
   },
   {
     test: 'compile',

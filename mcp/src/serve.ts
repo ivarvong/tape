@@ -124,17 +124,37 @@ const DIAGNOSTICS_SCHEMA = {
 };
 const refusalFields = { error: { type: 'string' }, reason: { type: 'string' } };
 
+const DOCS = 'https://github.com/ivarvong/tape/blob/main/docs';
+/**
+ * Tape in brief, in compile's and run's descriptions: what an agent reached for first in the usability benchmark
+ * and could not find (bench/usability, 2026-11-22: respond_as, Request's fields, the query). Every function named
+ * here is in std/ or a built-in (mcp/test.ts, list).
+ */
+export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a whole REST service, worked: ${DOCS}/guide.md#a-whole-rest-service-worked; the language: https://github.com/ivarvong/tape/blob/main/LANGUAGE.md):
+- Entry: \`fn handle(raw: View, db: Sql) -> Buf\`, with only the capabilities it uses (db: Sql, clock: Clock, timer: Timer). Arguments are named, \`f(a: 1)\`, or bare when the value is named so, \`f(a)\`.
+- Request: \`match request(raw) { Request(method: "GET", path: "/items/" ++ decimal(id)) -> … }\`. Fields: method, path (before \`?\`), query: Option[View] (raw, after \`?\`; one parameter: \`form_field(body: q, name: "limit")\`), body, caller. No headers.
+- Respond: \`respond(status: 404)\` is text/plain; \`respond_as(status: 200, content: Json) |> write_json(value: Item(id, name))\` is JSON (content: Json, Html, Text, Css or Svg); \`write_rows(rows: sql_all(…))\` writes rows as an array; \`append(view: "text")\` adds text. write_json takes a record: a List goes in a field.
+- JSON in (an arm of a block is a line of its own):
+    let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
+      Err(error) -> respond(status: 400) |> append(view: error)
+    }
+  Its error names the field. Refined types validate: \`type Qty = Int where self >= 1 and self <= 100\`. An Option field may be absent.
+- SQL: \`sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)\` gives Option[Item]; \`sql_all\` gives Rows[Item]; \`sql_exec(query: "UPDATE items SET qty = :qty WHERE id = :id", qty, id)\` the rows changed. Each :name takes the argument of that name. Tables: \`migration 1 "items" { CREATE TABLE … }\` (a TEXT PRIMARY KEY needs NOT NULL). A POST that makes a row takes the client's key: UNIQUE, \`ON CONFLICT(key) DO NOTHING RETURNING *\`.
+- Text and numbers: \`decimal(v)\` gives Option[Int]; holes \`"\\(n) items"\`; \`a ++ b\`; \`v[i]\` is a byte, \`len(v)\` the length. Steps: \`let P = e else { arms }\`; a match is the last expression of a function or an arm.`;
+
 /** The tools' descriptions: what each does, and examples/hello.tape with what it gives, to check in one call. */
 export function listing(deps: Deps): Fields[] {
   const hello = `examples/hello.tape, the program used when \`files\` is left out:\n\n\`\`\`tape\n${deps.hello.text.trimEnd()}\n\`\`\``;
-  const limits = `Limits: ${LIMITS.files} files and ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, each body at most ${LIMITS.requestBodyBytes / 1024} KB; each request runs within Tape's own budget (50,000,000 steps, 64 MB of memory); response bodies longer than ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. These are alpha limits and may change, as may anything else. Calls are logged (what was called, sizes, counts, codes and timings; not the source, bodies or responses): https://github.com/ivarvong/tape/blob/main/TERMS.md`;
+  const limits = `Limits (alpha, as is everything, and may change): ${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, bodies up to ${LIMITS.requestBodyBytes / 1024} KB; Tape's budget per request (50,000,000 steps, 64 MB); response bodies past ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. Calls are logged (what was called, sizes, counts, codes, timings; not the source, bodies or responses): https://github.com/ivarvong/tape/blob/main/TERMS.md`;
   return [
     {
       name: 'compile',
       title: 'Compile a Tape program',
-      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size and its SQL statement count.
+      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size and its SQL statement count. \`run\` compiles too, and runs requests.
 
 To check it works: compile with no arguments gives {"ok": true, "diagnostics": []}. Send hello.tape with the line \`repeat: True,\` taken out, and it gives ok: false and one diagnostic, code C54 at hello.tape line 11: the INSERT … DO UPDATE SET n = n + 1 would apply twice if the request were run twice.
+
+${CHEAT_SHEET}
 
 ${hello}
 
@@ -156,9 +176,11 @@ ${limits}`,
     {
       name: 'run',
       title: 'Run HTTP requests against a Tape program',
-      description: `Compile a Tape program and send it HTTP requests, in order, against one fresh in-memory SQLite database that lasts for this call only. A request is "METHOD SP TARGET", then optionally a line feed and a body: "GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}".
+      description: `Compile a Tape program and send it HTTP requests, in order, on one fresh in-memory SQLite database that lasts for this call. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} to send it on the run's own clock: now() is the run's start plus at_ms (a request without one keeps the time before it), and each timer due by then runs first, as a result of its own ("woken {\\"key\\":7}"), so a 60 s window or a retry is tested without waiting.
 
-Each result has the status, content type and body; effects, the effect log (each SQL statement as the program wrote it, with its :name placeholders, the params bound to each name, and the rows it returned or how many it wrote; calls, clock reads, random draws, timers); replayed, true when the service ran the request again from that log alone and got the same bytes; steps, the reductions it used; and trace, its spans as OTLP/JSON (resourceSpans), made from the same log. If the program does not compile, ok is false and diagnostics says why, as compile does. random() is seeded the same way on every call, on purpose: the same input gives the same output except trace ids and times. Calls to other programs answer Unreachable: one program runs at a time.
+Each result: status, content_type, body; effects, the effect log (each SQL statement as written, its :name params, rows_written or rows_returned and the rows: effects "compact", the default, leaves rows out past ${LIMITS.compactRows}, "full" keeps them; calls, now, random, wake); replayed, true when a replay from that log alone gave the same bytes; steps; trace: "summary" (default: each span's name, status, duration_us, events), "full" (OTLP/JSON) or "none". If it does not compile, ok is false with diagnostics, as compile gives. random() is seeded the same on every call. Calls to other programs answer Unreachable.
+
+${CHEAT_SHEET}
 
 To check it works: run with requests ["GET /hello/ada", "GET /hello/ada"] and no files. Both are status 200; the first body is "Hello, ada", the second "Hello again, ada #2!"; each has one sql effect, the INSERT with params {":name": "ada"} and rows [[1]] then [[2]]; both are replayed: true.
 
@@ -173,8 +195,32 @@ ${limits}`,
             type: 'array',
             minItems: 1,
             maxItems: LIMITS.requests,
-            items: { type: 'string' },
-            description: 'Requests, run in order: "GET /hello/ada", or "POST /path\\n<body>".',
+            items: {
+              anyOf: [
+                { type: 'string' },
+                {
+                  type: 'object',
+                  properties: {
+                    request: { type: 'string' },
+                    at_ms: { type: 'integer', minimum: 0, maximum: LIMITS.atMs },
+                  },
+                  required: ['request'],
+                  additionalProperties: false,
+                },
+              ],
+            },
+            description:
+              'Requests, run in order: "GET /hello/ada", "POST /path\\n<body>", or {"request": "GET /x", "at_ms": 61000} on the run\'s own clock (ms from its start, never going back).',
+          },
+          trace: {
+            type: 'string',
+            enum: ['summary', 'full', 'none'],
+            description: 'summary (the default): each span in a few words; full: OTLP/JSON; none.',
+          },
+          effects: {
+            type: 'string',
+            enum: ['compact', 'full'],
+            description: `compact (the default): a query's rows only when it returned at most ${LIMITS.compactRows}; full: all.`,
           },
         },
         required: ['requests'],
@@ -186,6 +232,7 @@ ${limits}`,
           ok: { type: 'boolean' },
           diagnostics: DIAGNOSTICS_SCHEMA,
           results: { type: 'array', items: { type: 'object' } },
+          timers: { type: 'object' },
           ...refusalFields,
         },
         required: ['ok'],

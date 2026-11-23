@@ -62,6 +62,10 @@ curl -s https://tape.ivar.workers.dev/v1/compile -H 'content-type: application/j
 ## The tools
 
 `compile` and `run` are below; [`feedback`](#feedback) sends what you found to the maintainers.
+The descriptions of `compile` and `run` carry a cheat sheet of the language (the entry point, `Request`'s fields and
+the query, `respond_as` and JSON out, `decode`, the SQL calls with `:name`) and link [the std reference](std.md)
+and [the guide's worked REST service](guide.md#a-whole-rest-service-worked); each is about 1,100 (compile) and 1,300
+(run) tokens.
 
 Both take `files`, the program: at most 8 `{name, text}`, each name like `hello.tape` (letters, digits, `_`, `-`,
 then `.tape`). The files are one program, as [`LANGUAGE.md`](../LANGUAGE.md) describes, with the standard library
@@ -253,6 +257,6 @@ version that gave it (`tape-mcp-version`).
 cd mcp && npm ci
 echo 'IP_SALT=dev-salt' > .dev.vars   # a salt for your own copy (.dev.vars is not tracked)
 npx cf dev                  # then POST to /mcp at the address it prints
-node test.ts                # the tools and the HTTP face in Node; --plants plants 41 bugs, each caught
+node test.ts                # the tools and the HTTP face in Node; --plants plants 43 bugs, each caught
 npx vitest run              # the Worker in workerd, with the real Loader and rate limiter
 ```
