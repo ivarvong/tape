@@ -183,6 +183,34 @@ function addParameters(prog: Program, types: Named, need: Needs): void {
     }
   }
 }
+// A built-in that takes a capability when the program has none of that type: no entry point was granted one, so
+// no function can have it. Refused at the call, with the parameter to add (written bare, `now(clock)` was then
+// "unknown name clock", whose fix, `let clock = …`, cannot make a Clock). Run by the build after ambient, not by
+// parseProgram, which tools use on fragments.
+export function granted(prog: Program): void {
+  const types = named(prog);
+  for (const f of prog.fns.values()) {
+    if (f.file.startsWith('std/')) continue;
+    eachExpr(f.body, e => {
+      const takes = e.k === 'call' ? BUILTIN_CAP.get(e.name) : undefined;
+      if (e.k !== 'call' || !takes) return;
+      const [label, type] = takes;
+      if ([...types.values()].some(t => t.name === type)) return;
+      // the capability left out, or passed as a bare name (`now(clock)`, `db: db`) that nothing declares
+      const given =
+        e.args.find(a => a.label === label) ?? (e.name === 'now' || e.name === 'random' ? e.args[0] : undefined);
+      if (given && !(given.value.k === 'var' && !types.has(given.value.name) && given.value.name === label)) return;
+      const entry = [...prog.fns.values()].find(g => g.name === 'handle' || g.exported)?.name ?? 'handle';
+      fail(
+        e,
+        'C72',
+        `${e.name} needs ${/^[AEIOU]/.test(type) ? 'an' : 'a'} ${type}, and no entry point declares one`,
+        `The host grants capabilities to an entry point: add \`${label}: ${type}\` to ${entry}'s parameters, and ${e.name} and every function ${entry} calls use it by name.`,
+      );
+    });
+  }
+}
+
 export function ambient(prog: Program): void {
   const types = named(prog);
   if (types.size === 0) return;

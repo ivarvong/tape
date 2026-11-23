@@ -3,7 +3,7 @@
 // functions that serve an export (served), the runtime's three functions (runtime), and the bytes (assemble).
 import { emptyProgram } from './ast.ts';
 import type { FnDecl, Program } from './ast.ts';
-import { ambient } from './ambient.ts';
+import { ambient, granted } from './ambient.ts';
 import { CompileError, fail, utf8 } from './common.ts';
 import type { Problem } from './common.ts';
 import { functionCompiler } from './function.ts';
@@ -71,6 +71,7 @@ function front(sources: readonly Source[]) {
   resolvePipes(prog);
   fuseRanges(prog);
   ambient(prog);
+  granted(prog);
   rowColumns(prog);
   // the rules, read from the program as written (before the generated functions are added); reported only once the
   // program has type-checked, so a type error is shown first

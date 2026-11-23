@@ -59,4 +59,35 @@ fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
   );
 }
 
+// ---- a capability no entry point declares. `now()` in a handle with no Clock said "write `now(clock)` with the
+// Clock parameter"; written so, it said "unknown name clock: `let clock = …`", which cannot make a Clock. The
+// host grants capabilities to an entry point, so the diagnostic is at the call and names the parameter to add.
+{
+  const cases: readonly (readonly [string, string, string])[] = [
+    ['respond(status: 200) |> write_int(value: now())', 'clock: Clock', 'now'],
+    ['respond(status: 200) |> write_int(value: now(clock))', 'clock: Clock', 'now'],
+    ['respond(status: 200) |> write_int(value: random(from))', 'from: Entropy', 'random'],
+    ['respond(status: 200) |> write_int(value: answered())', 'db: Sql', 'sql_first'],
+  ];
+  const program = (body: string, params: string): string =>
+    `type N { N(n: Int) }\n\nfn handle(raw: View${params}) -> Buf {\n  ${body}\n}\n\nfn answered() -> Int {\n  match sql_first(row: N, query: "SELECT 1 AS n") {\n    Some(value: N(n)) -> n\n    None -> 0\n  }\n}\n`;
+  for (const [body, param, fn] of cases) {
+    const s = said(program(body, body.includes('answered') ? '' : ', db: Sql'));
+    same(
+      `${fn} with no ${param} anywhere: C72 at the call, naming the parameter handle needs`,
+      [code(s), s === 'compiled' ? '' : s.message, hint(s).includes(`\`${param}\` to handle's parameters`)],
+      [
+        body.includes('answered') ? 'C72:8' : 'C72:4',
+        `${fn} needs ${/^[AEIOU]/.test(param.split(': ')[1] ?? '') ? 'an' : 'a'} ${param.split(': ')[1]}, and no entry point declares one`,
+        true,
+      ],
+    );
+    same(
+      `…and with \`${param}\` added to handle, it compiles`,
+      said(program(body, `, db: Sql, ${param}`).replace(', db: Sql, db: Sql', ', db: Sql')),
+      'compiled',
+    );
+  }
+}
+
 finish();
