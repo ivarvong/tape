@@ -20,10 +20,25 @@ npm ci                     # the formatter, the type checker and the linter
 ## The gate
 
 ```sh
+npm run fast                 # seconds: prettier, oxlint and tsc for the files changed against HEAD (proof/fast.ts)
+npm run hooks                # opt in: the same for the staged files, as a pre-commit hook (--no-verify skips it)
+npm run check:changed        # only the parts whose inputs changed since the last passing gate (iteration only)
 npm test                     # node proof/all.ts --quick
 npm run check                # node proof/all.ts: everything
 node proof/all.ts --only sim # the parts whose name contains a word
 ```
+
+`check:changed` runs every part when anything shared changed (the compiler, the host, `std/`, the examples, the
+simulator, `proof/lib.ts`, the dependencies: anything outside `service/`, `mcp/`, `apps/*/`, `bench/`, `test/`,
+`proof/`, `docs/` and the top-level Markdown); otherwise the cheap parts and the parts whose home has a changed file
+or whose TypeScript names one. It writes no gate record: a deploy needs `service/scripts/gate.sh`'s full run.
+`sim-all`, `sim-plants`, `interp-effects` and the playground's `--plants` run as shards side by side (`--shard i/n`,
+then `--merge n`, which prints and records what one whole run does; the merged records were compared with whole
+runs and are the same but for times).
+
+Deploying both Workers from one gated commit: `CLOUDFLARE_ACCOUNT_ID=<id> service/scripts/ship.sh "<message>"`
+(tape-mcp then tape; `--dry-run` stops after the uploads; the stepped ramp only when the change touches the
+objects or their storage, or with `--ramp`). The two deploy.sh scripts remain for one Worker at a time.
 
 `proof/all.ts` runs every check below, prints one table, and exits 0 only when every part passed. A part passes when
 it exits 0, prints no line starting with `FAIL`, and prints the result recorded for it (how many planted bugs are

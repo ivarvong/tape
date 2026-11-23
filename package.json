@@ -10,6 +10,9 @@
   "scripts": {
     "test": "node proof/all.ts --quick",
     "check": "node proof/all.ts",
+    "check:changed": "node proof/all.ts --changed",
+    "fast": "node proof/fast.ts",
+    "hooks": "sh proof/install-hooks.sh",
     "types": "tsc --noEmit",
     "lint": "node proof/lint.ts",
     "format": "prettier --write ."
