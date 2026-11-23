@@ -285,6 +285,43 @@ function step(sc: Scan): void {
   else if (ch === '{' && opensSql(sc.toks)) sql(sc);
   else operator(sc);
 }
+// Files lexed already in this process, by name and text: the standard library is in every compile (81 KB, most of
+// what a small program lexes), and the hosted compiler sees one program again and again. The tokens are frozen,
+// so a pass that changed one would throw rather than change another compile's; a least recently used file goes
+// once the texts held pass LEXED_CHARS (500,000 characters: std and a few hosted programs, which are at most 64 KB;
+// std's 16,408 tokens hold 1.8 MB, 23 bytes of heap a character: the cache holds at most ~11 MB).
+const LEXED = new Map<string, readonly Token[]>();
+export const LEXED_CHARS = 500_000;
+let lexedChars = 0;
+const frozen = (v: unknown): void => {
+  if (typeof v !== 'object' || v === null || Object.isFrozen(v)) return;
+  Object.freeze(v);
+  for (const x of Object.values(v)) frozen(x);
+};
+/** lex, from the cache when this file with this text was lexed before. */
+export function lexed(file: string, source: string): readonly Token[] {
+  const key = `${file}\0${source}`;
+  const had = LEXED.get(key);
+  if (had) {
+    LEXED.delete(key);
+    LEXED.set(key, had);
+    return had;
+  }
+  const toks = lex(file, source);
+  if (source.length > LEXED_CHARS) return toks;
+  frozen(toks);
+  for (const [k] of LEXED) {
+    if (lexedChars + source.length <= LEXED_CHARS) break;
+    LEXED.delete(k);
+    lexedChars -= k.length - k.indexOf('\0') - 1;
+  }
+  LEXED.set(key, toks);
+  lexedChars += source.length;
+  return toks;
+}
+/** How many files the cache holds, and their characters (test/lex-cache.ts). */
+export const lexedHeld = (): { files: number; chars: number } => ({ files: LEXED.size, chars: lexedChars });
+
 export function lex(file: string, source: string): Token[] {
   const sc: Scan = { file, text: source, toks: [], open: [], i: 0, line: 1 };
   while (sc.i < source.length) step(sc);

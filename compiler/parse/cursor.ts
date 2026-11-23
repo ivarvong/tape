@@ -2,7 +2,7 @@
 // what it read.
 import type { At, Token, TokenOf } from '../ast.ts';
 import { decText, fail } from '../common.ts';
-import { KEYWORDS, lex } from '../lex.ts';
+import { KEYWORDS, lexed } from '../lex.ts';
 
 const text8 = new TextDecoder();
 export const textOf = (bytes: number[]): string => text8.decode(new Uint8Array(bytes));
@@ -39,7 +39,7 @@ export class Cursor {
   /** over a file's text, or over tokens already read (a hole of a text literal) */
   constructor(file: string, text: string | readonly Token[]) {
     this.file = file;
-    this.toks = typeof text === 'string' ? lex(file, text) : text;
+    this.toks = typeof text === 'string' ? lexed(file, text) : text;
     // lex ends every file with this token: reading past it gives it again
     this.end = this.toks.at(-1) ?? { t: 'eof', line: 1, file };
   }
