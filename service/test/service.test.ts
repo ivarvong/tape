@@ -35,6 +35,32 @@ const rows = async (path: string): Promise<Fields[]> => list(await got(path)).ma
 /** One column of those rows by another: stock by sku, balance by card. */
 const table = async (path: string, key: string, value: string): Promise<Record<string, unknown>> =>
   Object.fromEntries((await rows(path)).map(r => [text(r[key]), r[value]]));
+/** Asks until the answer passes ok: waits for an event (a timer run, a step finished elsewhere), not for a time a
+ * loaded machine may not keep. Bounded by asks, not ms; on an idle machine the first few pass. */
+const eventually = async <T>(ask: () => Promise<T>, ok: (v: T) => boolean, asks = 1200): Promise<T> => {
+  let v = await ask();
+  for (let i = 0; !ok(v); i++) {
+    if (i >= asks) throw new Error(`still not so after ${asks} asks: ${JSON.stringify(v)}`);
+    // oxlint-disable-next-line no-await-in-loop -- one ask at a time is the point
+    await pause(50);
+    // oxlint-disable-next-line no-await-in-loop -- one ask at a time is the point
+    v = await ask();
+  }
+  return v;
+};
+/** Waits until the account's fault plan has held a reply (slow_reply logged): the call it holds has been sent. */
+const heldReply = (account: string): Promise<unknown> =>
+  eventually(
+    () => got(`/_faults/${account}`),
+    v => list(at(v, 'faults')).some(f => at(f, 'kind') === 'slow_reply'),
+  );
+/** examples/fulfillment.tape with its timers set an hour out: a test that resumes a stalled order by hand
+ * (POST /advance) is not raced by the order's own 1 s timer when the machine is slow between the two. */
+const parked = (source: string): string => {
+  const policy = 'Backoff(first: 1000, factor: 2, most: 30000, tries: 5)';
+  if (!source.includes(policy)) throw new Error(`examples/fulfillment.tape no longer has ${policy}`);
+  return source.replace(policy, 'Backoff(first: 3600000, factor: 2, most: 3600000, tries: 5)');
+};
 /** The codes of a list of problems. */
 const codes = (problems: unknown): unknown[] => list(problems).map(p => at(p, 'code'));
 /** What a search found; the test fails when it found nothing. */
@@ -532,8 +558,9 @@ fn count(found: Option[Count]) -> Buf {
   });
 
   it('runs a durable workflow: steps resume after a timeout without repeating, and a refusal compensates', async () => {
-    // an account of its own: other tests have a payments
-    await uploadAll('wf', { inventory, payments, shipping, fulfill: fulfillment });
+    // an account of its own: other tests have a payments. parked: the stalled order below is resumed by hand, and its
+    // own timer (1 s in the example) would race that on a slow machine
+    await uploadAll('wf', { inventory, payments, shipping, fulfill: parked(fulfillment) });
     const order = (body: Record<string, unknown>, wait = ''): Promise<Response> =>
       call(`/wf/fulfill/v/1/orders${wait}`, { method: 'POST', body: JSON.stringify(body) });
     const state = async (): Promise<Record<string, unknown>> => ({
@@ -565,10 +592,11 @@ fn count(found: Option[Count]) -> Buf {
       state: 'reserving',
       steps: 0,
       note: '',
-      stall: 'inventory.reserve did not answer in time; attempt 2 in 1000 ms',
+      stall: 'inventory.reserve did not answer in time; attempt 2 in 3600000 ms',
       retries: 1,
     });
-    expect(at(await state(), 'stock', 'lamp')).toBe(2); // the reservation happened
+    // the reservation happened: the caller stopped waiting after 1 ms, so it may still be running; wait for it
+    expect(at(await eventually(state, v => at(v, 'stock', 'lamp') !== 4), 'stock', 'lamp')).toBe(2);
     // resume: reserve is answered from the stored reply (stock is not taken again), charge and label run
     const resumed = await call('/wf/fulfill/v/1/advance/2', { method: 'POST' });
     expect(resumed.status).toBe(201);
@@ -678,12 +706,10 @@ fn count(found: Option[Count]) -> Buf {
         a => a.key === 'tape.wake.after_ms',
       )?.value,
     ).toEqual({ intValue: '1000' });
-    let order: unknown = null;
-    for (let i = 0; i < 60; i++) {
-      order = await got('/timer/fulfill/v/1/orders/1');
-      if (at(order, 'state') === 'done') break;
-      await pause(100);
-    }
+    const order = await eventually(
+      () => got('/timer/fulfill/v/1/orders/1'),
+      v => at(v, 'state') === 'done',
+    );
     expect(order).toMatchObject({ state: 'done', amount: 80, steps: 3, retries: 0, stall: '' });
     expect((await table('/timer/inventory/v/1/stock', 'sku', 'remaining')).lamp).toBe(3); // reserved once
     const after = await got('/timer/fulfill/wakes');
@@ -796,20 +822,20 @@ fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
       expect([up.status, up.ok ? '' : await up.text()]).toEqual([201, '']);
       await faults(a, { storage_error: 1 });
       expect((await call(`/${a}/ticker/v/1/`, { method: 'POST' })).status).toBe(202);
-      let w: unknown = null;
-      for (let i = 0; i < 50 && list(at(w, 'runs')).length === 0; i++) {
-        await pause(100);
-        w = await got(`/${a}/ticker/wakes`);
-      }
+      const wakes = (): Promise<unknown> => got(`/${a}/ticker/wakes`);
+      let w = await eventually(wakes, v => list(at(v, 'runs')).length > 0);
       await faults(a, null);
-      expect(list(at(w, 'runs')).map(r => [at(r, 'key'), at(r, 'status')])).toEqual([[1, 'failed']]);
+      // every run so far failed (more than one when the machine is slow enough that the 1 s retry came before the
+      // faults stopped), and the timer is kept
+      const failedRuns = list(at(w, 'runs')).map(r => [at(r, 'key'), at(r, 'status')]);
+      expect(failedRuns.length).toBeGreaterThan(0);
+      expect(failedRuns).toEqual(failedRuns.map(() => [1, 'failed']));
       expect(list(at(w, 'set')).map(s => at(s, 'key'))).toEqual([1]);
-      // tried again after the first wait (1 s), with no fault: it runs once and its timer goes
-      for (let i = 0; i < 60 && list(at(w, 'set')).length > 0; i++) {
-        await pause(100);
-        w = await got(`/${a}/ticker/wakes`);
-      }
-      expect([at(w, 'set'), list(at(w, 'runs')).map(r => at(r, 'status'))]).toEqual([[], ['ok', 'failed']]);
+      // tried again after its wait, with no fault: it runs once and its timer goes
+      w = await eventually(wakes, v => list(at(v, 'set')).length === 0);
+      const statuses = list(at(w, 'runs')).map(r => at(r, 'status'));
+      expect([at(w, 'set'), statuses]).toEqual([[], ['ok', ...statuses.slice(1).map(() => 'failed')]]);
+      expect(statuses.length).toBeGreaterThan(1);
       expect(list(at(await got(`/_faults/${a}`), 'faults')).map(f => [at(f, 'site'), at(f, 'kind')])).toContainEqual([
         'wake>ticker#1',
         'storage_error',
@@ -839,15 +865,18 @@ fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
       // before: the slow request wrote "did not answer in time" onto a done order and answered 202
       const a = 'jepsen-r-stalenote';
       await uploadAll(a, { inventory, payments, shipping, fulfill: fulfillment });
+      // the first call (the slow request's reserve) has its reply held 8 s, past its 4 s budget; the advance below
+      // finishes the order inside that budget with seconds to spare, and its calls are not faulted (later
+      // positions)
       await call(`/_faults/${a}`, {
         method: 'PUT',
-        body: JSON.stringify({ seed: 1, p: { slow_reply: 1 }, tail: [600, 600] }),
+        body: JSON.stringify({ seed: 1, points: [{ hop: 'call', n: 0, kind: 'slow_reply', ms: 8000 }] }),
       });
-      const slow = call(`/${a}/fulfill/v/1/orders/wait/300`, {
+      const slow = call(`/${a}/fulfill/v/1/orders/wait/4000`, {
         method: 'POST',
         body: '{"key":"b9","sku":"lamp","qty":1,"card":"ann-4242","address":"1 Main St"}',
       });
-      await pause(100); // the reserve has run; its reply is held 600 ms, past the 300 ms budget
+      await heldReply(a); // the reserve has been sent, and its reply will be held
       await faults(a, null);
       expect((await call(`/${a}/fulfill/v/1/advance/1`, { method: 'POST' })).status).toBe(201);
       const late = await slow;
@@ -866,12 +895,14 @@ fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
     const a = 'jepsen-r-phantom',
       faults = (p: unknown): Promise<Response> => call(`/_faults/${a}`, { method: 'PUT', body: JSON.stringify(p) });
     await uploadAll(a, { inventory, payments, shipping, fulfill: fulfillment });
-    await faults({ seed: 1, p: { slow_reply: 1 }, tail: [300, 300] });
-    const slow = call(`/${a}/fulfill/v/1/orders`, {
+    // the first call (the slow request's reserve) has its reply held 3 s, inside its 20 s budget: the advance below
+    // moves the order on before that reply arrives, with seconds to spare, and its own calls are not faulted
+    await faults({ seed: 1, points: [{ hop: 'call', n: 0, kind: 'slow_reply', ms: 3000 }] });
+    const slow = call(`/${a}/fulfill/v/1/orders/wait/20000`, {
       method: 'POST',
       body: '{"key":"b10","sku":"lamp","qty":1,"card":"ann-4242","address":"1 Main St"}',
     });
-    await pause(100); // reserve has run; its reply is held 300 ms
+    await heldReply(a); // reserve has been sent; its reply will be held
     await faults(null);
     expect((await call(`/${a}/fulfill/v/1/advance/1`, { method: 'POST' })).status).toBe(201); // the stored reserve reply, then charge and label
     const late = await slow;

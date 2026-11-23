@@ -33,5 +33,8 @@ const miniflare = {
 // need that charge answered run it with room (test/help.ts roomy), so their outcomes do not depend on the load.
 export default defineConfig({
   plugins: [erased(), bytes(), cloudflareTest({ main: './src/index.ts', miniflare })],
-  test: { fileParallelism: false },
+  // testTimeout: vitest's default, 5 s, is a wall-clock budget on every test. Most tests here upload programs (a
+  // compile each), and many take 1 to 2.5 s alone, half that budget; retention.test.ts saw one time out under CPU
+  // load. No test's property is how fast it ran, so the budget is only there to end a hung run.
+  test: { fileParallelism: false, testTimeout: 120_000, hookTimeout: 120_000 },
 });

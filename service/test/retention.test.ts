@@ -9,7 +9,10 @@ import { check, checkTraces, scenario } from '../jepsen/retention.ts';
 import type { Attempt, Checked, Traced } from '../jepsen/retention.ts';
 import { anyString, at, call, got, json, list, pause, send } from './help.ts';
 
-const W = 1000,
+// W: the scenario's resend "inside the window" comes two requests after the first send, so W must outlast two
+// requests on a loaded machine (at 1 s it did not always: a 410 where the replay was expected); 4 s does, at the
+// price of a longer sleep (W + S + 300 ms) per scenario. The rules checked do not depend on W's size.
+const W = 4000,
   S = 1000;
 
 // a name running this source, placed as shard 0 of 1 with the op window W and clock allowance S
@@ -28,7 +31,7 @@ const pruneTooEarly = (): string => mutant('cutoff: now - window_ms - skew_ms', 
 // bug B: no window check: a resend after its record was pruned runs again
 const noWindow = (): string => mutant('t < now - window_ms ->', 't < now - 86400000000 ->');
 const types = (r: Checked): string[] => [...new Set(r.anomalies.map(a => a.type))].toSorted();
-// A scenario takes about 4.1 s on an idle machine: the upload compiles the program (1.7 s) and it sleeps W + S + 300 ms.
+// A scenario takes about 7 s on an idle machine: the upload compiles the program (1.7 s) and it sleeps W + S + 300 ms.
 // vitest's default budget is 5 s, so on a loaded machine the test timed out (a flake, reproduced
 // under CPU load): these tests get their own budget.
 const SLOW = 60000;
@@ -78,7 +81,7 @@ describe('retention: the op window (R-RET-1..4)', () => {
     async () => {
       const base = await shard('ret', 'count', kvSource);
       // each op id carries the time it is sent: one time for all 40 (as first written) made the loop race the window
-      // W = 1 s (an op older than W is refused, 410), which 40 requests on a loaded machine lost
+      // W (an op older than W is refused, 410; it was 1 s then), which 40 requests on a loaded machine lost
       for (let i = 0; i < 40; i++)
         expect((await send('PUT', `${base}/k/k${i}?op=${Date.now()}_old-${i}`, 'v')).status).toBe(201);
       const before = at(await got('/ret/count/storage'), 'data');

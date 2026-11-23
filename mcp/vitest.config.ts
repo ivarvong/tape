@@ -18,4 +18,7 @@ const miniflare = {
 export default defineConfig({
   plugins: [erased(), bytes(), cloudflareTest({ main: './src/index.ts', miniflare })],
   server: { fs: { allow: ['..'] } },
+  // vitest's default 5 s per test is a wall-clock budget a loaded machine can spend on a few compiles; no test's
+  // property is how fast it ran, so the budget is only there to end a hung run
+  test: { testTimeout: 120_000, hookTimeout: 120_000 },
 });
