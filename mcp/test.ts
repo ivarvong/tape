@@ -80,7 +80,11 @@ const depsOf = (m: Mods, over: Partial<Deps> = {}): Deps => ({
   hello: { name: 'hello.tape', text: HELLO },
   run: async (program, requests) => {
     await m.runner.startSqlite(init, sqlite3);
-    return m.runner.runAll(new WebAssembly.Module(program.wasm), requests);
+    return m.runner.runAll(
+      new WebAssembly.Module(program.wasm),
+      requests,
+      program.traced ? new WebAssembly.Module(program.traced) : null,
+    );
   },
   ...over,
 });
@@ -467,10 +471,10 @@ const tests: Test[] = [
           );
         if (d.length > 6000) out.push(`${String(t?.['name'])}: its description is ${d.length} characters, over 6000`);
       }
-      for (const said of ['at_ms', 'woken', '"summary"', '"compact"'])
+      for (const said of ['at_ms', 'woken', '"lines"', '"compact"'])
         if (!String(run?.['description']).includes(said)) out.push(`run: its description does not say ${said}`);
       const props = F(F(run?.['inputSchema'])['properties']);
-      if (JSON.stringify(F(props['trace'])['enum']) !== '["summary","full","none"]') out.push('run: no trace enum');
+      if (JSON.stringify(F(props['trace'])['enum']) !== '["lines","full","none"]') out.push('run: no trace enum');
       if (JSON.stringify(F(props['effects'])['enum']) !== '["compact","full"]') out.push('run: no effects enum');
       if (!String(compile?.['description']).includes('C54')) out.push('compile: its description does not say C54');
       if (!String(run?.['description']).includes('Hello again, ada #2!'))
@@ -1017,46 +1021,77 @@ const tests: Test[] = [
   },
   {
     name: 'trace',
-    // trace: "summary" (the default) is the OTLP's spans in a few words each, "full" the OTLP, "none" nothing; the
-    // spans are compared with the playground's OTLP for the same requests, not with this code's own
+    // trace: "lines" (the default) is the run's line trace, made from its log by the traced build as the CLI's (each
+    // function, each arm tried with ✓ or ✗ and its line, each effect under the line that made it, a trap at its
+    // line); "full" the OTLP, compared with the playground's OTLP for the same requests; "none" nothing. The lines
+    // wanted are read off examples/hello.tape and test/limits.tape, not off this code
     run: async m => {
       const out: string[] = [];
+      const { out: h } = await tool(m, 'run', { requests: ['GET /hello/ada', 'GET /hello/ada'] });
+      const [first, second] = RESULTS(h).map(x => x['trace']);
+      if (typeof first !== 'string' || typeof second !== 'string')
+        out.push(`the default trace is text: ${JSON.stringify(first).slice(0, 120)}`);
+      const a = String(first).split('\n'),
+        b = String(second).split('\n');
+      const at = (ls: string[], s: string): number => ls.findIndex(l => l.includes(s));
+      // the first greeting takes line 25 (n == 1); the second tries 25, then takes 26
+      if (at(a, '✓ hello.tape:25') < 0 || at(a, 'hello.tape:26') >= 0) out.push(`first: ${a.join(' | ')}`);
+      if (
+        at(b, '✗ hello.tape:25') < 0 ||
+        at(b, '✓ hello.tape:26') < 0 ||
+        at(b, '✗ hello.tape:25') > at(b, '✓ hello.tape:26')
+      )
+        out.push(`second: ${b.join(' | ')}`);
+      // the INSERT, in the program's words with its :name, under the arm of line 9 that made it, before greet
+      const sql = at(a, 'sql INSERT INTO greeted(name, n) VALUES (:name, 1)');
+      if (!(at(a, '✓ hello.tape:9') < sql && sql < a.indexOf('greet')) || !String(a[sql]).includes(':name="ada"'))
+        out.push(`the INSERT is not under line 9: ${a.join(' | ')}`);
+      if (!String(a[sql]).includes('-> [[1]]') || !String(b[at(b, 'sql INSERT')]).includes('-> [[2]]'))
+        out.push(`the INSERT's rows: ${a[sql]} / ${b[at(b, 'sql INSERT')]}`);
+      // a trap ends the trace with its reason, at the arm it happened in: 100 / len("") in the arm of line 7
       const files = [{ name: 'limits.tape', text: LIMITS_TAPE }];
       const requests = ['GET /div/', 'GET /dice'];
-      const theirs = await workbenchOtlp('limits', LIMITS_TAPE, requests);
       const { out: r } = await tool(m, 'run', { files, requests });
-      for (const [i, x] of RESULTS(r).entries()) {
-        const t = F(x['trace']);
-        if ('resourceSpans' in t) out.push(`request ${i + 1}: the default trace is the OTLP`);
-        const spans = L(F(L(F(L(F(theirs[i])['resourceSpans'])[0])['scopeSpans'])[0])['spans']).map(F);
-        const want = spans.map(sp => ({
-          name: sp['name'],
-          status: F(sp['status'])['code'] === 2 ? 'error' : 'ok',
-          events: L(sp['events']).length,
-        }));
-        const got = L(t['spans'])
-          .map(F)
-          .map(sp => ({ name: sp['name'], status: sp['status'], events: sp['events'] }));
-        if (JSON.stringify(got) !== JSON.stringify(want))
-          out.push(`request ${i + 1}: summary ${JSON.stringify(got)}, the playground's spans ${JSON.stringify(want)}`);
-        if (!/^[0-9a-f]{32}$/.test(String(t['trace_id'])))
-          out.push(`request ${i + 1}: trace_id ${String(t['trace_id'])}`);
-        for (const sp of L(t['spans']).map(F))
-          if (typeof sp['duration_us'] !== 'number' || sp['duration_us'] < 0)
-            out.push(`request ${i + 1}: duration_us ${String(sp['duration_us'])}`);
-      }
-      const [div] = L(F(RESULTS(r)[0]?.['trace'])['spans']).map(F);
-      if (!String(div?.['error']).includes('division by zero'))
-        out.push(`the trap's span error ${String(div?.['error'])}`);
+      const div = String(RESULTS(r)[0]?.['trace']).split('\n');
+      const last = div.at(-1) ?? '';
+      if (
+        !/^ {2}✗ trap \d+: division by zero at limits\.tape:7 {2}Request\(method: "GET", path: "\/div\/" \+\+ by\)/.test(
+          last,
+        )
+      )
+        out.push(`the trap's last line: ${JSON.stringify(last)} of ${div.join(' | ')}`);
+      if (at(div, '✓ limits.tape:7') < 0) out.push(`the arm before the trap: ${div.join(' | ')}`);
+      const theirs = await workbenchOtlp('limits', LIMITS_TAPE, requests);
       const { out: full } = await tool(m, 'run', { files, requests, trace: 'full' });
-      for (const [i, x] of RESULTS(full).entries())
+      for (const [i, x] of RESULTS(full).entries()) {
         out.push(...otlpProblems(x['trace']).map(p => `full, request ${i + 1}: ${p}`));
+        const names = (o: unknown): unknown[] =>
+          L(F(L(F(L(F(o)['resourceSpans'])[0])['scopeSpans'])[0])['spans']).map(sp => F(sp)['name']);
+        if (JSON.stringify(names(x['trace'])) !== JSON.stringify(names(theirs[i])))
+          out.push(
+            `full, request ${i + 1}: spans ${JSON.stringify(names(x['trace']))}, the playground's ${JSON.stringify(names(theirs[i]))}`,
+          );
+      }
       const { out: none } = await tool(m, 'run', { files, requests, trace: 'none' });
       if (!RESULTS(none).every(x => x['trace'] === null)) out.push('trace: "none" still gives a trace');
-      // and it is smaller: a summary is a fraction of the OTLP
+      const { out: gone } = await tool(m, 'run', { files, requests, trace: 'summary' });
+      if (gone['error'] !== 'bad_arguments')
+        out.push(`trace: "summary" is not refused: ${JSON.stringify(gone).slice(0, 120)}`);
+      // and it is smaller than the OTLP
       const size = (x: Fields): number => JSON.stringify(x).length;
       if (!(size(none) < size(r) && size(r) * 2 < size(full)))
-        out.push(`sizes: none ${size(none)}, summary ${size(r)}, full ${size(full)}`);
+        out.push(`sizes: none ${size(none)}, lines ${size(r)}, full ${size(full)}`);
+      // a long trace is cut: at most 200 lines, then how many were left out (300 calls of count: 601 lines and
+      // more); a run of more steps than a line trace is made for says so
+      const COUNT =
+        'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> append(view: "\\(count(n: 0))")\n}\n\nfn count(n: Int) -> Int {\n  match {\n    n >= 300 -> n\n    else -> count(n: n + 1)\n  }\n}\n';
+      const { out: loop } = await tool(m, 'run', { files: [{ name: 'count.tape', text: COUNT }], requests: ['GET /'] });
+      const long = String(RESULTS(loop)[0]?.['trace']).split('\n');
+      if (long.length !== 201 || !/^… \d+ more lines$/.test(long.at(-1) ?? ''))
+        out.push(`a long trace: ${long.length} lines, last ${JSON.stringify(long.at(-1))}`);
+      const { out: spin } = await tool(m, 'run', { files, requests: ['GET /spin'] });
+      if (!/^the run took \d+ steps; a line trace is made for at most 200000/.test(String(RESULTS(spin)[0]?.['trace'])))
+        out.push(`a run too long to trace: ${String(RESULTS(spin)[0]?.['trace']).slice(0, 120)}`);
       return out;
     },
   },
@@ -1442,24 +1477,24 @@ const PLANTS: Plant[] = [
   },
   {
     test: 'trace',
-    what: 'the summary is the OTLP',
+    what: 'the line trace shows an arm tried and not taken as taken',
     file: 'tools.ts',
-    from: "trace = full_trace && modes.trace === 'summary' ? summaryOf(full_trace) : full_trace;",
-    to: 'trace = full_trace;',
+    from: '!matched(e.site, i)) out.push(`  ✗ ${at(s.file, s.line)}`);',
+    to: '!matched(e.site, i)) out.push(`  ✓ ${at(s.file, s.line)}`);',
   },
   {
     test: 'trace',
-    what: 'a span in error is summarised as ok',
+    what: "the line trace leaves out the trap's line",
     file: 'tools.ts',
-    from: "status: sp.status.code === 2 ? 'error' : 'ok',",
-    to: "status: 'ok',",
+    from: "if (error !== null) out.push(`  ✗ ${error}${last ? ` at ${at(last.file, last.line)}` : ''}`);",
+    to: 'if (error !== null) out.push(`  ✗ ${error}`);',
   },
   {
     test: 'trace',
     what: 'trace: "none" gives the OTLP',
     file: 'tools.ts',
-    from: "full_trace = modes.trace === 'none' ? null : otlp(",
-    to: 'full_trace = 1 > 2 ? null : otlp(',
+    from: "      modes.trace === 'full'",
+    to: "      modes.trace !== 'lines'",
   },
   {
     test: 'compact',

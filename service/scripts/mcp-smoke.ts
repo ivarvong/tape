@@ -6,7 +6,8 @@
 //
 // Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run, feedback]; a feedback report
 // (stored under smoke/: delete with node mcp/scripts/feedback.ts --delete-smoke); run with no files and
-// GET /hello/ada twice: 200 "Hello, ada" then 200 "Hello again, ada #2!", both replayed, each with an OTLP trace;
+// GET /hello/ada twice: 200 "Hello, ada" then 200 "Hello again, ada #2!", both replayed, with an OTLP trace (MCP,
+// trace: "full") and the default line trace (/v1/run: line 25 taken, then line 26);
 // compile of hello.tape without `repeat: True,` is C54 at line 11; the same run as plain JSON at /v1/run; a request
 // with an Origin is 403 origin_refused; every answer is JSON, nosniff, no-store and sandboxed.
 import '../../node25.ts';
@@ -102,9 +103,9 @@ const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
 check(JSON.stringify(names) === '["compile","run","feedback"]', `tools/list: ${JSON.stringify(names)}`);
 
-// trace: 'full', the OTLP (the default is a summary of it)
+// trace: 'full', the OTLP; the default (lines) on /v1/run
 const twice = { requests: ['GET /hello/ada', 'GET /hello/ada'], trace: 'full' };
-const sees = (where: string, ran: J): string => {
+const sees = (where: string, ran: J, trace: 'full' | 'lines' = 'full'): string => {
   const rs = arr(ran['results']).map(obj);
   check(ran['ok'] === true, `${where}: ok ${String(ran['ok'])}`);
   check(rs.length === 2, `${where}: ${rs.length} results`);
@@ -120,10 +121,16 @@ const sees = (where: string, ran: J): string => {
     rs.every(x => x['replayed'] === true),
     `${where}: replayed`,
   );
-  check(
-    rs.every(x => arr(obj(x['trace'])['resourceSpans']).length > 0),
-    `${where}: OTLP traces`,
-  );
+  if (trace === 'full')
+    check(
+      rs.every(x => arr(obj(x['trace'])['resourceSpans']).length > 0),
+      `${where}: OTLP traces`,
+    );
+  else
+    check(
+      str(rs[0]?.['trace']).includes('✓ hello.tape:25') && str(rs[1]?.['trace']).includes('✓ hello.tape:26'),
+      `${where}: line traces ${JSON.stringify(rs.map(x => x['trace'])).slice(0, 200)}`,
+    );
   return rs.map(x => `${str(x['status'])} ${JSON.stringify(x['body'])} replayed ${str(x['replayed'])}`).join(', ');
 };
 const ran = sees('run hello twice', await tool('run', twice));
@@ -139,9 +146,9 @@ check(
 const fb = await tool('feedback', { text: 'deploy smoke: ignore', kind: 'praise' });
 const fbId = str(fb['id']);
 check(fb['ok'] === true && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{12}$/.test(fbId), `feedback: ${JSON.stringify(fb)}`);
-const v1 = await post('/v1/run', twice);
+const v1 = await post('/v1/run', { requests: twice.requests });
 check(v1.r.status === 200, `/v1/run: ${v1.r.status}`);
-sees('/v1/run', v1.j);
+sees('/v1/run', v1.j, 'lines');
 const origin = await post(
   '/mcp',
   { jsonrpc: '2.0', id: ++id, method: 'tools/list' },

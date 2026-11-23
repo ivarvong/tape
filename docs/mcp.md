@@ -90,7 +90,7 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
 Also takes `requests`: 1 to 50, each `METHOD SP TARGET`, then optionally a line feed and a body
 (`"POST /links\n{\"url\":\"https://example.com\"}"`), or `{"request": "…", "at_ms": 61000}` to send it at a time of
 the run's own clock (below). They run in order against one database, so the second `GET /hello/ada` sees the first
-one's write. Two optional arguments say how much comes back: `trace` (`"summary"`, the default; `"full"`;
+one's write. Two optional arguments say how much comes back: `trace` (`"lines"`, the default; `"full"`;
 `"none"`) and `effects` (`"compact"`, the default; `"full"`); a mode quoted twice (`"\"none\""`) is taken as the
 mode.
 
@@ -103,7 +103,7 @@ mode.
                   "query": "INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n",
                   "params": { ":name": "ada" }, "rows_returned": 1, "rows": [[2]] }],
     "replayed": true, "steps": 77, "memory_bytes": 128,
-    "trace": { "trace_id": "4bf9…", "spans": [{ "name": "GET /hello/ada", "status": "ok", "duration_us": 412, "events": 1 }] } }] }
+    "trace": "handle\n  ✓ hello.tape:9  Request(method: \"GET\", path: \"/hello/\" ++ name) if len(name) > 0 -> greet(\n      sql INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  :name=\"ada\" -> [[2]]\ngreet\n  ✗ hello.tape:25  Some(value: Count(n)) if n == 1 -> …\n  ✓ hello.tape:26  Some(value: Count(n)) -> …" }] }
 ```
 
 - `headers` is the response headers the program set with std/http's `header` (a 302's `location`, say), as
@@ -119,9 +119,13 @@ mode.
   `rows_returned`).
 - A write or a timer that the request's `rollback(out)` or a trap undid has `undone: true`: it did not stay. Its
   trace event has `tape.sql.undone` (or `tape.timer.undone`), and the span's `tape.sql.rows_written` leaves it out.
-- `trace`: with `"summary"` (the default), each span of the request's trace in a few words: `name`, `status` (`ok`
-  or `error`, and `error` with the message), `duration_us` and how many `events` it has, with the `trace_id`.
-  `"full"` gives the trace as OTLP/JSON (`resourceSpans`), made by the same `otlp()` the service uses
+- `trace`: with `"lines"` (the default), the request's line trace as text, as `node tape.ts` prints it: each
+  function entered; each arm or step tried in your files, `✓` taken or `✗` tried and not taken, with its `file:line`
+  and source; each effect under the line that made it (a query in your words with its `:name` values and what came
+  back, a call, a timer). It is made from the effect log, by replaying the request through the program built with
+  tracing on. A trap ends it with the reason, at the arm it happened in
+  (`✗ trap 4: division by zero at limits.tape:7  …`). At most 200 lines, then `… N more lines`; a request of more
+  than 200,000 steps gets no line trace (it says so). `"full"` gives the trace as OTLP/JSON (`resourceSpans`), made by the same `otlp()` the service uses
   ([`service/src/view.ts`](../service/src/view.ts)) from the same log; the playground shows the same spans. `"none"`
   gives `trace: null`. A full trace is most of an answer's size: ask for it when you need the spans themselves.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got

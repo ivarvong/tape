@@ -11,7 +11,7 @@
 // origin needs a preflight, which gets no CORS headers, so the browser never sends it.
 import { fieldsOf, serveMcp } from '../../service/src/mcp.ts';
 import type { Fields, McpServer } from '../../service/src/mcp.ts';
-import { LIMITS, compileTool, isRefusal, refused, runTool } from './tools.ts';
+import { LIMITS, TRACE_LINES, compileTool, isRefusal, refused, runTool } from './tools.ts';
 import type { Deps, Refusal, Usage } from './tools.ts';
 import { FEEDBACK, KINDS, feedbackTool } from './feedback.ts';
 import type { CallMeta, Store } from './feedback.ts';
@@ -198,7 +198,7 @@ ${limits}`,
       title: 'Run HTTP requests against a Tape program',
       description: `Compile a Tape program and send it HTTP requests, in order, on one fresh in-memory SQLite database that lasts for this call. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} to send it on the run's own clock: now() is the run's start plus at_ms (a request without one keeps the time before it), and each timer due by then runs first, as a result of its own ("woken {\\"key\\":7}"), so a 60 s window or a retry is tested without waiting.
 
-Each result: status, content_type, headers (the response headers the program set, [{name, value}], left out when none), body; effects, the effect log (each SQL statement as written, its :name params, rows_written or rows_returned and the rows: effects "compact", the default, leaves rows out past ${LIMITS.compactRows}, "full" keeps them; calls, now, random, wake); replayed, true when a replay from that log alone gave the same bytes; steps; trace: "summary" (default: each span's name, status, duration_us, events), "full" (OTLP/JSON) or "none". If it does not compile, ok is false with diagnostics, as compile gives. random() is seeded the same on every call. Calls to other programs answer Unreachable.
+Each result: status, content_type, headers (the response headers the program set, [{name, value}], left out when none), body; effects, the effect log (each SQL statement as written, its :name params, rows_written or rows_returned and the rows: effects "compact", the default, leaves rows out past ${LIMITS.compactRows}, "full" keeps them; calls, now, random, wake); replayed, true when a replay from that log alone gave the same bytes; steps; trace: "lines" (default: the line trace, text: each function, each arm tried with ✓ taken or ✗ not and its file:line, each effect under the line that made it, a trap at its line; at most ${TRACE_LINES} lines), "full" (OTLP/JSON) or "none". If it does not compile, ok is false with diagnostics, as compile gives. random() is seeded the same on every call. Calls to other programs answer Unreachable.
 
 ${CHEAT_SHEET}
 
@@ -234,8 +234,9 @@ ${limits}`,
           },
           trace: {
             type: 'string',
-            enum: ['summary', 'full', 'none'],
-            description: 'summary (the default): each span in a few words; full: OTLP/JSON; none.',
+            enum: ['lines', 'full', 'none'],
+            description:
+              'lines (the default): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none.',
           },
           effects: {
             type: 'string',

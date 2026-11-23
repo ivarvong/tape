@@ -142,8 +142,9 @@ describe('tape-mcp in workerd', () => {
       );
     expect(nowOf(rs[3]) - nowOf(rs[0])).toBe(59_500);
     expect(out['timers']).toEqual({ fired: 1, pending: 0 });
-    // and the summary is the default trace
-    expect(F(rs[0]?.['trace'])['spans']).toEqual([expect.objectContaining({ name: 'POST /hit', status: 'ok' })]);
+    // and the line trace is the default: made in the Dynamic Worker from the log, by the traced build
+    expect(String(rs[0]?.['trace'])).toMatch(/^handle\n/);
+    expect(String(rs[0]?.['trace'])).toContain('✓ clock.tape:');
   });
 
   it("keeps Tape's budget and the body limit inside the Dynamic Worker", async () => {

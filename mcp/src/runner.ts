@@ -11,8 +11,8 @@
 // request every timer due by then runs, oldest first (`woken`, as a result of its own), so a test can step past a
 // window or a retry delay. The host reads Date.now() (host/run.ts: now, wake and the due check), so the clock is
 // Date.now itself, replaced for the length of the run; runs in one isolate are taken one at a time for that.
-import { instantiate, isEffect, replay } from './host.ts';
-import type { App, Effect, Service, ServiceReply } from './host.ts';
+import { instantiate, isEffect, replay, traceOf } from './host.ts';
+import type { App, Effect, Service, ServiceReply, TraceEvent } from './host.ts';
 import { loadSqlite, nodeSql, sqliteReady } from './sqlite.ts';
 import type { InitSqlJs, NodeSql, SqlJs } from './sqlite.ts';
 
@@ -68,7 +68,14 @@ export type Ran = {
   steps: number;
   at: number;
   took: number;
+  /**
+   * when a traced build was given: the run replayed from its log through it (host.ts traceOf), its events and the
+   * trap it ended in; a run past TRACE_STEPS is not traced (`too_long`, its steps). None for a timer's run.
+   */
+  trace?: { events: TraceEvent[]; error: string | null } | { too_long: number };
 };
+/** A line trace is made only for a run of at most this many steps: each step can add an event. */
+export const TRACE_STEPS = 200_000;
 /** Every request, or why the program could not be linked to a database (a schema statement SQLite refused). */
 export type RanAll =
   { ok: true; runs: Ran[]; timers?: { fired: number; pending: number } } | { ok: false; error: string };
@@ -128,8 +135,12 @@ const asRequest = (r: string | RunRequest): RunRequest => (typeof r === 'string'
 let queue: Promise<unknown> = Promise.resolve();
 
 /** Run each request in order against one fresh database, then free it. */
-export function runAll(module: WebAssembly.Module, requests: readonly (string | RunRequest)[]): Promise<RanAll> {
-  const mine = queue.then(() => runInOrder(module, requests.map(asRequest)));
+export function runAll(
+  module: WebAssembly.Module,
+  requests: readonly (string | RunRequest)[],
+  traced: WebAssembly.Module | null = null,
+): Promise<RanAll> {
+  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced));
   queue = mine.catch(() => null);
   return mine;
 }
@@ -177,14 +188,30 @@ const dueTimes = (db: NodeSql): Map<number, number> => {
   }
 };
 
-async function runInOrder(module: WebAssembly.Module, requests: readonly RunRequest[]): Promise<RanAll> {
+/** The run again from its log, through the traced build: what the line trace is made of. */
+function lineTrace(
+  traced: WebAssembly.Module,
+  bytes: Uint8Array,
+  effects: Effect[],
+  steps: number,
+): NonNullable<Ran['trace']> {
+  if (steps > TRACE_STEPS) return { too_long: steps };
+  const t = traceOf(traced, bytes, effects);
+  return { events: t.events, error: t.error };
+}
+
+async function runInOrder(
+  module: WebAssembly.Module,
+  requests: readonly RunRequest[],
+  traced: WebAssembly.Module | null,
+): Promise<RanAll> {
   const own = requests.some(r => r.at_ms !== null);
   const realNow = Date.now,
     start = realNow();
   let t = 0;
   if (own) Date.now = () => start + t;
   try {
-    return await runEach(module, requests, own, start, (ms: number) => {
+    return await runEach(module, traced, requests, own, start, (ms: number) => {
       t = ms;
     });
   } finally {
@@ -194,6 +221,7 @@ async function runInOrder(module: WebAssembly.Module, requests: readonly RunRequ
 
 async function runEach(
   module: WebAssembly.Module,
+  traced: WebAssembly.Module | null,
   requests: readonly RunRequest[],
   own: boolean,
   start: number,
@@ -247,6 +275,7 @@ async function runEach(
         steps,
         at,
         took,
+        ...(traced === null ? {} : { trace: lineTrace(traced, bytes, effects, steps) }),
       });
     }
     return own ? { ok: true, runs, timers: { fired, pending: dueTimes(db).size } } : { ok: true, runs };

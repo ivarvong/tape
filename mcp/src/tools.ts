@@ -14,7 +14,7 @@ import { effectLine, queryNames } from '../../apps/playground/src/lines.ts';
 import { otlp } from '../../service/src/view.ts';
 import type { Otlp } from '../../service/src/view.ts';
 import type { Entry, Joined, JoinedCall, RunHead } from '../../service/src/records.ts';
-import { NAME, UNREACHABLE } from './runner.ts';
+import { NAME, TRACE_STEPS, UNREACHABLE } from './runner.ts';
 import type { Ran, RanAll, RunRequest } from './runner.ts';
 
 export const LIMITS = {
@@ -53,7 +53,8 @@ export const isRefusal = (v: unknown): v is Refusal =>
   typeof v === 'object' && v !== null && 'ok' in v && v.ok === false && 'status' in v && 'reason' in v;
 
 /** What a build is given to run: its module's bytes, and a name the Loader can cache it by. */
-export type Program = { wasm: Uint8Array; build: string };
+/** A build to run; `traced`, the same program built with { trace: true }, when a line trace is asked for. */
+export type Program = { wasm: Uint8Array; build: string; traced?: Uint8Array };
 export type Deps = {
   /** the standard library, as the compiler takes it */
   std: readonly Source[];
@@ -97,12 +98,7 @@ export type EffectOut =
   | { kind: 'now'; now: number }
   | { kind: 'random'; random: number }
   | { kind: 'wake'; key: number; after_ms: number; due: number; undone?: true };
-/** A run's spans in a few words each: name, status, how long, and how many events (the OTLP has them all). */
-export type TraceSummary = {
-  trace_id: string;
-  spans: { name: string; status: 'ok' | 'error'; error?: string; duration_us: number; events: number }[];
-};
-export type TraceMode = 'summary' | 'full' | 'none';
+export type TraceMode = 'lines' | 'full' | 'none';
 export type EffectsMode = 'compact' | 'full';
 export type RunResultOne = {
   request: string;
@@ -124,7 +120,7 @@ export type RunResultOne = {
   replay_error?: string;
   steps: number;
   memory_bytes: number | null;
-  trace: Otlp | TraceSummary | null;
+  trace: Otlp | string | null;
   omitted?: string;
 };
 export type RunResult = {
@@ -430,19 +426,66 @@ export function joinedOf(built: Built, files: readonly Source[], ran: Ran, statu
   };
 }
 
-/** The OTLP of one run, in a few words a span. */
-export function summaryOf(trace: Otlp): TraceSummary {
-  const spans = trace.resourceSpans.flatMap(r => r.scopeSpans.flatMap(sc => sc.spans));
-  return {
-    trace_id: spans[0]?.traceId ?? '',
-    spans: spans.map(sp => ({
-      name: sp.name,
-      status: sp.status.code === 2 ? 'error' : 'ok',
-      ...(sp.status.code === 2 && sp.status.message !== undefined ? { error: sp.status.message } : {}),
-      duration_us: Number((BigInt(sp.endTimeUnixNano) - BigInt(sp.startTimeUnixNano)) / 1000n),
-      events: sp.events.length,
-    })),
+/** A line trace is cut after this many lines; the last says how many were left out. */
+export const TRACE_LINES = 200;
+/**
+ * One run's line trace, as the CLI prints it (cli/run.ts): each function entered, each arm or step tried in the
+ * program's files with ✓ (taken) or ✗ (tried, not taken) and its line, and each effect under the line that made
+ * it, a query in the program's own words (its :names). A trap ends it, at the line it happened on.
+ */
+export function lineTraceOf(
+  traced: Built,
+  files: readonly Source[],
+  trace: NonNullable<Ran['trace']>,
+  names: ReadonlyMap<string, string[]>,
+): string {
+  if ('too_long' in trace)
+    return `the run took ${trace.too_long} steps; a line trace is made for at most ${TRACE_STEPS} (trace: "full" gives the spans)`;
+  const { events, error } = trace;
+  const texts = new Map(files.map(f => [f.name, f.text.split('\n')]));
+  const at = (file: string, line: number): string =>
+    `${file}:${line}  ${(texts.get(file)?.[line - 1] ?? '').trim().slice(0, 100)}`;
+  // an arm tried and then matched is shown once, as matched
+  const matched = (site: number, i: number): boolean => {
+    for (let j = i + 1; j < events.length; j++) {
+      const n = events[j];
+      if (n && 'site' in n && n.site === site) return n.what === 1;
+    }
+    return false;
   };
+  const out: string[] = [];
+  let last: { file: string; line: number } | null = null;
+  for (const [i, e] of events.entries()) {
+    if ('site' in e) {
+      const s = traced.sites[e.site];
+      if (!s || !texts.has(s.file)) continue;
+      last = { file: s.file, line: s.line };
+      if (e.what === 2) out.push(s.fn);
+      else if (e.what === 1) out.push(`  ✓ ${at(s.file, s.line)}`);
+      else if (e.what === 0 && s.kind !== 'else' && !matched(e.site, i)) out.push(`  ✗ ${at(s.file, s.line)}`);
+      continue;
+    }
+    if ('sql' in e) {
+      const sqlEffect: Effect = {
+        q: e.sql,
+        p: e.p,
+        ...(e.r === undefined ? {} : { r: e.r }),
+        ...(e.rows === undefined ? {} : { rows: e.rows }),
+        ...(e.undone ? { undone: true as const } : {}),
+      };
+      const l = effectLine(traced, sqlEffect, names);
+      const binds = (l.sql?.binds ?? []).map(([k, v]) => `${k}=${v}`).join(' ');
+      out.push(`      sql ${l.sql?.query ?? ''}${binds ? `  ${binds}` : ''} -> ${l.sql?.result ?? ''}`);
+    } else if ('call' in e) out.push(`      call ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`);
+    else if ('json' in e) out.push(`      json: ${e.json}`);
+    else if ('wake' in e) out.push(`      wake ${e.wake} after ${e.after} ms${e.undone ? ', undone' : ''}`);
+    else if ('now' in e) out.push(`      now -> ${e.now}`);
+    else if ('random' in e) out.push(`      random -> ${e.random}`);
+  }
+  if (error !== null) out.push(`  ✗ ${error}${last ? ` at ${at(last.file, last.line)}` : ''}`);
+  return out.length > TRACE_LINES
+    ? [...out.slice(0, TRACE_LINES), `… ${out.length - TRACE_LINES} more lines`].join('\n')
+    : out.join('\n');
 }
 
 const sizeOf = (v: unknown): number =>
@@ -451,6 +494,7 @@ const sizeOf = (v: unknown): number =>
 type Modes = { trace: TraceMode; effects: EffectsMode };
 function resultOf(
   built: Built,
+  traced: Built | null,
   files: readonly Source[],
   ran: Ran,
   names: ReadonlyMap<string, string[]>,
@@ -464,8 +508,12 @@ function resultOf(
     body = cut ? dec.decode((res?.body ?? enc.encode(full)).subarray(0, LIMITS.responseBodyBytes)) : full;
   const [head] = ran.effects;
   const effects = effectsOut(built, ran.effects, names, modes.effects),
-    full_trace = modes.trace === 'none' ? null : otlp(joinedOf(built, files, ran, status, full)),
-    trace = full_trace && modes.trace === 'summary' ? summaryOf(full_trace) : full_trace;
+    trace =
+      modes.trace === 'full'
+        ? otlp(joinedOf(built, files, ran, status, full))
+        : modes.trace === 'lines' && traced !== null && ran.trace
+          ? lineTraceOf(traced, files, ran.trace, names)
+          : null;
   const large = sizeOf(effects) + sizeOf(trace) > LIMITS.resultBytes;
   return {
     request: ran.request,
@@ -486,7 +534,7 @@ function resultOf(
     trace: large ? null : trace,
     ...(large
       ? {
-          omitted: `the effect log and trace are more than ${LIMITS.resultBytes} bytes as JSON, so both are left out; run fewer requests, return fewer rows, or ask for less (effects: "compact", trace: "summary" or "none")`,
+          omitted: `the effect log and trace are more than ${LIMITS.resultBytes} bytes as JSON, so both are left out; run fewer requests, return fewer rows, or ask for less (effects: "compact", trace: "lines" or "none")`,
         }
       : {}),
   };
@@ -518,17 +566,21 @@ export async function runTool(
   if (isRefusal(c)) return { result: c, usage: null };
   const requests = requestsOf(args);
   if (isRefusal(requests)) return { result: requests, usage: null };
-  const trace = modeOf<TraceMode>(args, 'trace', ['summary', 'full', 'none'], 'summary');
+  const trace = modeOf<TraceMode>(args, 'trace', ['lines', 'full', 'none'], 'lines');
   if (isRefusal(trace)) return { result: trace, usage: null };
   const effects = modeOf<EffectsMode>(args, 'effects', ['compact', 'full'], 'compact');
   if (isRefusal(effects)) return { result: effects, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
   if (!built) return { result: { ok: false, diagnostics: c.diagnostics, results: [] }, usage };
+  // the line trace: the same program built with { trace: true }, each request replayed through it from its log
+  const traced = trace === 'lines' ? compile([...deps.std, ...c.files], { trace: true }) : null;
+  const tracedWasm = traced?.wasm ?? null;
+  const program = { wasm: built.wasm, build: built.build, ...(tracedWasm ? { traced: tracedWasm } : {}) };
   const t0 = Date.now();
   let all: RanAll | 'timeout';
   try {
-    all = await within(deps.run({ wasm: built.wasm, build: built.build }, requests), deps.wallMs ?? LIMITS.wallMs);
+    all = await within(deps.run(program, requests), deps.wallMs ?? LIMITS.wallMs);
   } catch (e) {
     usage.run_ms = Date.now() - t0;
     return {
@@ -552,7 +604,8 @@ export async function runTool(
     };
   if (!all.ok) return { result: { ok: false, diagnostics: [], error: all.error, results: [] }, usage };
   const names = namesOf(c.files);
-  const results = all.runs.map(ran => resultOf(built, c.files, ran, names, { trace, effects }));
+  const tracedBuilt = traced?.wasm ? traced : null;
+  const results = all.runs.map(ran => resultOf(built, tracedBuilt, c.files, ran, names, { trace, effects }));
   usage.statuses = results.map(r => r.status);
   usage.steps = all.runs.reduce((n, r) => n + r.steps, 0);
   return {

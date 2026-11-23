@@ -55,16 +55,25 @@ const codeOf = (): Promise<string> =>
 const runIn =
   (env: Env) =>
   async (program: Program, requests: readonly RunRequest[]): Promise<RanAll> => {
-    const wasm = hexOf(await crypto.subtle.digest('SHA-256', program.wasm)).slice(0, 32);
+    const traced = program.traced ?? program.wasm;
+    const both = new Uint8Array(program.wasm.length + traced.length);
+    both.set(program.wasm);
+    both.set(traced, program.wasm.length);
+    const wasm = hexOf(await crypto.subtle.digest('SHA-256', both)).slice(0, 32);
     const worker = env.LOADER.get(`tape-mcp/${await codeOf()}/${wasm}`, () => ({
       compatibilityDate: '2026-11-13',
       mainModule: 'loaded.js',
       globalOutbound: null,
       limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 },
-      modules: { ...MODULES, 'sqlite3.wasm': { wasm: sqlite3 }, 'program.wasm': { wasm: program.wasm } },
+      modules: {
+        ...MODULES,
+        'sqlite3.wasm': { wasm: sqlite3 },
+        'program.wasm': { wasm: program.wasm },
+        'traced.wasm': { wasm: traced },
+      },
     }));
     const runner = worker.getEntrypoint<Runner>('Runner', { limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 } });
-    return runner.run([...requests]);
+    return runner.run([...requests], program.traced !== undefined);
   };
 
 /** Feedback reports: one private R2 object each (feedback.ts), behind their own rate limit. */
