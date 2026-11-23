@@ -96,6 +96,13 @@ starts in the first state. Not checked: DELETE, and the statements of migrations
 refuses stored rows in an undeclared state). The triggers do not catch a write that leaves the column as it is,
 which is why C58 exists.
 
+Keys of commands (2026-11-23). C65's check of a key made only of what its message carries was deleted: it judged a
+key by where each value came from, was refused by keys that named their command correctly (15 refusals in three bench
+rounds), and its own way out (`once:` the message) had the defect it refused. C65 keeps a key that is the same every
+time; C71 requires a command built from a row, bound by a match arm or a `let`, to name that row in its key. Not
+checked: a row held as a field (`order.amount` of `Some(value: order)`) and the payload of an exported method's
+message; closing them would take a second mechanism, not a wider C71.
+
 ## Timers: C77 to C80
 
 Jepsen runs against the box office in production (`apps/tickets`) found two bugs that every local test and compile
