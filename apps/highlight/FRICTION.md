@@ -31,7 +31,7 @@ in 129 files, and on 6,000 generated sources (`test.ts`).
 - A text literal that starts like a statement (`SELECT `, `INSERT `, …) is `s q`, with `sk` spans on capitalised
   words inside. It is still one `s` token.
 - After an error lex.ts stops; the highlighter marks it (`x`, `s x`, `e x`, `q x`) and goes on. For a source
-  lex.ts refuses, the test checks that the first marked span is the kind refused (L01 to L04), on the line lex.ts
+  lex.ts refuses, the test checks that the first marked span is the kind refused (L01 to L06; a refused number is `n x`), on the line lex.ts
   reports.
 - The bracket stack past 63 levels (entry 3).
 

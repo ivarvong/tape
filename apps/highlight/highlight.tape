@@ -4,7 +4,7 @@
 // reads characters, and decides the same token boundaries.
 //
 // Classes: c comment, s text literal (e an escape inside one, or the backslash that carries it on to the next
-// line; h a hole, `\(…)`, whose expression inside is highlighted as code between two hd delimiters), n integer,
+// line; h a hole, `\(…)`, whose expression inside is highlighted as code between two hd delimiters), n number,
 // k reserved word, w a word with a meaning only where it stands, t a type or constructor name, i any other name,
 // o operator or punctuation, q SQL (a migration's or an invariant's body, or a text literal that starts like a
 // statement; inside it, sk an SQL keyword, sp a named placeholder and ss quoted SQL text), x what the compiler would refuse.
@@ -50,12 +50,7 @@ fn token(src: View, at: Int, out: Buf, state: Scan, ch: Int) -> Buf {
       state
     )
     ch == 34 -> text(src, at, out, state, end: text_end(src, at: at + 1))
-    ch >= 48 and ch <= 57 -> scan(
-      src,
-      at: digits_end(v: src, at),
-      out: span(out, class: "n", src, from: at, to: digits_end(v: src, at)),
-      state: pushed(state, kind: 0)
-    )
+    ch >= 48 and ch <= 57 -> number(src, at, out, state, end: number_end(src, at))
     letter(b: ch) or (ch == 95 and word_byte(b: byte_at(src, at: at + 1))) -> word(
       src,
       at,
@@ -209,6 +204,159 @@ fn contextual(w: View) -> Bool {
     "read" -> True
     "write" -> True
     _ -> False
+  }
+}
+
+// A number, as lex.ts reads one: digits, then a point and digits, then an exponent, then `f` for a Float
+// (`1.5f`, `2f`, `1e-3f`), all one span. Digits alone are an Int, and digits with a point a Dec (`12.30`). An
+// exponent without the f is refused, and so are a Dec with more than 18 digits after its point and a Float with
+// more than 20 significant digits or beyond the largest Float. `end` is where the digits, point and exponent end.
+fn number(src: View, at: Int, out: Buf, state: Scan, end: Int) -> Buf {
+  match {
+    byte_at(src, at: end) == 102 and not word_byte(b: byte_at(src, at: end + 1)) -> scan(
+      src,
+      at: end + 1,
+      out: span(out, class: float_class(src, at, f: end), src, from: at, to: end + 1),
+      state: pushed(state, kind: 0)
+    )
+    refused(src, at, end) -> scan(
+      src,
+      at: end,
+      out: span(out, class: "n x", src, from: at, to: end),
+      state: pushed(state, kind: 0)
+    )
+    else -> scan(
+      src,
+      at: end,
+      out: span(out, class: "n", src, from: at, to: end),
+      state: pushed(state, kind: 0)
+    )
+  }
+}
+
+// an Int or a Dec lex.ts refuses: an exponent (it is only for a Float), or more than 18 digits after the point
+fn refused(src: View, at: Int, end: Int) -> Bool {
+  let point = digits_end(v: src, at)
+  end > fraction_end(src, at: point) or end > point + 19
+}
+
+fn number_end(src: View, at: Int) -> Int {
+  exponent_end(src, at: fraction_end(src, at: digits_end(v: src, at)))
+}
+
+// a point counts only with a digit after it (`1.x` is 1, then `.`)
+fn fraction_end(src: View, at: Int) -> Int {
+  match {
+    byte_at(src, at) == 46 and is_digit(byte_at(src, at: at + 1)) -> digits_end(v: src, at: at + 1)
+    else -> at
+  }
+}
+
+// an e or E, a sign or none, and at least one digit (`1e` is 1, then the name e)
+fn exponent_end(src: View, at: Int) -> Int {
+  let b = byte_at(src, at)
+  let from = at + 1 + sign_size(src, at: at + 1)
+  match {
+    (b == 101 or b == 69) and is_digit(byte_at(src, at: from)) -> digits_end(v: src, at: from)
+    else -> at
+  }
+}
+
+fn sign_size(src: View, at: Int) -> Int {
+  match {
+    byte_at(src, at) == 43 or byte_at(src, at) == 45 -> 1
+    else -> 0
+  }
+}
+
+// The Float from `at` to its f at `f`: "n", or "n x" when lex.ts refuses it. Its digits without the point run
+// from the first that is not 0 (`first`) to the last that is not 0; there must be at most 20 of them. The
+// first stands at 10 to the power `power`. Number() of it is finite below 10^308, and at 10^308 when its first
+// 20 digits are at most 17976931348623158079: halfway between the largest Float and the next power of two,
+// 1.7976931348623158079372…e308, rounds to infinity.
+fn float_class(src: View, at: Int, f: Int) -> View {
+  let point = digits_end(v: src, at)
+  let mantissa = fraction_end(src, at: point)
+  let first = nonzero_from(src, at, to: mantissa)
+  let power = digit_count(src, at: first, to: mantissa) - 1 + exponent_of(
+    src,
+    at: mantissa,
+    to: f
+  ) - digit_count(
+    src,
+    at: point,
+    to: mantissa
+  )
+  match {
+    first == mantissa -> "n"
+    digit_count(
+      src,
+      at: first,
+      to: nonzero_before(src, at: mantissa, from: first) + 1
+    ) > 20 -> "n x"
+    power > 308 -> "n x"
+    power == 308 and above_largest(src, at: first, to: mantissa, k: 0) -> "n x"
+    else -> "n"
+  }
+}
+
+// the first digit from `at` that is not 0 (a point is passed over), or `to`
+fn nonzero_from(src: View, at: Int, to: Int) -> Int {
+  match {
+    at >= to -> to
+    src[at] >= 49 and src[at] <= 57 -> at
+    else -> nonzero_from(src, at: at + 1, to)
+  }
+}
+
+// the last digit before `at` that is not 0, at or after `from` (which is one)
+fn nonzero_before(src: View, at: Int, from: Int) -> Int {
+  match {
+    at - 1 <= from -> from
+    src[at - 1] >= 49 and src[at - 1] <= 57 -> at - 1
+    else -> nonzero_before(src, at: at - 1, from)
+  }
+}
+
+// how many digits from `at` to `to` (a point is not one)
+fn digit_count(src: View, at: Int, to: Int) -> Int {
+  match {
+    at >= to -> 0
+    src[at] == 46 -> digit_count(src, at: at + 1, to)
+    else -> 1 + digit_count(src, at: at + 1, to)
+  }
+}
+
+// the exponent from `at` (an e or E) to `to`, 0 when there is none; its size is held at 100000, past any
+// Float's either way
+fn exponent_of(src: View, at: Int, to: Int) -> Int {
+  match {
+    at >= to -> 0
+    src[at + 1] == 45 -> 0 - exponent_digits(src, at: at + 2, to, acc: 0)
+    src[at + 1] == 43 -> exponent_digits(src, at: at + 2, to, acc: 0)
+    else -> exponent_digits(src, at: at + 1, to, acc: 0)
+  }
+}
+
+fn exponent_digits(src: View, at: Int, to: Int, acc: Int) -> Int {
+  match {
+    at >= to -> acc
+    acc > 100000 -> 100000
+    else -> exponent_digits(src, at: at + 1, to, acc: acc * 10 + src[at] - 48)
+  }
+}
+
+// Are the digits from `at` (a point passed over; 0 past `to`), from the k-th on, above those of
+// 17976931348623158079?
+fn above_largest(src: View, at: Int, to: Int, k: Int) -> Bool {
+  let largest = "17976931348623158079"
+  match {
+    k == 20 -> False
+    at < to and src[at] == 46 -> above_largest(src, at: at + 1, to, k)
+    at < to and src[at] > largest[k] -> True
+    at < to and src[at] < largest[k] -> False
+    at < to -> above_largest(src, at: at + 1, to, k: k + 1)
+    else -> 48 > largest[k]
   }
 }
 

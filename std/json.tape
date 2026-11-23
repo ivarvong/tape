@@ -1018,7 +1018,7 @@ fn int_or_zero(found: Option[Int]) -> Int {
 fn json_float_of(found: Option[Json_Tree]) -> Float {
   match json_maybe_float(found) {
     Some(value) -> value
-    None -> float(n: 0)
+    None -> 0f
   }
 }
 

@@ -167,7 +167,7 @@ const expectedClass = (t: Token): string =>
         ? CONTEXTUAL.includes(t.v)
           ? 'w'
           : 'i'
-        : t.t === 'int'
+        : t.t === 'int' || t.t === 'float' || t.t === 'dec'
           ? 'n'
           : t.t === 'str' || t.t === 'interp'
             ? 's'
@@ -264,6 +264,14 @@ function compareTokens(
           );
       });
     } else if (t.t === 'int') value = /^[0-9]+$/.test(str(s)) && BigInt(str(s)) === t.v;
+    // a Float's span is the whole literal, its f included
+    // a Dec's span is its digits and point: the count of its last place, and that many digits after the point
+    else if (t.t === 'dec')
+      value =
+        /^[0-9]+\.[0-9]+$/.test(str(s)) &&
+        BigInt(str(s).replace('.', '')) === t.v &&
+        str(s).length - str(s).indexOf('.') - 1 === t.s;
+    else if (t.t === 'float') value = /^[0-9.eE+-]+f$/.test(str(s)) && Number(str(s).slice(0, -1)) === t.v;
     else if (t.t === 'sql') value = str(s) === `{${t.v}}`;
     else value = str(s) === t.v;
     const shown =
@@ -282,7 +290,7 @@ function compareTokens(
 // A source lex() refuses: the first span marked x must be the kind of thing refused, on the same line. Where a
 // span's fault is: an unclosed text literal at its end (the line break or the end of the source), anything
 // else at its start (lex.ts reports an unclosed migration at its opening line).
-const REFUSAL: Record<string, string> = { L01: 'x', L02: 's', L03: 'e', L04: 'q', L05: 'h' };
+const REFUSAL: Record<string, string> = { L01: 'x', L02: 's', L03: 'e', L04: 'q', L05: 'h', L06: 'n' };
 const fault = (s: Span): number => (s.cls.startsWith('s ') ? s.to : s.from);
 function refused(e: CompileError, input: Uint8Array, p: Parsed): string[] {
   const all = p.tops
@@ -456,6 +464,21 @@ const sp = (c: string, t: string): string => `<span class="${c}">${t}</span>`;
 const hole = (inside: string): string => sp('h', `${sp('hd', '\\(')}${inside}${sp('hd', ')')}`);
 const EDGES: [string, string][] = [
   ['', ''],
+  // a Float is one span, its point, exponent and f included; a point or an exponent without the f is refused
+  ['1.5f 2f 1e-3f 6.02E+23f', [sp('n', '1.5f'), sp('n', '2f'), sp('n', '1e-3f'), sp('n', '6.02E+23f')].join(' ')],
+  [
+    '2fa 1.x 1e',
+    `${sp('n', '2')}${sp('i', 'fa')} ${sp('n', '1')}${sp('o', '.')}${sp('i', 'x')} ${sp('n', '1')}${sp('i', 'e')}`,
+  ],
+  // a point without the f is a Dec, of at most 18 digits after the point; an exponent without the f is refused
+  ['12.30 0.123456789012345678', `${sp('n', '12.30')} ${sp('n', '0.123456789012345678')}`],
+  ['0.1234567890123456789', sp('n x', '0.1234567890123456789')],
+  ['1e5', sp('n x', '1e5')],
+  ['1.5e3', sp('n x', '1.5e3')],
+  ['1.5fx', `${sp('n', '1.5')}${sp('i', 'fx')}`],
+  ['123456789012345678901f', sp('n x', '123456789012345678901f')],
+  ['1797693134862315807e290f', sp('n', '1797693134862315807e290f')],
+  ['1797693134862315808e290f', sp('n x', '1797693134862315808e290f')],
   ['\n\n', '\n\n'],
   ['"abc', sp('s x', '&quot;abc')],
   ['"abc\nx', `${sp('s x', '&quot;abc')}\n${sp('i', 'x')}`],
@@ -604,6 +627,42 @@ function fuzz(h: Highlighter): { cases: number; refused: number; bad: string[] }
   ];
   // a hole that breaks does so at its end (a quote, a line break), so no fragment after it lands inside it
   const broken = ["'", '"', '!', '\\', 'é', '"\\q"', '#', '"\\(x"', '"\\(x\n', '"a \\'];
+  // the numbers, in cases of their own (after the first 6000, so those stay the sources they were): pieces of
+  // literals lex() accepts alone, which joined make more (`1` `.` `5` `f`), then ones it refuses: an exponent
+  // with no f, a Dec with more than 18 digits after its point, a Float with too many digits or too large
+  const numbers = [
+    '0',
+    '5',
+    '1.5f',
+    '2f',
+    '0f',
+    '1e-3f',
+    '6.02E+23f',
+    '2fa',
+    'f',
+    'e',
+    'E',
+    '.',
+    '-',
+    '+',
+    '17976931348623158f',
+    '1797693134862315807e290f',
+    '12345678901234567890f',
+    '0.000000000000000000000123f',
+    '12.30',
+    '1.5fx',
+    '0.123456789012345678',
+    '00.0',
+  ];
+  const badNumbers = [
+    '1e5',
+    '1.5e3',
+    '0.1234567890123456789',
+    '123456789012345678901f',
+    '1e309f',
+    '1797693134862315808e290f',
+    '1e99999999999999999999f',
+  ];
   let seed = 7,
     refusedCount = 0;
   const rnd = (n: number): number => {
@@ -611,10 +670,11 @@ function fuzz(h: Highlighter): { cases: number; refused: number; bad: string[] }
     return seed % n;
   };
   const bad: string[] = [],
-    cases = 6000;
+    cases = 9000;
   for (let c = 0; c < cases && bad.length < 10; c++) {
     // half the sources from fragments lex() accepts alone, half with a few it refuses mixed in
-    const parts = c % 2 ? clean : [...clean, ...broken],
+    const ok = c < 6000 ? clean : [...clean, ...numbers],
+      parts = c % 2 ? ok : c < 6000 ? [...ok, ...broken] : [...ok, ...broken, ...badNumbers],
       src = Array.from({ length: 1 + rnd(30) }, () => parts[rnd(parts.length)] ?? '').join(''),
       input = enc.encode(src),
       p = parse(h.run(input).out);
@@ -693,6 +753,36 @@ const PLANTS: { gate: string; what: string; from: string; to: string }[] = [
     what: 'a placeholder may follow a word (a:b is one)',
     from: 'at == 0 or (not word_byte(b: src[at - 1]) and src[at - 1] != 58)',
     to: 'at == 0 or src[at - 1] != 58',
+  },
+  {
+    gate: 'lexer agreement',
+    what: "a Float's f is left out of its span",
+    from: 'from: at, to: end + 1)',
+    to: 'from: at, to: end)',
+  },
+  {
+    gate: 'edges',
+    what: 'a point counts without a digit after it',
+    from: 'byte_at(src, at) == 46 and is_digit(byte_at(src, at: at + 1))',
+    to: 'byte_at(src, at) == 46',
+  },
+  {
+    gate: 'edges',
+    what: 'a Float at 10^308 is compared to the largest on 18 digits, not 20',
+    from: 'k == 20 -> False',
+    to: 'k == 18 -> False',
+  },
+  {
+    gate: 'lexer agreement',
+    what: 'a point without the f is refused (as before Dec)',
+    from: 'end > fraction_end(src, at: point) or',
+    to: 'end > point or',
+  },
+  {
+    gate: 'edges',
+    what: 'a Dec may have 19 digits after its point',
+    from: 'end > point + 19',
+    to: 'end > point + 20',
   },
   {
     gate: 'large',

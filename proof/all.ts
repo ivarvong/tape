@@ -94,9 +94,9 @@ const slow: Part[] = [
     8,
   ],
   [
-    'apps/highlight/test.ts --plants: 13 bugs planted in highlight.tape, each caught by its gate',
+    'apps/highlight/test.ts --plants: 18 bugs planted in highlight.tape, each caught by its gate',
     [node, 'apps/highlight/test.ts', '--plants'],
-    /^all 13 plants caught$/m,
+    /^all 18 plants caught$/m,
   ],
   [
     'apps/trace/test.ts --plants: 39 bugs planted in trace.tape, each caught by its gate',
