@@ -107,8 +107,8 @@ function compileFn(B: Build, f: FnDecl): Compiled {
   return { sig: B.sig(params, results), body: [...localRuns(c.locals), ...c.code] };
 }
 
-/** functionCompiler(build) -> compileFn(f) -> { sig, body } */
-export function functionCompiler(build: Omit<Build, 'counters'>): (f: FnDecl) => Compiled {
-  const B: Build = { ...build, counters: { lambdas: 0 } };
+/** functionCompiler(build) -> compileFn(f) -> { sig, body }; `counters` shared by compilers of one program */
+export function functionCompiler(build: Omit<Build, 'counters'>, counters: Build['counters']): (f: FnDecl) => Compiled {
+  const B: Build = { ...build, counters };
   return f => compileFn(B, f);
 }

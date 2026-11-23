@@ -167,6 +167,17 @@ rejects(
     ['arms differ', 'fn f(b: Buf, n: Int) -> View {\n  match n {\n    0 -> freeze(b)\n    _ -> "x"\n  }\n}', 'C28'],
     ['positional', 'fn g(a: Int, b: Int) -> Int {\n  a\n}\nfn f(n: Int) -> Int {\n  g(1, 2)\n}', 'C10'],
     ['type mismatch', 'fn f(n: Int) -> Bool {\n  n + 1\n}', 'C14'],
+    // a function nothing calls is checked too: its error is the program's, at its line (until 2026-11-23 it compiled)
+    [
+      'type error in a function nothing calls',
+      'fn f(n: Int) -> Int {\n  n\n}\nfn g(n: Int) -> Int {\n  n + "1"\n}',
+      'C14 line 5',
+    ],
+    [
+      'unknown name in a function nothing calls',
+      'fn f(n: Int) -> Int {\n  n\n}\nfn g(n: Int) -> Int {\n  m\n}',
+      'C16 line 5',
+    ],
     ['unknown name', 'fn f(count: Int) -> Int {\n  coumt + 1\n}', 'C16'],
     ['no else', 'fn f(n: Int) -> Int {\n  match {\n    n > 0 -> 1\n  }\n}', 'C24'],
   ],

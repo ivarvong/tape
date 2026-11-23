@@ -100,6 +100,8 @@ fn name(param: Type, …) -> Type {
 Arguments are named: `f(at: i)`. A variable named like the parameter is passed bare, `f(at)`; so is the only
 argument of a one-parameter function, whatever expression it is: `fact(n - 1)`. Any other argument is named, so a
 function of two parameters is called `pow(b, e: e - 1)` (C10). `a |> f(b: 1)` is `f(<first parameter>: a, b: 1)`.
+Every function is checked, whether anything calls it or not: a type error in one nothing calls yet is the
+program's error, at its line. A generic function is checked where it is called, for the types it is called with.
 
 A body is steps, then one expression that is its value. There are three steps:
 

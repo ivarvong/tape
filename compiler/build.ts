@@ -189,7 +189,8 @@ function compileAll(fr: Front, opts: Options, L: layout.Layouts) {
   const tables = mod.tables(prog, imports.FIRST);
   const filled = filling();
   const kit = toolkit(fr, opts, L, { tables, imports, callsOf, filled });
-  const compileFn = functionCompiler(kit);
+  const counters = { lambdas: 0 };
+  const compileFn = functionCompiler(kit, counters);
   for (const n of opts.exports) {
     if (!prog.fns.has(n)) fail(null, 'C30', `the program has no function ${n}`, `The host calls \`${n}\`. Define it.`);
     mod.fnIndex(tables, n);
@@ -200,6 +201,7 @@ function compileAll(fr: Front, opts: Options, L: layout.Layouts) {
     const f = tables.order[i];
     if (f) compiled.push(compileFn(f));
   }
+  checkUnreached(fr, opts, L, { imports, callsOf, counters }, tables);
   for (const fl of prog.flags)
     if (!filled.flagRead.has(fl.name))
       fail(
@@ -209,6 +211,27 @@ function compileAll(fr: Front, opts: Options, L: layout.Layouts) {
         `Delete the declaration, or read it with \`flags.${fl.name}\`. A flag nothing reads is a rollout that already finished.`,
       );
   return { imports, tables, compiled, fingerprint: kit.fingerprint, resolve: kit.resolve, ...filled };
+}
+
+/**
+ * Every function the exports do not reach, type-checked all the same: compiled into tables of its own and thrown
+ * away, so a mistake in a function nothing calls yet is the program's error, at its line, and the module is what it
+ * was. A generic function is checked where it is called, for the types it is called with.
+ */
+function checkUnreached(
+  fr: Front,
+  opts: Options,
+  L: layout.Layouts,
+  parts: { imports: mod.Imports; callsOf: mod.CallGraph; counters: { lambdas: number } },
+  reached: mod.Tables,
+): void {
+  const { prog } = fr;
+  const rest = [...prog.fns.values()].filter(f => f.tparams.length === 0 && !reached.indexOf.has(f.name));
+  if (rest.length === 0) return;
+  const tables = mod.tables(prog, parts.imports.FIRST);
+  const kit = toolkit(fr, opts, L, { tables, imports: parts.imports, callsOf: parts.callsOf, filled: filling() });
+  const check = functionCompiler(kit, parts.counters);
+  for (const f of rest) check(f);
 }
 
 /** The JSON Schema of a type the simulator will need, or null when it has none. */
