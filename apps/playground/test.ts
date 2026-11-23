@@ -854,8 +854,8 @@ const PLANTS: Plant[] = [
     test: 'names',
     what: "the effect log loses the program's names for its values (shows ?1)",
     file: 'src/lines.ts',
-    from: 'if (n.names && n.names.length > 0 && !n.mixed) out.set(n.sql, n.names);',
-    to: 'if (n.names && n.names.length > 1 && !n.mixed) out.set(n.sql, n.names);',
+    from: 'if (!n.names || n.names.length === 0 || n.mixed) continue;',
+    to: 'if (!n.names || n.names.length <= 1 || n.mixed) continue;',
   },
   {
     test: 'home',

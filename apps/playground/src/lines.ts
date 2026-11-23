@@ -41,11 +41,18 @@ export function queryNames(text: string): Map<string, string[]> {
   } catch {
     return out;
   }
+  // two literals that differ only in their names (`:id`, `:to`) are one statement, and a log entry cannot say which
+  // ran: such a statement keeps its numbers
+  const clash = new Set<string>();
   for (const t of toks) {
     if (t.t !== 'str') continue;
     const n = numbered(dec.decode(Uint8Array.from(t.v)));
-    if (n.names && n.names.length > 0 && !n.mixed) out.set(n.sql, n.names);
+    if (!n.names || n.names.length === 0 || n.mixed) continue;
+    const had = out.get(n.sql);
+    if (had && had.join(',') !== n.names.join(',')) clash.add(n.sql);
+    out.set(n.sql, n.names);
   }
+  for (const sql of clash) out.delete(sql);
   return out;
 }
 

@@ -5,8 +5,9 @@ import { compile } from '../compiler.ts';
 import { std } from '../std.ts';
 import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
+import { effectLine, queryNames } from '../apps/playground/src/lines.ts';
 import { nodeSql } from '../nodesql.ts';
-import { finish, same } from './harness.ts';
+import { built, finish, same } from './harness.ts';
 
 const said = (text: string): string => {
   const [e] = compile([...std, { name: 't.tape', text }], { exports: ['f'] }).errors;
@@ -147,6 +148,51 @@ fn handle(raw: View) -> Buf {
       [want, want],
     );
   }
+}
+
+// ---- the effect log in the program's words (feedback 20261123T013350.931Z-e65cf778d550, ledger): two queries that
+// differ only in a placeholder's name, `WHERE id = :id` and `WHERE id = :to`, are one statement, `WHERE id = ?1`,
+// and the log named both runs with the last literal's names: `:to` for a lookup written with `:id`. The statement
+// cannot say which literal ran, so its names are shown only when every literal that makes it gives the same ones.
+{
+  const LOOKUPS = `migration 1 "a" {
+  CREATE TABLE accounts(id TEXT PRIMARY KEY NOT NULL, balance INTEGER NOT NULL)
+}
+
+type Account { Account(id: View, balance: Int) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(path: "/accounts/" ++ id) -> shown(found: sql_first(row: Account, query: "SELECT id, balance FROM accounts WHERE id = :id", id))
+    Request(path: "/to/" ++ to) -> shown(found: sql_first(row: Account, query: "SELECT id, balance FROM accounts WHERE id = :to", to))
+    Request(path: "/n/" ++ id) -> shown(found: sql_first(row: Account, query: "SELECT id, balance FROM accounts WHERE id = :id AND balance > 0", id))
+    _ -> respond(status: 404)
+  }
+}
+
+fn shown(found: Option[Account]) -> Buf {
+  match found {
+    Some(value: Account(balance)) -> respond(status: 200) |> append(view: "\\(balance)")
+    None -> respond(status: 404)
+  }
+}
+`;
+  const b = built(LOOKUPS);
+  const names = queryNames(LOOKUPS);
+  const shownFor = (sql: string): string => {
+    const q = b.queries.findIndex(x => x.sql === sql);
+    return q < 0 ? `no statement ${sql}` : (effectLine(b, { q, p: ['alice'], rows: [] }, names).sql?.query ?? '');
+  };
+  same(
+    'two literals that number alike, :id and :to, are one statement, shown as numbered',
+    [b.queries.length, shownFor('SELECT id, balance FROM accounts WHERE id = ?1')],
+    [2, 'SELECT id, balance FROM accounts WHERE id = ?1'],
+  );
+  same(
+    'a statement only one literal makes is shown with its names',
+    shownFor('SELECT id, balance FROM accounts WHERE id = ?1 AND balance > 0'),
+    'SELECT id, balance FROM accounts WHERE id = :id AND balance > 0',
+  );
 }
 
 finish();
