@@ -79,7 +79,7 @@ function rewritten(r: Asked, q: Query, s: Write, w: Rewrite, opTables: ReadonlyS
     'C54',
     q.at,
     `run twice (a retried request, a timer that fires again), this write applies twice: ${dependent.map(x => `${x.col} = ${q.raw.slice(x.expr.s, x.expr.e).trim()}`).join(', ')} depends on the row it changes, and nothing at the top level of its WHERE stops a second run`,
-    `Make the second run a no-op: compare-and-set on a column it changes (\`AND state = 'pending'\` with a new state, \`AND version = :version\` with version = version + 1), or guard it by an op id (\`AND NOT EXISTS (SELECT 1 FROM ops WHERE op = :op AND key = :key)\`), or claim the op id first and write only once it is yours: \`let 1 = sql_exec(query: "INSERT INTO ops(op) VALUES (:op) ON CONFLICT(op) DO NOTHING", op) else -> …\` before the write, with \`rollback\` where the write then fails. If every attempt is meant to count, say so in the call: \`repeat: True\`.`,
+    `Make the second run a no-op: compare-and-set on a column it changes (\`AND state = 'pending'\` with a new state, \`AND version = :version\` with version = version + 1), or guard it by an op id (\`AND NOT EXISTS (SELECT 1 FROM ops WHERE op = :op AND key = :key)\`), or claim the op id first and write only once it is yours: \`let 1 = sql_exec(query: "INSERT INTO ops(op) VALUES (:op) ON CONFLICT(op) DO NOTHING", op) else -> …\` before the write, with \`rollback\` where the write then fails. Any one of these is enough: with it, \`repeat: True\` is refused (C88). Only if none is meant, because every attempt is meant to count, say so in the call: \`repeat: True\`.`,
   );
 }
 

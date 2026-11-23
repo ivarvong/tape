@@ -398,4 +398,38 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// ---- C54's fix and C88 agree. C54 listed the claim-first form and `repeat: True` side by side; an agent did both
+// (the claim, then `repeat: True` on the debit) and C88 refused the flag, a second round trip to learn that the claim
+// alone was enough. The fix says each guard is enough alone and that `repeat: True` is for a write none applies to;
+// the claim alone compiles, and the claim with the flag is still C88, as the fix now says it is.
+{
+  const CREDIT = `migration 1 "t" {
+  CREATE TABLE a(id TEXT PRIMARY KEY NOT NULL, balance INTEGER NOT NULL);
+  CREATE TABLE tr(id TEXT PRIMARY KEY NOT NULL)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let id = request(raw).path
+  @CLAIM
+  do sql_exec(query: "UPDATE a SET balance = balance + 5 WHERE id = :id", id@R)
+  respond(status: 200)
+}
+`;
+  const CLAIM =
+    'let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> respond(status: 200)';
+  const s = said(CREDIT.replace('@CLAIM', '').replace('@R', ''));
+  same('C54 on the credit with no claim', code(s), 'C54:9');
+  same(
+    '…and its fix says each guard is enough alone, so repeat: True is not added to one (C88)',
+    hint(s).includes('Any one of these is enough: with it, `repeat: True` is refused (C88)'),
+    true,
+  );
+  same('the claim alone compiles', said(CREDIT.replace('@CLAIM', CLAIM).replace('@R', '')), 'compiled');
+  same(
+    'the claim with repeat: True is C88, as the fix says',
+    code(said(CREDIT.replace('@CLAIM', CLAIM).replace('@R', ', repeat: True'))),
+    'C88:9',
+  );
+}
+
 finish();
