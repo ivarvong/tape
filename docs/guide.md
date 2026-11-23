@@ -495,11 +495,25 @@ this is refused (C35). A field of a JSON type is:
 - `Int`, `Bool`, `View`, or a refinement of one (`type Qty = Int where self >= 1`);
 - a record of such fields;
 - `List[…]` of any of these, lists of lists included;
-- `Option[…]` of any of these, for a key that may be absent (decoding only).
+- `Option[…]` of any of these, for a key that may be absent.
 
 ```
 type NewTier { NewTier(key: Key, name: Name, price: Money, capacity: Seats) }
 type NewEvent { NewEvent(key: Key, name: Name, starts: Name, tiers: Option[List[NewTier]]) }
+```
+
+A key that is a reserved word, such as a webhook's `"type"`, is a field like any other. A pattern binds it under
+another name (`type: kind`), since a reserved word cannot name a variable:
+
+```tape
+type Hook { Hook(id: View, type: View) }
+
+fn handle(raw: View) -> Buf {
+  let Ok(value: Hook(id, type: kind)) = decode(json: request(raw).body, as: Hook) else {
+    Err(error) -> respond(status: 400) |> append(view: error)
+  }
+  respond(status: 200) |> append(view: "\(id) is a \(kind)")
+}
 ```
 
 A value that does not fit is refused with the path to what is wrong: `tiers[1]: price: not a valid Money`,
