@@ -115,6 +115,11 @@ const BUILT_INS: BuiltIn[] = [
     doc: 'The bytes from `from` up to, not including, `to`; no copy. `v[i]` is one byte, as an Int.',
   },
   { name: 'buf', sig: 'buf() -> Buf', doc: 'A new, empty buffer to write into. A response starts as one: `respond`.' },
+  ...(['add', 'sub', 'mul'] as const).map((op): BuiltIn => ({
+    name: `wrapping_${op}`,
+    sig: `wrapping_${op}(a: Int, b: Int) -> Int`,
+    doc: `a ${{ add: '+', sub: '-', mul: '*' }[op]} b modulo 2^64: the low 64 bits of the exact result. Plain \`${{ add: '+', sub: '-', mul: '*' }[op]}\` traps on overflow (trap 6); use this where wrapping is meant (a hash).`,
+  })),
   { name: 'push', sig: 'push(buf: Buf, byte: Int) -> Buf', doc: 'Appends one byte.' },
   { name: 'append', sig: 'append(buf: Buf, view: View) -> Buf', doc: 'Appends text.' },
   { name: 'freeze', sig: 'freeze(buf: Buf) -> View', doc: 'The bytes written so far, as a View.' },

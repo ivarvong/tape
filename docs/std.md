@@ -176,7 +176,7 @@ Uses: [`Request`](#type-request).
 
 ## Contents
 
-- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
+- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`digits`](#fn-digits), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`write_rows`](#fn-write_rows)
@@ -212,6 +212,30 @@ buf() -> Buf
 ```
 
 A new, empty buffer to write into. A response starts as one: `respond`.
+
+### builtin wrapping_add
+
+```tape
+wrapping_add(a: Int, b: Int) -> Int
+```
+
+a + b modulo 2^64: the low 64 bits of the exact result. Plain `+` traps on overflow (trap 6); use this where wrapping is meant (a hash).
+
+### builtin wrapping_sub
+
+```tape
+wrapping_sub(a: Int, b: Int) -> Int
+```
+
+a - b modulo 2^64: the low 64 bits of the exact result. Plain `-` traps on overflow (trap 6); use this where wrapping is meant (a hash).
+
+### builtin wrapping_mul
+
+```tape
+wrapping_mul(a: Int, b: Int) -> Int
+```
+
+a * b modulo 2^64: the low 64 bits of the exact result. Plain `*` traps on overflow (trap 6); use this where wrapping is meant (a hash).
 
 ### builtin push
 
