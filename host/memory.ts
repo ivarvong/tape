@@ -203,8 +203,9 @@ export function writeRows(m: Mem, q: Query, rows: readonly Cell[][]): number {
 // ---- JSON
 // env.json(ptr, len, shape id): JSON.parse, checked against the type's shape. Writes a u32 constructor index,
 // 4 bytes of padding, then that constructor's fields in order (an optional field is an i64 flag, then its value
-// if present). The bytes may not be JSON of that shape: not an object, an unknown or missing key, a value of the
-// wrong kind, text that is not well-formed. Refined types' conditions are checked by the module.
+// if present). The bytes may not be JSON of that shape: not an object, a missing key, a value of the wrong kind,
+// text that is not well-formed. A key no field names is left unread. Refined types' conditions are checked by the
+// module.
 
 const KIND: Readonly<Record<string, string>> = { t: 'text', b: 'true or false', i: 'a whole number' };
 const wellFormed = (s: string): boolean => s.isWellFormed();
@@ -226,7 +227,7 @@ function nested(f: FieldShape, x: unknown): string | null | undefined {
 const ofKind = (kind: string, x: unknown): boolean =>
   kind === 't' ? typeof x === 'string' : kind === 'b' ? typeof x === 'boolean' : Number.isSafeInteger(x);
 
-/** Whether the object's keys and values are exactly this constructor's fields. */
+/** Whether the object has this constructor's fields, with values of their kinds (other keys are left unread). */
 function fit(shape: readonly FieldShape[], v: Record<string, unknown>): Fit | Miss {
   const raw = new Map<string, string>();
   let size = 8;
@@ -249,9 +250,11 @@ function fit(shape: readonly FieldShape[], v: Record<string, unknown>): Fit | Mi
     size += 8 + (length === null ? 8 : 4 + 3 * length);
     depth++;
   }
-  const extra = Object.keys(v).find(k => !shape.some(f => f.name === k));
-  return extra === undefined ? { size, raw } : { depth, why: `unknown key ${JSON.stringify(extra)}` };
+  return { size, raw };
 }
+/** How many of the object's keys a constructor names; -1 when it lacks one of its fields that is not optional. */
+const named = (shape: readonly FieldShape[], v: Record<string, unknown>): number =>
+  shape.some(f => !f.optional && !Object.hasOwn(v, f.name)) ? -1 : shape.filter(f => Object.hasOwn(v, f.name)).length;
 
 /** Constructor `which` with the object's values, written where the module reads it; the pointer. */
 function writeObject(
@@ -288,8 +291,9 @@ function writeObject(
 }
 
 /**
- * JSON decoded as a type: a pointer to the value, as the first constructor whose fields are exactly the object's
- * keys with values of the right kinds; or why not, from the constructor that got furthest.
+ * JSON decoded as a type: a pointer to the value, as the constructor that has all its fields among the object's
+ * keys and names the most of them (the first such, in declaration order), when its values are of the right kinds;
+ * or why not: that constructor's reason, or, when none has its fields, the one that got furthest.
  */
 export function decodeJson(m: Mem, shape: Shape, ptr: number, len: number): { at: number } | { issue: string } {
   let v: unknown;
@@ -299,11 +303,21 @@ export function decodeJson(m: Mem, shape: Shape, ptr: number, len: number): { at
     return { issue: len > 0 ? 'not JSON' : 'empty' };
   }
   if (!isObject(v)) return { issue: 'not an object' };
-  let furthest: Miss = { depth: -1, why: '' };
+  let best = -1,
+    most = -1;
   for (const [which, fields] of shape.variants.entries()) {
+    const n = named(fields, v);
+    if (n > most) [best, most] = [which, n];
+  }
+  const fields = shape.variants[best];
+  if (fields) {
     const found = fit(fields, v);
-    if ('size' in found) return { at: writeObject(m, fields, which, v, found) };
-    if (found.depth > furthest.depth) furthest = found;
+    return 'size' in found ? { at: writeObject(m, fields, best, v, found) } : { issue: found.why };
+  }
+  let furthest: Miss = { depth: -1, why: '' };
+  for (const f of shape.variants) {
+    const found = fit(f, v);
+    if ('depth' in found && found.depth > furthest.depth) furthest = found;
   }
   return { issue: furthest.why };
 }

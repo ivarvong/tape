@@ -269,8 +269,8 @@ What to notice:
 - **The query** is `Request(query)`: the raw text after `?`. `form_field(body: q, name: "limit")` reads one
   parameter; `number` says absent (the default) apart from present but wrong (a 400 that names it).
 - **Validation** is the types: `decode(json: body, as: NewItem)` checks every refined field (`Qty`, `Tag`, each
-  element of `tags`) and refuses unknown keys, and its `Err` is a sentence that names the field. It goes back as
-  the 400's body as it is.
+  element of `tags`), leaves a key it does not name unread (clients send more than a service reads), and its `Err`
+  is a sentence that names the field. It goes back as the 400's body as it is.
 - **JSON out** is `respond_as(status, content: Json)` and then `write_json` of a record (a `List` field is an
   array) or `write_rows` of a query. A `List` cannot be written on its own: `Page` wraps it.
 - **SQL** names each value: `WHERE id = :id`, and the argument `id`. A row type's fields name the columns
@@ -295,11 +295,11 @@ POST /items {"key":"a1","name":"desk","qty":1}
 POST /items {"key":"b2","name":"desk","qty":-1}
 400 {"error":"qty: not a valid Qty"}
 POST /items {"key":"b2","name":"desk","qty":1,"color":"red"}
-400 {"error":"unknown key \"color\""}
+201 {"id":2,"key":"b2","name":"desk","qty":1,"version":1}
 POST /items {"key":"b2","name":"desk","qty":1,"tags":["Red"]}
 400 {"error":"tags[0]: not a valid Tag"}
 POST /items {"key":"b2","name":"desk","qty":1}
-201 {"id":2,"key":"b2","name":"desk","qty":1,"version":1}
+200 {"id":2,"key":"b2","name":"desk","qty":1,"version":1}
 GET /items/1
 200 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
 GET /items/9
@@ -503,8 +503,8 @@ type NewEvent { NewEvent(key: Key, name: Name, starts: Name, tiers: Option[List[
 ```
 
 A value that does not fit is refused with the path to what is wrong: `tiers[1]: price: not a valid Money`,
-`venue: unknown key "roof"`, `grid[1][1]: expected a whole number`. Every level is as strict as the top one: a
-missing key, an unknown key, a wrong kind and a refinement that fails are each a reason. A fingerprint covers the
+`grid[1][1]: expected a whole number`. Every level is read as the top one is: a missing key, a wrong kind and a
+refinement that fails are each a reason, and a key no field names is left unread. A fingerprint covers the
 whole message, so two programs that disagree about a field three records down answer `Skew` and run nothing. An
 exported method's JSON Schema goes through records and lists too.
 

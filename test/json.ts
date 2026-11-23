@@ -140,11 +140,6 @@ if (b.wasm !== null) {
     ],
     ['a key missing in an element', { ...good, tiers: [{ name: 'x', qty: 1 }] }, 'tiers[0]: missing key "price"'],
     ['a record that is not an object', { ...good, venue: 'NYC' }, 'venue: expected an object'],
-    [
-      'an unknown key inside a record',
-      { ...good, venue: { city: 'x', indoor: true, roof: 1 } },
-      'venue: unknown key "roof"',
-    ],
     ['a wrong value in a list of text', { ...good, tags: ['a', 5] }, 'tags[1]: expected text'],
     ['a list that is not an array', { ...good, tiers: {} }, 'tiers: expected an array'],
     ['an element that is not an object', { ...good, tiers: [7] }, 'tiers[0]: not an object'],
@@ -162,6 +157,12 @@ if (b.wasm !== null) {
     ],
     ['null where a record goes', { ...good, venue: null }, 'venue: expected an object'],
   ];
+  const [s3, t3] = post({ ...good, sent_at: 1, venue: { ...good.venue, roof: 1 } });
+  ok(
+    'keys the types do not name, at the top and inside a record, are left unread',
+    s3 === 201 && t3 === JSON.stringify({ ...good, seats: 11 }),
+    t3.slice(0, 200),
+  );
   for (const [what, bad, want] of BAD) {
     const [s, t] = post(bad);
     ok(`400: ${what}`, s === 400 && t === want, t);

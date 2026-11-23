@@ -23,8 +23,6 @@ function transfer(v: unknown, i: number): Transfer {
       refuse(`${at}${k}: expected ${k === 'amount' ? 'a whole number' : 'text'}`);
     if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
   }
-  const extra = Object.keys(v).find(k => !FIELDS.some(f => f === k));
-  if (extra !== undefined) refuse(`${at}unknown key ${JSON.stringify(extra)}`);
   // the loop above refused any other kind; these checks only tell the type checker so
   const t: Transfer = {
     key: asText(v['key']),
@@ -47,8 +45,6 @@ function decode(body: string): Transfer[] {
   if (!isObject(v)) return refuse('not an object');
   if (!Object.hasOwn(v, 'transfers')) refuse('missing key "transfers"');
   if (!Array.isArray(v['transfers'])) refuse('transfers: expected an array');
-  const extra = Object.keys(v).find(k => k !== 'transfers');
-  if (extra !== undefined) refuse(`unknown key ${JSON.stringify(extra)}`);
   const transfers = v['transfers'];
   return (Array.isArray(transfers) ? transfers : refuse('transfers: expected an array')).map(transfer);
 }

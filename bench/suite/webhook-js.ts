@@ -23,8 +23,6 @@ function event(v: unknown, i: number): Event {
       refuse(`${at}${k}: expected ${k === 'amount' ? 'a whole number' : 'text'}`);
     if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
   }
-  const extra = Object.keys(v).find(k => !FIELDS.some(f => f === k));
-  if (extra !== undefined) refuse(`${at}unknown key ${JSON.stringify(extra)}`);
   // the loop above refused any other kind; these checks only tell the type checker so
   const e: Event = {
     id: asText(v['id']),
@@ -54,8 +52,6 @@ function decode(body: string): { source: string; events: Event[] } {
   if (!Object.hasOwn(v, 'events')) refuse('missing key "events"');
   const events = v['events'];
   if (!Array.isArray(events)) return refuse('events: expected an array');
-  const extra = Object.keys(v).find(k => k !== 'source' && k !== 'events');
-  if (extra !== undefined) refuse(`unknown key ${JSON.stringify(extra)}`);
   return { source, events: events.map(event) };
 }
 

@@ -3,7 +3,8 @@
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { std } from '../std.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
+import { interpret } from '../interp.ts';
 import { nodeSql } from '../nodesql.ts';
 import { finish, same } from './harness.ts';
 
@@ -92,6 +93,60 @@ fn credit(k: View, by: Int) -> Buf {
     codesOf(claimed.replace('else -> respond(status: 200) |> append(view: "dup")', 'else -> credit(k: "acme", by: 1)')),
     ['C54:23'],
   );
+}
+
+// ---- decode takes a body with keys its type does not name (7 reports: todo, webhook, shortener, invoice; real
+// clients and providers send more than a service reads). Of a type with several constructors it takes the one
+// that names the most of the body's keys, so declaring the smaller first changes nothing. Compiled and
+// interpreted, each against the answer written here from that rule.
+{
+  const EV = `type Ev {
+  Refunded(id: Int)
+  Paid(id: Int, amount: Int)
+}
+
+type Note {
+  Note(text: View, at: Option[Int])
+}
+
+fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  match r.path {
+    "/ev" -> match decode(json: r.body, as: Ev) {
+      Ok(value: Paid(id, amount)) -> respond(status: 200) |> append(view: "paid \\(id) \\(amount)")
+      Ok(value: Refunded(id)) -> respond(status: 200) |> append(view: "refunded \\(id)")
+      Err(error) -> respond(status: 400) |> append(view: error)
+    }
+    _ -> match decode(json: r.body, as: Note) {
+      Ok(value: Note(text)) -> respond(status: 200) |> append(view: text)
+      Err(error) -> respond(status: 400) |> append(view: error)
+    }
+  }
+}
+`;
+  const cases: [string, string][] = [
+    ['POST /note\n{"text":"hi","from":"app","v":2}', '200\nhi'],
+    ['POST /note\n{"text":"hi","at":null}', '400\nat: expected a whole number'],
+    ['POST /note\n{"from":"app"}', '400\nmissing key "text"'],
+    ['POST /ev\n{"id":1,"amount":2}', '200\npaid 1 2'],
+    ['POST /ev\n{"id":1,"amount":2,"currency":"usd"}', '200\npaid 1 2'],
+    ['POST /ev\n{"id":1}', '200\nrefunded 1'],
+    ['POST /ev\n{"id":1,"reason":"dup"}', '200\nrefunded 1'],
+    ['POST /ev\n{"id":1,"amount":"2"}', '400\namount: expected a whole number'],
+  ];
+  const r = compile([...std, { name: 't.tape', text: EV }]);
+  const app = r.wasm ? instantiate(new WebAssembly.Module(r.wasm), { sql: nodeSql(), log: false }) : null;
+  const it = interpret([...std, { name: 't.tape', text: EV }]);
+  const enc = new TextEncoder(),
+    dec = new TextDecoder();
+  for (const [req, want] of cases) {
+    const got = app ? responseOf(app.handle(enc.encode(req))) : null;
+    same(
+      `decode: ${req.replace('\n', ' ')}`,
+      [got ? `${got.status}\n${dec.decode(got.body)}` : 'does not compile', dec.decode(it.handle(enc.encode(req)))],
+      [want, want],
+    );
+  }
 }
 
 finish();

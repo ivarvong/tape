@@ -132,7 +132,7 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'decode',
     sig: 'decode(json: View, as: T) -> Result[T, View]',
-    doc: 'Reads a JSON object into the record type `T` (or into the first of its constructors whose keys fit). A missing key, an unknown key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused.',
+    doc: 'Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused.',
   },
   {
     name: 'next',

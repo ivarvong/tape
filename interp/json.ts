@@ -60,9 +60,10 @@ const isObject = (v: unknown): v is Readonly<Record<string, unknown>> =>
 const err = (why: string): Adt => adt('Err', { error: enc.encode(why) });
 
 /**
- * decode(json:, as:): JSON.parse, then the first constructor whose fields are exactly the object's keys with values
- * of the right kinds, then each refined field's condition (`meets`). When none fits, the reason is from the
- * constructor that got furthest.
+ * decode(json:, as:): JSON.parse, then the constructor that has its fields among the object's keys and names the
+ * most of them (the first such), its values of the right kinds, then each refined field's condition (`meets`). A
+ * key no field names is left unread. When no constructor has its fields, the reason is from the one that got
+ * furthest.
  */
 export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t: TypeAst, v: Value) => boolean): Adt {
   let parsed: unknown;
@@ -112,15 +113,19 @@ export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t
       read.push({ name: fl.name, type, value });
       depth++;
     }
-    const extra = Object.keys(object).find(key => !variant.fields.some(fl => fl.name === key));
-    if (extra !== undefined) return no(depth, `unknown key ${JSON.stringify(extra)}`);
     const bad = read.find(r => !meets(r.type, r.value));
     return bad ? err(`${bad.name}: not a valid ${bad.type.name}`) : adt('Ok', { value: adt(variant.name, f) });
   };
-  for (const variant of recordOf(prog, name, 'decode').decl.variants) {
-    const found = fit(variant);
-    if (found) return found;
-  }
+  // the constructor that has its fields among the keys and names the most of them; a key none names is unread
+  const variants = recordOf(prog, name, 'decode').decl.variants;
+  const has = (fl: Variant['fields'][number]): boolean => Object.hasOwn(object, fl.name);
+  const named = (v: Variant): number =>
+    v.fields.some(fl => fl.type.name !== 'Option' && !has(fl)) ? -1 : v.fields.filter(has).length;
+  let best: Variant | undefined,
+    most = -1;
+  for (const v of variants) if (named(v) > most) [best, most] = [v, named(v)];
+  if (best) return fit(best) ?? err(issue);
+  for (const v of variants) fit(v);
   return err(issue);
 }
 

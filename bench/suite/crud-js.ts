@@ -1,6 +1,6 @@
 // bench/suite/crud-js.ts: the JS twin of crud.tape, written as one would write it by hand, and its inputs.
 // Decoding refuses what decode refuses, with the same reason: for each object, every field's kind in order, a
-// missing key, an unknown key; then, in order, each field's condition, or each element of a list.
+// missing key (a key no field names is left unread); then, in order, each field's condition, or each element of a list.
 import type { NodeSql } from '../../nodesql.ts';
 import { dec, enc, rng } from './rand.ts';
 import type { Workload } from './common.ts';
@@ -12,7 +12,7 @@ class Refused extends Error {}
 const refuse = (why: string): never => {
   throw new Refused(why);
 };
-/** The host's checks on one object: kinds in field order, then a missing key, then an unknown key. */
+/** The host's checks on one object: kinds in field order, then a missing key; other keys are left unread. */
 function shape(v: unknown, fields: Record<string, 't' | 'i' | 'a'>, at = ''): Record<string, unknown> {
   if (!isObject(v)) return refuse(`${at}not an object`);
   for (const [k, kind] of Object.entries(fields)) {
@@ -23,8 +23,6 @@ function shape(v: unknown, fields: Record<string, 't' | 'i' | 'a'>, at = ''): Re
     if (kind === 'a' && !Array.isArray(x)) refuse(`${at}${k}: expected an array`);
     if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
   }
-  const extra = Object.keys(v).find(k => !Object.hasOwn(fields, k));
-  if (extra !== undefined) refuse(`${at}unknown key ${JSON.stringify(extra)}`);
   return v;
 }
 const textIn = (v: string, lo: number, hi: number): boolean => bytes(v) >= lo && bytes(v) <= hi;

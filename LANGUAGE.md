@@ -394,7 +394,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 
 | Job | The form | Otherwise |
 |---|---|---|
-| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors. A field the type does not have is refused, and so is `null` for an `Option` field: it is there or it is not. An `Int` field takes a JSON number that is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), as `JSON.parse` reads it, so `1e3` is 1000; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded: the host reads JSON with `JSON.parse`, whose numbers are doubles, and past 2^53 - 1 a double cannot hold every whole number exactly. Send such a value as text until exact large-integer JSON, the whole 64-bit range, comes (planned for 0.3) | C35 |
+| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors. A key the type does not name is left unread (clients send more than a service reads); `null` for an `Option` field is refused: it is there or it is not. Of several constructors, decode takes the one that has all its fields among the keys and names the most of them. An `Int` field takes a JSON number that is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), as `JSON.parse` reads it, so `1e3` is 1000; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded: the host reads JSON with `JSON.parse`, whose numbers are doubles, and past 2^53 - 1 a double cannot hold every whole number exactly. Send such a value as text until exact large-integer JSON, the whole 64-bit range, comes (planned for 0.3) | C35 |
 | Write a record, or the rows of a query | `write_json(value)`, `write_rows(rows)` | |
 | Write a list of computed items | `out \|> write_json_list(list, by: fn(out: Buf, item: T) -> Buf { … })`: the Buf is handed from item to item, never kept in a record (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
@@ -575,6 +575,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | `decode` leaves a key the type does not name unread, instead of refusing the body (7 reports: providers and clients send more than a service reads). Of several constructors it takes the one that has its fields and names the most of the body's keys. There is no strict mode |
 | 23 November 2026 | C54 takes a write in a helper when every call of the helper comes after a claim of an op id (the webhook's credit, called once its delivery id is inserted). A helper also called where nothing was claimed is still refused |
 | 23 November 2026 | the capabilities the compiler adds (`db` of a function that reads the database) are not written parameters: `load(order.id)` for `fn load(id: Int)` takes its argument bare, no refusal lists them, and C11 shows the call with the parameter's name |
 | 23 November 2026 | `_ ->` in a match with no subject, and `else ->` in a match on a value, say which fallback arm that match takes |

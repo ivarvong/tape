@@ -187,7 +187,7 @@ fn handle(raw: View) -> Buf {
   T('decode: not JSON', go('{"title":'), 'no: not JSON');
   T('decode: missing key', go('{"done":true}'), 'no: missing key "title"');
   T('decode: wrong kind', go('{"title":5}'), 'no: title: expected text');
-  T('decode: unknown key', go('{"title":"a","x":1}'), 'no: unknown key "x"');
+  T('decode: a key the type does not name is left unread', go('{"title":"a","x":1}'), 'a');
   T('decode: refinement', go('{"title":"too long"}'), 'no: title: not a valid Title');
   T('decode: empty', go(''), 'no: empty');
 }
