@@ -575,6 +575,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | std: `isqrt(n)`, the square root rounded down (None below 0), exact up to the largest Int, for fixed point (feedback 20261123T015153.800Z-7782f1b2045b) |
 | 23 November 2026 | `decode` leaves a key the type does not name unread, instead of refusing the body (7 reports: providers and clients send more than a service reads). Of several constructors it takes the one that has its fields and names the most of the body's keys. There is no strict mode |
 | 23 November 2026 | C54 takes a write in a helper when every call of the helper comes after a claim of an op id (the webhook's credit, called once its delivery id is inserted). A helper also called where nothing was claimed is still refused |
 | 23 November 2026 | the capabilities the compiler adds (`db` of a function that reads the database) are not written parameters: `load(order.id)` for `fn load(id: Int)` takes its argument bare, no refusal lists them, and C11 shows the call with the parameter's name |

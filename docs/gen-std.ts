@@ -313,6 +313,22 @@ fn stock() -> List[Item] {
 `,
   },
   {
+    title: 'Money and other fractions, in fixed point',
+    uses: ['fn isqrt', 'fn decimal_text', 'fn parse_int'],
+    text: 'There are no floats yet (`Dec` and `Float` are planned): keep amounts as whole numbers of the smallest unit (cents, thousandths) and scale before you divide or take a root, so `isqrt(n: 2 * 1000 * 1000)` is the root of 2 in thousandths, 1414. Arithmetic that does not fit an Int traps (trap 6) instead of wrapping.',
+    program: `// the length of the diagonal of a w by h rectangle, in thousandths of the unit
+fn diagonal(w: Int, h: Int) -> Int {
+  let Some(value: root) = isqrt(n: (w * w + h * h) * 1000 * 1000) else -> 0
+  root
+}
+
+fn handle(raw: View) -> Buf {
+  let d = diagonal(w: 3, h: 4)
+  respond(status: 200) |> append(view: "\\(d) thousandths")
+}
+`,
+  },
+  {
     title: 'Validate characters',
     uses: ['fn every_byte', 'fn is_lower', 'fn is_digit', 'fn is_alpha', 'fn is_alnum', 'builtin len'],
     text: '`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v, keep)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.',

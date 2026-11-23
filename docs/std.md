@@ -135,6 +135,25 @@ fn stock() -> List[Item] {
 
 Uses: [`write_rows`](#fn-write_rows), [`write_json`](#builtin-write_json), [`List`](#type-list), [`write_json_string`](#fn-write_json_string).
 
+### Money and other fractions, in fixed point
+
+There are no floats yet (`Dec` and `Float` are planned): keep amounts as whole numbers of the smallest unit (cents, thousandths) and scale before you divide or take a root, so `isqrt(n: 2 * 1000 * 1000)` is the root of 2 in thousandths, 1414. Arithmetic that does not fit an Int traps (trap 6) instead of wrapping.
+
+```tape
+// the length of the diagonal of a w by h rectangle, in thousandths of the unit
+fn diagonal(w: Int, h: Int) -> Int {
+  let Some(value: root) = isqrt(n: (w * w + h * h) * 1000 * 1000) else -> 0
+  root
+}
+
+fn handle(raw: View) -> Buf {
+  let d = diagonal(w: 3, h: 4)
+  respond(status: 200) |> append(view: "\(d) thousandths")
+}
+```
+
+Uses: [`isqrt`](#fn-isqrt), [`decimal_text`](#fn-decimal_text), [`parse_int`](#fn-parse_int).
+
 ### Validate characters
 
 `v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v, keep)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.
@@ -181,7 +200,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 - [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
-- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`min`](#fn-min), [`max`](#fn-max), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`digits`](#fn-digits), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
+- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`min`](#fn-min), [`max`](#fn-max), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`digits`](#fn-digits), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`write_json_list`](#fn-write_json_list), [`join`](#fn-join)
@@ -691,6 +710,23 @@ The larger of two numbers.
 3
 ```
 
+### fn isqrt
+
+```tape
+fn isqrt(n: Int) -> Option[Int]
+```
+
+The square root of `n`, rounded down: the largest r with r * r <= n. None when n is negative. Exact for every Int, up to the largest (whose root is 3037000499). For fixed point, scale first: the root of 2 to 3 places is isqrt(2 * 1000 * 1000), 1414 thousandths.
+
+```
+> isqrt(n: 17)
+Some(value: 4)
+> isqrt(n: 2 * 1000 * 1000)
+Some(value: 1414)
+> isqrt(n: -1)
+None
+```
+
 ### fn digits_end
 
 ```tape
@@ -822,6 +858,7 @@ The code point that starts at `at` (a byte of 128 or more), and where the next o
 Helpers (called by the functions above; callable, but not meant to be):
 
 - `fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool`: every_byte from position `at`.
+- `fn root_between(n: Int, lo: Int, hi: Int) -> Int`: isqrt's search; the root is in lo..hi, and hi * hi never overflows.
 - `fn decimal_value(v: View, at: Int, value: Int) -> Int`: the loop of decimal.
 - `fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the least Int fits.
 - `fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits after the first.

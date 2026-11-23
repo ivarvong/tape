@@ -7,7 +7,7 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { effectLine, queryNames } from '../apps/playground/src/lines.ts';
 import { nodeSql } from '../nodesql.ts';
-import { built, finish, same } from './harness.ts';
+import { bare, built, call, finish, same } from './harness.ts';
 
 const said = (text: string): string => {
   const [e] = compile([...std, { name: 't.tape', text }], { exports: ['f'] }).errors;
@@ -148,6 +148,33 @@ fn handle(raw: View) -> Buf {
       [want, want],
     );
   }
+}
+
+// ---- isqrt (feedback 20261123T015153.800Z-7782f1b2045b: a square root for fixed-point maths): the floor of the
+// square root, None below 0, for every Int up to the largest. The oracle is BigInt's: r * r <= n < (r + 1) ^ 2.
+{
+  const P = 'fn root(n: Int) -> Int {\n  match isqrt(n) {\n    Some(value) -> value\n    None -> -1\n  }\n}\n';
+  const b = built(P, { exports: ['root'] });
+  const fns = bare(new WebAssembly.Module(b.wasm)).fns;
+  const it = interpret([...std, { name: 't.tape', text: P }]);
+  const MAX = 2n ** 63n - 1n;
+  const floorSqrt = (n: bigint): bigint => {
+    if (n < 0n) return -1n;
+    let r = BigInt(Math.floor(Math.sqrt(Number(n))));
+    while (r * r > n) r -= 1n;
+    while ((r + 1n) * (r + 1n) <= n) r += 1n;
+    return r;
+  };
+  const edges = [-(2n ** 63n), -1n, 0n, 1n, 2n, 3n, 4n, 15n, 16n, 17n, 99n, 100n, 2n ** 52n - 1n, 2n ** 53n + 1n];
+  for (const r of [3037000499n, 3037000498n, 94906265n, 2n ** 26n]) edges.push(r * r - 1n, r * r, r * r + 1n);
+  edges.push(MAX - 1n, MAX);
+  const bad = edges.filter(n => {
+    const want = floorSqrt(n);
+    call(fns, 'reset');
+    return call(fns, 'root', n) !== want || it.call('root', [n]) !== want;
+  });
+  same(`isqrt: ${edges.length} edge values, compiled and interpreted, as BigInt says`, bad, []);
+  same('isqrt of the largest Int is 3037000499', floorSqrt(MAX), 3037000499n);
 }
 
 // ---- the effect log in the program's words (feedback 20261123T013350.931Z-e65cf778d550, ledger): two queries that

@@ -138,6 +138,33 @@ fn max(a: Int, b: Int) -> Int {
   }
 }
 
+// The square root of `n`, rounded down: the largest r with r * r <= n. None when n is negative. Exact for every
+// Int, up to the largest (whose root is 3037000499). For fixed point, scale first: the root of 2 to 3 places is
+// isqrt(2 * 1000 * 1000), 1414 thousandths.
+//
+//   > isqrt(n: 17)
+//   Some(value: 4)
+//   > isqrt(n: 2 * 1000 * 1000)
+//   Some(value: 1414)
+//   > isqrt(n: -1)
+//   None
+fn isqrt(n: Int) -> Option[Int] {
+  match {
+    n < 0 -> None
+    else -> Some(value: root_between(n, lo: 0, hi: 3037000499))
+  }
+}
+
+// Internal: isqrt's search; the root is in lo..hi, and hi * hi never overflows.
+fn root_between(n: Int, lo: Int, hi: Int) -> Int {
+  let mid = lo + (hi - lo + 1) / 2
+  match {
+    lo >= hi -> lo
+    mid * mid <= n -> root_between(n, lo: mid, hi)
+    else -> root_between(n, lo, hi: mid - 1)
+  }
+}
+
 // The position of the first byte at or after `at` that is not a digit.
 fn digits_end(v: View, at: Int) -> Int {
   match {
