@@ -317,6 +317,12 @@ function rowKeys(r: Reading, f: FnDecl, rowTable: ReadonlyMap<string, string | n
       if (pk.length > 0) out.push(pk.map(col => `${only.name}.${col}`));
     }
   };
+  // a row the function is given: a parameter of a row type (`fn charge(order: Order)`), named by `order.id`
+  for (const pm of f.params) {
+    const table = pm.typeAst.args.length === 0 ? rowTable.get(pm.typeAst.name) : null;
+    const pk = table ? pkOf(table) : [];
+    if (pk.length > 0) out.push(pk.map(col => `${pm.name}.${col}`));
+  }
   eachExpr(f.body, e => {
     if (e.k === 'match' && e.subject) for (const a of e.arms) held(a.pat, e.subject);
     if (e.k === 'block') for (const l of e.lets) if (l.pat) held(l.pat, l.value);

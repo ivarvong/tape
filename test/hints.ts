@@ -464,4 +464,59 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// ---- C65 and a row passed in as a parameter. The exemption for a key naming the row's primary key saw the row's
+// pattern (`Order(id, …)`) and a field of a row read in the same function, not a field of a row the function is
+// given: `fn charge(order: Order)` with `once: ForOrder(order: order.id)` was still C65 (2 Haiku orders runs), and
+// the fix text wrote that very key. Both forms of a parameter row are taken; a key of the amount is still C65.
+{
+  const PARAM = `migration 1 "t" {
+  CREATE TABLE orders(id INTEGER PRIMARY KEY, amount INTEGER NOT NULL)
+}
+
+type Order { Order(id: Int, amount: Int) }
+type Charge { Charge(order_id: Int, amount: Int) }
+type Charged { Charged(payment: Int) }
+type ForOrder { ForOrder(order: Int) }
+type ForAmount { ForAmount(amount: Int) }
+
+fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+  match sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") {
+    Some(value) -> charge(order: value)
+    None -> respond(status: 404)
+  }
+}
+
+fn charge(order: Order) -> Buf {
+  @BODY
+}
+
+fn charged(reply: Result[Charged, CallError]) -> Buf {
+  match reply {
+    Ok(value) -> respond(status: 201)
+    Err(error) -> respond(status: 502)
+  }
+}
+`;
+  const field = (key: string): string =>
+    PARAM.replace(
+      '@BODY',
+      `charged(reply: call(to: payments, method: "charge", send: Charge(order_id: order.id, amount: order.amount), reply: Charged, within: 100, once: ${key}))`,
+    );
+  const bound = (key: string): string =>
+    PARAM.replace(
+      '@BODY',
+      `let Order(id, amount) = order\n  charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, within: 100, once: ${key}))`,
+    );
+  same(
+    'a parameter row: its primary key as a field compiles, and bound by its pattern',
+    [said(field('ForOrder(order: order.id)')), said(bound('ForOrder(order: id)'))],
+    ['compiled', 'compiled'],
+  );
+  same(
+    '…and a key of its amount is still C65, both ways',
+    [code(said(field('ForAmount(amount: order.amount)'))), code(said(bound('ForAmount(amount)')))],
+    ['C65:19', 'C65:20'],
+  );
+}
+
 finish();
