@@ -4,7 +4,26 @@ export const I32 = 0x7f,
   I64 = 0x7e,
   F64 = 0x7c;
 // DIVISION: by zero. OVERFLOW: an Int result that does not fit in 64 bits. SHIFT: a shift amount outside 0..63.
-export const TRAP = { MEMORY: 1, REDUCTIONS: 2, BOUNDS: 3, DIVISION: 4, RELEASED: 5, OVERFLOW: 6, SHIFT: 7 } as const;
+// FLOAT: a Float operation whose result would be NaN or infinite.
+export const TRAP = {
+  MEMORY: 1,
+  REDUCTIONS: 2,
+  BOUNDS: 3,
+  DIVISION: 4,
+  RELEASED: 5,
+  OVERFLOW: 6,
+  SHIFT: 7,
+  FLOAT: 8,
+} as const;
+/** Which f64 load and store, i64, or i32 a value of a Wasm type takes in memory (8 bytes each in the arena). */
+export const loadOp = (vt: number): number => (vt === F64 ? 0x2b : vt === I64 ? 0x29 : 0x28);
+export const storeOp = (vt: number): number => (vt === F64 ? 0x39 : vt === I64 ? 0x37 : 0x36);
+/** An f64 constant's instruction. */
+export const f64 = (x: number): number[] => {
+  const b = new Uint8Array(8);
+  new DataView(b.buffer).setFloat64(0, x, true);
+  return [0x44, ...b];
+};
 // trace: emit an event for every function entered and every arm or step tried and matched (for replay traces).
 export const DEFAULTS = {
   pin: {},

@@ -1190,20 +1190,6 @@ fn colored(acc: Acc) -> Acc {
 
 // ---------- times ----------
 
-fn max(a: Int, b: Int) -> Int {
-  match {
-    a > b -> a
-    else -> b
-  }
-}
-
-fn min(a: Int, b: Int) -> Int {
-  match {
-    a < b -> a
-    else -> b
-  }
-}
-
 // The earliest readable time, start or end, of any span; -1 when there is none.
 fn earliest(list: List[Span], lo: Int) -> Int {
   match list {

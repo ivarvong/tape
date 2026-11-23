@@ -1,7 +1,7 @@
 // compiler/gen/module.ts: what one build keeps while its functions are compiled: who calls what, which imports
 // the module needs and their numbers, and the tables every function adds to (signatures, text, queries).
-import { eachExpr, eachPattern, patternsIn } from '../ast.ts';
-import type { Arg, Expr, FnDecl, Program } from '../ast.ts';
+import { eachExpr, eachPattern, eachType, patternsIn, typesIn } from '../ast.ts';
+import type { Arg, Expr, FnDecl, Program, TypeAst, TypeDecl } from '../ast.ts';
 import { CompileError, fail, sleb, stemOf, vec } from '../common.ts';
 import type { DEFAULTS } from '../common.ts';
 import { integerParams } from '../../sql/analyze.ts';
@@ -81,11 +81,13 @@ export type Imports = {
   usesMember: boolean;
   usesAsk: boolean;
   usesWake: boolean;
+  usesFloat: boolean;
   JSON_IMPORT: number;
   CALL_IMPORT: number;
   MEMBER_IMPORT: number;
   ASK_IMPORT: number;
   WAKE_IMPORT: number;
+  FLOAT_TEXT_IMPORT: number;
   TRACE_IMPORT: number;
   PROFILE_IMPORT: number;
   IMPORTS: number;
@@ -116,7 +118,7 @@ function checkWoken(setter: FnDecl | undefined, served: readonly Served[]): void
     );
 }
 
-type Uses = Pick<Imports, 'usesSql' | 'usesJson' | 'usesCall' | 'usesMember' | 'usesAsk' | 'usesWake'>;
+type Uses = Pick<Imports, 'usesSql' | 'usesJson' | 'usesCall' | 'usesMember' | 'usesAsk' | 'usesWake' | 'usesFloat'>;
 
 /** The index of each import that is used, in the order the module lists them, and of the functions after them. */
 function numbered(uses: Uses, opts: Options): Imports {
@@ -126,12 +128,44 @@ function numbered(uses: Uses, opts: Options): Imports {
   const MEMBER_IMPORT = CALL_IMPORT + n(uses.usesCall);
   const ASK_IMPORT = MEMBER_IMPORT + n(uses.usesMember);
   const WAKE_IMPORT = ASK_IMPORT + n(uses.usesAsk);
-  const TRACE_IMPORT = WAKE_IMPORT + n(uses.usesWake);
+  const FLOAT_TEXT_IMPORT = WAKE_IMPORT + n(uses.usesWake);
+  const TRACE_IMPORT = FLOAT_TEXT_IMPORT + n(uses.usesFloat);
   const PROFILE_IMPORT = TRACE_IMPORT + n(opts.trace);
   const IMPORTS = PROFILE_IMPORT + n(opts.profile);
   const after = { IMPORTS, ALLOC: IMPORTS, RESET: IMPORTS + 1, RESERVE: IMPORTS + 2, FIRST: IMPORTS + 3 };
-  const before = { JSON_IMPORT, CALL_IMPORT, MEMBER_IMPORT, ASK_IMPORT, WAKE_IMPORT, TRACE_IMPORT, PROFILE_IMPORT };
+  const before = {
+    JSON_IMPORT,
+    CALL_IMPORT,
+    MEMBER_IMPORT,
+    ASK_IMPORT,
+    WAKE_IMPORT,
+    FLOAT_TEXT_IMPORT,
+    TRACE_IMPORT,
+    PROFILE_IMPORT,
+  };
   return Object.assign(after, before, uses);
+}
+
+/** Does the program write a Float anywhere: a literal, `float(n)`, or the type in a signature or a declaration? */
+function mentionsFloat(prog: Program): boolean {
+  const typed = (t: TypeAst): boolean => {
+    let found = false;
+    eachType(t, x => {
+      if (x.name === 'Float') found = true;
+    });
+    return found;
+  };
+  const inFn = (f: FnDecl): boolean => {
+    if ([...f.params.map(p => p.typeAst), f.retAst].some(typed)) return true;
+    let found = false;
+    eachExpr(f.body, e => {
+      if (e.k === 'float' || (e.k === 'call' && e.name === 'float') || typesIn(e).some(typed)) found = true;
+    });
+    return found;
+  };
+  const inType = (d: TypeDecl): boolean =>
+    d.variants.some(v => v.fields.some(f => typed(f.type))) || (d.refine !== undefined && typed(d.refine.base));
+  return [...prog.fns.values()].some(inFn) || [...prog.types.values()].some(inType);
 }
 
 export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, served: readonly Served[]): Imports {
@@ -149,6 +183,9 @@ export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, serv
       // remote(of: family, index): the Remote of one member of a family (the host names it <family>-<index>)
       usesMember: anyCalls('remote'),
       usesWake: setter !== undefined,
+      // a Float's text is the host's (env.float_text): imported by a program that has Floats at all, since which
+      // hole holds one is known only once the types are
+      usesFloat: mentionsFloat(prog),
     },
     opts,
   );

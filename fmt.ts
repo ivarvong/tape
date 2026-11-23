@@ -72,6 +72,7 @@ const WORDS = new Set([
 type Tok = { t: 'word' | 'num' | 'str' | 'op' | 'sql' | 'comment'; v: string } | { t: 'nl'; v: '' };
 type Prev = Tok | null;
 
+const NUMBER = /[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?f?/y;
 /** Where the run of characters that pass `test` ends, from `from`. */
 const runEnd = (text: string, from: number, test: RegExp): number => {
   let j = from;
@@ -118,7 +119,9 @@ function tokenAt(text: string, i: number, out: readonly Tok[]): [Tok | null, num
     return [{ t: 'str', v: text.slice(i, j + 1).replaceAll(/\\\n[ \t]*/g, CARRY) }, j + 1];
   }
   if (ch >= '0' && ch <= '9') {
-    const j = runEnd(text, i, /[0-9]/);
+    // an Int, or a Float: `1.5f`, `1e-3f` (the lexer refuses the forms between)
+    NUMBER.lastIndex = i;
+    const j = i + (NUMBER.exec(text)?.[0].length ?? 1);
     return [{ t: 'num', v: text.slice(i, j) }, j];
   }
   if (/[A-Za-z]/.test(ch) || (ch === '_' && /[A-Za-z0-9_]/.test(text[i + 1] ?? ''))) {

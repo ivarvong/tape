@@ -2,7 +2,7 @@
 // small emitters every part of the function compiler uses.
 import type { Arg, At, Call, Expr, FnDecl, Program } from '../ast.ts';
 import { showExpr } from '../../rules/origins.ts';
-import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
+import { F64, I32, TRAP, f64, fail, loadOp, sleb, storeOp, uleb } from '../common.ts';
 import type { Problem } from '../common.ts';
 import { shadowedHint } from '../shadow.ts';
 import { BUILTIN_TYPES, key, same } from '../types.ts';
@@ -10,6 +10,10 @@ import type { Type } from '../types.ts';
 import type { Wire } from '../wire.ts';
 import type { Adt, BoxedField, FlatAdt, Shape } from './layout.ts';
 import type { CallGraph, Imports, Options, QueryEntry } from './module.ts';
+
+/** What to write where an Int and a Float meet: there is no conversion but the one written. */
+export const MIXED =
+  'An Int and a Float do not mix: write a Float literal with an f (`2f`, `0.5f`), turn an Int into a Float with `float(n)`, and a Float into an Int with `trunc(x)` (toward zero; `floor(x)` or `ceil(x)` first for the other ways).';
 
 export type Place = { readonly file?: string; readonly line?: number } | null | undefined;
 /** A value already in locals. */
@@ -159,6 +163,7 @@ function mismatchHint(c: Ctx, got: Type, want: Type, at: Place): string {
     return `An Option is wanted: \`Some(value: ${e === 'it' ? '…' : e})\`, or \`None\`.`;
   if (want.name === 'Buf' && !BUILTIN_TYPES.has(got.name))
     return `A Buf is an answer's bytes being written (\`respond(status)\`, \`buf()\`), and ${key(got)} is not: write the value into one first (a function from ${key(got)} to Buf, or \`respond(status: 200) |> write_json(value: …)\` for a record).`;
+  if ((got.name === 'Float' && want.name === 'Int') || (got.name === 'Int' && want.name === 'Float')) return MIXED;
   if (want.name === 'View' && got.name === 'List')
     return 'A List is not text: `length(list: …)` counts it, and `write_json(value: …)` writes it.';
   return '';
@@ -235,18 +240,12 @@ export function buildVariant(c: Ctx, adt: Adt, vi: number, ls: readonly number[]
     if (!v) return;
     const ptr = fresh(c, I32);
     const header = [0x22, ...uleb(ptr), 0x41, ...sleb(vi), 0x36, 2, 0, ...get(ptr), 0x41, 0, 0x36, 2, 4];
-    const fields = v.mem.flatMap(({ o, vt }, j) => [
-      ...get(ptr),
-      ...get(ls[j] ?? 0),
-      vt === I64 ? 0x37 : 0x36,
-      0,
-      ...uleb(o),
-    ]);
+    const fields = v.mem.flatMap(({ o, vt }, j) => [...get(ptr), ...get(ls[j] ?? 0), storeOp(vt), 0, ...uleb(o)]);
     c.code.push(...room(c, v.size), ...header, ...fields, ...get(ptr));
     return;
   }
   const flat = adt.variants[vi]?.flat ?? [];
-  const zero = (vt: number): number[] => (vt === I32 ? [0x41, 0] : [0x42, 0]);
+  const zero = (vt: number): number[] => (vt === I32 ? [0x41, 0] : vt === F64 ? f64(0) : [0x42, 0]);
   adt.slots.forEach((vt, s) => {
     const j = flat.indexOf(s);
     if (adt.tagged && s === 0) c.code.push(0x41, ...sleb(vi));
@@ -259,7 +258,7 @@ export const loadFieldUnchecked = (c: Ctx, ptr: number, fl: BoxedField): number[
   fl.slots.map((o, i) => {
     const vt = fl.vts[i] ?? I32;
     const l = fresh(c, vt);
-    c.code.push(...get(ptr), vt === I64 ? 0x29 : 0x28, 0, ...uleb(o), ...set(l));
+    c.code.push(...get(ptr), loadOp(vt), 0, ...uleb(o), ...set(l));
     return l;
   });
 export function loadField(c: Ctx, ptr: number, fl: BoxedField): number[] {

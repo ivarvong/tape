@@ -40,6 +40,7 @@ const TRAPS: Readonly<Record<number, string>> = {
   5: 'a value was read after its memory was released (a compiler bug)',
   6: 'integer overflow',
   7: 'shift amount outside 0 to 63',
+  8: 'float not finite',
 };
 /** the longest a timer may be set for: 30 days */
 export const MAX_WAKE_MS = 30 * 24 * 3600 * 1000;
@@ -366,6 +367,8 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     member: (family: number, index: number) => member(get(), family, index),
     ask: (kind: number) => ask(get(), kind),
     wake: (key: number, after: number) => wake(get(), key, after),
+    // a Float's text: the shortest digits that read back as it (ECMA-262 Number::toString), as interp/float.ts
+    float_text: (x: number) => block(get().mem, String(x)),
     allocated: (size: number) => {
       const { heap } = get().o;
       if (heap) allocated(heap, size);

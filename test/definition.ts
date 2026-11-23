@@ -50,9 +50,11 @@ const TRAPS: Readonly<Record<number, string>> = {
   4: 'division by zero',
   6: 'integer overflow',
   7: 'shift amount outside 0 to 63',
+  8: 'float not finite',
 };
 for (const b of blocks.filter(x => x.kind === 'tape' && x.info === 'gives')) {
-  const calls = [...b.text.matchAll(/^\/\/ (\w+)\(([^)]*)\) (?:is (-?\d+)|traps: (.+))$/gm)];
+  // an argument or a value is an Int, or a Float with its f (`2.5f`)
+  const calls = [...b.text.matchAll(/^\/\/ (\w+)\(([^)]*)\) (?:is (-?[\d.e+-]+f?)|traps: (.+))$/gm)];
   const fns = [...new Set(calls.map(m => m[1] ?? ''))];
   const r = compile([...std, { name: 'program.tape', text: b.text }], { exports: fns });
   ok(
@@ -64,17 +66,22 @@ for (const b of blocks.filter(x => x.kind === 'tape' && x.info === 'gives')) {
   const ex = bare(new WebAssembly.Module(r.wasm)),
     it = interpret([...std, { name: 'program.tape', text: b.text }]);
   for (const [line, fn = '', list = '', value, reason] of calls) {
-    const args = list === '' ? [] : list.split(',').map(a => BigInt(a.trim()));
+    const args =
+      list === ''
+        ? []
+        : list.split(',').map(a => (a.trim().endsWith('f') ? Number(a.trim().slice(0, -1)) : BigInt(a.trim())));
+    const shown = (v: unknown): string =>
+      typeof v === 'bigint' ? `is ${v}` : typeof v === 'number' ? `is ${v}f` : 'not a number';
     let compiled: string, interpreted: string;
     call(ex.fns, 'reset');
     try {
-      compiled = `is ${String(call(ex.fns, fn, ...args))}`;
+      compiled = shown(call(ex.fns, fn, ...args));
     } catch {
       compiled = `traps: ${TRAPS[ex.why()] ?? ex.why()}`;
     }
     try {
       const v = it.call(fn, args);
-      interpreted = typeof v === 'bigint' ? `is ${v}` : 'not a number';
+      interpreted = shown(v);
     } catch (e) {
       interpreted = e instanceof Trap ? `traps: ${TRAPS[e.code] ?? e.code}` : String(e);
     }

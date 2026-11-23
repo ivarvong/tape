@@ -120,6 +120,38 @@ const BUILT_INS: BuiltIn[] = [
     sig: `wrapping_${op}(a: Int, b: Int) -> Int`,
     doc: `a ${{ add: '+', sub: '-', mul: '*' }[op]} b modulo 2^64: the low 64 bits of the exact result. Plain \`${{ add: '+', sub: '-', mul: '*' }[op]}\` traps on overflow (trap 6); use this where wrapping is meant (a hash).`,
   })),
+  {
+    name: 'float',
+    sig: 'float(n: Int) -> Float',
+    doc: 'The Float nearest `n`, a tie to the even one: exact up to 2^53. The one way from an Int to a Float; there is no implicit conversion.',
+  },
+  {
+    name: 'trunc',
+    sig: 'trunc(x: Float) -> Int',
+    doc: 'The Int toward zero: the one way from a Float to an Int (`floor` or `ceil` first for the other ways). Outside the Ints (beyond ±9.2e18) it traps, integer overflow (trap 6).',
+  },
+  ...(
+    [
+      ['floor', 'The integer below or equal, as a Float (`floor(-0.5f)` is -1).'],
+      ['ceil', 'The integer above or equal, as a Float.'],
+      ['sqrt', 'The square root, correctly rounded; below 0 it traps (trap 8, float not finite).'],
+    ] as const
+  ).map(([name, doc]): BuiltIn => ({ name, sig: `${name}(x: Float) -> Float`, doc })),
+  {
+    name: 'abs',
+    sig: 'abs(x: Int) -> Int, abs(x: Float) -> Float',
+    doc: 'The absolute value. Of the least Int it traps (integer overflow, trap 6).',
+  },
+  ...(['min', 'max'] as const).map((name): BuiltIn => ({
+    name,
+    sig: `${name}(a: Int, b: Int) -> Int, ${name}(a: Float, b: Float) -> Float`,
+    doc: `The ${name === 'min' ? 'smaller' : 'larger'} of two Ints, or of two Floats.`,
+  })),
+  {
+    name: 'write_float',
+    sig: 'write_float(out: Buf, value: Float) -> Buf',
+    doc: 'Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\\(x)"`, writes).',
+  },
   { name: 'push', sig: 'push(buf: Buf, byte: Int) -> Buf', doc: 'Appends one byte.' },
   { name: 'append', sig: 'append(buf: Buf, view: View) -> Buf', doc: 'Appends text.' },
   { name: 'freeze', sig: 'freeze(buf: Buf) -> View', doc: 'The bytes written so far, as a View.' },

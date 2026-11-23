@@ -1,7 +1,7 @@
 // compiler/gen/layout.ts: what each type is at run time. A type's values are Wasm values (its slots); a type that
 // can contain itself is boxed, and its values are pointers into the arena.
 import type { Program, TypeAst, TypeDecl } from '../ast.ts';
-import { I32, I64, fail } from '../common.ts';
+import { F64, I32, I64, fail } from '../common.ts';
 import { BUILTIN_TYPES, CAPABILITIES, T, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import type { Wire, WireKind } from '../wire.ts';
@@ -84,6 +84,7 @@ export function resolve(L: Layouts, ast: Type, map: ReadonlyMap<string, Type> = 
 
 const FIXED: Readonly<Record<string, readonly number[]>> = {
   Int: [I64],
+  Float: [F64],
   Bool: [I32],
   Buf: [I32],
   Remote: [I32],

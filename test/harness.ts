@@ -59,10 +59,22 @@ export function functionsOf(module: WebAssembly.Module, imports: WebAssembly.Imp
   }
   return out;
 }
-/** A module instantiated with no host: its functions, its memory, and the code of its last trap (0 for none). */
+/** A module instantiated with no host: its functions, its memory, and the code of its last trap (0 for none).
+ * Its one import, when it has Floats, is the host's text of a Float (host/run.ts float_text). */
 export type Bare = { fns: Functions; memory: WebAssembly.Memory; why: () => number };
 export function bare(module: WebAssembly.Module): Bare {
-  const { exports } = new WebAssembly.Instance(module, { env: {} });
+  const late: { exports: WebAssembly.Instance['exports'] | null } = { exports: null };
+  const floatText = (x: number): number => {
+    const b = new TextEncoder().encode(String(x)),
+      { alloc, memory } = late.exports ?? {};
+    if (typeof alloc !== 'function' || !(memory instanceof WebAssembly.Memory)) throw new TypeError('not linked');
+    const at = Number(alloc(4 + b.length));
+    new DataView(memory.buffer).setUint32(at, b.length, true);
+    new Uint8Array(memory.buffer, at + 4, b.length).set(b);
+    return at;
+  };
+  const { exports } = new WebAssembly.Instance(module, { env: { float_text: floatText } });
+  late.exports = exports;
   const { memory, why } = exports;
   if (!(memory instanceof WebAssembly.Memory)) throw new TypeError('the module exports no memory');
   const fns: Functions = {};

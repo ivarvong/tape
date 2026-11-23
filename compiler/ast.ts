@@ -15,6 +15,8 @@ export type Token =
   /** text with holes, "a \(x) b": the bytes between the holes and each hole's tokens, in turn */
   | (At & { t: 'interp'; v: ({ text: number[] } | { hole: Token[] })[] })
   | (At & { t: 'int'; v: bigint })
+  /** `1.5f`: the nearest f64 to the digits */
+  | (At & { t: 'float'; v: number })
   | (At & { t: 'nl' | 'eof'; v?: undefined });
 export type TokenOf<K extends Token['t']> = Extract<Token, { t: K }>;
 
@@ -43,6 +45,8 @@ export type Let =
   | (At & { name: string; value: Expr; do?: true; pat?: undefined })
   | (At & { pat: Pattern; value: Expr; name?: undefined; do?: undefined });
 export type Int = At & { k: 'int'; v: bigint };
+/** `1.5f`, `2f`, `1e-3f`: a Float literal, the nearest f64 to its digits. */
+export type FloatLit = At & { k: 'float'; v: number };
 export type Str = At & { k: 'str'; bytes: number[]; written?: string };
 /** How a use of a variable takes its value: as the owner, only to read it, or as the subject of a match. */
 export type UsePos = 'own' | 'read' | 'subject';
@@ -73,12 +77,13 @@ export type Match = At & { k: 'match' } & ({ subject: Expr; arms: PatArm[] } | {
 /** A value the compiler already holds in locals, passed where an expression goes. Never written in a program. */
 export type Held = At & { k: 'held'; held: { type: Resolved; locals: number[] } };
 export type Expr =
-  Int | Str | Interp | Var | Field | Index | Neg | Not | Bin | Call | Ctor | Lambda | Block | Match | Held;
+  Int | FloatLit | Str | Interp | Var | Field | Index | Neg | Not | Bin | Call | Ctor | Lambda | Block | Match | Held;
 
 /** The expressions written directly inside e, in the order they are written. */
 export const partsOf = (e: Expr): Expr[] => {
   switch (e.k) {
     case 'int':
+    case 'float':
     case 'str':
     case 'var':
     case 'held':

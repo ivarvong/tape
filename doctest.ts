@@ -56,6 +56,7 @@ const text = (bytes: Iterable<number>): string => JSON.stringify(new TextDecoder
 /** A value from interp.ts, written as Tape. */
 function shown(v: Value): string {
   if (typeof v === 'bigint') return String(v);
+  if (typeof v === 'number') return `${v}f`;
   if (typeof v === 'boolean') return v ? 'True' : 'False';
   if (v instanceof Uint8Array) return text(v);
   if (v.k === 'buf') return `Buf ${text(v.buf)}`;

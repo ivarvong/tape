@@ -135,10 +135,50 @@ function text(sc: Scan): void {
   if (parts.length === 0) sc.toks.push({ t: 'str', v: bytes, ...here(sc) });
   else sc.toks.push({ t: 'interp', v: [...parts, { text: bytes }], ...here(sc) });
 }
+const digit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
+/**
+ * A number: digits, then `.` and digits, then an exponent, then `f` for a Float (`1.5f`, `2f`, `1e-3f`); digits
+ * alone are an Int. A point or an exponent without the `f` is refused: `1.5` is kept for an exact decimal.
+ */
 function number(sc: Scan): void {
-  const end = runEnd(sc.text, sc.i, c => c !== undefined && c >= '0' && c <= '9');
-  sc.toks.push({ t: 'int', v: BigInt(sc.text.slice(sc.i, end)), ...here(sc) });
-  sc.i = end;
+  const src = sc.text;
+  let end = runEnd(src, sc.i, digit);
+  const point = src[end] === '.' && digit(src[end + 1]);
+  if (point) end = runEnd(src, end + 1, digit);
+  const sign = src[end + 1] === '+' || src[end + 1] === '-' ? 1 : 0;
+  const exponent = (src[end] === 'e' || src[end] === 'E') && digit(src[end + 1 + sign]);
+  if (exponent) end = runEnd(src, end + 1 + sign, digit);
+  const written = src.slice(sc.i, end);
+  if (src[end] !== 'f' || wordChar(src[end + 1])) {
+    if (point || exponent)
+      fail(
+        here(sc),
+        'L06',
+        `${written} is not a number Tape has: a point or an exponent is only for a Float, which ends in f`,
+        `Write \`${written}f\` for a Float. A number with a point and no f is kept for an exact decimal, which Tape does not have yet.`,
+      );
+    sc.toks.push({ t: 'int', v: BigInt(written), ...here(sc) });
+    sc.i = end;
+    return;
+  }
+  // more than 20 significant digits may round either way on another engine (ECMAScript's RoundMVResult)
+  const significant = written
+    .replace(/[eE].*$/, '')
+    .replace('.', '')
+    .replace(/^0+/, '')
+    .replace(/0+$/, '');
+  const v = Number(written);
+  if (significant.length > 20 || !Number.isFinite(v))
+    fail(
+      here(sc),
+      'L06',
+      significant.length > 20
+        ? `${written}f has more than 20 significant digits`
+        : `${written}f is beyond the largest Float, about 1.8e308`,
+      'A Float literal has at most 20 significant digits and is at most about 1.8e308; a Float holds about 17.',
+    );
+  sc.toks.push({ t: 'float', v, ...here(sc) });
+  sc.i = end + 1;
 }
 // a keyword, a name that opens with a capital (a type or a constructor), or any other name
 function word(sc: Scan): void {
@@ -227,7 +267,7 @@ function step(sc: Scan): void {
   else if (ch === ' ' || ch === '\t' || ch === '\r') sc.i++;
   else if (ch === '/' && next === '/') sc.i = runEnd(sc.text, sc.i, c => c !== '\n');
   else if (ch === '"') text(sc);
-  else if (ch >= '0' && ch <= '9') number(sc);
+  else if (digit(ch)) number(sc);
   else if (/[A-Za-z]/.test(ch) || (ch === '_' && wordChar(next))) word(sc);
   else if (ch === '{' && opensSql(sc.toks)) sql(sc);
   else operator(sc);

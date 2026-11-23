@@ -4,9 +4,9 @@
 // values and calls the real one.
 import { eachExpr } from '../ast.ts';
 import type { At, Call, Expr, FnDecl, Interface, TypeAst } from '../ast.ts';
-import { I32, I64, fail, sleb, uleb, utf8 } from '../common.ts';
+import { I32, fail, loadOp, sleb, storeOp, uleb, utf8 } from '../common.ts';
 import { ROW_CALLS } from '../rows.ts';
-import { BOOL, CAPABILITIES, INT, INTRINSICS, T, VIEW, key } from '../types.ts';
+import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { fresh, get, mark, need, set } from './fn.ts';
 import type { Binding, Build, CExpr, Ctx, Stored } from './fn.ts';
@@ -125,6 +125,7 @@ export function peek(c: Ctx, e: CExpr): Type | null {
     return a?.variants.length === 1 ? (only?.fields.find(x => x.name === e.name)?.type ?? null) : null;
   }
   if (e.k === 'int') return INT;
+  if (e.k === 'float') return FLOAT;
   if (e.k === 'str') return VIEW;
   if (e.k === 'call') return peekCall(c, e);
   return e.k === 'ctor' ? peekCtor(c, e) : null;
@@ -178,7 +179,7 @@ export function compileEntry(B: Build, f: FnDecl & { trampoline: { g: FnDecl; k:
   let off = 0;
   for (const pm of g.params.slice(0, k))
     for (const vt of B.slotsOf(typeOf(pm, g))) {
-      code.push(0x20, 0, vt === I64 ? 0x29 : 0x28, vt === I64 ? 3 : 2, ...uleb(off));
+      code.push(0x20, 0, loadOp(vt), vt === I32 ? 2 : 3, ...uleb(off));
       off += 8;
     }
   const passed = g.params.slice(k).flatMap(pm => B.slotsOf(typeOf(pm, g)));
@@ -192,9 +193,9 @@ function capture(c: Ctx, captured: readonly Stored[]): void {
   const words = captured.reduce((n, v) => n + v.locals.length, 0);
   c.code.push(0x41, ...sleb(8 * words), 0x10, ...uleb(c.B.ALLOC), ...set(at));
   for (const v of captured) mark(c, v.type, v.locals);
-  const words8 = captured.flatMap(v => v.locals.map((l, i) => ({ l, wide: c.B.slotsOf(v.type)[i] === I64 })));
-  words8.forEach(({ l, wide }, n) => {
-    c.code.push(...get(at), ...get(l), wide ? 0x37 : 0x36, wide ? 3 : 2, ...uleb(8 * n));
+  const words8 = captured.flatMap(v => v.locals.map((l, i) => ({ l, vt: c.B.slotsOf(v.type)[i] ?? I32 })));
+  words8.forEach(({ l, vt }, n) => {
+    c.code.push(...get(at), ...get(l), storeOp(vt), vt === I32 ? 2 : 3, ...uleb(8 * n));
   });
   c.code.push(...get(at));
 }

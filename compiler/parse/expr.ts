@@ -122,6 +122,7 @@ function holeOrText(c: Cursor, part: TokenOf<'interp'>['v'][number], at: At): Ex
 function atom(c: Cursor, t: Token): Expr {
   const at = c.at(t);
   if (t.t === 'int') return { k: 'int', v: intLiteral(t, t.v), ...at };
+  if (t.t === 'float') return { k: 'float', v: t.v, ...at };
   if (t.t === 'str') return { k: 'str', bytes: t.v, ...at };
   if (t.t === 'interp') return { k: 'interp', parts: t.v.flatMap(part => holeOrText(c, part, at)), ...at };
   if (t.t === 'kw' && t.v === 'fn') return lambda(c, t);
@@ -307,6 +308,13 @@ function simplePattern(c: Cursor, inLet: boolean): Pattern {
   const t = c.next(),
     at = c.at(t);
   if (t.t === 'op' && t.v === '_') return { k: 'any', ...at };
+  if (t.t === 'float' || (t.t === 'op' && t.v === '-' && c.peek().t === 'float'))
+    return fail(
+      t,
+      'C19',
+      'a Float is not matched against a literal',
+      'Bind it and compare in a guard, which says how near is equal: `x if x == 0f -> …`, or `match { x < 0.5f -> … }`.',
+    );
   if (t.t === 'int') return { k: 'int', v: intLiteral(t, t.v), ...at };
   if (t.t === 'op' && t.v === '-') return { k: 'int', v: intLiteral(t, -c.expect('int').v), ...at };
   if (t.t === 'str')
@@ -426,8 +434,8 @@ function plainLet(c: Cursor): Let {
 const patternLet = (c: Cursor): boolean => {
   const first = c.peek(),
     next = c.peek(1);
-  if (first.t === 'Id' || first.t === 'str' || first.t === 'int') return true;
-  if (first.t === 'op' && first.v === '-') return next.t === 'int';
+  if (first.t === 'Id' || first.t === 'str' || first.t === 'int' || first.t === 'float') return true;
+  if (first.t === 'op' && first.v === '-') return next.t === 'int' || next.t === 'float';
   if (first.t === 'op' && first.v === '_') return true;
   return first.t === 'id' && next.t === 'op' && (next.v === '++' || next.v === '(');
 };

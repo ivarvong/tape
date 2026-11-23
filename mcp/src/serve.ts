@@ -161,7 +161,7 @@ export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a
   Its error names the field. Refined types validate: \`type Qty = Int where self >= 1 and self <= 100\`. An Option field may be absent.
 - SQL: \`sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)\` gives Option[Item]; \`sql_all\` gives Rows[Item]; \`sql_exec(query: "UPDATE items SET qty = :qty WHERE id = :id", qty, id)\` the rows changed. Each :name takes the argument of that name. Tables: \`migration 1 "items" { CREATE TABLE … }\` (a TEXT PRIMARY KEY needs NOT NULL; an INTEGER PRIMARY KEY does not). A POST that makes a row takes the client's key: UNIQUE, \`ON CONFLICT(key) DO NOTHING RETURNING *\`.
 - Text and numbers: \`decimal(v)\` gives Option[Int] (strict, for ids; \`parse_int(text)\` takes a sign and leading zeros); \`is_digit\`, \`is_alpha\`, \`every_byte(v, keep)\` check bytes; holes \`"\\(n) items"\`; \`a ++ b\`; \`v[i]\` is a byte, \`len(v)\` the length. Steps: \`let P = e else { arms }\`; a match is an expression anywhere: \`let fee = match { … }\`, an argument, an operand.
-- Numbers: Int is a 64-bit signed integer; + - * overflow traps ("trap 6: integer overflow"), so does division by zero ("trap 4: division by zero"); no floats yet (Dec, Float planned): use fixed point, cents.
+- Numbers: Int is a 64-bit signed integer; overflow ("trap 6: integer overflow") and /0 ("trap 4: division by zero") trap. Float \`1.5f\`: NaN/∞ trap ("trap 8: float not finite"); \`float(n)\`, \`trunc(x)\`.
 - Examples: \`//   > decimal(v: "42")\`, next line \`//   Some(42)\`; the test tool runs them.`;
 
 /** The tools' descriptions: what each does, and examples/hello.tape with what it gives, to check in one call. */

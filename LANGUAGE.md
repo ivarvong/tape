@@ -26,9 +26,12 @@ waits on a call, another may run. Three things hold for every program:
 
 `//` starts a comment. Integers are decimal, from `-9223372036854775808` to `9223372036854775807`: a `-` written
 before the digits is part of the literal (`-7`, and in a pattern `-1 ->`), and a literal outside that range is
-refused (P08). Text literals are in double quotes, on one line, with the escapes
+refused (P08). A Float literal ends in `f`: `1.5f`, `2f`, `1e-3f`, `6.02E23f`, at most 20 significant digits and
+no larger than the largest Float (L06). A point or an exponent with no `f` is refused (L06): `1.5` is kept for an
+exact decimal. Text literals are in double quotes, on one line, with the escapes
 `\" \\ \/ \n \r \t \b \f`. `\(e)` in a literal is a hole: `"Hello, \(name) #\(n)"` is the text with the value
-of each expression in its place, a View as it is and an Int in decimal. A hole holds one expression with no text
+of each expression in its place, a View as it is, an Int in decimal, and a Float in the shortest digits that read
+back as it (`0.1`, `5`, `1e+21`, as JavaScript's `String` writes a number). A hole holds one expression with no text
 literal in it (L05); a value of any other type is refused (C19). Appended to a Buf, the text is written straight
 into it. A newline ends a declaration or a step, except inside `( )` and `[ ]`, and
 except before a line that starts with `|>`, which carries the step on. A backslash at the end of a line inside a
@@ -62,6 +65,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | Type | What it is |
 |---|---|
 | `Int` | a 64-bit signed integer. Arithmetic is exact or it traps (section 10): there is no wrapping |
+| `Float` | a 64-bit IEEE 754 number that is never NaN and never infinite: an operation that would make one traps. For measurements, not for money, counts or keys |
 | `Bool` | `True` or `False` |
 | `View` | read-only bytes (text is UTF-8 bytes) |
 | `Buf` | bytes being written. It has one owner: a function that is handed a `Buf` uses it once (C25) |
@@ -75,7 +79,7 @@ std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `E
 (`Moved(value)`, `Raced(now)`, `NoRow`), `CallError` (`Timeout`, `Unreachable`, `Rejected(reason)`,
 `Skew(reason)`), `Map[T]`, `List[T]`, `Request`, `Wake`.
 
-There are no floats, no null, no exceptions, no mutable variables and no loops.
+There are no implicit conversions between numbers, and no null, no exceptions, no mutable variables and no loops.
 
 On `Int`: `+ - *` and unary `-` give the exact result, and trap (integer overflow) when it does not fit in 64 bits.
 `/` truncates toward zero and `%` has the sign of its left side; both trap on a zero divisor (division by zero),
@@ -83,6 +87,15 @@ and on the least Int by -1 (integer overflow: the quotient does not fit, so neit
 work on the 64 bits. `a << n` and `a >> n` take a shift `n` from 0 to 63 and trap on any other; `<<` drops the
 bits it moves out, `>>` copies the sign in. Where a hash or a checksum means arithmetic modulo 2^64, it says so:
 `wrapping_add(a, b)`, `wrapping_sub(a, b)` and `wrapping_mul(a, b)` give the low 64 bits of the exact result.
+
+On `Float`: `+ - * /` are IEEE 754's, rounded once to the nearest Float (a tie to the even one), the same bits in
+every engine Wasm runs in; a result that would be infinite or not a number (`1f / 0f`, `0f / 0f`, `1e308f * 10f`)
+traps (trap 8, float not finite), so every Float a program holds is finite. Unary `-` is exact. `== != < <= > >=`
+compare values, and `-0f == 0f`. There is no `%` and no bitwise operator (C19), and an Int and a Float do not mix
+(C14): `float(n)` is the Float nearest an Int, and `trunc(x)` the Int toward zero, trapping (integer overflow)
+outside the Ints. `floor(x)`, `ceil(x)`, `abs(x)` and `sqrt(x)` are exactly as IEEE 754 defines them (`sqrt` of a
+negative traps); `abs`, `min(a, b)` and `max(a, b)` take two Ints or two Floats. A Float is matched with a guard,
+`x if x == 0f ->`, never a literal pattern (C19).
 
 Operators, tightest first: unary `-`; `* / %`; `+ - ++`; `<< >>`; `&`; `^`; `|` and `|>`; the comparisons, which
 do not chain; `not`; `and`; `or`. So `-x * y` is `(-x) * y`, and `-2 * 3` is `-6`.
@@ -171,7 +184,7 @@ A pattern can fail, and binds what it proves.
 | Pattern | Matches |
 |---|---|
 | `Ctor(field, other: P)` | that constructor; a field named bare is bound, fields left out are not looked at. A field given a pattern binds its own name too, where the arm reads it and nothing else binds it: `Some(value: Account(balance: 0)) -> value.id` |
-| `"text"`, `42`, `-1`, `True` | that value |
+| `"text"`, `42`, `-1`, `True` | that value. A Float has no literal pattern (C19): bind it and compare in a guard |
 | `"prefix" ++ rest` | bytes that start so; `rest` is matched against what follows |
 | `Some("")`, `Some(decimal(n))` | a constructor of one field, with a pattern for that field: as its one argument is passed bare, its one pattern needs no name. A constructor of two or more fields names each (C10) |
 | `Key(k)` | a value for which the refined type's condition holds; `k` has the type |
@@ -400,6 +413,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Write a record, or the rows of a query | `write_json(value)`, `write_rows(rows)` | |
 | Write a list of computed items | `out \|> write_json_list(list, by: fn(out: Buf, item: T) -> Buf { … })`: the Buf is handed from item to item, never kept in a record (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
+| Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made | C55 |
@@ -541,7 +555,8 @@ a program's clock moves only across I/O, so nothing inside a run (`now()`, a spa
 
 A trap ends the request, undoes its writes and is recorded: out of memory (64 MB), more than 50,000,000 steps, an
 index out of bounds, a division by zero (trap 4), an `Int` result that does not fit in 64 bits (trap 6, integer
-overflow), a shift by less than 0 or more than 63 (trap 7). Nothing else stops a program: every other failure is a
+overflow), a shift by less than 0 or more than 63 (trap 7), a Float operation whose result would be infinite or
+not a number (trap 8, float not finite). Nothing else stops a program: every other failure is a
 value. A request that traps is answered 500 with the reason, `trap 6: integer overflow`. Each line `// f(…) is v`
 or `// f(…) traps: reason` below is a call `test/definition.ts` makes, compiled and in the reference interpreter:
 
@@ -573,12 +588,24 @@ fn hash(h: Int, byte: Int) -> Int {
   wrapping_mul(a: h ^ byte, b: 1099511628211)
 }
 
+fn mean(total: Float, n: Int) -> Float {
+  total / float(n)
+}
+
+fn whole(x: Float) -> Int {
+  trunc(x)
+}
+
 // fact(20) is 2432902008176640000
 // fact(21) traps: integer overflow
 // pow(-2, 63) is -9223372036854775808
 // pow(2, 63) traps: integer overflow
 // sign(-1) is -1
 // hash(-3750763034362895579, 97) is -5808556873153909620
+// mean(7.5f, 2) is 3.75f
+// mean(1f, 0) traps: float not finite
+// whole(-2.5f) is -2
+// whole(1e19f) traps: integer overflow
 ```
 
 ## 11. Changes in 0.4
@@ -588,6 +615,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | `Float`: a finite 64-bit IEEE 754 number for measurements. Literals end in `f` (`1.5f`; `1.5` is L06, kept for an exact decimal); `+ - * /` and comparisons; trap 8 (float not finite) where IEEE would give NaN or an infinity; `float(n)` and `trunc(x)` the only conversions; `floor`, `ceil`, `abs`, `sqrt`; `abs`, `min`, `max` built in for Int and Float (std's `min` and `max` of Ints, and `apps/trace`'s own, are gone); a hole writes the shortest digits, as JavaScript's `String` does (env.float_text) |
 | 23 November 2026 | std `digits(v)` is gone: `decimal` reads an id (no sign, no leading zero), `parse_int` a number as people write one (a sign, leading zeros) |
 | 23 November 2026 | `respond_as(status, content: Csv)` answers `text/csv` (the sales task, 3 of 3 Haiku runs) |
 | 23 November 2026 | std: `isqrt(n)`, the square root rounded down (None below 0), exact up to the largest Int, for fixed point (feedback 20261123T015153.800Z-7782f1b2045b) |
@@ -603,7 +631,7 @@ what went before.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
 - Who is calling. A program is handed the request; identity is its own business.
 - JSON for bytes, maps and floats; writing a record with an `Option` field.
-- Numbers other than `Int`.
+- An exact decimal (`Dec`): a number with a point and no `f` is kept for it.
 
 ## 13. What went
 

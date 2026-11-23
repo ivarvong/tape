@@ -1225,8 +1225,13 @@ const PLANTS: { gate: string; why: string; from: string; to: string }[] = [
     from: '    k == 1 and attr_named(list: ev.attrs, key: "tape.sql.undone") == "true" -> 16\n',
     to: '    k == 1 and attr_named(list: ev.attrs, key: "tape.sql.undone") == "true" -> 1\n',
   },
-  { gate: 'compile', why: 'a type error', from: '    a > b -> a\n', to: '    a > b -> "a"\n' },
-  { gate: 'fmt', why: 'a second space', from: 'fn max(a: Int, b: Int)', to: 'fn max(a: Int,  b: Int)' },
+  { gate: 'compile', why: 'a type error', from: '    a < 0 -> b\n', to: '    a < 0 -> "b"\n' },
+  {
+    gate: 'fmt',
+    why: 'a second space',
+    from: 'fn earliest(list: List[Span], lo: Int)',
+    to: 'fn earliest(list: List[Span],  lo: Int)',
+  },
   {
     gate: 'fixtures',
     why: 'bars shifted 0.1% right',

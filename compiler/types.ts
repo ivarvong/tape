@@ -1,6 +1,7 @@
 // compiler/types.ts: the types and built-in functions the compiler knows by name.
 export const BUILTIN_TYPES = new Set([
   'Int',
+  'Float',
   'Bool',
   'View',
   'Buf',
@@ -54,15 +55,26 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     random: null,
     wake: null,
     write_json: ['out', 'value'],
+    write_float: ['out', 'value'],
     wrapping_add: ['a', 'b'],
     wrapping_sub: ['a', 'b'],
     wrapping_mul: ['a', 'b'],
+    // numbers (compiler/gen/float.ts)
+    float: ['n'],
+    trunc: ['x'],
+    floor: ['x'],
+    ceil: ['x'],
+    sqrt: ['x'],
+    abs: ['x'],
+    min: ['a', 'b'],
+    max: ['a', 'b'],
   }),
 );
 /** A type as the compiler holds it: a name applied to types. */
 export type Type = { name: string; args: Type[] };
 export const T = (n: string, ...args: Type[]): Type => ({ name: n, args });
 export const INT = T('Int'),
+  FLOAT = T('Float'),
   BOOL = T('Bool'),
   VIEW = T('View'),
   BUF = T('Buf'),

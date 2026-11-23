@@ -198,9 +198,9 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 ## Contents
 
-- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
+- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
-- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`min`](#fn-min), [`max`](#fn-max), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
+- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`write_json_list`](#fn-write_json_list), [`join`](#fn-join)
@@ -258,6 +258,78 @@ wrapping_mul(a: Int, b: Int) -> Int
 ```
 
 a * b modulo 2^64: the low 64 bits of the exact result. Plain `*` traps on overflow (trap 6); use this where wrapping is meant (a hash).
+
+### builtin float
+
+```tape
+float(n: Int) -> Float
+```
+
+The Float nearest `n`, a tie to the even one: exact up to 2^53. The one way from an Int to a Float; there is no implicit conversion.
+
+### builtin trunc
+
+```tape
+trunc(x: Float) -> Int
+```
+
+The Int toward zero: the one way from a Float to an Int (`floor` or `ceil` first for the other ways). Outside the Ints (beyond ±9.2e18) it traps, integer overflow (trap 6).
+
+### builtin floor
+
+```tape
+floor(x: Float) -> Float
+```
+
+The integer below or equal, as a Float (`floor(-0.5f)` is -1).
+
+### builtin ceil
+
+```tape
+ceil(x: Float) -> Float
+```
+
+The integer above or equal, as a Float.
+
+### builtin sqrt
+
+```tape
+sqrt(x: Float) -> Float
+```
+
+The square root, correctly rounded; below 0 it traps (trap 8, float not finite).
+
+### builtin abs
+
+```tape
+abs(x: Int) -> Int, abs(x: Float) -> Float
+```
+
+The absolute value. Of the least Int it traps (integer overflow, trap 6).
+
+### builtin min
+
+```tape
+min(a: Int, b: Int) -> Int, min(a: Float, b: Float) -> Float
+```
+
+The smaller of two Ints, or of two Floats.
+
+### builtin max
+
+```tape
+max(a: Int, b: Int) -> Int, max(a: Float, b: Float) -> Float
+```
+
+The larger of two Ints, or of two Floats.
+
+### builtin write_float
+
+```tape
+write_float(out: Buf, value: Float) -> Buf
+```
+
+Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\(x)"`, writes).
 
 ### builtin push
 
@@ -682,32 +754,6 @@ Does every byte of v pass `keep`? True for "" (nothing fails). For a slug, a key
 True
 > every_byte(v: "Order 17", keep: is_alnum)
 False
-```
-
-### fn min
-
-```tape
-fn min(a: Int, b: Int) -> Int
-```
-
-The smaller of two numbers.
-
-```
-> min(a: 3, b: -2)
--2
-```
-
-### fn max
-
-```tape
-fn max(a: Int, b: Int) -> Int
-```
-
-The larger of two numbers.
-
-```
-> max(a: 3, b: -2)
-3
 ```
 
 ### fn isqrt

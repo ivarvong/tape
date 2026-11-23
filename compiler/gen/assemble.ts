@@ -35,12 +35,13 @@ function importList({ imports, opts, tables }: Parts): [string, number][] {
     [imports.usesAsk, 'ask', [I32], [F64]],
     [imports.usesMember, 'member', [I32, F64], [I32]],
     [imports.usesWake, 'wake', [F64, F64], [F64]],
+    [imports.usesFloat, 'float_text', [F64], [I32]],
   ];
   // the types are numbered in this order; the imports are listed in the order of their indices
   const typed = new Map(
     wanted.flatMap(([on, field, p, r]): [string, number][] => (on ? [[field, sig(tables, p, r)]] : [])),
   );
-  return ['sql', 'json', 'call_key', 'member', 'ask', 'wake', 'trace', 'allocated'].flatMap(
+  return ['sql', 'json', 'call_key', 'member', 'ask', 'wake', 'float_text', 'trace', 'allocated'].flatMap(
     (field): [string, number][] => {
       const type = typed.get(field);
       return type === undefined ? [] : [[field, type]];

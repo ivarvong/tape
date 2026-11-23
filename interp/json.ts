@@ -146,6 +146,7 @@ export function writeJson(prog: Program, out: Buf, v: Adt, writeText: (out: Buf,
     if (typeof x === 'bigint') text(String(x));
     else if (typeof x === 'boolean') text(x ? 'true' : 'false');
     else if (x instanceof Uint8Array) writeText(out, x);
+    else if (typeof x === 'number') throw new Unsupported(`write_json of a Float inside ${v.c}`);
     else throw new Unsupported(`write_json of ${x?.k === 'adt' ? `a ${x.c}` : 'a value'} inside ${v.c}`);
   });
   text(only.fields.length > 0 ? '}' : '{}');

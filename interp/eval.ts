@@ -15,6 +15,7 @@ import { TRAP } from '../compiler/common.ts';
 import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
 import { Unsupported } from './json.ts';
+import { finite, floatArithmetic, truncToInt } from './float.ts';
 import {
   type Env,
   type Fn,
@@ -24,6 +25,7 @@ import {
   asBool,
   asBuf,
   asBytes,
+  asFloat,
   asInt,
   isFn,
   sameBytes,
@@ -168,6 +170,7 @@ function binary(it: Interp, e: Bin, env: Env, file: string): Value {
   if (e.op === 'or') return asBool(ev(it, e.l, env, file)) || asBool(ev(it, e.r, env, file));
   const l = ev(it, e.l, env, file),
     r = ev(it, e.r, env, file);
+  if (typeof l === 'number') return floatBinary(e.op, l, asFloat(r));
   switch (e.op) {
     case '++':
       return concat(asBytes(l), asBytes(r));
@@ -187,6 +190,29 @@ function binary(it: Interp, e: Bin, env: Env, file: string): Value {
       return arithmetic(e.op, asInt(l), asInt(r));
   }
 }
+function floatBinary(op: Bin['op'], l: number, r: number): Value {
+  switch (op) {
+    case '==':
+      return l === r;
+    case '!=':
+      return l !== r;
+    case '<':
+      return l < r;
+    case '<=':
+      return l <= r;
+    case '>':
+      return l > r;
+    case '>=':
+      return l >= r;
+    case '+':
+    case '-':
+    case '*':
+    case '/':
+      return floatArithmetic(op, l, r);
+    default:
+      return stop(`Float has no ${op}`);
+  }
+}
 const INTRINSIC = {
   len: ['v'],
   slice: ['v', 'from', 'to'],
@@ -198,6 +224,14 @@ const INTRINSIC = {
   wrapping_add: ['a', 'b'],
   wrapping_sub: ['a', 'b'],
   wrapping_mul: ['a', 'b'],
+  float: ['n'],
+  trunc: ['x'],
+  floor: ['x'],
+  ceil: ['x'],
+  sqrt: ['x'],
+  abs: ['x'],
+  min: ['a', 'b'],
+  max: ['a', 'b'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -237,6 +271,32 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
       return wrap(asInt(a[0]) - asInt(a[1]));
     case 'wrapping_mul':
       return wrap(asInt(a[0]) * asInt(a[1]));
+    // the Float nearest the Int, a tie to the even one: ECMA-262's Number of a BigInt is correctly rounded
+    case 'float':
+      return Number(asInt(a[0]));
+    case 'trunc':
+      return truncToInt(asFloat(a[0]));
+    // exact in ECMA-262, as IEEE 754 defines them
+    case 'floor':
+      return Math.floor(asFloat(a[0]));
+    case 'ceil':
+      return Math.ceil(asFloat(a[0]));
+    case 'sqrt':
+      return finite(Math.sqrt(asFloat(a[0])));
+    case 'abs': {
+      const x = a[0];
+      if (typeof x === 'number') return Math.abs(x);
+      return fit(asInt(x) < 0n ? -asInt(x) : asInt(x));
+    }
+    // Math.min and Math.max order -0 below 0, as Wasm's f64.min and f64.max do
+    case 'min':
+    case 'max': {
+      const [x, y] = a;
+      if (typeof x === 'number') return name === 'min' ? Math.min(x, asFloat(y)) : Math.max(x, asFloat(y));
+      const p = asInt(x),
+        q = asInt(y);
+      return (name === 'min' ? q < p : q > p) ? q : p;
+    }
     default:
       return unreachable(name, 'intrinsic');
   }
@@ -315,14 +375,23 @@ function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value
   switch (e.k) {
     case 'int':
       return fit(e.v);
+    case 'float':
+      return e.v;
     case 'str':
       return Uint8Array.from(e.bytes);
     case 'interp':
-      // each hole in turn: text as it is, a number in decimal
+      // each hole in turn: text as it is, an Int in decimal, a Float in the shortest digits that read back as it
+      // (ECMA-262 Number::toString, as the host's float_text)
       return Uint8Array.from(
         e.parts.flatMap(part => {
           const v = ev(it, part, env, file);
-          return [...(typeof v === 'bigint' ? new TextEncoder().encode(String(v)) : asBytes(v))];
+          return [
+            ...(typeof v === 'bigint'
+              ? enc.encode(String(v))
+              : typeof v === 'number'
+                ? enc.encode(String(v))
+                : asBytes(v)),
+          ];
         }),
       );
     case 'var':
@@ -336,8 +405,10 @@ function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value
       if (byte === undefined) throw new Trap(TRAP.BOUNDS);
       return BigInt(byte);
     }
-    case 'neg':
-      return fit(-asInt(ev(it, e.e, env, file)));
+    case 'neg': {
+      const v = ev(it, e.e, env, file);
+      return typeof v === 'number' ? -v : fit(-asInt(v));
+    }
     case 'not':
       return !asBool(ev(it, e.e, env, file));
     case 'bin':

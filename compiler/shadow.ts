@@ -50,6 +50,15 @@ export const SHADOWABLE = new Set([
   'wrapping_add',
   'wrapping_sub',
   'wrapping_mul',
+  'float',
+  'write_float',
+  'trunc',
+  'floor',
+  'ceil',
+  'sqrt',
+  'abs',
+  'min',
+  'max',
 ]);
 type Kind = 'types' | 'ctors';
 // the file that defines the type or constructor of this name, if one does

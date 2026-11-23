@@ -111,6 +111,7 @@ function go(rd: Reading, e: Expr, pos: UsePos, path: readonly Step[], fl: Flags)
   const plain = { ...fl, argOwn: false };
   switch (e.k) {
     case 'int':
+    case 'float':
     case 'str':
     case 'held':
       return;

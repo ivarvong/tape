@@ -22,7 +22,8 @@ export type Remote = { readonly k: 'remote'; readonly remote: string };
 export type Family = { readonly k: 'family'; readonly family: string };
 /** What stands for Sql, Clock, Entropy or Timer: holding it is the permission, and it carries nothing else. */
 export type Capability = { readonly k: 'capability'; readonly capability: string };
-export type Value = bigint | boolean | Uint8Array | Adt | Buf | Fn | Rows | Remote | Family | Capability;
+/** An Int is a bigint and a Float a number, so one is never taken for the other. */
+export type Value = bigint | number | boolean | Uint8Array | Adt | Buf | Fn | Rows | Remote | Family | Capability;
 
 export const adt = (c: string, f: Record<string, Value> = {}): Adt => ({ k: 'adt', c, f });
 export const kindOf = (v: Value | undefined): string =>
@@ -30,17 +31,20 @@ export const kindOf = (v: Value | undefined): string =>
     ? 'nothing'
     : typeof v === 'bigint'
       ? 'a number'
-      : typeof v === 'boolean'
-        ? 'a Bool'
-        : v instanceof Uint8Array
-          ? 'text'
-          : v.k === 'adt'
-            ? v.c
-            : `a ${v.k}`;
+      : typeof v === 'number'
+        ? 'a Float'
+        : typeof v === 'boolean'
+          ? 'a Bool'
+          : v instanceof Uint8Array
+            ? 'text'
+            : v.k === 'adt'
+              ? v.c
+              : `a ${v.k}`;
 const not = (want: string, v: Value | undefined): never => {
   throw new Error(`expected ${want}, found ${kindOf(v)}`);
 };
 export const asInt = (v: Value | undefined): bigint => (typeof v === 'bigint' ? v : not('a number', v));
+export const asFloat = (v: Value | undefined): number => (typeof v === 'number' ? v : not('a Float', v));
 export const asBool = (v: Value | undefined): boolean => (typeof v === 'boolean' ? v : not('a Bool', v));
 export const asBytes = (v: Value | undefined): Uint8Array => (v instanceof Uint8Array ? v : not('text', v));
 const isObject = (v: Value | undefined): v is Adt | Buf | Fn | Rows | Remote | Family | Capability =>

@@ -15,6 +15,7 @@ const TRAPS = [
   'use after release',
   'integer overflow',
   'shift amount outside 0 to 63',
+  'float not finite',
 ];
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 

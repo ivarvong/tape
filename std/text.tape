@@ -116,28 +116,6 @@ fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool {
   }
 }
 
-// The smaller of two numbers.
-//
-//   > min(a: 3, b: -2)
-//   -2
-fn min(a: Int, b: Int) -> Int {
-  match {
-    a <= b -> a
-    else -> b
-  }
-}
-
-// The larger of two numbers.
-//
-//   > max(a: 3, b: -2)
-//   3
-fn max(a: Int, b: Int) -> Int {
-  match {
-    a >= b -> a
-    else -> b
-  }
-}
-
 // The square root of `n`, rounded down: the largest r with r * r <= n. None when n is negative. Exact for every
 // Int, up to the largest (whose root is 3037000499). For fixed point, scale first: the root of 2 to 3 places is
 // isqrt(2 * 1000 * 1000), 1414 thousandths.

@@ -1,8 +1,8 @@
 // compiler/gen/expr.ts: an expression checked and written as Wasm; its type is what the emitter gives back.
 import { eachExpr, eachPattern, eachType, patternsIn, unreachable } from '../ast.ts';
 import type { Arg, Expr, Pattern, TypeAst, Variant } from '../ast.ts';
-import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
-import { BOOL, CAPABILITIES, INT, T, VIEW, key } from '../types.ts';
+import { I32, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
+import { BOOL, CAPABILITIES, FLOAT, INT, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import {
   buildVariant,
@@ -24,6 +24,7 @@ import type { Binding, CExpr, Ctx } from './fn.ts';
 import { closure, emitCall, emitLambda, fnValue } from './call.ts';
 import { emitMatch, letPattern } from './match.ts';
 import { emitInterp } from './text.ts';
+import { emitFloatBin } from './float.ts';
 import { rangeOf } from './range.ts';
 
 type Of<K extends Expr['k']> = Extract<Expr, { k: K }>;
@@ -216,6 +217,7 @@ function emitConcat(c: Ctx, e: Of<'bin'>, lt: Type): Type {
 
 function emitEquals(c: Ctx, e: Of<'bin'>, lt: Type): Type {
   const { op } = e;
+  if (lt.name === 'Float') return emitFloatBin(c, e);
   if (!['Int', 'Bool', 'View'].includes(lt.name))
     fail(e, 'C19', `${key(lt)} values cannot be compared with ${op}`, 'Use `match` to take the value apart.');
   need(c, c.emit(e.r, lt, false), lt, e, `the right side of ${op}`);
@@ -378,6 +380,7 @@ function emitBin(c: Ctx, e: Of<'bin'>): Type {
   const lt = c.B.strip(c.emit(e.l, null, false));
   if (op === '++') return emitConcat(c, e, lt);
   if (op === '==' || op === '!=') return emitEquals(c, e, lt);
+  if (lt.name === 'Float') return emitFloatBin(c, e);
   need(c, lt, INT, e, `the left side of ${op}`);
   if (op === '/' || op === '%') return emitDivide(c, e);
   const k = literal(e.r);
@@ -520,7 +523,17 @@ function emitNeg(c: Ctx, e: Of<'neg'>): Type {
     c.code.push(...i64(-k));
     return INT;
   }
-  need(c, c.emit(e.e, INT, false), INT, e, 'the operand of -');
+  // a Float's negation is exact, and never NaN or infinite
+  if (e.e.k === 'float') {
+    c.code.push(...f64(-e.e.v));
+    return FLOAT;
+  }
+  const t = c.B.strip(c.emit(e.e, null, false));
+  if (t.name === 'Float') {
+    c.code.push(0x9a);
+    return FLOAT;
+  }
+  need(c, t, INT, e, 'the operand of -');
   const x = scratch(c, 0);
   c.code.push(...set(x), ...get(x), ...i64(LEAST), I64_EQ);
   trapIf(c, TRAP.OVERFLOW);
@@ -534,6 +547,9 @@ export function emit(c: Ctx, e: CExpr, expected: Type | null, tail: boolean): Ty
     case 'int':
       c.code.push(0x42, ...sleb(e.v));
       return INT;
+    case 'float':
+      c.code.push(...f64(e.v));
+      return FLOAT;
     case 'str': {
       const [at, n] = c.B.literal(e.bytes);
       c.code.push(0x41, ...sleb(at), 0x41, ...sleb(n));

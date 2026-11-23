@@ -15,7 +15,9 @@ export const shown = (t: Token): string =>
       ? 'the end of the line'
       : t.t === 'str' || t.t === 'interp'
         ? 'a text literal'
-        : `\`${t.v}\``;
+        : t.t === 'float'
+          ? `\`${t.v}f\``
+          : `\`${t.v}\``;
 const wanted = (kind: Token['t'], v?: string): string =>
   v
     ? `\`${v}\``

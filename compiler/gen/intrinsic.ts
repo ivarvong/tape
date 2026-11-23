@@ -1,9 +1,9 @@
 // compiler/gen/intrinsic.ts: the functions the compiler knows itself: text and Bufs, timers, the clock, JSON out,
 // and the rows of a query. Those that leave the program (sql_*, decode, call, ask) have modules of their own.
 import type { Arg, Call } from '../ast.ts';
-import { I32, I64, TRAP, fail, sleb, uleb, utf8 } from '../common.ts';
+import { F64, I32, I64, TRAP, fail, sleb, uleb, utf8 } from '../common.ts';
 import { stdName } from '../shadow.ts';
-import { BUF, INT, INTRINSICS, REMOTE, T, VIEW, key } from '../types.ts';
+import { BUF, FLOAT, INT, INTRINSICS, REMOTE, T, VIEW, key } from '../types.ts';
 import { written } from './text.ts';
 import type { Type } from '../types.ts';
 import { buildVariant, close, fresh, get, inLocals, need, open, set, trapIf } from './fn.ts';
@@ -11,6 +11,7 @@ import type { Ctx } from './fn.ts';
 import { emitCallOut } from './callout.ts';
 import { decodeRow, emitDecode } from './decode.ts';
 import { emitSql } from './sql.ts';
+import { emitFloatIntrinsic } from './float.ts';
 
 /** A call of an intrinsic with its arguments in the order of its parameters. */
 type Use = { readonly c: Ctx; readonly e: Call; readonly n: string; readonly args: readonly Arg[] };
@@ -95,6 +96,23 @@ function append(u: Use): Type {
   const longer = [...get(h), ...get(h), ...ld(4), ...get(len), 0x6a, ...st(4)];
   const reserved = [...get(h), ...get(len), 0x10, ...uleb(c.B.RESERVE)];
   c.code.push(...reserved, ...end, ...get(ptr), ...get(len), 0xfc, 0x0a, 0, 0, ...longer, ...get(h));
+  return BUF;
+}
+
+/** write_float(out, value): the shortest digits that read back as the Float, as the host writes them (u32 length,
+ * then the bytes), appended. */
+function writeFloat(u: Use): Type {
+  const { c } = u;
+  const h = bufArg(u, 0);
+  const x = scalar(u, 1, FLOAT, F64);
+  const text = fresh(c, I32);
+  c.code.push(...get(x), 0x10, ...uleb(c.B.FLOAT_TEXT_IMPORT), ...set(text));
+  const len = [...get(text), ...ld(0)];
+  const end = [...get(h), ...ld(0), ...get(h), ...ld(4), 0x6a];
+  const longer = [...get(h), ...get(h), ...ld(4), ...len, 0x6a, ...st(4)];
+  const reserved = [...get(h), ...len, 0x10, ...uleb(c.B.RESERVE)];
+  const from = [...get(text), ...i32(4), 0x6a];
+  c.code.push(...reserved, ...end, ...from, ...len, 0xfc, 0x0a, 0, 0, ...longer, ...get(h));
   return BUF;
 }
 
@@ -314,6 +332,7 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   },
   size,
   write_json: writeJson,
+  write_float: writeFloat,
   next,
   wrapping_add: wrapping(0x7c),
   wrapping_sub: wrapping(0x7d),
@@ -328,6 +347,8 @@ export function emitIntrinsic(c: Ctx, e: Call): Type {
   if (n === 'wake') return wake(c, e);
   if (n === 'remote') return remote(c, e);
   if (n === 'now' || n === 'random') return ask(c, e, n);
+  const float = emitFloatIntrinsic(c, e);
+  if (float) return float;
   const args = c.B.orderArgs(`function ${n}`, INTRINSICS.get(n) ?? [], e.args, e);
   const known = Object.hasOwn(BY_NAME, n) ? BY_NAME[n] : undefined;
   return known

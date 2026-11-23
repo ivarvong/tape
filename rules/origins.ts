@@ -220,6 +220,7 @@ function called(tr: Trace, e: Of<'call'>, path: string[], fn: FnDecl, d: number)
 function originOf(tr: Trace, e: Expr, path: string[], fn: FnDecl, d: number): Origin {
   switch (e.k) {
     case 'int':
+    case 'float':
       return path.length > 0 ? unknown() : nothing();
     case 'neg':
       return path.length > 0 ? unknown() : flip(origin(tr, e.e, [], fn, d + 1));
@@ -319,6 +320,7 @@ export function wrapsTo(pt: Pattern | null | undefined, type: string): string[] 
 export function showExpr(e: Expr | null | undefined): string {
   if (!e) return '';
   if (e.k === 'int') return String(e.v);
+  if (e.k === 'float') return `${e.v}f`;
   if (e.k === 'var') return e.name;
   if (e.k === 'neg') return `-${showExpr(e.e)}`;
   if (e.k === 'field') return `${showExpr(e.e)}.${e.name}`;
