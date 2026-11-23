@@ -1,0 +1,114 @@
+{
+  "bench/money.tape": {
+    "bytes": 29088,
+    "functions": 118
+  },
+  "bench/suite/crud.tape": {
+    "bytes": 29152,
+    "functions": 113
+  },
+  "bench/suite/ledger.tape": {
+    "bytes": 29478,
+    "functions": 114
+  },
+  "bench/suite/webhook.tape": {
+    "bytes": 29701,
+    "functions": 113
+  },
+  "examples/bump.tape": {
+    "bytes": 32255,
+    "functions": 117
+  },
+  "examples/cart.tape": {
+    "bytes": 25281,
+    "functions": 109
+  },
+  "examples/counter.tape": {
+    "bytes": 5957,
+    "functions": 19
+  },
+  "examples/csv.tape": {
+    "bytes": 9059,
+    "functions": 38
+  },
+  "examples/fulfillment.tape": {
+    "bytes": 56885,
+    "functions": 148
+  },
+  "examples/git.tape": {
+    "bytes": 8468,
+    "functions": 26
+  },
+  "examples/hello.tape": {
+    "bytes": 4602,
+    "functions": 18
+  },
+  "examples/inventory.tape": {
+    "bytes": 27384,
+    "functions": 106
+  },
+  "examples/kv.tape": {
+    "bytes": 29627,
+    "functions": 78
+  },
+  "examples/ledger.tape": {
+    "bytes": 27046,
+    "functions": 96
+  },
+  "examples/orders.tape": {
+    "bytes": 30406,
+    "functions": 107
+  },
+  "examples/payments.tape": {
+    "bytes": 27003,
+    "functions": 106
+  },
+  "examples/ratelimit.tape": {
+    "bytes": 4811,
+    "functions": 18
+  },
+  "examples/shipping.tape": {
+    "bytes": 25471,
+    "functions": 97
+  },
+  "examples/shortener.tape": {
+    "bytes": 25517,
+    "functions": 95
+  },
+  "examples/stats.tape": {
+    "bytes": 4754,
+    "functions": 35
+  },
+  "examples/stock.tape": {
+    "bytes": 22607,
+    "functions": 88
+  },
+  "examples/tickets.tape": {
+    "bytes": 41805,
+    "functions": 124
+  },
+  "examples/todo-decode.tape": {
+    "bytes": 29953,
+    "functions": 110
+  },
+  "examples/todo-handparsed.tape": {
+    "bytes": 20831,
+    "functions": 79
+  },
+  "examples/todo.tape": {
+    "bytes": 36448,
+    "functions": 137
+  },
+  "examples/trap.tape": {
+    "bytes": 1075,
+    "functions": 4
+  },
+  "examples/webhook.tape": {
+    "bytes": 25276,
+    "functions": 104
+  },
+  "examples/words.tape": {
+    "bytes": 7419,
+    "functions": 29
+  }
+}
