@@ -552,6 +552,11 @@ const tests: Test[] = [
           '"trap 6: integer overflow"',
           '"trap 4: division by zero"',
           'no floats yet',
+          // what a step is, where the budget is stated (report e2acaf7ad474), and why there is no time (7ed7045a5577)
+          '50,000,000 steps',
+          'a step is one entry into a recursive function',
+          'other calls are free',
+          'the clock moves only across I/O',
         ])
           if (!d.includes(said)) out.push(`${String(t?.['name'])}: its description does not say ${said}`);
         const sheet = d.slice(d.indexOf('Tape in brief'), d.indexOf('examples/hello.tape, the program'));

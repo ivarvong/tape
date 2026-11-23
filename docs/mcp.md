@@ -130,7 +130,12 @@ mode.
   gives `trace: null`. A full trace is most of an answer's size: ask for it when you need the spans themselves.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got
   the same bytes back (or, for a trap, the same trap). `replay_error` says why when it did not.
-- `steps` is the reductions the request used, out of Tape's 50,000,000.
+- `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive
+  function (each call, and each call of itself as its result), std's included: the byte scans behind `request()` take
+  a few a byte, so an arm added above a route, or a longer path, changes its count. A call of a non-recursive function
+  is free. Steps are the only cost measure here: on Workers the clock moves only across I/O, so wall time cannot be
+  measured inside a run, and every span's duration in a trace is 0. [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops)
+  says more.
 - A request that traps (the step budget, the 64 MB arena, a division by zero) is status 500 with `error` set; its
   writes are rolled back and the next request runs on.
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not
@@ -194,7 +199,7 @@ These are alpha limits and may change.
 | What | Limit |
 |---|---|
 | files | 8, 64 KB of source together |
-| requests | 20 a call; a first line of at most 2 KB, a body of at most 16 KB |
+| requests | 50 a call; a first line of at most 2 KB, a body of at most 16 KB |
 | each request | Tape's own budget: 50,000,000 steps, 64 MB of memory |
 | a response body | given back up to 64 KB; past that it is cut and `truncated` is true (`body_bytes` is the whole size) |
 | a result's effects and trace | 512 KB of JSON; past that both are left out and `omitted` says so |

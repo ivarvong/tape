@@ -526,6 +526,17 @@ A program says what must hold, and what must hold in the end (`settled`), and is
 
 ## 10. When a program stops
 
+A request may take 50,000,000 steps. A step of that budget (not a step of a body, section 4) is one entry into a
+recursive function, a function that can reach itself through the calls it makes: each time it is called, and each
+time it calls itself again as its result. A call of any other function is free however much it computes, and so is a
+built-in. The standard library's recursive functions count like the program's own: the byte scans behind
+`request()`, `until`, `after` and `decimal` take a few steps per byte. So a request's steps depend on its bytes and
+on the arms tried before the one that answers it, and a route's count can change while the route does not: an arm
+added above it, or a function made recursive by a call added elsewhere. In a program with two `GET` arms and a 404
+fallback, one more `GET` arm on top added 4 steps to every request below it, and a path 12 bytes longer cost 59
+more. Steps are a count of reductions, as in Erlang, not a time. They are the cost measure all the same: on Workers
+a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's duration) can time its work.
+
 A trap ends the request, undoes its writes and is recorded: out of memory (64 MB), more than 50,000,000 steps, an
 index out of bounds, a division by zero (trap 4), an `Int` result that does not fit in 64 bits (trap 6, integer
 overflow), a shift by less than 0 or more than 63 (trap 7). Nothing else stops a program: every other failure is a
