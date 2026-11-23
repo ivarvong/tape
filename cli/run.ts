@@ -77,7 +77,8 @@ export async function runRequests(file: string, requests: readonly string[]): Pr
   for (const r of requests.length > 0 ? requests : ['']) {
     const req = enc.encode(r.replaceAll(String.raw`\n`, '\n').replace(/^([A-Z]+ \S+)$/, '$1\n'));
     const ran = await app.runLogged(req);
-    console.log(`\n→ ${r}\n← ${dec.decode(ran.out).replaceAll('\n', ' ⏎ ')}\n\n  effect log`);
+    // a header the program set stands on the status line after a carriage return: shown as ␍
+    console.log(`\n→ ${r}\n← ${dec.decode(ran.out).replaceAll('\r', ' ␍ ').replaceAll('\n', ' ⏎ ')}\n\n  effect log`);
     for (const e of ran.effects) console.log(`    ${effectLine(plain, e)}`);
     const t = traceOf(tmod, req, ran.effects);
     const out = [...traceLines(traced, file, lines, t.events), ...(t.error === null ? [] : [`  ${t.error}`])];

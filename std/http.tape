@@ -1,6 +1,7 @@
 // std/http.tape: a request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY.
 // A request that came through a published name's public route (no token: anyone) ends its line with a word,
-// METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's.
+// METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. The request headers
+// the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case.
 // `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests.
 
 // Who sent a request: the operator (with the token), or Anyone, through a published name's public route.
@@ -11,14 +12,14 @@ type Caller {
 
 // A request as `request(raw)` gives it. `path` is the target before `?`, as sent (percent-encoding is not undone);
 // `query` the raw text after `?` (read one parameter with `form_field(body: q, name: "limit")`); `body` what
-// follows the first line feed. There are no headers.
+// follows the first line feed; `headers` the request headers the host passed, read with `header_of`.
 //
 //   match request(raw) {
 //     Request(method: "GET", path: "/items/" ++ decimal(id)) -> …
 //     Request(method: "POST", path: "/items", body) -> …
 //   }
 type Request {
-  Request(method: View, path: View, query: Option[View], body: View, caller: Caller)
+  Request(method: View, path: View, query: Option[View], body: View, caller: Caller, headers: View)
 }
 
 // The request `handle` is given, parsed.
@@ -31,8 +32,11 @@ type Request {
 //   Request(path: "/items", query: Some(value: ""))
 //   > request(raw: "GET /items\n")
 //   Request(path: "/items", query: None)
+//   > request(raw: "GET /k\raccept: text/html\n") |> header_of(name: "Accept")
+//   Some(value: "text/html")
 fn request(raw: View) -> Request {
-  let line = until(v: raw, byte: 10)
+  let whole = until(v: raw, byte: 10)
+  let line = until(v: whole, byte: 13)
   let rest = after(v: line, byte: 32)
   let open = len(rest) >= 7 and has(v: rest, at: len(rest) - 7, word: " public")
   let target = slice(v: rest, from: 0, to: len(rest) - 7 * opened(open))
@@ -41,8 +45,56 @@ fn request(raw: View) -> Request {
     path: until(v: target, byte: 63),
     query: asked(target),
     body: after(v: raw, byte: 10),
-    caller: caller_of(open)
+    caller: caller_of(open),
+    headers: slice(v: whole, from: len(line), to: len(whole))
   )
+}
+
+// The value of a request header, by its name in any case; the first one when there are several. A host passes
+// only the headers it means a program to see (the service: accept, content-type, if-match, if-none-match,
+// idempotency-key and x-…, never cookie or authorization).
+//
+//   > request(raw: "POST /\rcontent-type: text/csv\ridempotency-key: 7\nbody") |> header_of(name: "Idempotency-Key")
+//   Some(value: "7")
+//   > request(raw: "GET /\n") |> header_of(name: "accept")
+//   None
+//   > request(raw: "GET /\rx-a: 1\n") |> header_of(name: "accept")
+//   None
+fn header_of(request: Request, name: View) -> Option[View] {
+  header_from(lines: request.headers, name: "\r" ++ lower(text: name) ++ ": ")
+}
+
+// Internal: header_of's search of the header lines.
+fn header_from(lines: View, name: View) -> Option[View] {
+  match lines {
+    "" -> None
+    _ -> {
+      let at = find_text(v: lines, sep: name, at: 0)
+      match {
+        at < 0 -> None
+        else -> Some(
+          value: until(v: slice(v: lines, from: at + len(name), to: len(lines)), byte: 13)
+        )
+      }
+    }
+  }
+}
+
+// ASCII letters in lower case; every other byte as it is.
+//
+//   > lower(text: "Content-Type")
+//   "content-type"
+fn lower(text: View) -> View {
+  freeze(buf: lower_from(out: buf(), text, at: 0))
+}
+
+// Internal: lower from position `at`.
+fn lower_from(out: Buf, text: View, at: Int) -> Buf {
+  match {
+    at >= len(text) -> out
+    is_upper(text[at]) -> lower_from(out: push(buf: out, byte: text[at] + 32), text, at: at + 1)
+    else -> lower_from(out: push(buf: out, byte: text[at]), text, at: at + 1)
+  }
 }
 
 // Internal: only the last word, and only `public`, names the caller: a target with a space in it (never sent by
@@ -73,6 +125,68 @@ fn asked(target: View) -> Option[View] {
 // A response: the status, a line feed, then the body written by the caller. It is served as text/plain.
 fn respond(status: Int) -> Buf {
   push(buf: write_int(out: buf(), value: status), byte: 10)
+}
+
+// A response header, on an answer begun by respond or respond_as: `respond(status: 302) |> header(name: "location",
+// value: url)`. The status line carries it, after a carriage return: STATUS[ SP TYPE](CR name: value)* LF BODY. A
+// name is 1 to 64 token characters (letters, digits, and !#$%&'*+-.^_`|~) and a value up to 4096 bytes with no CR,
+// LF or NUL; the host refuses any other (the request is answered 500 and says why), and those it sets itself
+// (content-type, which is respond_as's, content-length, set-cookie, the security headers…).
+//
+//   > respond(status: 302) |> header(name: "Location", value: "/links/7") |> freeze
+//   "302\rlocation: /links/7\n"
+//   > respond(status: 200) |> append(view: "hi") |> header(name: "cache-control", value: "no-store") |> freeze
+//   "200\rcache-control: no-store\nhi"
+fn header(out: Buf, name: View, value: View) -> Buf {
+  let all = freeze(buf: out)
+  let line = until(v: all, byte: 10)
+  buf()
+    |> append(view: line)
+    |> push(byte: 13)
+    |> append(view: header_text(name, value))
+    |> append(view: slice(v: all, from: len(line), to: len(all)))
+}
+
+// Internal: `name: value`, or, for a name or a value the host would refuse, a part it refuses with the reason.
+fn header_text(name: View, value: View) -> View {
+  match {
+    len(name) == 0 or len(name) > 64 or not every_byte(
+      v: name,
+      keep: token_byte
+    ) -> "!invalid header name"
+    len(value) > 4096 or not every_byte(
+      v: value,
+      keep: value_byte
+    ) -> "!invalid header value for \(lower(text: name))"
+    else -> "\(lower(text: name)): \(value)"
+  }
+}
+
+// Internal: a token character (RFC 9110): a letter, a digit, or one of !#$%&'*+-.^_`|~.
+fn token_byte(b: Int) -> Bool {
+  is_alnum(b) or (b >= 35 and b <= 39) or token_mark(b)
+}
+
+// Internal: the marks among the token characters.
+fn token_mark(b: Int) -> Bool {
+  match b {
+    33 -> True
+    42 -> True
+    43 -> True
+    45 -> True
+    46 -> True
+    94 -> True
+    95 -> True
+    96 -> True
+    124 -> True
+    126 -> True
+    _ -> False
+  }
+}
+
+// Internal: a byte a header value may hold.
+fn value_byte(b: Int) -> Bool {
+  b != 0 and b != 10 and b != 13
 }
 
 // The content types the service serves: respond_as(status: 200, content: Html) answers text/html.

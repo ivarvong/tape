@@ -79,16 +79,29 @@ export const bodyOf = async (request: Request, max: number): Promise<Uint8Array<
   return out;
 };
 
-// The program's request: METHOD SP TARGET LF BODY; through a published name's public route, METHOD SP TARGET SP
-// public LF BODY (std/http: caller Anyone). The target is percent-encoded by the URL, so it has no space.
-// Null when the body is over BODY_MAX.
+// The request headers a program sees (std/http's header_of): those that say what a client asks for and how its
+// body is written, and the client's own x- headers. Never cookie, authorization (the operator's token), the
+// client's address or what Cloudflare adds. Each value is cut at HEADER_VALUE_MAX.
+const PASSED =
+  /^(accept|accept-language|content-type|if-match|if-none-match|if-modified-since|idempotency-key|x-(?!forwarded|real-ip).+)$/;
+export const HEADER_VALUE_MAX = 1024;
+const passedHeaders = (request: Request): string =>
+  [...request.headers]
+    .filter(([name]) => PASSED.test(name))
+    .slice(0, 32)
+    .map(([name, value]) => `\r${name}: ${value.slice(0, HEADER_VALUE_MAX).replaceAll(/[\0\r\n]/g, ' ')}`)
+    .join('');
+
+// The program's request: METHOD SP TARGET (CR name: value)* LF BODY; through a published name's public route,
+// METHOD SP TARGET SP public … (std/http: caller Anyone). The target is percent-encoded by the URL, so it has no
+// space. Null when the body is over BODY_MAX.
 export const tapeRequest = async (
   request: Request,
   path: string,
   search: string,
   via: string | null = null,
 ): Promise<Uint8Array<ArrayBuffer> | null> => {
-  const head = `${request.method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}\n`,
+  const head = `${request.method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}${passedHeaders(request)}\n`,
     body = await bodyOf(request, BODY_MAX);
   return body === null ? null : new Uint8Array(await new Blob([head, body]).arrayBuffer());
 };

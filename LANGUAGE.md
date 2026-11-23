@@ -409,7 +409,9 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |
-| Answer | functions return a value (`Outcome`); one function turns it into bytes | |
+| Answer | functions return a value (`Outcome`); one function turns it into bytes: `respond(status)`, or `respond_as(status, content: Json)` for a type, then the body | |
+| Set a response header | `respond(status: 302) \|> header(name: "location", value: url)`, anywhere before or after the body. A name is a token, a value has no CR, LF or NUL; the host refuses those it sets itself (content-type, set-cookie, the security headers) and answers 500 with the reason | |
+| Read a request header | `header_of(request: r, name: "if-none-match")`, an `Option[View]`; the host passes only those it means a program to see | |
 
 ```diff C83
 -  do wake(after: 5000, key: order.id)
@@ -578,6 +580,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | no response headers (a redirect had no Location) and no request headers | `header(name:, value:)` on an answer and `header_of(request:, name:)`; the status line carries them, `STATUS CR name: value LF BODY`, checked by the host (host.ts responseOf) |
 | 23 November 2026 | a JSON list of computed items needed a Buf kept in a record (C08), and `Cons(head: 1, tail: Nil)` in a `let` could not tell its type (C21) | std: `write_json_list`, `write_each`, `join`; a constructor's later fields take the type parameters its earlier ones gave |
 | 23 November 2026 | a debit after its transfer id was inserted (`ON CONFLICT DO NOTHING`, the row required by a step) was C54, and agents marked it `repeat: True` | the claim is an op-id guard: C54 takes a write that runs only once the claim inserted its row |
 | 23 November 2026 | byte classes, a number with a sign or leading zeros, min and max written by hand in each program | std: `is_digit is_alpha is_alnum is_space is_lower is_upper`, `every_byte(v, keep)`, `parse_int(text)`, `min`, `max` |

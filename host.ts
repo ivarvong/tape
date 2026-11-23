@@ -43,9 +43,13 @@ export {
 export type { MachineSpec, Migrated, Transaction } from './host/schema.ts';
 
 // A program's answer: `STATUS LF BODY`, or `STATUS SP TYPE LF BODY` with TYPE one of CONTENT_TYPES (std/http's
-// respond_as). Output whose first line is neither is all body, with status 200 (as before content types). The type
-// is a closed list, so a program cannot send a header the service does not mean to send (no `text/html;
-// x-injected: …`, no types a browser runs as script beyond the page itself).
+// respond_as), and either with headers on the same line, each after a carriage return: `STATUS CR name: value LF
+// BODY` (std/http's header). Output whose first line is not one of those is all body, with status 200 (as before
+// content types). The type is a closed list, so a program cannot send a header the service does not mean to send
+// (no `text/html; x-injected: …`, no types a browser runs as script beyond the page itself), and the headers are
+// checked here, for every host alike: a name of token characters, a value with no CR, LF or NUL, within the
+// limits below, and none of those the host sets itself. A head with a header that fails is answered 500, and says
+// why: a program that means to redirect and cannot should not answer as if it had.
 export const CONTENT_TYPES = new Map([
   ['text/plain', 'text/plain; charset=utf-8'],
   ['text/html', 'text/html; charset=utf-8'],
@@ -53,14 +57,50 @@ export const CONTENT_TYPES = new Map([
   ['text/css', 'text/css; charset=utf-8'],
   ['image/svg+xml', 'image/svg+xml'],
 ]);
+/** The most headers an answer may set, the longest name and value, and the longest head. */
+export const HEADER_LIMITS = { count: 32, name: 64, value: 4096, head: 16384 } as const;
+/** Headers the host owns: the body's framing and type, cookies (every program shares the service's origin), and the
+ * headers the service sets on every answer. */
+const HOST_OWNED =
+  /^(content-type|content-length|content-encoding|transfer-encoding|connection|keep-alive|upgrade|te|trailer|proxy-.*|set-cookie|set-cookie2|content-security-policy.*|x-frame-options|x-content-type-options|referrer-policy|x-robots-tag|strict-transport-security|cross-origin-.*|permissions-policy|tape-.*|cf-.*)$/;
+const TOKEN = /^[!#$%&'*+.^_`|~0-9a-z-]+$/;
 const HEAD = /^([1-5][0-9][0-9])(?: ([a-z+/]+))?$/;
-export function responseOf(out: Uint8Array): { status: number; type: string | undefined; body: Uint8Array } {
+export type Header = { name: string; value: string };
+export type Answer = { status: number; type: string | undefined; headers: Header[]; body: Uint8Array };
+const refused = (why: string): Answer => ({
+  status: 500,
+  type: CONTENT_TYPES.get('text/plain'),
+  headers: [],
+  body: new TextEncoder().encode(`the program set a response header the host refuses: ${why}`),
+});
+/** A header part of the head, `name: value`; or why it is refused. */
+function headerOf(part: string): Header | string {
+  if (part.startsWith('!')) return part.slice(1);
+  const colon = part.indexOf(': ');
+  const name = colon < 0 ? part : part.slice(0, colon),
+    value = colon < 0 ? '' : part.slice(colon + 2);
+  if (colon < 0 || name.length === 0 || name.length > HEADER_LIMITS.name || !TOKEN.test(name))
+    return `invalid header name ${JSON.stringify(name.slice(0, HEADER_LIMITS.name))}`;
+  if (value.length > HEADER_LIMITS.value || /[\0\r\n]/.test(value)) return `invalid header value for ${name}`;
+  if (HOST_OWNED.test(name)) return `${name} is the host's to set${name === 'content-type' ? ' (use respond_as)' : ''}`;
+  return { name, value };
+}
+export function responseOf(out: Uint8Array): Answer {
   const nl = out.indexOf(10);
-  const m = nl > 0 && nl <= 32 ? HEAD.exec(new TextDecoder().decode(out.subarray(0, nl))) : null;
+  const line = nl > 0 && nl <= HEADER_LIMITS.head ? new TextDecoder().decode(out.subarray(0, nl)) : '';
+  const [first = '', ...parts] = line.split('\r');
+  const m = first.length <= 32 ? HEAD.exec(first) : null;
   const type = m?.[2];
   if (!m || (type !== undefined && !CONTENT_TYPES.has(type)))
-    return { status: 200, type: CONTENT_TYPES.get('text/plain'), body: out };
-  return { status: Number(m[1]), type: CONTENT_TYPES.get(type ?? 'text/plain'), body: out.subarray(nl + 1) };
+    return { status: 200, type: CONTENT_TYPES.get('text/plain'), headers: [], body: out };
+  if (parts.length > HEADER_LIMITS.count) return refused(`more than ${HEADER_LIMITS.count} headers`);
+  const headers: Header[] = [];
+  for (const part of parts) {
+    const h = headerOf(part);
+    if (typeof h === 'string') return refused(h);
+    headers.push(h);
+  }
+  return { status: Number(m[1]), type: CONTENT_TYPES.get(type ?? 'text/plain'), headers, body: out.subarray(nl + 1) };
 }
 
 export type InstantiateOptions = Omit<LinkOptions, 'recorded' | 'trace' | 'heap'> & {

@@ -368,7 +368,8 @@ const missing = (t: number, what: string, reason: string, extra: Attributes = {}
 
 /** A run's request line: an HTTP verb and a target, or (a served call, a tool call) a method and a message. */
 const requestLine = (request: string): { method: string; target: string; path: string; query: string | undefined } => {
-  const [line = ''] = request.split('\n'),
+  // the request headers follow on the line, each after a carriage return (web.ts tapeRequest)
+  const [line = ''] = (request.split('\n')[0] ?? '').split('\r'),
     [method = ''] = line.split(' '),
     target = line.slice(method.length + 1),
     [path = '', query] = target.split('?');

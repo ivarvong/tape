@@ -70,7 +70,7 @@ export const traceLinks = async (
 // any: `/users/<buyer>/…` in the path, `buyer=` in the query or a form body, or `"buyer": "…"` in a JSON body.
 export const targetOf = (head: string | null | undefined): string | null => {
   if (head === null || head === undefined || head === '') return null;
-  const [line = ''] = head.split('\n', 1);
+  const [line = ''] = (head.split('\n', 1)[0] ?? '').split('\r', 1);
   return line.split(' ')[1] ?? null;
 };
 const clean = (sent: string): string | null => {

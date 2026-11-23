@@ -2,6 +2,7 @@
 // (/p/:account/:name/…): no token, the latest live version, `public` on the request line (std/http caller Anyone).
 import { describe, expect, it } from 'vitest';
 import page from './fixtures/page.tape?raw';
+import redirect from './fixtures/redirect.tape?raw';
 import hello from '../../examples/hello.tape?raw';
 import { responseOf } from '../../host.ts';
 import { anyone, at, call, got } from './help.ts';
@@ -39,6 +40,46 @@ describe('content types', () => {
     // an older program's plain status line is still text/plain
     await call('/ivar/hello', { method: 'POST', body: hello });
     expect((await call('/ivar/hello/v/1/hello/ada')).headers.get('content-type')).toBe('text/plain; charset=utf-8');
+  });
+});
+
+describe('headers (0.3)', () => {
+  it('reads the headers a program set from the status line, and refuses one it may not set', () => {
+    const all = (s: string) => {
+      const r = responseOf(enc.encode(s));
+      return [r.status, r.headers, dec.decode(r.body)];
+    };
+    expect(all('302\rlocation: /x\n')).toEqual([302, [{ name: 'location', value: '/x' }], '']);
+    expect(all('200 text/html\rx-a: 1\rx-a: 2\n<p>')).toEqual([
+      200,
+      [
+        { name: 'x-a', value: '1' },
+        { name: 'x-a', value: '2' },
+      ],
+      '<p>',
+    ]);
+    expect(all('200\rset-cookie: a=b\nx')[0]).toBe(500);
+    expect(all('200\rcontent-type: text/javascript\nx')[0]).toBe(500);
+    expect(all('200\r!invalid header value for x-bad\nx')).toEqual([
+      500,
+      [],
+      'the program set a response header the host refuses: invalid header value for x-bad',
+    ]);
+  });
+
+  it("serves a program's headers, passes the request headers it may read, and never a cookie", async () => {
+    const up = await call('/ivar/redirect', { method: 'POST', body: redirect });
+    expect(up.status).toBe(201);
+    const r = await call('/ivar/redirect/v/1/go/abc', { redirect: 'manual' });
+    expect([r.status, r.headers.get('location'), r.headers.get('x-content-type-options')]).toEqual([
+      302,
+      '/to/abc',
+      'nosniff',
+    ]);
+    const e = await call('/ivar/redirect/v/1/echo', { headers: { 'idempotency-key': 'k7', cookie: 'a=b' } });
+    expect([e.status, e.headers.get('x-echo'), await e.text()]).toEqual([200, 'k7', 'k7']);
+    const bad = await call('/ivar/redirect/v/1/bad', { method: 'POST', body: 'a\r\nset-cookie: x=1' });
+    expect([bad.status, bad.headers.get('set-cookie'), bad.headers.get('x-bad')]).toEqual([500, null, null]);
   });
 });
 

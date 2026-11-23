@@ -19,7 +19,7 @@ import {
   isEffect,
   isHead,
 } from './host.ts';
-import type { App, Effect, MachineSpec, ServiceReply, Sql, TraceEvent, Transaction } from './host.ts';
+import type { App, Effect, Header, MachineSpec, ServiceReply, Sql, TraceEvent, Transaction } from './host.ts';
 import versions from './versions.ts';
 import type { VersionBuild } from './versions.ts';
 import { isCheckHead, isEntry, isMigrationsHead, isRunHead } from './records.ts';
@@ -667,16 +667,19 @@ export class Program extends DurableObject<Env> {
       });
     try {
       const ran = await app.runLogged(bytes, { transaction, trace: traceOfHeader(request.headers.get('traceparent')) });
-      const { status, body, type } = split(ran.out);
+      const { status, body, type, headers } = split(ran.out);
       // the whole log, with its measured took (and, for a run that rolled itself back, written only now)
       log.keep(ran.effects, false);
-      return new Response(body, {
+      const res = new Response(body, {
         status,
         headers: {
           ...this.#headers(log.id(), ran.effects[0]),
           ...(type === undefined ? {} : { 'content-type': type }),
         },
       });
+      // the program's own headers (std/http's header), checked by responseOf: none is one the host sets
+      for (const h of headers) res.headers.append(h.name, h.value);
+      return res;
     } catch (err) {
       return this.#failed(err, log);
     }
@@ -974,11 +977,21 @@ const runView = (
       error: head.failed.error,
       failed: head.failed,
     };
-  const { status, body } = answered(t.out, called);
-  return { request, status, response: dec.decode(body), trace: traceLines(b, t.events), error: t.error };
+  const { status, body, headers } = answered(t.out, called);
+  return {
+    request,
+    status,
+    ...(headers.length > 0 ? { headers } : {}),
+    response: dec.decode(body),
+    trace: traceLines(b, t.events),
+    error: t.error,
+  };
 };
 /** What a replayed run answered: a request's status line and body; a method's first byte says ok or rejected. */
-const answered = (out: Uint8Array | null, called: boolean): { status: number | string; body: Uint8Array } => {
-  if (!out) return { status: 500, body: new Uint8Array(0) };
-  return called ? { status: out[0] === 48 ? 'ok' : 'rejected', body: out.subarray(1) } : split(out);
+const answered = (
+  out: Uint8Array | null,
+  called: boolean,
+): { status: number | string; body: Uint8Array; headers: Header[] } => {
+  if (!out) return { status: 500, body: new Uint8Array(0), headers: [] };
+  return called ? { status: out[0] === 48 ? 'ok' : 'rejected', body: out.subarray(1), headers: [] } : split(out);
 };

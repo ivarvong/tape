@@ -9,6 +9,7 @@ import { compile } from '../../../compiler.ts';
 import type { Built, Refused, Source } from '../../../compiler.ts';
 import type { Problem } from '../../../compiler/common.ts';
 import { instantiate, isCall, isHead, responseOf, traceOf } from '../../../host.ts';
+import type { Header } from '../../../host.ts';
 import type { App, Cell, Effect, Flags, Service, ServiceOptions, ServiceReply } from '../../../host.ts';
 import { isEffect } from '../../../host/log.ts';
 import type { CallEffect, Sql } from '../../../host/log.ts';
@@ -60,6 +61,8 @@ export type Exchange = {
   request: string;
   status: number;
   type: string;
+  /** the headers the program set (std/http's header), as the host checked them */
+  headers: Header[];
   body: string;
   ms: number;
   root: RunView;
@@ -444,7 +447,7 @@ export class Workbench {
   ): Exchange {
     const woken = bytes === null && failed === null;
     const res = woken
-      ? { status: out[0] === 48 ? 200 : 500, type: 'application/json', body: out.subarray(1) }
+      ? { status: out[0] === 48 ? 200 : 500, type: 'application/json', headers: [], body: out.subarray(1) }
       : responseOf(out);
     const root = this.#view(slot, bytes, out, effects, woken ? 'woken' : null, failed);
     const joined = this.#joined(slot, request, res.status, dec.decode(res.body), effects, failed, began, took);
@@ -454,6 +457,7 @@ export class Workbench {
       request,
       status: res.status,
       type: res.type ?? 'text/plain',
+      headers: res.headers,
       body: dec.decode(res.body),
       ms: took,
       root,

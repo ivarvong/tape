@@ -720,7 +720,13 @@ export class Name extends DurableObject {
     const facetBegan = Date.now();
     let res: Response;
     try {
-      res = await this.data(account, name).fetch(`http://program/${version}`, { method: 'POST', body: bytes, headers });
+      // a program's redirect is its answer, passed on: never followed here
+      res = await this.data(account, name).fetch(`http://program/${version}`, {
+        method: 'POST',
+        body: bytes,
+        headers,
+        redirect: 'manual',
+      });
     } catch (e) {
       // the facet stopped (reset, evicted) before it answered: what it committed is kept, its log is not written
       note({

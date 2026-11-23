@@ -174,13 +174,18 @@ T(
   ],
 );
 T(
-  'responseOf: an unknown type or a smuggled header is all body, 200',
-  [head('200 text/javascript\nx'), head('200 text/html\r\nx'), head('200 text/html; a=b\nx')],
+  'responseOf: an unknown type or a header smuggled into the type is all body, 200',
+  [head('200 text/javascript\nx'), head('200 text/html; a=b\nx')],
   [
     [200, 'text/plain; charset=utf-8'],
     [200, 'text/plain; charset=utf-8'],
-    [200, 'text/plain; charset=utf-8'],
   ],
+);
+// 0.3: a carriage return on the status line opens a header (std/http's header); an empty one is refused, 500
+T(
+  'responseOf: a header that is not `name: value` is refused, 500',
+  [head('200 text/html\r\nx')],
+  [[500, 'text/plain; charset=utf-8']],
 );
 
 // ---- 7. the tickets app compiles, and its pay program

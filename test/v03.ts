@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { rng } from '../sim.ts';
 import { nodeSql } from '../nodesql.ts';
 import { call, finish, functionsOf, same as T } from './harness.ts';
@@ -863,6 +863,78 @@ fn handle(raw: View) -> Buf {
       .split(' | ')[1]
       ?.includes('write_json_list'),
     true,
+  );
+}
+
+// ---- 2. response headers: std/http's header, on the status line after a carriage return, read by the host
+// (responseOf) for every host alike; and request headers, by header_of. The shortener task needed a Location.
+{
+  const R = `fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  match r.path {
+    "/go/" ++ code -> respond(status: 302) |> header(name: "Location", value: "https://example.com/" ++ code)
+    "/twice" -> respond_as(status: 200, content: Json)
+      |> header(name: "cache-control", value: "no-store")
+      |> append(view: "{}")
+      |> header(name: "x-n", value: "2")
+    "/key" -> respond(status: 200)
+      |> append(view: match header_of(request: r, name: "idempotency-key") {
+        Some(value) -> value
+        None -> "none"
+      })
+    "/cookie" -> respond(status: 200) |> header(name: "set-cookie", value: "a=b")
+    "/split" -> respond(status: 200) |> header(name: "x-v", value: r.body)
+    _ -> respond(status: 200) |> header(name: "bad name", value: "x")
+  }
+}
+`;
+  const r = compile([...std, { name: 't.tape', text: R }]);
+  const app = r.wasm ? instantiate(new WebAssembly.Module(r.wasm), { log: false }) : null;
+  const it = interpret([...std, { name: 't.tape', text: R }]);
+  const enc = new TextEncoder();
+  const both = (req: string): unknown => {
+    if (!app) return `does not compile: ${r.errors[0]?.code} ${r.errors[0]?.message}`;
+    const a = responseOf(app.handle(enc.encode(req))),
+      b = responseOf(it.handle(enc.encode(req)));
+    const shown = (x: typeof a): unknown => [x.status, x.type, x.headers, new TextDecoder().decode(x.body)];
+    return JSON.stringify(shown(a)) === JSON.stringify(shown(b)) ? shown(a) : ['differ', shown(a), shown(b)];
+  };
+  const PLAIN = 'text/plain; charset=utf-8';
+  T('a redirect carries its Location, compiled and interpreted', both('GET /go/abc'), [
+    302,
+    PLAIN,
+    [{ name: 'location', value: 'https://example.com/abc' }],
+    '',
+  ]);
+  T('headers with a content type, before and after the body is written', both('GET /twice'), [
+    200,
+    'application/json',
+    [
+      { name: 'cache-control', value: 'no-store' },
+      { name: 'x-n', value: '2' },
+    ],
+    '{}',
+  ]);
+  T(
+    'a request header read by name, in any case',
+    [both('GET /key\ridempotency-key: k-1\n'), both('GET /key')],
+    [
+      [200, PLAIN, [], 'k-1'],
+      [200, PLAIN, [], 'none'],
+    ],
+  );
+  const why = (req: string): unknown => {
+    const x = both(req);
+    return Array.isArray(x) ? [x[0], x[3]] : x;
+  };
+  T(
+    'a header the host owns, a value that would split the head, a name that is not a token: 500, and why',
+    [why('GET /cookie'), why('POST /split\nfine\r\nset-cookie: x=1'), why('GET /other')],
+    [
+      [500, "the program set a response header the host refuses: set-cookie is the host's to set"],
+      [500, 'the program set a response header the host refuses: invalid header value for x-v'],
+      [500, 'the program set a response header the host refuses: invalid header name'],
+    ],
   );
 }
 

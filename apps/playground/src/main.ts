@@ -599,7 +599,8 @@ const pretty = (text: string, type: string): string => {
   return text;
 };
 function responseView(ex: Exchange): string {
-  return `<div class="kv"><span>content-type</span><code>${esc(ex.type)}</code></div><pre class="block response">${esc(pretty(ex.body, ex.type)) || '<span class="muted">(empty body)</span>'}</pre>`;
+  const set = ex.headers.map(h => `<div class="kv"><span>${esc(h.name)}</span><code>${esc(h.value)}</code></div>`);
+  return `<div class="kv"><span>content-type</span><code>${esc(ex.type)}</code></div>${set.join('')}<pre class="block response">${esc(pretty(ex.body, ex.type)) || '<span class="muted">(empty body)</span>'}</pre>`;
 }
 
 function runSections(root: RunView, lines: (r: RunView) => Line[], clickable = false, asLog = false): string {
