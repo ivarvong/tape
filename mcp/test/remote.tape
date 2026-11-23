@@ -1,5 +1,6 @@
 // remote.tape: a program for mcp/test.ts that calls another, so run's scripted `remotes` can answer it: each
-// outcome of the call is its own answer (201 with the reply's field, 402 with the refusal's reason, 504, 503).
+// outcome of the call is its own answer (201 with the reply's field, 402 with the refusal's reason, 409 with a
+// skew's, 504, 503).
 type Charge { Charge(order: Int) }
 type Charged { Charged(payment: Int) }
 
@@ -21,6 +22,7 @@ fn paid(reply: Result[Charged, CallError]) -> Buf {
   match reply {
     Ok(value: Charged(payment)) -> respond(status: 201) |> write_int(value: payment)
     Err(error: Rejected(reason)) -> respond(status: 402) |> append(view: reason)
+    Err(error: Skew(reason)) -> respond(status: 409) |> append(view: reason)
     Err(error: Timeout) -> respond(status: 504)
     Err(error) -> respond(status: 503)
   }

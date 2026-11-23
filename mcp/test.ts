@@ -1025,14 +1025,28 @@ const tests: Test[] = [
       const files = [{ name: 'remote.tape', text: REMOTE_TAPE }];
       const remotes = {
         payments: {
-          charge: [{ payment: 7 }, { error: 'Rejected', reason: 'card declined' }, 'timeout', 'unreachable'],
+          charge: [
+            { payment: 7 },
+            { error: 'Rejected', reason: 'card declined' },
+            'timeout',
+            'unreachable',
+            { error: 'Skew', reason: 'another message' },
+          ],
         },
       };
-      const requests = ['POST /pay/1', 'POST /pay/2', 'POST /pay/3', 'POST /pay/4', 'POST /pay/1', 'POST /pay/5'];
+      const requests = [
+        'POST /pay/1',
+        'POST /pay/2',
+        'POST /pay/3',
+        'POST /pay/4',
+        'POST /pay/1',
+        'POST /pay/5',
+        'POST /pay/6',
+      ];
       const { out: r, isError } = await tool(m, 'run', { files, requests, remotes });
       const rs = RESULTS(r);
       const got = rs.map(x => `${String(x['status'])} ${String(x['body'])}`);
-      const want = ['201 7', '402 card declined', '504 ', '503 ', '201 7', '503 '];
+      const want = ['201 7', '402 card declined', '504 ', '503 ', '201 7', '409 another message', '503 '];
       if (isError || JSON.stringify(got) !== JSON.stringify(want)) out.push(`answers: ${JSON.stringify(got)}`);
       const calls = rs.map(x =>
         F(
@@ -1043,7 +1057,8 @@ const tests: Test[] = [
       );
       const statuses = calls.map(c => c['status']);
       if (
-        JSON.stringify(statuses) !== JSON.stringify(['ok', 'rejected', 'timeout', 'unreachable', 'ok', 'unreachable'])
+        JSON.stringify(statuses) !==
+        JSON.stringify(['ok', 'rejected', 'timeout', 'unreachable', 'ok', 'skew', 'unreachable'])
       )
         out.push(`the effect log's calls: ${JSON.stringify(statuses)}`);
       if (JSON.stringify(calls[0]?.['reply']) !== '{"payment":7}' || calls[1]?.['reply'] !== 'card declined')

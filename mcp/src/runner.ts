@@ -143,8 +143,12 @@ function replyOf(answer: unknown): ServiceReply | 'timeout' {
   if (answer === undefined) return { status: 'unreachable', body: enc.encode(SCRIPTED_OUT) };
   if (answer === 'timeout') return 'timeout';
   if (answer === 'unreachable') return { status: 'unreachable', body: enc.encode(UNREACHABLE) };
+  // {"error": "Rejected" or "Skew", "reason": …}: the callee refused, or found the key used for another message
   if (typeof answer === 'object' && answer !== null && 'error' in answer)
-    return { status: 'rejected', body: enc.encode(String('reason' in answer ? answer.reason : '')) };
+    return {
+      status: answer.error === 'Skew' ? 'skew' : 'rejected',
+      body: enc.encode(String('reason' in answer ? answer.reason : '')),
+    };
   return enc.encode(JSON.stringify(answer));
 }
 /**

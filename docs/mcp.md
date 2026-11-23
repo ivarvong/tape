@@ -146,7 +146,7 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   `{"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout",
   "unreachable"]}}`, by the name of the program's `Remote` parameter and the method. Each call takes the next answer
   for its method, across the run's requests and timers: the reply's value as JSON (`Ok`), a refusal (`Rejected`, its
-  `reason`), `"timeout"` (no answer in time: `Timeout`), `"unreachable"`; once they run out, Unreachable. A repeated
+  `reason`), `{"error": "Skew", "reason": …}` (the callee found the key used for another message: `Skew`), `"timeout"` (no answer in time: `Timeout`), `"unreachable"`; once they run out, Unreachable. A repeated
   `once` key gets the reply or refusal it got before, as a program that keeps its replies answers; after a
   `"timeout"` or `"unreachable"` nothing was kept (the callee did not answer), so the same key sent again, from a
   timer that retries, takes the next answer. Each call is in the
