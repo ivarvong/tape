@@ -291,7 +291,8 @@ function selectCore(c: Cursor): Select {
     from = c.eatKw('FROM') ? fromClause(c) : [],
     where = c.eatKw('WHERE') ? expr(c) : null,
     group = c.eatKw('GROUP') ? (c.kw('BY'), c.list(expr)) : null,
-    having = group && c.eatKw('HAVING') ? expr(c) : null;
+    // HAVING without GROUP BY makes the whole selection one group (SQLite 3.39 and later: one row, or none)
+    having = c.eatKw('HAVING') ? expr(c) : null;
   if (c.isKw('WINDOW')) c.refuse('a WINDOW clause');
   const rest = { distinct, cols, from, where, group, having, order: null, limit: null, offset: null };
   return { k: 'select', ...c.span(s), ...rest };
