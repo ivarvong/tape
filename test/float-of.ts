@@ -167,18 +167,13 @@ same(
 );
 
 // parse_float in a program, through the host: Some of the nearest Float, None when it is not finite or not a number
-// (written with a Float parameter: a program whose own code names no Float does not import float_of, and its call of
-// parse_float does not compile to valid Wasm; see the note in the commit)
+// (the program names no Float itself: parse_float is what makes the module import float_of, test/imports.ts)
 const program = `fn handle(raw: View) -> Buf {
   let Request(body) = request(raw) else -> respond(status: 400)
   match parse_float(body) {
-    Some(value: x) -> shown(x)
+    Some(value: x) -> respond(status: 200) |> append(view: "\\(x)")
     None -> respond(status: 200) |> append(view: "none")
   }
-}
-
-fn shown(x: Float) -> Buf {
-  respond(status: 200) |> append(view: "\\(x)")
 }
 `;
 const b = compile([...std, { name: 'float-of.tape', text: program }]);

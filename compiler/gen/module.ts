@@ -58,11 +58,17 @@ export function recursiveOf(fns: ReadonlyMap<string, FnDecl>, callsOf: CallGraph
   return new Set([...fns.keys()].filter(n => reaches(n, n)));
 }
 
+/** The functions a name in a call can mean: itself, one of that name in two files, or `file.name` (`retry.backoff`). */
+const meant = (fns: ReadonlyMap<string, FnDecl>, n: string): string[] =>
+  fns.has(n)
+    ? [n]
+    : [...fns.entries()].filter(([k, f]) => k.endsWith(`.${n}`) || `${stemOf(f.file)}.${k}` === n).map(([k]) => k);
+
 /** What the exports reach, by the names functions are known by. */
 function reachedFrom(fns: ReadonlyMap<string, FnDecl>, callsOf: CallGraph, exports: readonly string[]): Set<string> {
   const reached = new Set<string>();
   const visit = (n: string): void => {
-    for (const k of fns.has(n) ? [n] : [...fns.keys()].filter(x => x.endsWith(`.${n}`))) {
+    for (const k of meant(fns, n)) {
       if (reached.has(k)) continue;
       reached.add(k);
       for (const c of callsOf.get(k) ?? []) visit(c);
@@ -146,8 +152,14 @@ function numbered(uses: Uses, opts: Options): Imports {
   return Object.assign(after, before, uses);
 }
 
-/** Does the program write a Float anywhere: a literal, `float(n)`, or the type in a signature or a declaration? */
-function mentionsFloat(prog: Program): boolean {
+// the calls that make a Float from something else: from an Int or a Dec, and from text (the host's float_of)
+const FLOAT_CALLS: ReadonlySet<string> = new Set(['float', 'parse_float']);
+
+/**
+ * Does the program have a Float anywhere: a literal, `float(n)`, `parse_float(text)`, or the type in a signature or
+ * a declaration, in its own code or in a function of std's that its exports reach?
+ */
+function mentionsFloat(prog: Program, reached: ReadonlySet<string>): boolean {
   const typed = (t: TypeAst): boolean => {
     let found = false;
     eachType(t, x => {
@@ -159,15 +171,15 @@ function mentionsFloat(prog: Program): boolean {
     if ([...f.params.map(p => p.typeAst), f.retAst].some(typed)) return true;
     let found = false;
     eachExpr(f.body, e => {
-      if (e.k === 'float' || (e.k === 'call' && e.name === 'float') || typesIn(e).some(typed)) found = true;
+      if (e.k === 'float' || (e.k === 'call' && FLOAT_CALLS.has(e.name)) || typesIn(e).some(typed)) found = true;
     });
     return found;
   };
   const inType = (d: TypeDecl): boolean =>
     d.variants.some(v => v.fields.some(f => typed(f.type))) || (d.refine !== undefined && typed(d.refine.base));
-  // std's own (std/json.tape reads a Float field with parse_float) counts only when a program's code or type does
+  // std's own (std/json.tape reads a Float field with parse_float) counts only when the exports reach it
   return (
-    [...prog.fns.values()].some(f => !isStd(f.file) && inFn(f)) ||
+    [...prog.fns.values()].some(f => (!isStd(f.file) || reached.has(f.name)) && inFn(f)) ||
     [...prog.types.values()].some(d => !isStd(d.file) && inType(d))
   );
 }
@@ -175,7 +187,8 @@ function mentionsFloat(prog: Program): boolean {
 export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, served: readonly Served[]): Imports {
   const anyCalls = (...names: string[]): boolean => [...callsOf.values()].some(c => names.some(n => c.has(n)));
   // only what the exports reach counts: std/retry.tape calls wake, and a program that never uses it sets no timers
-  const setter = [...reachedFrom(prog.fns, callsOf, opts.exports)].find(x => callsOf.get(x)?.has('wake'));
+  const reached = reachedFrom(prog.fns, callsOf, opts.exports);
+  const setter = [...reached].find(x => callsOf.get(x)?.has('wake'));
   if (setter !== undefined) checkWoken(prog.fns.get(setter), served);
   return numbered(
     {
@@ -188,7 +201,7 @@ export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, serv
       usesWake: setter !== undefined,
       // a Float's text is the host's (env.float_text): imported by a program that has Floats at all, since which
       // hole holds one is known only once the types are
-      usesFloat: mentionsFloat(prog),
+      usesFloat: mentionsFloat(prog, reached),
     },
     opts,
   );
