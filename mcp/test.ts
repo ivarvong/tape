@@ -1270,6 +1270,16 @@ const tests: Test[] = [
       await expect('no requests', { requests: [] }, 400, 'bad_requests');
       await expect('a body of 16385 bytes', { requests: [`POST /x\n${'x'.repeat(16385)}`] }, 413, 'request_too_large');
       await expect('a request that is not METHOD SP TARGET', { requests: ['hello ada'] }, 400, 'bad_request_line');
+      // a space in the target (4 bench runs tested a key with a space): the refusal shows the line with it as %20,
+      // and that line is taken
+      {
+        const spaced = await tool(m, 'run', { requests: ['POST /check/a b\n{}'] });
+        const reason = String(spaced.out['reason']);
+        if (!reason.includes('a space in the target is sent as %20') || !reason.includes('"POST /check/a%20b"'))
+          out.push(`a space in the target: ${reason}`);
+        const fixed = await tool(m, 'run', { requests: ['POST /check/a%20b\n{}'] });
+        if (fixed.isError) out.push(`the line it shows is refused: ${JSON.stringify(fixed.out).slice(0, 200)}`);
+      }
       await expect('a request that is not text', { requests: [7] }, 400, 'bad_requests');
       await expect('an unknown argument', { requests: ok, file: 'x' }, 400, 'unknown_argument');
       await expect('trace: "otlp"', { requests: ok, trace: 'otlp' }, 400, 'bad_arguments');

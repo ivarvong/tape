@@ -378,12 +378,18 @@ export function requestsOf(args: Fields): RunRequest[] | Refusal {
       body = nl < 0 ? '' : r.slice(nl + 1);
     if (enc.encode(line).length > LIMITS.lineBytes)
       return refused(413, 'request_too_large', `requests[${i}]'s first line is more than ${LIMITS.lineBytes} bytes`);
-    if (!REQUEST_LINE.test(line))
+    if (!REQUEST_LINE.test(line)) {
+      // a space inside the target: the line with each written as %20, when that is a request line
+      const [, method, target] = /^([A-Z]{1,16}) (\/.*\S)$/.exec(line) ?? [];
+      const spaced = method && target ? `${method} ${target.replaceAll(' ', '%20')}` : null;
       return refused(
         400,
         'bad_request_line',
-        `requests[${i}] starts ${JSON.stringify(line.slice(0, 80))}; a request is METHOD SP TARGET, then optionally a line feed and a body: "GET /hello/ada" or "POST /links\\n{\\"url\\":\\"https://example.com\\"}"`,
+        spaced && REQUEST_LINE.test(spaced)
+          ? `requests[${i}] starts ${JSON.stringify(line.slice(0, 80))}: a space in the target is sent as %20, so write ${JSON.stringify(spaced.slice(0, 80))}; a request is METHOD SP TARGET, then optionally a line feed and a body`
+          : `requests[${i}] starts ${JSON.stringify(line.slice(0, 80))}; a request is METHOD SP TARGET, then optionally a line feed and a body: "GET /hello/ada" or "POST /links\\n{\\"url\\":\\"https://example.com\\"}"`,
       );
+    }
     if (enc.encode(body).length > LIMITS.requestBodyBytes)
       return refused(413, 'request_too_large', `requests[${i}]'s body is more than ${LIMITS.requestBodyBytes} bytes`);
     out.push({ request: r, at_ms: at });
