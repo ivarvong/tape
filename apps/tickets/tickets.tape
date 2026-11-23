@@ -899,7 +899,7 @@ fn rendered(outcome: Outcome) -> Buf {
       |> append(view: "}")
     Undo(status, reason) -> rollback(out: json_head(status) |> append(
       view: "{\"error\":"
-      ) |> write_json_string(
+    ) |> write_json_string(
         text: reason
       ) |> append(
         view: "}"
@@ -984,14 +984,14 @@ fn form_post(form: View, query: View, body: View) -> Buf {
       id,
       body: freeze(buf: buf() |> append(view: "{\"card\":") |> write_json_string(
         text: text_of(field: form_field(body, name: "card"))
-        ) |> append(view: "}"))
+      ) |> append(view: "}"))
     ))
     "release" -> after_page(outcome: release(id))
     "give" -> given_page(outcome: transfer(
       id,
       body: freeze(buf: buf() |> append(view: "{\"from\":") |> write_json_string(
         text: text_of(field: form_field(body, name: "from"))
-        ) |> append(view: ",\"to\":") |> write_json_string(
+      ) |> append(view: ",\"to\":") |> write_json_string(
           text: text_of(field: form_field(body, name: "to"))
         ) |> append(view: "}"))
     ))
@@ -1008,7 +1008,7 @@ fn form_post(form: View, query: View, body: View) -> Buf {
 fn hold_json(form: View) -> View {
   freeze(buf: buf() |> append(view: "{\"key\":") |> write_json_string(
     text: text_of(field: form_field(body: form, name: "key"))
-    ) |> append(view: ",\"tier\":") |> write_int(
+  ) |> append(view: ",\"tier\":") |> write_int(
       value: number(field: form_field(body: form, name: "tier"))
     ) |> append(view: ",\"buyer\":") |> write_json_string(
       text: text_of(field: form_field(body: form, name: "buyer"))

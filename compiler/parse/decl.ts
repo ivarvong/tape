@@ -132,7 +132,7 @@ export function fnDecl(c: Cursor, prog: Program, exported: boolean): void {
     ps = params(c);
   c.expect('op', '->', 'Every function states its result type: `-> Type`.');
   const retAst = type(c),
-    body = block(c, true),
+    body = block(c),
     mine = prog.byFile.get(c.file) ?? new Map<string, string>(),
     // a name another file has already taken is known as `file.name`
     unique = prog.fns.has(n.v) ? `${stemOf(c.file)}.${n.v}` : n.v,

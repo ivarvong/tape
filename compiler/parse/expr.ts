@@ -95,9 +95,9 @@ function arg(c: Cursor): Arg {
     colon = c.peek(1);
   if (first.t === 'id' && colon.t === 'op' && colon.v === ':') {
     c.pos += 2;
-    return { label: first.v, value: expr(c, false), ...c.at(first) };
+    return { label: first.v, value: expr(c), ...c.at(first) };
   }
-  const value = expr(c, false);
+  const value = expr(c);
   return { label: value.k === 'var' ? value.name : null, pun: true, value, ...c.at(first) };
 }
 const args = (c: Cursor): Arg[] => c.listUntil(')', arg);
@@ -106,13 +106,13 @@ const args = (c: Cursor): Arg[] => c.listUntil(')', arg);
 function lambda(c: Cursor, t: Token): Expr {
   const ps = params(c);
   c.expect('op', '->', 'A function value states its result type: `fn(x: Int) -> Int { … }`.');
-  return { k: 'lambda', params: ps, retAst: type(c), body: block(c, false), ...c.at(t) };
+  return { k: 'lambda', params: ps, retAst: type(c), body: block(c), ...c.at(t) };
 }
 /** A part of a text literal with holes: the text between two holes (nothing when it is empty), or a hole's expression. */
 function holeOrText(c: Cursor, part: TokenOf<'interp'>['v'][number], at: At): Expr[] {
   if ('text' in part) return part.text.length > 0 ? [{ k: 'str', bytes: part.text, ...at }] : [];
   const inner = new Cursor(c.file, part.hole);
-  const e = expr(inner, false);
+  const e = expr(inner);
   if (!inner.is('eof'))
     fail(inner.peek(), 'P02', 'a \\( hole holds one expression', 'Close the hole after it: `"Hello, \\(name)"`.');
   return [e];
@@ -125,7 +125,7 @@ function atom(c: Cursor, t: Token): Expr {
   if (t.t === 'interp') return { k: 'interp', parts: t.v.flatMap(part => holeOrText(c, part, at)), ...at };
   if (t.t === 'kw' && t.v === 'fn') return lambda(c, t);
   if (t.t === 'op' && t.v === '(') {
-    const inner = expr(c, false);
+    const inner = expr(c);
     c.expect('op', ')');
     return inner;
   }
@@ -134,13 +134,8 @@ function atom(c: Cursor, t: Token): Expr {
       ? numberedCall({ k: 'call', name: t.v, args: args(c), ...at })
       : { k: 'var', name: t.v, ...at };
   if (t.t === 'Id') return { k: 'ctor', name: t.v, args: c.eat('op', '(') ? args(c) : [], ...at };
-  if (t.t === 'kw' && t.v === 'match')
-    return fail(
-      t,
-      'C40',
-      '`match` can only be the last expression of a function or of a match arm',
-      'Move this decision into its own function and call it here. Conditions can be combined with `and` / `or`, and patterns can nest.',
-    );
+  // a match is an expression like any other: a value, an argument, the left side of a pipe
+  if (t.t === 'kw' && t.v === 'match') return match(c, t);
   return fail(
     t,
     'P02',
@@ -161,7 +156,7 @@ function primary(c: Cursor): Expr {
           ? { k: 'call', name: `${e.name}.${name}`, args: args(c), ...at }
           : { k: 'field', e, name, ...at };
     } else if (c.eat('op', '[')) {
-      const i = expr(c, false);
+      const i = expr(c);
       c.expect('op', ']');
       e = { k: 'index', e, i, ...at };
     } else return e;
@@ -237,8 +232,8 @@ export function binary(c: Cursor, min: number): Expr {
       fail(after, 'P03', 'comparisons cannot be chained', 'Combine two comparisons with `and`.');
   }
 }
-/** an expression; a `match` only where one may stand (`allowMatch`) */
-export function expr(c: Cursor, allowMatch: boolean): Expr {
+/** an expression */
+export function expr(c: Cursor): Expr {
   // there was `with { pattern <- e … -> result else -> fallback }`; `let … else` does what it did, a step at a time
   if (c.is('kw', 'with'))
     fail(
@@ -247,7 +242,7 @@ export function expr(c: Cursor, allowMatch: boolean): Expr {
       '`with { … }` is not a form',
       'Write each step as `let pattern = expression else -> fallback` on its own line; the function goes on with what the pattern matched.',
     );
-  return c.is('kw', 'match') && allowMatch ? match(c) : binary(c, 1);
+  return binary(c, 1);
 }
 
 // ---- patterns
@@ -307,7 +302,7 @@ function simplePattern(c: Cursor): Pattern {
 }
 
 // ---- match
-const armBody = (c: Cursor): Expr => (c.is('op', '{') ? block(c, true) : expr(c, true));
+const armBody = (c: Cursor): Expr => (c.is('op', '{') ? block(c) : expr(c));
 // arms, each on its own line, up to and past the closing brace
 function arms<A>(c: Cursor, arm: (c: Cursor) => A): A[] {
   const out: A[] = [];
@@ -332,8 +327,9 @@ function condArm(c: Cursor): CondArm {
   c.expect('op', '->', 'An arm is `condition -> expression`, and the last arm is `else -> expression`.');
   return cond ? { ...at, cond, body: armBody(c) } : { ...at, else: true, body: armBody(c) };
 }
-function match(c: Cursor): Match {
-  const at = c.at(c.expect('kw', 'match')),
+// from just after the word `match`
+function match(c: Cursor, word: Token): Match {
+  const at = c.at(word),
     subject = c.is('op', '{') ? null : binary(c, 1);
   c.expect('op', '{');
   c.skipNl();
@@ -347,7 +343,7 @@ type Steps = { lets: Let[]; result: Expr };
 // `do call(…)`: run it for what it does; its value is dropped. A step like a `let`, with no name to invent.
 function doStep(c: Cursor, n: number): Let {
   const d = c.next(),
-    value = expr(c, false);
+    value = expr(c);
   if (value.k !== 'call')
     fail(
       d,
@@ -369,18 +365,11 @@ function elseArms(c: Cursor): PatArm[] {
 // `let P = e else { arms }` (or `else -> fallback`): a step. When e matches P, its names are bound for the rest of
 // the block; otherwise the first matching arm is the block's value. It is read as `match e { P -> rest, arms }`, so
 // the arms are checked like any match: together with P they must cover every value of e.
-function letElse(c: Cursor, at: { line: number; file: string }, pat: Pattern, value: Expr, allowMatch: boolean): Expr {
-  if (!allowMatch)
-    fail(
-      c.peek(),
-      'C40',
-      '`let … else` can only be used where a match can: in a function body or a match arm',
-      'Move it into its own function and call it here.',
-    );
+function letElse(c: Cursor, at: { line: number; file: string }, pat: Pattern, value: Expr): Expr {
   const others = elseArms(c);
   c.expect('nl', undefined, 'After `else { … }` comes a new line.');
   c.skipNl();
-  const rest = steps(c, true),
+  const rest = steps(c),
     first: PatArm = { pat, body: { k: 'block', ...rest, ...at }, ...at, step: true };
   return { k: 'match', subject: value, arms: [first, ...others], ...at };
 }
@@ -388,15 +377,15 @@ function letElse(c: Cursor, at: { line: number; file: string }, pat: Pattern, va
 function plainLet(c: Cursor): Let {
   const n = c.expect('id');
   c.expect('op', '=');
-  const value = expr(c, false);
+  const value = expr(c);
   c.expect('nl');
   return { name: n.v, value, ...c.at(n) };
 }
-function steps(c: Cursor, allowMatch: boolean): Steps {
+function steps(c: Cursor): Steps {
   const lets: Let[] = [];
   for (;;) {
     if (c.is('kw', 'do')) lets.push(doStep(c, lets.length));
-    else if (!c.eat('kw', 'let')) return { lets, result: expr(c, allowMatch) };
+    else if (!c.eat('kw', 'let')) return { lets, result: expr(c) };
     // `let Order(id, sku) = e` takes a value apart; the pattern must always match (checked where it is compiled),
     // unless an `else` takes the other cases. Any pattern can stand here: a constructor, a text, a number
     // (`let 1 = sql_exec(…) else -> …`: go on when one row changed).
@@ -404,18 +393,18 @@ function steps(c: Cursor, allowMatch: boolean): Steps {
       const at = c.at(c.peek()),
         pat = pattern(c);
       c.expect('op', '=', 'A destructuring `let` is `let Ctor(field, …) = expression`.');
-      const value = expr(c, false);
-      if (c.is('kw', 'else')) return { lets, result: letElse(c, at, pat, value, allowMatch) };
+      const value = expr(c);
+      if (c.is('kw', 'else')) return { lets, result: letElse(c, at, pat, value) };
       lets.push({ pat, value, ...at });
       c.expect('nl');
     } else lets.push(plainLet(c));
     c.skipNl();
   }
 }
-export function block(c: Cursor, allowMatch: boolean): Block {
+export function block(c: Cursor): Block {
   const t = c.expect('op', '{');
   c.skipNl();
-  const { lets, result } = steps(c, allowMatch);
+  const { lets, result } = steps(c);
   c.skipNl();
   c.expect('op', '}', 'A block is `let` lines followed by one expression.');
   return { k: 'block', lets, result, ...c.at(t) };

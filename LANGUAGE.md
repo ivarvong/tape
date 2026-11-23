@@ -1,11 +1,11 @@
-# The Tape language, version 0.2
+# The Tape language, version 0.3
 
 This is the definition of Tape as it stands: what a program is made of, and the one way to do each job. It is
 short on purpose. [The guide](docs/guide.md) teaches; this states. Where the two disagree, this file is right, and where this file
 and the compiler disagree, that is a bug in one of them: `test/definition.ts` compiles every program in this file, makes
 every edit it shows, and fails when the compiler does not say what the file says.
 
-This is version 0.2. A form that is here has one meaning and one way to be written, and the tests hold the
+This is version 0.3. A form that is here has one meaning and one way to be written, and the tests hold the
 compiler to it. Before 1.0 a form may still go: when one does, the old way is a compile error that says the new
 one, and the last section says what went and when. A program is tied to the compiler it was built with; the
 service runs the same compiler on every upload and keeps old versions as built.
@@ -93,15 +93,41 @@ A body is steps, then one expression that is its value. There are three steps:
 | `let P = e else { arms }` | go on with the case `P`; every other case leaves the function through an arm. `else -> e` takes all of them. `P` is any pattern: `let 1 = sql_exec(…) else -> …` goes on when one row changed |
 | `do f(…)` | run a call for what it does. The call must return an `Int`, which is dropped |
 
-Branching is `match`, as the last expression of a function or of an arm, never as an argument (C40):
+Branching is `match`, and a match is an expression: a function's or an arm's value, a `let`'s value, an argument,
+an operand, the left side of a pipe:
 
 ```
 match subject { Pattern if guard -> e  … }
 match { condition -> e  …  else -> e }
 ```
 
-A match covers every value of its subject or does not compile (C24). Repetition is a function calling itself; a
-call in tail position does not grow the stack.
+Every arm has the type the match is expected to have (a function's result, a parameter's type). Where nothing
+expects one (`let x = match …`, an operand), the first arm's value gives it, without a refinement, and an arm that
+cannot say its type there (`None` first) is refused (C21). A match covers every value of its subject or does not
+compile (C24).
+
+```tape gives
+fn fee(amount: Int) -> Int {
+  let base = match {
+    amount > 1000 -> 0
+    else -> 50
+  }
+  base + match amount % 2 {
+    0 -> 0
+    _ -> 1
+  }
+}
+
+// fee(2000) is 0
+// fee(7) is 51
+```
+
+Before 0.3 a match could only be a function's or an arm's last expression, so every decision used as a value
+became a function of its own (three of the eight tasks of the usability benchmark of 22 November 2026 were refused
+for it). One way to do each job still holds: `match` is the one way to branch, and it is now used wherever a branch
+is wanted, as an `if` would be elsewhere. A decision used in more than one place is still a function.
+
+Repetition is a function calling itself; a call in tail position does not grow the stack.
 
 Capabilities are ambient by name: inside a function with a parameter `db: Sql`, `sql_first(…)` uses it without
 naming it, and a function that calls one that needs `db` must declare `db` too (C72).
@@ -403,11 +429,6 @@ made to the program above by `test/definition.ts`; each must be refused with the
 +  sql_first(row: Order, query: "SELECT * FROM orders WHERE ident = :id", id)
 ```
 
-```diff C40
--    Shown(status, order) -> respond(status) |> write_json(value: order)
-+    Shown(status, order) -> respond(status) |> write_json(value: match order { _ -> order })
-```
-
 The pattern `json(T(…))` was the second way to read a body. It is refused:
 
 ```tape refused C35
@@ -504,6 +525,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | `match` only as the last expression of a function or of an arm (refused elsewhere), so a decision in a `let`, an argument or an operand was a function of its own | a match is an expression wherever a value is (its code is retired) |
 | 22 November 2026 | `Int` arithmetic that did not fit wrapped around (`fact(21)` answered `-4249290049419214848`), and so did a literal too large for an `Int` | a trap, integer overflow (trap 6; division by zero is trap 4 alone, a shift outside 0..63 is trap 7); `wrapping_add`, `wrapping_sub`, `wrapping_mul` where wrapping is meant; a literal out of range is P08 |
 | 22 November 2026 | numbered placeholders, `WHERE id = ?1` with `p1: id` | names: `WHERE id = :id` with `id` (C32) |
 | 22 November 2026 | a comment in the SQL to say a write is meant to repeat, or may go below a floor | `repeat: True`, `no_floor: True` on the call (C88 when it is not needed) |

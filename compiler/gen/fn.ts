@@ -95,7 +95,7 @@ export function fresh(c: Ctx, vt: number): number {
   return c.nparams + c.locals.length - 1;
 }
 
-const blockType = (c: Ctx, results: readonly number[]): number[] => {
+export const blockType = (c: Ctx, results: readonly number[]): number[] => {
   const [only] = results;
   if (only === undefined) return [0x40];
   return results.length === 1 ? [only] : sleb(c.B.sig([], results));

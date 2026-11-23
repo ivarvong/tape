@@ -101,12 +101,15 @@ T(
   codes(S.replace(' else -> 0 - 2', ''), ['sum'])[0]?.split(':')[0],
   'C48',
 );
+// 0.3: a match, and so a step, is an expression anywhere (it was C40 inside a let value)
 T(
-  'steps: not inside a let value (C40)',
-  codes(
-    'type O {\n  A(n: Int)\n  B\n}\nfn f(o: O) -> Int {\n  let n = (fn(p: O) -> Int {\n    let A(n) = p else -> 0\n    n\n  })\n  1\n}\n',
-  ).some(c => /^(C40|P)/.test(c)),
-  true,
+  'steps: inside a function value bound by a let',
+  run(
+    'type O {\n  A(n: Int)\n  B\n}\nfn f(k: Int) -> Int {\n  let g = fn(p: O) -> Int {\n    let A(n) = p else -> 0\n    n\n  }\n  g(A(n: k)) + g(B)\n}\n',
+    'f',
+    [6n],
+  ),
+  6,
 );
 {
   const it = interpret([...std, { name: 't.tape', text: S }]);

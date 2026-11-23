@@ -1,10 +1,10 @@
 // compiler/gen/match.ts: `match`, and `let` with a pattern. A match must cover every value of what it matches;
 // when it does not, the compiler names a value it misses.
 import type { CondArm, Expr, Let, PatArm, Pattern } from '../ast.ts';
-import { fail } from '../common.ts';
+import { CompileError, fail } from '../common.ts';
 import { BOOL, BUILTIN_TYPES, CAPABILITIES, key } from '../types.ts';
 import type { Type } from '../types.ts';
-import { close, ev, inLocals, need, noConsume, open, release, site } from './fn.ts';
+import { blockType, close, ev, inLocals, need, noConsume, open, release, site } from './fn.ts';
 import type { Binding, Ctx, Stored } from './fn.ts';
 import { ctorOf, irrefutable, isBool, isRefine, matchPat } from './pattern.ts';
 import { proved, withFacts } from './range.ts';
@@ -192,7 +192,15 @@ function takeArm(c: Ctx, a: PatArm, expr: Expr, subject: Stored): number | null 
   return variant ? variant.size : null;
 }
 
-function emitArm(c: Ctx, e: Match, a: PatArm | CondArm, subject: Stored | null, expected: Type, tail: boolean): void {
+/** Writes one arm; gives its body's type, which is the one expected when there is one. */
+function emitArm(
+  c: Ctx,
+  e: Match,
+  a: PatArm | CondArm,
+  subject: Stored | null,
+  expected: Type | null,
+  tail: boolean,
+): Type {
   const outer = c.env;
   c.env = new Map(c.env);
   open(c, 0x02);
@@ -210,10 +218,14 @@ function emitArm(c: Ctx, e: Match, a: PatArm | CondArm, subject: Stored | null, 
   if (subject && size !== null) release(c, subject.locals[0] ?? 0, size);
   // the arm runs when its condition held: what that proves holds in its body
   const held = !('pat' in a) && a.cond ? proved(c, a.cond, true) : [];
-  withFacts(c, held, () => need(c, c.emit(a.body, expected, tail), expected, a, 'this arm'));
+  const got = withFacts(c, held, () => {
+    const t = c.emit(a.body, expected, tail);
+    return expected ? need(c, t, expected, a, 'this arm') : t;
+  });
   c.code.push(0x0c, 1);
   close(c);
   c.env = outer;
+  return got;
 }
 
 const endsWithElse = (e: Match): boolean => {
@@ -226,15 +238,28 @@ const handedOver = (consumed: ReadonlySet<Binding>): string =>
     .toSorted()
     .join(',');
 
-export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean): Type {
-  if (!expected)
+/** The first arm of a match that nothing gives a type: a C21 there says how to give it one. */
+function typing(e: Match, arm: () => Type): Type {
+  try {
+    return arm();
+  } catch (err) {
+    if (!(err instanceof CompileError) || err.info.code !== 'C21') throw err;
     return fail(
-      e,
-      'C99',
-      'match needs a known result type',
-      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+      err.info,
+      'C21',
+      err.info.message,
+      `Nothing here says the type of this match (line ${e.line}), so its first arm does, and this one cannot. Put first an arm whose value says it (\`Some(value: …)\` rather than \`None\`), or use the match where a type is expected: a function's result, an argument.`,
     );
-  const results = c.B.slotsOf(expected);
+  }
+}
+
+/**
+ * A match is an expression wherever it stands. Its type is the one expected there (a function's result, a
+ * parameter); where nothing expects one (`let x = match …`, an operand), it is the first arm's, without a
+ * refinement, and every other arm must have it too. The block that holds the value is opened before that type is
+ * known, and its type is written in once the first arm has given it.
+ */
+export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean): Type {
   const subject = e.subject ? inLocals(c, e.subject) : null;
   if (subject) checkCovered(c, e, subject);
   else if (!endsWithElse(e))
@@ -246,13 +271,20 @@ export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean
     );
   const before = new Set(c.consumed);
   let after: { sig: string; set: Set<Binding> } | null = null;
-  open(c, 0x02, results);
+  let type = expected;
+  const opened = c.code.length;
+  open(c, 0x02, type ? c.B.slotsOf(type) : []);
   // an arm of a condition match is reached when every condition before it did not hold
   const failed: Fact[] = [];
   for (const a of e.arms) {
     c.consumed = new Set(before);
     withFacts(c, failed, () => {
-      emitArm(c, e, a, subject, expected, tail);
+      const got =
+        type === null ? typing(e, () => emitArm(c, e, a, subject, null, tail)) : emitArm(c, e, a, subject, type, tail);
+      if (type === null) {
+        type = c.B.strip(got);
+        c.code.splice(opened + 1, 1, ...blockType(c, c.B.slotsOf(type)));
+      }
     });
     if (!('pat' in a) && a.cond) failed.push(...proved(c, a.cond, false));
     const sig = handedOver(c.consumed);
@@ -268,5 +300,13 @@ export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean
   c.code.push(0x00);
   close(c);
   if (after) c.consumed = after.set;
-  return expected;
+  return (
+    type ??
+    fail(
+      e,
+      'C99',
+      'a match with no arms',
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    )
+  );
 }

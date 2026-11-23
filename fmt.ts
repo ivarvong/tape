@@ -172,8 +172,11 @@ type Open = { ch: string; line: number };
 /** How far a line that starts at token k is indented: closers at its start count against it. */
 function indentAt(toks: readonly Tok[], k: number, stack: readonly Open[]): number {
   const s = stack.slice();
-  for (let j = k; toks[j]?.t === 'op' && CLOSER[s.at(-1)?.ch ?? ''] === toks[j]?.v; j++) s.pop();
-  return new Set(s.map(o => o.line)).size;
+  let closed: number | null = null;
+  for (let j = k; toks[j]?.t === 'op' && CLOSER[s.at(-1)?.ch ?? ''] === toks[j]?.v; j++) closed = s.pop()?.line ?? null;
+  // a closer stands where the line that opened it stands, even when that line opened another bracket still open
+  // (`twice(n: match n {` … `}, m: 3)`)
+  return new Set(s.flatMap(o => (closed === null || o.line < closed ? [o.line] : []))).size;
 }
 
 /** The lines of a file, each with its spacing fixed; null for a run of blank lines. */
