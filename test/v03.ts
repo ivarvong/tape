@@ -7,6 +7,7 @@ import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
 import { instantiate } from '../host.ts';
+import { rng } from '../sim.ts';
 import { call, finish, functionsOf, same as T } from './harness.ts';
 
 /** f(args) compiled and interpreted, as one answer when the two agree. */
@@ -635,6 +636,114 @@ fn f(p: P) -> Int {
     'C22 of a method call on a value says Tape has no methods',
     fix('fn f(n: Int) -> Int {\n  n.to_string()\n}\n').split(' | ')[1]?.startsWith('`n` is a value, not a capability'),
     true,
+  );
+}
+
+// ---- 10. std helpers agents wrote by hand: byte classes, every_byte, min/max, parse_int. parse_int is checked
+// against BigInt on generated texts (an independent reading), compiled and interpreted.
+{
+  const P = `fn handle(raw: View) -> Buf {
+  match parse_int(text: request(raw).body) {
+    Some(value) -> respond(status: 200) |> write_int(value)
+    None -> respond(status: 400)
+  }
+}
+`;
+  const app = served(P);
+  const it = interpret([...std, { name: 't.tape', text: P }]);
+  const r = rng(7);
+  const pick = <X>(xs: readonly X[]): X => xs[Math.floor(r() * xs.length)] ?? (xs[0] as X);
+  const texts = [
+    '',
+    '-',
+    '+',
+    '0',
+    '-0',
+    '007',
+    '9223372036854775807',
+    '9223372036854775808',
+    '-9223372036854775808',
+    '-9223372036854775809',
+    '00000000000000000000009223372036854775807',
+    ' 1',
+    '1 ',
+    '1.5',
+    '--1',
+    '+-1',
+    ...Array.from({ length: 400 }, () =>
+      Array.from({ length: 1 + Math.floor(r() * 22) }, (_, i) =>
+        pick(i === 0 ? ['-', '+', '0', '1', '9', 'x', ''] : ['0', '1', '5', '9', '9', '9', 'a', ' ']),
+      ).join(''),
+    ),
+  ];
+  const oracle = (t: string): string => {
+    if (!/^[+-]?\d+$/.test(t)) return 'None';
+    const v = BigInt(t);
+    return v >= -(2n ** 63n) && v < 2n ** 63n ? String(v) : 'None';
+  };
+  const compiled = (t: string): string => {
+    const out = app(`POST /\n${t}`);
+    return out.startsWith('200\n') ? out.slice(4) : 'None';
+  };
+  const interpreted = (t: string): string => {
+    const v: unknown = it.call('parse_int', [new TextEncoder().encode(t)]);
+    if (typeof v !== 'object' || v === null || !('c' in v) || v.c !== 'Some' || !('f' in v)) return 'None';
+    const f: unknown = v.f;
+    return typeof f === 'object' && f !== null && 'value' in f ? String(f.value) : 'None';
+  };
+  const wrong = texts.filter(t => compiled(t) !== oracle(t) || interpreted(t) !== oracle(t));
+  T(
+    `parse_int agrees with BigInt on ${texts.length} texts (${texts.filter(t => oracle(t) !== 'None').length} numbers), compiled and interpreted`,
+    wrong.map(t => `${JSON.stringify(t)}: ${compiled(t)} ${interpreted(t)} want ${oracle(t)}`),
+    [],
+  );
+  T(
+    'decimal stays strict: no sign, no leading zero',
+    ['007', '-1', '+1', '7'].map(t => served(P.replace('parse_int(text:', 'decimal(v:'))(`POST /\n${t}`)),
+    ['400\n', '400\n', '400\n', '200\n7'],
+  );
+  T(
+    'the byte classes against JavaScript’s, on every byte, compiled and interpreted',
+    (() => {
+      const names = ['is_digit', 'is_alpha', 'is_alnum', 'is_space', 'is_lower', 'is_upper'];
+      const src = `fn f(b: Int) -> Int {\n${names.map((f, i) => `  let b${i} = match {\n    ${f}(b) -> ${1 << i}\n    else -> 0\n  }\n`).join('')}  ${names.map((_, i) => `b${i}`).join(' + ')}\n}\n`;
+      const ex = functionsOf(
+        new WebAssembly.Module(
+          compile([...std, { name: 't.tape', text: src }], { exports: ['f'] }).wasm ?? new Uint8Array(),
+        ),
+      );
+      const it = interpret([...std, { name: 't.tape', text: src }]);
+      return Array.from({ length: 256 }, (_, b) => b).filter(b => {
+        const ch = String.fromCharCode(b);
+        const want = [/[0-9]/, /[a-zA-Z]/, /[a-zA-Z0-9]/, /[ \t\n\r]/, /[a-z]/, /[A-Z]/].reduce(
+          (m, re, i) => m + (b < 128 && re.test(ch) ? 1 << i : 0),
+          0,
+        );
+        call(ex, 'reset');
+        return call(ex, 'f', BigInt(b)) !== BigInt(want) || it.call('f', [BigInt(b)]) !== BigInt(want);
+      });
+    })(),
+    [],
+  );
+  T(
+    'every_byte with a byte class, and min and max',
+    run(
+      `fn f(n: Int) -> Int {
+  let slug = match n {
+    0 -> "order-17"
+    _ -> "Order 17"
+  }
+  let ok = match {
+    every_byte(v: slug, keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == 45 }) -> 1
+    else -> 0
+  }
+  ok * 100 + max(a: n, b: 3) * 10 + min(a: n, b: 3)
+}
+`,
+      'f',
+      [0n],
+    ),
+    130,
   );
 }
 

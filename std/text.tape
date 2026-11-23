@@ -47,7 +47,8 @@ fn has(v: View, at: Int, word: View) -> Bool {
   at + len(word) <= len(v) and slice(v, from: at, to: at + len(word)) == word
 }
 
-// Is the byte an ASCII digit, 0-9?
+// Is the byte an ASCII digit, 0-9? The byte classes are ASCII: a byte of a UTF-8 sequence (128 and above) is in
+// none of them. With `every_byte`, a text is checked a byte at a time.
 //
 //   > is_digit(b: 55)
 //   True
@@ -55,6 +56,87 @@ fn has(v: View, at: Int, word: View) -> Bool {
 //   False
 fn is_digit(b: Int) -> Bool {
   b >= 48 and b <= 57
+}
+
+// Is the byte an ASCII lower-case letter, a-z?
+//
+//   > is_lower(b: "a"[0])
+//   True
+fn is_lower(b: Int) -> Bool {
+  b >= 97 and b <= 122
+}
+
+// Is the byte an ASCII upper-case letter, A-Z?
+//
+//   > is_upper(b: "a"[0])
+//   False
+fn is_upper(b: Int) -> Bool {
+  b >= 65 and b <= 90
+}
+
+// Is the byte an ASCII letter, a-z or A-Z?
+//
+//   > is_alpha(b: "_"[0])
+//   False
+fn is_alpha(b: Int) -> Bool {
+  is_lower(b) or is_upper(b)
+}
+
+// Is the byte an ASCII letter or digit?
+//
+//   > is_alnum(b: "Z"[0])
+//   True
+fn is_alnum(b: Int) -> Bool {
+  is_alpha(b) or is_digit(b)
+}
+
+// Is the byte white space: a space, a tab, a line feed or a carriage return?
+//
+//   > is_space(b: 9)
+//   True
+fn is_space(b: Int) -> Bool {
+  b == 32 or b == 9 or b == 10 or b == 13
+}
+
+// Does every byte of v pass `keep`? True for "" (nothing fails). For a slug, a key or a code of a fixed alphabet:
+//
+//   > every_byte(v: "order-17", keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == 45 })
+//   True
+//   > every_byte(v: "Order 17", keep: is_alnum)
+//   False
+fn every_byte(v: View, keep: Fn[Int, Bool]) -> Bool {
+  every_from(v, keep, at: 0)
+}
+
+// Internal: every_byte from position `at`.
+fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool {
+  match {
+    at >= len(v) -> True
+    keep(v[at]) -> every_from(v, keep, at: at + 1)
+    else -> False
+  }
+}
+
+// The smaller of two numbers.
+//
+//   > min(a: 3, b: -2)
+//   -2
+fn min(a: Int, b: Int) -> Int {
+  match {
+    a <= b -> a
+    else -> b
+  }
+}
+
+// The larger of two numbers.
+//
+//   > max(a: 3, b: -2)
+//   3
+fn max(a: Int, b: Int) -> Int {
+  match {
+    a >= b -> a
+    else -> b
+  }
 }
 
 // The position of the first byte at or after `at` that is not a digit.
@@ -81,11 +163,57 @@ fn decimal(v: View) -> Option[Int] {
   }
 }
 
-// Internal: the loop of decimal.
 fn decimal_value(v: View, at: Int, value: Int) -> Int {
   match {
     at >= len(v) -> value
     else -> decimal_value(v, at: at + 1, value: value * 10 + v[at] - 48)
+  }
+}
+
+// An integer as people write one: an optional sign (`-` or `+`), then one or more digits, leading zeros and all;
+// None for anything else, and for a number an Int cannot hold. For a value from a form, a query or a CSV field.
+// `decimal` is the strict one, for ids in a path: no sign, no leading zero, so "/orders/007" is not order 7.
+//
+//   > parse_int(text: "007")
+//   Some(value: 7)
+//   > parse_int(text: "-42")
+//   Some(value: -42)
+//   > parse_int(text: "+5")
+//   Some(value: 5)
+//   > parse_int(text: "-9223372036854775808")
+//   Some(value: -9223372036854775808)
+//   > parse_int(text: "9223372036854775808")
+//   None
+//   > parse_int(text: "1.5")
+//   None
+//   > parse_int(text: "-")
+//   None
+fn parse_int(text: View) -> Option[Int] {
+  match text {
+    "-" ++ rest -> int_digits(text: rest, at: 0, value: 0, negative: True)
+    "+" ++ rest -> int_digits(text: rest, at: 0, value: 0, negative: False)
+    _ -> int_digits(text, at: 0, value: 0, negative: False)
+  }
+}
+
+// Internal: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the
+// least Int fits.
+fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
+  match {
+    len(text) == 0 or not is_digit(text[at]) -> None
+    else -> int_more(text, at, value, negative)
+  }
+}
+
+// Internal: parse_int's digits after the first.
+fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
+  match {
+    at >= len(text) -> Some(value)
+    not is_digit(text[at]) -> None
+    negative and value < (-9223372036854775808 + (text[at] - 48)) / 10 -> None
+    negative -> int_more(text, at: at + 1, value: value * 10 - (text[at] - 48), negative)
+    value > (9223372036854775807 - (text[at] - 48)) / 10 -> None
+    else -> int_more(text, at: at + 1, value: value * 10 + (text[at] - 48), negative)
   }
 }
 
@@ -102,7 +230,6 @@ fn digits(v: View) -> Option[Int] {
   }
 }
 
-// Internal: the loop of digits.
 fn digits_value(v: View, at: Int, value: Int) -> Int {
   match {
     at >= len(v) -> value
@@ -136,7 +263,6 @@ fn write_int(out: Buf, value: Int) -> Buf {
   }
 }
 
-// Internal: the loop of write_int.
 fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   match {
     value > 0 -> push(buf: write_digits(out, value: value / 10, last: value % 10), byte: 48 + last)
@@ -144,7 +270,6 @@ fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   }
 }
 
-// Appends text: append(buf: out, view: text) with the names write_* use.
 fn write_text(out: Buf, text: View) -> Buf {
   append(buf: out, view: text)
 }
@@ -174,8 +299,6 @@ type Utf8 {
   BadUtf8
 }
 
-// The code point that starts at `at` (a byte of 128 or more), and where the next one starts; BadUtf8 when it is not
-// valid UTF-8.
 fn utf8_at(v: View, at: Int) -> Utf8 {
   let b = v[at]
   match {
@@ -204,17 +327,14 @@ fn utf8_at(v: View, at: Int) -> Utf8 {
   }
 }
 
-// Internal: is the byte at `at` a UTF-8 continuation byte?
 fn cont(v: View, at: Int) -> Bool {
   at < len(v) and (v[at] & 192) == 128
 }
 
-// Internal: the second byte of a three-byte sequence is allowed after `b` (no overlong forms, no surrogates).
 fn second_of_3(b: Int, c: Int) -> Bool {
   (b != 224 or c >= 160) and (b != 237 or c <= 159)
 }
 
-// Internal: the second byte of a four-byte sequence is allowed after `b` (no overlong forms, nothing above U+10FFFF).
 fn second_of_4(b: Int, c: Int) -> Bool {
   (b != 240 or c >= 144) and (b != 244 or c <= 143)
 }

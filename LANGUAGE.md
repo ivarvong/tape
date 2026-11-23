@@ -173,7 +173,7 @@ A pattern can fail, and binds what it proves.
 | `"prefix" ++ rest` | bytes that start so; `rest` is matched against what follows |
 | `Some("")`, `Some(decimal(n))` | a constructor of one field, with a pattern for that field: as its one argument is passed bare, its one pattern needs no name. A constructor of two or more fields names each (C10) |
 | `Key(k)` | a value for which the refined type's condition holds; `k` has the type |
-| `decimal(n)` | any one-parameter function returning `Option[…]`, when it returns `Some` |
+| `decimal(n)` | any one-parameter function returning `Option[…]`, when it returns `Some`. `decimal` is strict, for ids in a path (digits, no sign, no leading zero); `parse_int` takes a number as people write one (a sign, leading zeros) |
 | `name = P` | `P`, and binds the whole value |
 | `_` | anything |
 
@@ -577,6 +577,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | byte classes, a number with a sign or leading zeros, min and max written by hand in each program | std: `is_digit is_alpha is_alnum is_space is_lower is_upper`, `every_byte(v, keep)`, `parse_int(text)`, `min`, `max` |
 | 23 November 2026 | `Some("")` as a pattern was P01 (a name expected), though `Some("")` builds one; parse errors named only the token | the one field of a constructor takes its pattern unnamed; a backtick, `;`, `&&`, `!`, a single quote, `if`, `return` and `let x: T` are each named for what they are, with what Tape writes instead |
 | 23 November 2026 | a field given a pattern bound only what the pattern bound, so `Some(value: Account(…)) -> value` was C16 | the field's name is bound too, where the arm reads it and nothing else binds it |
 | 23 November 2026 | a `let` whose pattern opened with a name (`let head ++ "&" ++ rest = q else …`) read as a plain `let` (P01) | every pattern a match arm takes stands there; a `STRICT` table's PRIMARY KEY is known NOT NULL (C69), and C69's fix is the declaration to write |
