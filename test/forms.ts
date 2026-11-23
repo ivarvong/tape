@@ -546,9 +546,10 @@ T(
     results.filter(r => !r.ok).map(r => `${r.file}:${r.line}`),
     [],
   );
-  T('doctest: std has examples in every file but json', [...new Set(results.map(r => r.file))].toSorted(), [
+  T('doctest: std has examples in every file', [...new Set(results.map(r => r.file))].toSorted(), [
     'std/core.tape',
     'std/http.tape',
+    'std/json.tape',
     'std/list.tape',
     'std/map.tape',
     'std/retry.tape',
