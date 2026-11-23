@@ -65,7 +65,7 @@ curl -s https://tape.ivar.workers.dev/v1/compile -H 'content-type: application/j
 `compile`, `run` and `test` are below; [`feedback`](#feedback) sends what you found to the maintainers.
 The descriptions of `compile` and `run` carry a cheat sheet of the language (the entry point, `Request`'s fields and
 the query, `respond_as` and JSON out, `decode`, the SQL calls with `:name`) and link [the std reference](std.md)
-and [the guide's worked REST service](guide.md#a-whole-rest-service-worked); each is about 1,100 (compile) and 1,300
+and [the guide's quickstart](guide.md#quickstart-a-service-in-one-file); each is about 1,100 (compile) and 1,300
 (run) tokens.
 
 All three take `files`, the program: at most 8 `{name, text}`, each name like `hello.tape` (letters, digits, `_`, `-`,

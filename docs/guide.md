@@ -3,338 +3,166 @@
 The language, one feature at a time, with the before and after of each. [`LANGUAGE.md`](../LANGUAGE.md) is the
 definition and wins where the two differ; this guide explains; [`std.md`](std.md) lists every function the standard
 library has. Paths are relative to the repository root, and every command runs from there on Node 25. It starts
-with [a whole REST service](#a-whole-rest-service-worked); the sections after it take one feature each.
+with [a quickstart](#quickstart-a-service-in-one-file), a whole service in one file; the sections after it take one
+feature each.
 
-## A whole REST service, worked
+## Quickstart: a service in one file
 
-One program with the parts most services need: routes with an id in the path, a query string, validation that
-answers 400 with the reason, JSON in and out (lists too), SQL with `:name` parameters (insert, select, update), a
-POST a client can retry safely, and 404, 405 and 409. `test/guide.ts` compiles this program with the rules on,
-checks it is in `tape fmt`'s layout, and sends it the requests below, so the answers shown are the ones it gives.
-The functions it uses are in [the std reference](std.md).
+This section is enough to write a first version of a service; look a function up in [`std.md`](std.md) when the
+compiler names one you need, and read the rest of this guide or [`LANGUAGE.md`](../LANGUAGE.md) when something
+surprises you. The program takes orders: a POST that a client may retry, validated by its types, a count kept once
+per order, and a call to another program (payments) that may answer, refuse or not answer at all. `test/guide.ts`
+compiles it with the rules on and runs the `run` call below through the hosted runner's code, so every answer
+shown is the one it gives.
 
-```tape items.tape
-migration 1 "items" {
-  CREATE TABLE items(
+```tape orders.tape
+migration 1 "orders" {
+  CREATE TABLE orders(
     id INTEGER PRIMARY KEY,
     key TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    qty INTEGER NOT NULL CHECK (qty >= 0),
-    version INTEGER NOT NULL DEFAULT 1
+    item TEXT NOT NULL,
+    amount INTEGER NOT NULL
   );
-  CREATE TABLE tags(
-    item INTEGER NOT NULL,
-    tag TEXT NOT NULL,
-    PRIMARY KEY (item, tag)
-  )
+  CREATE TABLE items(item TEXT PRIMARY KEY NOT NULL, sold INTEGER NOT NULL);
+  INSERT INTO items(item, sold) VALUES ('lamp', 0)
 }
 
-type Id = Int where self >= 1 and self <= 9007199254740991
 type Key = View where len(self) >= 1 and len(self) <= 64
-type Name = View where len(self) >= 1 and len(self) <= 80
-type Qty = Int where self >= 0 and self <= 1000000
-type Limit = Int where self >= 1 and self <= 100
-type Tag = View where len(self) >= 1 and len(self) <= 20 and tag_from(v: self, at: 0)
+type Amount = Int where self >= 1 and self <= 1000000
 
-// What a client sends: POST /items, PATCH /items/ID, PUT /items/ID/tags.
-type NewItem { NewItem(key: Key, name: Name, qty: Qty, tags: Option[List[Tag]]) }
-type Change { Change(qty: Qty, version: Int) }
-type Tags { Tags(tags: List[Tag]) }
-
-// What it gets back.
-type Item { Item(id: Int, key: View, name: View, qty: Int, version: Int) }
-type Page { Page(items: List[Item], next: Int) }
-type TagRow { TagRow(tag: View) }
+type NewOrder { NewOrder(key: Key, item: View, amount: Amount) }
+type Order { Order(id: Int, key: View, item: View, amount: Int) }
+type Item { Item(item: View, sold: Int) }
+type Charge { Charge(order: Int, amount: Int) }
+type Charged { Charged(payment: Int) }
+type ForOrder { ForOrder(order: Int) }
+type Paid { Paid(order: Int, payment: Int) }
 type Problem { Problem(error: View) }
-type Paging { Paging(after: Int, limit: Int) }
 
-type Outcome {
-  Shown(status: Int, item: Item)
-  Failed(status: Int, reason: View)
-}
-
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
   match request(raw) {
-    Request(method: "GET", path: "/items", query) -> listed(paged: paging(query))
-    Request(method: "POST", path: "/items", body) -> created(body) |> rendered
-    Request(method: "GET", path: "/items/" ++ decimal(Id(id))) -> found(item: load(id)) |> rendered
-    Request(method: "PATCH", path: "/items/" ++ decimal(Id(id)), body) -> changed(id, body)
-      |> rendered
-    Request(method: "GET", path: "/items/" ++ decimal(Id(id)) ++ "/tags") -> tags_of(id)
-    Request(method: "PUT", path: "/items/" ++ decimal(Id(id)) ++ "/tags", body) -> tagged(id, body)
-    Request(path: "/items/" ++ decimal(Id(id))) -> rendered(
-      outcome: Failed(status: 405, reason: "GET or PATCH")
+    Request(method: "POST", path: "/orders", body) -> placed(body)
+    Request(method: "GET", path: "/items/" ++ item) -> shown(
+      found: sql_first(row: Item, query: "SELECT item, sold FROM items WHERE item = :item", item)
     )
-    Request(
-      path: "/items/" ++ decimal(Id(id)) ++ "/tags"
-    ) -> rendered(outcome: Failed(status: 405, reason: "GET or PUT"))
-    Request(path: "/items/" ++ _) -> rendered(
-      outcome: Failed(status: 400, reason: "an item is /items/ID, ID a whole number from 1")
-    )
-    _ -> rendered(outcome: Failed(status: 404, reason: "no such route"))
+    _ -> problem(status: 404, error: "no such route")
   }
 }
 
-// GET /items?after=ID&limit=N: both optional; anything else is a 400 that says which and why
-fn paging(query: Option[View]) -> Result[Paging, View] {
-  let q = query_text(query)
-  let Some(value: after) = number(
-    q,
-    name: "after",
-    none: 0
-  ) else -> Err(error: "after: not a whole number")
-  let Some(value: Limit(limit)) = number(q, name: "limit", none: 10) else {
-    _ -> Err(error: "limit: not a whole number from 1 to 100")
+// POST /orders: the client's key is claimed first, so a retried POST counts the sale once and charges the same
+// order again under the same once key; a call that got no answer is a 202, and the client sends the POST again
+fn placed(body: View) -> Buf {
+  let Ok(value: NewOrder(key, item, amount)) = decode(json: body, as: NewOrder) else {
+    Err(error) -> problem(status: 400, error)
   }
-  Ok(value: Paging(after, limit))
-}
-
-fn query_text(query: Option[View]) -> View {
-  match query {
-    Some(value) -> value
-    None -> ""
-  }
-}
-
-// the parameter `name` as a number: `none` when it is absent, None when it is there but not a number
-fn number(q: View, name: View, none: Int) -> Option[Int] {
-  match form_field(body: q, name) {
-    None -> Some(value: none)
-    Some(value: decimal(n)) -> Some(value: n)
-    _ -> None
-  }
-}
-
-// a page of items by id, as {"items": [...], "next": ID}: pass `next` as ?after= for the next page; 0 at the end
-fn listed(paged: Result[Paging, View]) -> Buf {
-  let Ok(value: Paging(after, limit)) = paged else {
-    Err(error) -> rendered(outcome: Failed(status: 400, reason: error))
-  }
-  let items = collect(rows: sql_all(
-    row: Item,
-    query: "SELECT * FROM items WHERE id > :after ORDER BY id LIMIT :limit",
-    after,
-    limit
-  ))
-  respond_as(status: 200, content: Json)
-    |> write_json(value: Page(items, next: next_after(items, limit)))
-}
-
-fn collect(rows: Rows[Item]) -> List[Item] {
-  match next(rows) {
-    Next(value, rest) -> Cons(head: value, tail: collect(rows: rest))
-    End -> Nil
-  }
-}
-
-fn next_after(items: List[Item], limit: Int) -> Int {
-  match {
-    length(list: items) < limit -> 0
-    else -> last_id(items)
-  }
-}
-
-fn last_id(items: List[Item]) -> Int {
-  match items {
-    Cons(head: Item(id), tail: Nil) -> id
-    Cons(tail) -> last_id(items: tail)
-    Nil -> 0
-  }
-}
-
-// POST /items: made once per client key. The same key again answers the item it made (200), so a client that
-// got no answer can send it again; the same key with another name is a conflict (409).
-fn created(body: View) -> Outcome {
-  let Ok(value: NewItem(key, name, qty, tags)) = decode(json: body, as: NewItem) else {
-    Err(error) -> Failed(status: 400, reason: error)
-  }
-  let Some(value: item) = sql_first(
-    row: Item,
-    query: "INSERT INTO items(key, name, qty) VALUES (:key, :name, :qty) ON CONFLICT(key) \
-        DO NOTHING RETURNING *",
+  let 1 = sql_exec(
+    query: "INSERT INTO orders(key, item, amount) VALUES (:key, :item, :amount) ON CONFLICT(key) \
+        DO NOTHING",
     key,
-    name,
-    qty
-  ) else {
-    None -> again(
-      key,
-      name,
-      found: sql_first(row: Item, query: "SELECT * FROM items WHERE key = :key", key)
+    item,
+    amount
+  ) else -> charged(found: by_key(key))
+  let 1 = sql_exec(
+    query: "UPDATE items SET sold = sold + 1 WHERE item = :item",
+    item
+  ) else -> rollback(
+    out: problem(status: 404, error: "no such item \(item)")
+  )
+  charged(found: by_key(key))
+}
+
+fn by_key(key: View) -> Option[Order] {
+  sql_first(row: Order, query: "SELECT * FROM orders WHERE key = :key", key)
+}
+
+fn charged(found: Option[Order]) -> Buf {
+  let Some(value: order) = found else -> problem(status: 500, error: "the order is gone")
+  match call(
+    to: payments,
+    method: "charge",
+    send: Charge(order: order.id, amount: order.amount),
+    reply: Charged,
+    within: 2000,
+    once: ForOrder(order: order.id)
+  ) {
+    Ok(value: Charged(payment)) -> respond_as(status: 201, content: Json)
+      |> write_json(value: Paid(order: order.id, payment))
+    Err(error: Rejected(reason)) -> problem(status: 402, error: reason)
+    Err(error) -> problem(
+      status: 202,
+      error: "no answer from payments yet: send the same POST again"
     )
   }
-  do insert_tags(item: item.id, tags: listed_tags(tags))
-  Shown(status: 201, item)
 }
 
-fn again(key: Key, name: Name, found: Option[Item]) -> Outcome {
+fn shown(found: Option[Item]) -> Buf {
   match found {
-    Some(value: item = Item(name: had)) if had == name -> Shown(status: 200, item)
-    Some(value) -> Failed(status: 409, reason: "key \(key) was used for another item")
-    None -> Failed(status: 500, reason: "the key is taken but its item is gone")
+    Some(value) -> respond_as(status: 200, content: Json) |> write_json(value)
+    None -> problem(status: 404, error: "no such item")
   }
 }
 
-fn listed_tags(tags: Option[List[Tag]]) -> List[Tag] {
-  match tags {
-    Some(value) -> value
-    None -> Nil
-  }
+fn problem(status: Int, error: View) -> Buf {
+  respond_as(status, content: Json) |> write_json(value: Problem(error))
 }
+```
 
-// PATCH /items/ID {"qty": 3, "version": 1}: a compare-and-set on the version, so two clients that read version
-// 1 cannot both write; the second gets 409 and reads again.
-fn changed(id: Id, body: View) -> Outcome {
-  let Ok(value: Change(qty, version)) = decode(json: body, as: Change) else {
-    Err(error) -> Failed(status: 400, reason: error)
-  }
-  match sql_move(
-    row: Item,
-    query: "UPDATE items SET qty = :qty, version = version + 1 WHERE id = :id \
-        AND version = :version RETURNING *",
-    qty,
-    id,
-    version
-  ) {
-    Moved(value) -> Shown(status: 200, item: value)
-    Raced(now) -> Failed(status: 409, reason: "the item is at version \(now.version)")
-    NoRow -> Failed(status: 404, reason: "no such item")
-  }
-}
+Sent to the `run` tool ([`mcp.md`](mcp.md)), with `remotes` standing in for the payments program (each call takes
+the next answer; a `once` key that got a reply gets it again):
 
-// PUT /items/ID/tags {"tags": ["red", "big"]}: the item's tags become these (a list in, rows out)
-fn tagged(id: Id, body: View) -> Buf {
-  let Ok(value: Tags(tags)) = decode(json: body, as: Tags) else {
-    Err(error) -> rendered(outcome: Failed(status: 400, reason: error))
-  }
-  let Some(value: item) = load(id) else -> rendered(
-    outcome: Failed(status: 404, reason: "no such item")
-  )
-  do sql_exec(query: "DELETE FROM tags WHERE item = :id", id)
-  do insert_tags(item: item.id, tags)
-  tags_of(id)
+```json orders.tape
+{
+  "files": [{"name": "orders.tape", "text": "…the program above…"}],
+  "requests": [
+    "POST /orders\n{\"key\":\"a1\",\"item\":\"lamp\",\"amount\":30}",
+    "POST /orders\n{\"key\":\"a1\",\"item\":\"lamp\",\"amount\":30}",
+    "POST /orders\n{\"key\":\"b2\",\"item\":\"lamp\",\"amount\":20}",
+    "POST /orders\n{\"key\":\"b2\",\"item\":\"lamp\",\"amount\":20}",
+    "POST /orders\n{\"key\":\"c3\",\"item\":\"lamp\",\"amount\":10}",
+    "POST /orders\n{\"key\":\"d4\",\"item\":\"desk\",\"amount\":5}",
+    "POST /orders\n{\"key\":\"\",\"item\":\"lamp\",\"amount\":5}",
+    "GET /items/lamp",
+    "GET /nothing"
+  ],
+  "remotes": {"payments": {"charge": [{"payment": 7}, "timeout", {"payment": 8}, {"error": "Rejected", "reason": "card declined"}]}}
 }
+```
 
-fn insert_tags(item: Int, tags: List[Tag]) -> Int {
-  match tags {
-    Cons(head, tail) -> sql_exec(
-      query: "INSERT INTO tags(item, tag) VALUES (:item, :head) ON CONFLICT DO NOTHING",
-      item,
-      head
-    ) + insert_tags(item, tags: tail)
-    Nil -> 0
-  }
-}
+The answers, one a request (every one `application/json`):
 
-fn tags_of(id: Id) -> Buf {
-  respond_as(status: 200, content: Json)
-    |> write_rows(
-    rows: sql_all(row: TagRow, query: "SELECT tag FROM tags WHERE item = :id ORDER BY tag", id)
-  )
-}
-
-fn load(id: Int) -> Option[Item] {
-  sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)
-}
-
-fn found(item: Option[Item]) -> Outcome {
-  match item {
-    Some(value) -> Shown(status: 200, item: value)
-    None -> Failed(status: 404, reason: "no such item")
-  }
-}
-
-fn rendered(outcome: Outcome) -> Buf {
-  match outcome {
-    Shown(status, item) -> respond_as(status, content: Json) |> write_json(value: item)
-    Failed(status, reason) -> respond_as(status, content: Json)
-      |> write_json(value: Problem(error: reason))
-  }
-}
-
-// a tag: a-z, 0-9 and -
-fn tag_from(v: View, at: Int) -> Bool {
-  match {
-    at >= len(v) -> True
-    (v[at] >= 97 and v[at] <= 122) or is_digit(v[at]) or v[at] == 45 -> tag_from(v, at: at + 1)
-    else -> False
-  }
-}
+```text orders.tape
+201 {"order":1,"payment":7}
+201 {"order":1,"payment":7}
+202 {"error":"no answer from payments yet: send the same POST again"}
+201 {"order":2,"payment":8}
+402 {"error":"card declined"}
+404 {"error":"no such item desk"}
+400 {"error":"key: not a valid Key"}
+200 {"item":"lamp","sold":3}
+404 {"error":"no such route"}
 ```
 
 What to notice:
 
-- **Routes** are one `match request(raw)`. `"/items/" ++ decimal(Id(id))` takes the path apart, parses the number
-  and checks its range in one pattern; a path that does not fit falls through to the next arm, so the 405 and 400
-  arms come after the ones that serve. A refinement that fails in a route is a path that does not fit: it falls
-  through, to a 404 unless an arm below answers it. For a 400 that says why, take the segment as text
-  (`"/check/" ++ key`) and match it against the type in the handler (`Key(k) -> …`, `_ -> 400`).
-- **The query** is `Request(query)`: the raw text after `?`. `form_field(body: q, name: "limit")` reads one
-  parameter; `number` says absent (the default) apart from present but wrong (a 400 that names it).
-- **Validation** is the types: `decode(json: body, as: NewItem)` checks every refined field (`Qty`, `Tag`, each
-  element of `tags`), leaves a key it does not name unread (clients send more than a service reads), and its `Err`
-  is a sentence that names the field. It goes back as the 400's body as it is.
-- **JSON out** is `respond_as(status, content: Json)` and then `write_json` of a record (a `List` field is an
-  array) or `write_rows` of a query. A `List` cannot be written on its own: `Page` wraps it.
-- **SQL** names each value: `WHERE id = :id`, and the argument `id`. A row type's fields name the columns
-  (`SELECT *` is `Item`'s five).
-- **A retried POST** makes nothing twice: the client's `key` is `UNIQUE`, the INSERT is `ON CONFLICT(key) DO
-  NOTHING RETURNING *`, and when it returns no row the request looks the key up and answers what the first one
-  made. Take away the `UNIQUE` and the `ON CONFLICT`, and a retried POST would make a second item: the compiler
-  refuses that INSERT (C55).
-- **A lost update** is a 409: PATCH sends the version it read, and `sql_move` sets the row only if it is still at
-  that version (`Raced` when it is not, `NoRow` when there is no row).
+- **Routes** are one `match request(raw)`, a path taken apart by its pattern (`"/items/" ++ item`); a path that fits
+  no arm falls through to the last, the 404.
+- **Validation is the types.** `decode(json: body, as: NewOrder)` checks each refined field (`Key`, `Amount`), leaves
+  a key it does not name unread, and its `Err` names the field: the 400's body as it is.
+- **A POST a client may retry** claims the client's key first: `UNIQUE`, `ON CONFLICT(key) DO NOTHING`, and
+  `let 1 = sql_exec(…) else -> …`, so a second run finds the key taken and leaves by the `else`. The count after the
+  claim needs nothing more (C54 sees the claim); `repeat: True` is only for a write meant to apply on every attempt.
+  Without the `UNIQUE` key and its `ON CONFLICT` the compiler refuses the INSERT (C55).
+- **`rollback(out:)`** answers and undoes this request's writes: the claim of an order for an unknown item goes too.
+- **A call** has a time budget (`within:`) and a `once:` key that names the row it is for, so sending it again from
+  a retried request runs it once. Its three outcomes are three arms: `Ok`, `Rejected` (a refusal: final), and no
+  answer (`Timeout` or `Unreachable`: the outcome is unknown, so the same key is sent again later).
+- **JSON out** is `respond_as(status, content: Json)` and `write_json` of a record.
 
-The requests, in order on one database, and what each answers (a request line, its body after the target, then
-the status and body of the answer; every answer is `application/json`):
-
-```text items.tape
-POST /items {"key":"a1","name":"lamp","qty":2,"tags":["red","big"]}
-201 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
-POST /items {"key":"a1","name":"lamp","qty":2,"tags":["red","big"]}
-200 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
-POST /items {"key":"a1","name":"desk","qty":1}
-409 {"error":"key a1 was used for another item"}
-POST /items {"key":"b2","name":"desk","qty":-1}
-400 {"error":"qty: not a valid Qty"}
-POST /items {"key":"b2","name":"desk","qty":1,"color":"red"}
-201 {"id":2,"key":"b2","name":"desk","qty":1,"version":1}
-POST /items {"key":"b2","name":"desk","qty":1,"tags":["Red"]}
-400 {"error":"tags[0]: not a valid Tag"}
-POST /items {"key":"b2","name":"desk","qty":1}
-200 {"id":2,"key":"b2","name":"desk","qty":1,"version":1}
-GET /items/1
-200 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
-GET /items/9
-404 {"error":"no such item"}
-GET /items/abc
-400 {"error":"an item is /items/ID, ID a whole number from 1"}
-DELETE /items/1
-405 {"error":"GET or PATCH"}
-GET /items?limit=1
-200 {"items":[{"id":1,"key":"a1","name":"lamp","qty":2,"version":1}],"next":1}
-GET /items?after=1&limit=1
-200 {"items":[{"id":2,"key":"b2","name":"desk","qty":1,"version":1}],"next":2}
-GET /items?after=2
-200 {"items":[],"next":0}
-GET /items?limit=500
-400 {"error":"limit: not a whole number from 1 to 100"}
-PATCH /items/1 {"qty":5,"version":1}
-200 {"id":1,"key":"a1","name":"lamp","qty":5,"version":2}
-PATCH /items/1 {"qty":6,"version":1}
-409 {"error":"the item is at version 2"}
-PATCH /items/9 {"qty":6,"version":1}
-404 {"error":"no such item"}
-GET /items/1/tags
-200 [{"tag":"big"},{"tag":"red"}]
-PUT /items/1/tags {"tags":["blue"]}
-200 [{"tag":"blue"}]
-GET /nothing
-404 {"error":"no such route"}
-```
-
-To try it: save the program as `items.tape` and run `node tape.ts items.tape 'GET /items'`, or send it to the
-hosted `run` tool ([docs/mcp.md](mcp.md)) with these requests (there, a body goes after a line feed:
-`"POST /items\n{\"key\":\"a1\",…}"`).
+Where to look next, by section below: Patterns (what a route can match), Steps (`let … else`), JSON (lists and
+records inside records), Rules (the retry rules and their codes), Machines (a status column), Timers (retrying
+later, `wake` and `woken`), Numbers (money and measurements). Every std function is in [`std.md`](std.md), the `run`
+tool's arguments in [`mcp.md`](mcp.md), and a task with the form for it in section 9 of
+[`LANGUAGE.md`](../LANGUAGE.md).
 
 ## Patterns
 

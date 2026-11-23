@@ -560,7 +560,7 @@ const tests: Test[] = [
         const d = String(t?.['description']);
         for (const said of [
           'docs/std.md',
-          'docs/guide.md#a-whole-rest-service-worked',
+          'docs/guide.md#quickstart-a-service-in-one-file',
           'respond_as(status: 200, content: Json)',
           'query: Option[View]',
           'form_field(body: q, name: "limit")',
