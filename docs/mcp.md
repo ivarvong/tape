@@ -91,9 +91,11 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
 Also takes `requests`: 1 to 50, each `METHOD SP TARGET`, then optionally a line feed and a body
 (`"POST /links\n{\"url\":\"https://example.com\"}"`), or `{"request": "…", "at_ms": 61000}` to send it at a time of
 the run's own clock (below). They run in order against one database, so the second `GET /hello/ada` sees the first
-one's write. Two optional arguments say how much comes back: `trace` (`"lines"`, the default; `"full"`;
-`"none"`) and `effects` (`"compact"`, the default; `"full"`); a mode quoted twice (`"\"none\""`) is taken as the
+one's write. Two optional arguments say how much comes back: `trace` (`"lines"`, the default for one request; `"full"`;
+`"none"`, the default for more) and `effects` (`"compact"`, the default; `"full"`); a mode quoted twice (`"\"none\""`) is taken as the
 mode.
+
+The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"`:
 
 ```json
 { "ok": true, "diagnostics": [],
@@ -111,6 +113,9 @@ mode.
   `[{"name": "location", "value": "/links/7"}]`, names in lower case, in the order set. A response that set none has
   no `headers` field (the example above). The host's own headers (content-type, which is `content_type`, and the
   security headers) are not in it.
+- `steps` and `memory_bytes` are what the request used: memory is every byte it allocated and did not hand back for
+  reuse, up to the 64 MB a request has. A request that trapped has them too, as they stood when it stopped (an out of
+  memory trap, near 64 MB).
 - `effects` is the request's effect log: each SQL statement as the program wrote it (its `:name` placeholders),
   the value bound to each name, and what it did: `rows_written` for a statement that wrote, `rows_returned` and the
   `rows` themselves for one that returned rows (an INSERT, UPDATE or DELETE with `RETURNING` has both); calls to

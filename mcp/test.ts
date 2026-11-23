@@ -960,6 +960,12 @@ const tests: Test[] = [
         out.push(`spin: a trap replays as the same trap: ${String(spin?.['replay_error'])}`);
       if (huge?.['status'] !== 500 || !String(huge['error']).includes('out of memory'))
         out.push(`huge: ${String(huge?.['status'])} ${String(huge?.['error'])}`);
+      // a trapped run says how much memory it had used when it stopped: a Buf grown 100 bytes at a time to the 64 MB
+      // arena had more than half of it when the next doubling did not fit; the loop that spins allocates nothing
+      if (!(Number(huge?.['memory_bytes']) > 32 * 2 ** 20 && Number(huge?.['memory_bytes']) <= 64 * 2 ** 20))
+        out.push(`huge: memory_bytes ${String(huge?.['memory_bytes'])} at its trap`);
+      if (typeof spin?.['memory_bytes'] !== 'number' || spin['memory_bytes'] > 4096)
+        out.push(`spin: memory_bytes ${String(spin?.['memory_bytes'])} at its trap`);
       if (
         big?.['status'] !== 200 ||
         big['truncated'] !== true ||

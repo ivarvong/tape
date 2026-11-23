@@ -433,6 +433,10 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
     h = Number(call(L.target.name, args));
   } catch (err) {
     if (err instanceof Pending) throw err;
+    // a run that stopped says how much memory it had used by then, as a finished one does: the run to size is
+    // most often the one that ran out
+    const [head] = L.effects;
+    if (head && isHead(head) && L.live) head.bytes = globalOf(L, 'heap') - floor;
     const why = globalOf(L, 'why');
     throw new Error(why ? `trap ${why}: ${TRAPS[why]}` : err instanceof Error ? err.message : String(err), {
       cause: err,
