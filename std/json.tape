@@ -7,29 +7,33 @@
 // Strings must be valid UTF-8 and well-formed Unicode: a lone surrogate escape is Malformed.
 // A repeated key is reported again; the caller decides (JSON.parse keeps the last).
 
+// A value of a member, as json_first and json_next give it: text and booleans; anything else is JsonOther.
 type Json {
   JsonString(text: View)
   JsonBool(value: Bool)
   JsonOther
 }
 
+// One step through an object: a member, the end of the object, or text that is not JSON.
 type JsonStep {
   Member(key: View, value: Json, next: Int)
   Close(next: Int)
   Malformed
 }
 
+// Internal: a value and where it ends, or BadValue.
 type JsonValue {
   JsonValue(json: Json, next: Int)
   BadValue
 }
 
+// Internal: a decoded string and where it ends, or BadText.
 type JsonText {
   JsonText(text: View, next: Int)
   BadText
 }
 
-// One character of a string body.
+// Internal: One character of a string body.
 type JsonChar {
   Char(code: Int, next: Int, escaped: Bool)
   Quote(next: Int)
@@ -61,6 +65,7 @@ fn json_end(v: View, at: Int) -> Bool {
   json_ws(v, at) == len(v)
 }
 
+// Internal: the first position at or after `at` that is not JSON whitespace.
 fn json_ws(v: View, at: Int) -> Int {
   match {
     at < len(v) and (
@@ -70,6 +75,7 @@ fn json_ws(v: View, at: Int) -> Int {
   }
 }
 
+// Internal: the first step after `{`.
 fn first_member(v: View, at: Int) -> JsonStep {
   let s = json_ws(v, at)
   match {
@@ -78,6 +84,7 @@ fn first_member(v: View, at: Int) -> JsonStep {
   }
 }
 
+// Internal: a member that starts at `at` (its key's quote).
 fn member(v: View, at: Int) -> JsonStep {
   match {
     at < len(v) and v[at] == 34 -> member_key(v, key: json_text(v, at: at + 1))
@@ -85,6 +92,7 @@ fn member(v: View, at: Int) -> JsonStep {
   }
 }
 
+// Internal: a member, after its key.
 fn member_key(v: View, key: JsonText) -> JsonStep {
   match key {
     JsonText(text, next) -> member_colon(v, key: text, at: json_ws(v, at: next))
@@ -92,6 +100,7 @@ fn member_key(v: View, key: JsonText) -> JsonStep {
   }
 }
 
+// Internal: a member, at the colon after its key.
 fn member_colon(v: View, key: View, at: Int) -> JsonStep {
   match {
     at < len(v) and v[at] == 58 -> member_value(
@@ -102,6 +111,7 @@ fn member_colon(v: View, key: View, at: Int) -> JsonStep {
   }
 }
 
+// Internal: a member, once its value is read.
 fn member_value(key: View, value: JsonValue) -> JsonStep {
   match value {
     JsonValue(json, next) -> Member(key, value: json, next)
@@ -123,6 +133,7 @@ fn json_value(v: View, at: Int) -> JsonValue {
   }
 }
 
+// Internal: a string as a JsonValue.
 fn string_value(found: JsonText) -> JsonValue {
   match found {
     JsonText(text, next) -> JsonValue(json: JsonString(text), next)
@@ -130,6 +141,7 @@ fn string_value(found: JsonText) -> JsonValue {
   }
 }
 
+// Internal: a value json_first does not decode (an object, an array, a number, null) as JsonOther.
 fn other(end: Option[Int]) -> JsonValue {
   match end {
     Some(value) -> JsonValue(json: JsonOther, next: value)
@@ -137,6 +149,7 @@ fn other(end: Option[Int]) -> JsonValue {
   }
 }
 
+// Internal: where the object whose first step is `step` ends.
 fn object_end(v: View, step: JsonStep) -> Option[Int] {
   match step {
     Member(next) -> object_end(v, step: json_next(v, at: next))
@@ -145,7 +158,7 @@ fn object_end(v: View, step: JsonStep) -> Option[Int] {
   }
 }
 
-// `at` is the first non-space position after `[`.
+// Internal: `at` is the first non-space position after `[`.
 fn array_end(v: View, at: Int) -> Option[Int] {
   match {
     at < len(v) and v[at] == 93 -> Some(at + 1)
@@ -153,6 +166,7 @@ fn array_end(v: View, at: Int) -> Option[Int] {
   }
 }
 
+// Internal: an array's element, once its value is read.
 fn element(v: View, value: JsonValue) -> Option[Int] {
   match value {
     JsonValue(next) -> element_end(v, at: json_ws(v, at: next))
@@ -160,6 +174,7 @@ fn element(v: View, value: JsonValue) -> Option[Int] {
   }
 }
 
+// Internal: after an array's element: `,` or `]`.
 fn element_end(v: View, at: Int) -> Option[Int] {
   match {
     at >= len(v) -> None
@@ -181,6 +196,7 @@ fn number_end(v: View, at: Int) -> Option[Int] {
   }
 }
 
+// Internal: a number's fraction, after its `.`.
 fn fraction_end(v: View, at: Int) -> Option[Int] {
   let d = digits_end(v, at)
   match {
@@ -189,6 +205,7 @@ fn fraction_end(v: View, at: Int) -> Option[Int] {
   }
 }
 
+// Internal: a number's exponent, if it has one.
 fn exponent_end(v: View, at: Int) -> Option[Int] {
   let i = skip(v, at: skip(v, at: at + 1, byte: 43), byte: 45)
   let d = digits_end(v, at: i)
@@ -213,6 +230,7 @@ fn json_text(v: View, at: Int) -> JsonText {
   text_end(v, from: at, at, clean: True)
 }
 
+// Internal: the loop of json_text; `clean` while no escape has been seen.
 fn text_end(v: View, from: Int, at: Int, clean: Bool) -> JsonText {
   match json_char(v, at) {
     Char(next, escaped) -> text_end(v, from, at: next, clean: clean and not escaped)
@@ -222,6 +240,7 @@ fn text_end(v: View, from: Int, at: Int, clean: Bool) -> JsonText {
   }
 }
 
+// Internal: a string with escapes, decoded into new memory.
 fn decode_text(v: View, at: Int, out: Buf) -> Buf {
   match json_char(v, at) {
     Char(code, next) -> decode_text(v, at: next, out: write_code(out, code))
@@ -229,6 +248,7 @@ fn decode_text(v: View, at: Int, out: Buf) -> Buf {
   }
 }
 
+// Internal: one character of a string body, at `at`.
 fn json_char(v: View, at: Int) -> JsonChar {
   match {
     at >= len(v) -> BadChar
@@ -240,6 +260,7 @@ fn json_char(v: View, at: Int) -> JsonChar {
   }
 }
 
+// Internal: a UTF-8 sequence as a JsonChar.
 fn utf8_char(found: Utf8) -> JsonChar {
   match found {
     Utf8(code, next) -> Char(code, next, escaped: False)
@@ -247,7 +268,7 @@ fn utf8_char(found: Utf8) -> JsonChar {
   }
 }
 
-// `at` is the byte after the backslash.
+// Internal: `at` is the byte after the backslash.
 fn escape(v: View, at: Int) -> JsonChar {
   match {
     at >= len(v) -> BadChar
@@ -256,6 +277,7 @@ fn escape(v: View, at: Int) -> JsonChar {
   }
 }
 
+// Internal: the byte a one-letter escape stands for (`n` is a line feed).
 fn unescape(b: Int) -> Option[Int] {
   match b {
     34 -> Some(34)
@@ -270,6 +292,7 @@ fn unescape(b: Int) -> Option[Int] {
   }
 }
 
+// Internal: a one-letter escape as a JsonChar.
 fn simple(code: Option[Int], next: Int) -> JsonChar {
   match code {
     Some(value) -> Char(code: value, next, escaped: True)
@@ -277,7 +300,7 @@ fn simple(code: Option[Int], next: Int) -> JsonChar {
   }
 }
 
-// `at` is the position after \uXXXX. A high surrogate needs a low surrogate escape right after it.
+// Internal: `at` is the position after \uXXXX. A high surrogate needs a low surrogate escape right after it.
 fn unicode(v: View, at: Int, unit: Option[Int]) -> JsonChar {
   match unit {
     Some(value) if value >= 55296 and value < 56320 -> low_half(
@@ -291,6 +314,7 @@ fn unicode(v: View, at: Int, unit: Option[Int]) -> JsonChar {
   }
 }
 
+// Internal: the \uXXXX after a high surrogate, if there is one.
 fn low_unit(v: View, at: Int) -> Option[Int] {
   match {
     has(v, at, word: "\\u") -> hex4(v, at: at + 2)
@@ -298,6 +322,7 @@ fn low_unit(v: View, at: Int) -> Option[Int] {
   }
 }
 
+// Internal: a surrogate pair as one code point.
 fn low_half(high: Int, low: Option[Int], next: Int) -> JsonChar {
   match low {
     Some(value) if value >= 56320 and value < 57344 -> Char(
@@ -309,6 +334,7 @@ fn low_half(high: Int, low: Option[Int], next: Int) -> JsonChar {
   }
 }
 
+// Internal: four hex digits at `at`, as a number.
 fn hex4(v: View, at: Int) -> Option[Int] {
   match {
     at + 4 <= len(v) and is_hex(v[at]) and is_hex(v[at + 1]) and is_hex(v[at + 2]) and is_hex(
@@ -320,10 +346,20 @@ fn hex4(v: View, at: Int) -> Option[Int] {
   }
 }
 
+// Is the byte a hex digit (0-9, a-f, A-F)?
+//
+//   > is_hex(b: 70)
+//   True
+//   > is_hex(b: 103)
+//   False
 fn is_hex(b: Int) -> Bool {
   is_digit(b) or (b >= 97 and b <= 102) or (b >= 65 and b <= 70)
 }
 
+// The value of a hex digit (is_hex(b) must hold).
+//
+//   > hex(b: 102)
+//   15
 fn hex(b: Int) -> Int {
   match {
     b <= 57 -> b - 48
@@ -335,11 +371,14 @@ fn hex(b: Int) -> Int {
 // ---------- writing ----------
 
 // Appends text as a JSON string, escaped exactly as JSON.stringify escapes it.
+//
+//   > buf() |> write_json_string(text: "a\nb") |> freeze
+//   "\"a\\nb\""
 fn write_json_string(out: Buf, text: View) -> Buf {
   push(buf: write_chars(out: push(buf: out, byte: 34), text, from: 0, at: 0), byte: 34)
 }
 
-// Copies runs of plain bytes whole; `from` is the start of the current run.
+// Internal: Copies runs of plain bytes whole; `from` is the start of the current run.
 fn write_chars(out: Buf, text: View, from: Int, at: Int) -> Buf {
   match {
     at >= len(text) -> append(buf: out, view: slice(v: text, from, to: at))
@@ -353,6 +392,7 @@ fn write_chars(out: Buf, text: View, from: Int, at: Int) -> Buf {
   }
 }
 
+// Internal: one byte of a JSON string as its escape.
 fn write_escape(out: Buf, b: Int) -> Buf {
   match b {
     34 -> append(buf: out, view: "\\\"")
@@ -369,6 +409,7 @@ fn write_escape(out: Buf, b: Int) -> Buf {
   }
 }
 
+// Internal: 0-15 as a lowercase hex digit's byte.
 fn hex_digit(d: Int) -> Int {
   match {
     d < 10 -> 48 + d
@@ -386,12 +427,19 @@ fn hex_digit(d: Int) -> Int {
 // rounds: the host's JSON.parse reads numbers as doubles, which past 2^53 - 1 cannot hold every whole number.
 // Exact large-integer JSON, the whole 64-bit range, is planned for 0.3; until then such a value is sent as text.
 
+// Internal: a nested object as the host hands it to a second decode.
 type WireObject = View where len(self) >= 0
 
+// Internal: an array of objects, one to a line, as the host hands it over.
 type WireItems = View where len(self) >= 0
 
+// Internal: an array of other values, each as {"value": …}, one to a line.
 type WireValues = View where len(self) >= 0
 
+// Appends true or false.
+//
+//   > buf() |> write_bool(value: True) |> freeze
+//   "true"
 fn write_bool(out: Buf, value: Bool) -> Buf {
   match value {
     True -> append(buf: out, view: "true")
@@ -399,7 +447,7 @@ fn write_bool(out: Buf, value: Bool) -> Buf {
   }
 }
 
-// A key that was there: its decoded value as Some.
+// Internal: A key that was there: its decoded value as Some.
 fn wire_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
   match decoded {
     Ok(value) -> Ok(value: Some(value))
@@ -407,11 +455,13 @@ fn wire_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
   }
 }
 
-// The elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
+// Internal: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its
+// index.
 fn wire_each[T](items: View, by: Fn[View, Result[T, View]]) -> Result[List[T], View] {
   wire_each_from(items, by, at: 0, acc: Nil)
 }
 
+// Internal: the loop of wire_each.
 fn wire_each_from[T](
   items: View,
   by: Fn[View, Result[T, View]],
@@ -425,6 +475,7 @@ fn wire_each_from[T](
   }
 }
 
+// Internal: wire_each, after one element.
 fn wire_each_next[T](
   decoded: Result[T, View],
   rest: View,
@@ -438,7 +489,7 @@ fn wire_each_next[T](
   }
 }
 
-// "[2]: reason", or "[2][0]: reason" when the element was itself a list.
+// Internal: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
 fn wire_at(at: Int, error: View) -> View {
   match error {
     "[" ++ rest -> "[" ++ decimal_text(value: at) ++ "]" ++ error
@@ -446,7 +497,7 @@ fn wire_at(at: Int, error: View) -> View {
   }
 }
 
-// An element that is not an object is handed over as {"value": …}: its reason without that key.
+// Internal: An element that is not an object is handed over as {"value": …}: its reason without that key.
 fn wire_plain(error: View) -> View {
   match error {
     "value: " ++ why -> why
@@ -460,6 +511,7 @@ fn write_rows[T](out: Buf, rows: Rows[T]) -> Buf {
   write_rows_from(out: push(buf: out, byte: 91), rows, first: True)
 }
 
+// Internal: the loop of write_rows.
 fn write_rows_from[T](out: Buf, rows: Rows[T], first: Bool) -> Buf {
   match next(rows) {
     Next(value, rest) if first -> write_rows_from(

@@ -1,5 +1,6 @@
 // std/list.tape: an immutable list. Adding to the front shares the rest; nothing is ever changed in place.
 
+// An immutable list: Cons(head, tail) or Nil. Build one in a function that says its type, `fn items() -> List[Item]`.
 type List[T] {
   Cons(head: T, tail: List[T])
   Nil
@@ -13,6 +14,7 @@ fn length[T](list: List[T]) -> Int {
   length_from(list, acc: 0)
 }
 
+// Internal: the loop of length.
 fn length_from[T](list: List[T], acc: Int) -> Int {
   match list {
     Cons(tail) -> length_from(list: tail, acc: acc + 1)
@@ -28,6 +30,7 @@ fn reverse[T](list: List[T]) -> List[T] {
   reverse_onto(list, acc: Nil)
 }
 
+// Internal: the loop of reverse.
 fn reverse_onto[T](list: List[T], acc: List[T]) -> List[T] {
   match list {
     Cons(head, tail) -> reverse_onto(list: tail, acc: Cons(head, tail: acc))
@@ -43,6 +46,7 @@ fn map[A, B](list: List[A], by: Fn[A, B]) -> List[B] {
   reverse(list: map_onto(list, by, acc: Nil))
 }
 
+// Internal: the loop of map, last item first.
 fn map_onto[A, B](list: List[A], by: Fn[A, B], acc: List[B]) -> List[B] {
   match list {
     Cons(head, tail) -> map_onto(list: tail, by, acc: Cons(head: by(head), tail: acc))
@@ -58,6 +62,7 @@ fn filter[A](list: List[A], keep: Fn[A, Bool]) -> List[A] {
   reverse(list: filter_onto(list, keep, acc: Nil))
 }
 
+// Internal: the loop of filter, last item first.
 fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A] {
   match list {
     Cons(head, tail) if keep(head) -> filter_onto(list: tail, keep, acc: Cons(head, tail: acc))

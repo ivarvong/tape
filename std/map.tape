@@ -2,6 +2,7 @@
 // map that shares all but one path with the old one; the old map is unchanged. Walk it in order by matching on
 // Node(left, key, value, right) and Empty.
 
+// A map from text keys to values of type V. Start from Empty; put and get.
 type Map[V] {
   Node(left: Map[V], key: View, value: V, right: Map[V], height: Int)
   Empty
@@ -12,6 +13,7 @@ fn before(a: View, b: View) -> Bool {
   before_from(a, b, at: 0)
 }
 
+// Internal: the loop of before.
 fn before_from(a: View, b: View, at: Int) -> Bool {
   match {
     at >= len(b) -> False
@@ -71,6 +73,7 @@ fn count[V](map: Map[V]) -> Int {
   }
 }
 
+// Internal: a tree's height.
 fn height[V](map: Map[V]) -> Int {
   match map {
     Empty -> 0
@@ -78,6 +81,7 @@ fn height[V](map: Map[V]) -> Int {
   }
 }
 
+// Internal: a node with its height computed.
 fn node[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match {
     height(map: left) > height(map: right) -> Node(
@@ -91,6 +95,7 @@ fn node[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   }
 }
 
+// Internal: a node, rotated when one side is more than one taller.
 fn balance[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match {
     height(map: left) > height(map: right) + 1 -> lean_right(left, key, value, right)
@@ -99,6 +104,7 @@ fn balance[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   }
 }
 
+// Internal: a rotation when the left side is taller.
 fn lean_right[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match left {
     Node(left: ll, key: lk, value: lv, right: lr) if height(map: ll) >= height(map: lr) -> node(
@@ -122,6 +128,7 @@ fn lean_right[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   }
 }
 
+// Internal: a rotation when the right side is taller.
 fn lean_left[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match right {
     Node(left: rl, key: rk, value: rv, right: rr) if height(map: rr) >= height(map: rl) -> node(

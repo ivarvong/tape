@@ -47,6 +47,12 @@ fn has(v: View, at: Int, word: View) -> Bool {
   at + len(word) <= len(v) and slice(v, from: at, to: at + len(word)) == word
 }
 
+// Is the byte an ASCII digit, 0-9?
+//
+//   > is_digit(b: 55)
+//   True
+//   > is_digit(b: 97)
+//   False
 fn is_digit(b: Int) -> Bool {
   b >= 48 and b <= 57
 }
@@ -75,6 +81,7 @@ fn decimal(v: View) -> Option[Int] {
   }
 }
 
+// Internal: the loop of decimal.
 fn decimal_value(v: View, at: Int, value: Int) -> Int {
   match {
     at >= len(v) -> value
@@ -95,6 +102,7 @@ fn digits(v: View) -> Option[Int] {
   }
 }
 
+// Internal: the loop of digits.
 fn digits_value(v: View, at: Int, value: Int) -> Int {
   match {
     at >= len(v) -> value
@@ -128,6 +136,7 @@ fn write_int(out: Buf, value: Int) -> Buf {
   }
 }
 
+// Internal: the loop of write_int.
 fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   match {
     value > 0 -> push(buf: write_digits(out, value: value / 10, last: value % 10), byte: 48 + last)
@@ -135,6 +144,7 @@ fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   }
 }
 
+// Appends text: append(buf: out, view: text) with the names write_* use.
 fn write_text(out: Buf, text: View) -> Buf {
   append(buf: out, view: text)
 }
@@ -164,6 +174,8 @@ type Utf8 {
   BadUtf8
 }
 
+// The code point that starts at `at` (a byte of 128 or more), and where the next one starts; BadUtf8 when it is not
+// valid UTF-8.
 fn utf8_at(v: View, at: Int) -> Utf8 {
   let b = v[at]
   match {
@@ -192,14 +204,17 @@ fn utf8_at(v: View, at: Int) -> Utf8 {
   }
 }
 
+// Internal: is the byte at `at` a UTF-8 continuation byte?
 fn cont(v: View, at: Int) -> Bool {
   at < len(v) and (v[at] & 192) == 128
 }
 
+// Internal: the second byte of a three-byte sequence is allowed after `b` (no overlong forms, no surrogates).
 fn second_of_3(b: Int, c: Int) -> Bool {
   (b != 224 or c >= 160) and (b != 237 or c <= 159)
 }
 
+// Internal: the second byte of a four-byte sequence is allowed after `b` (no overlong forms, nothing above U+10FFFF).
 fn second_of_4(b: Int, c: Int) -> Bool {
   (b != 240 or c >= 144) and (b != 244 or c <= 143)
 }

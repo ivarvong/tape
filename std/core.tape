@@ -1,5 +1,6 @@
 // std/core.tape: the types and functions the compiler itself refers to.
 
+// A value that may be absent: Some(value) or None. `let Some(value: x) = e else -> fallback` goes on with x.
 type Option[T] {
   Some(value: T)
   None
@@ -55,6 +56,7 @@ fn same(a: View, b: View) -> Bool {
   len(a) == len(b) and same_from(a, b, at: 0)
 }
 
+// Internal: the loop of same, from position `at`.
 fn same_from(a: View, b: View, at: Int) -> Bool {
   match {
     at >= len(a) -> True

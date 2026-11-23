@@ -1,22 +1,36 @@
 // std/http.tape: a request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY.
 // A request that came through a published name's public route (no token: anyone) ends its line with a word,
 // METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's.
-//
-//   > request(raw: "POST /holds?x=1 public\nqty=1")
-//   Request(method: "POST", path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
-//   > request(raw: "GET /k/a b\n")
-//   Request(path: "/k/a b", caller: Operator)
 // `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests.
 
+// Who sent a request: the operator (with the token), or Anyone, through a published name's public route.
 type Caller {
   Operator
   Anyone
 }
 
+// A request as `request(raw)` gives it. `path` is the target before `?`, as sent (percent-encoding is not undone);
+// `query` the raw text after `?` (read one parameter with `form_field(body: q, name: "limit")`); `body` what
+// follows the first line feed. There are no headers.
+//
+//   match request(raw) {
+//     Request(method: "GET", path: "/items/" ++ decimal(id)) -> …
+//     Request(method: "POST", path: "/items", body) -> …
+//   }
 type Request {
   Request(method: View, path: View, query: Option[View], body: View, caller: Caller)
 }
 
+// The request `handle` is given, parsed.
+//
+//   > request(raw: "POST /holds?x=1 public\nqty=1")
+//   Request(method: "POST", path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
+//   > request(raw: "GET /k/a b\n")
+//   Request(path: "/k/a b", caller: Operator)
+//   > request(raw: "GET /items?\n")
+//   Request(path: "/items", query: Some(value: ""))
+//   > request(raw: "GET /items\n")
+//   Request(path: "/items", query: None)
 fn request(raw: View) -> Request {
   let line = until(v: raw, byte: 10)
   let rest = after(v: line, byte: 32)
@@ -31,8 +45,8 @@ fn request(raw: View) -> Request {
   )
 }
 
-// Only the last word, and only `public`, names the caller: a target with a space in it (never sent by the service,
-// which passes the URL's percent-encoded path) is read as before.
+// Internal: only the last word, and only `public`, names the caller: a target with a space in it (never sent by
+// the service, which passes the URL's percent-encoded path) is read as before.
 fn opened(open: Bool) -> Int {
   match {
     open -> 1
@@ -40,6 +54,7 @@ fn opened(open: Bool) -> Int {
   }
 }
 
+// Internal: Anyone when the request line ended with ` public`.
 fn caller_of(open: Bool) -> Caller {
   match {
     open -> Anyone
@@ -47,6 +62,7 @@ fn caller_of(open: Bool) -> Caller {
   }
 }
 
+// Internal: the query of a target: None without a `?`, else what follows the first `?`.
 fn asked(target: View) -> Option[View] {
   match {
     find(v: target, byte: 63, at: 0) == len(target) -> None
@@ -68,6 +84,11 @@ type Content {
   Svg
 }
 
+// A response with a content type: the status, then the body written by the caller. respond_as(status: 200,
+// content: Json) answers application/json; `respond` answers text/plain.
+//
+//   > respond_as(status: 201, content: Json) |> append(view: "{}") |> freeze
+//   "201 application/json\n{}"
 fn respond_as(status: Int, content: Content) -> Buf {
   push(
     buf: append(
@@ -78,6 +99,10 @@ fn respond_as(status: Int, content: Content) -> Buf {
   )
 }
 
+// The media type a Content is served as.
+//
+//   > content_type(content: Json)
+//   "application/json"
 fn content_type(content: Content) -> View {
   match content {
     Html -> "text/html"
@@ -99,6 +124,7 @@ fn form_field(body: View, name: View) -> Option[View] {
   form_from(body, name, at: 0)
 }
 
+// Internal: form_field, from the pair that starts at `at`.
 fn form_from(body: View, name: View, at: Int) -> Option[View] {
   let end = find(v: body, byte: 38, at)
   let pair = slice(v: body, from: at, to: end)
@@ -112,10 +138,12 @@ fn form_from(body: View, name: View, at: Int) -> Option[View] {
   }
 }
 
+// Internal: one name or value of a form, `+` and %XX decoded.
 fn form_decoded(raw: View) -> View {
   freeze(buf: form_bytes(out: buf(), raw, at: 0))
 }
 
+// Internal: the loop of form_decoded.
 fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
   match {
     at >= len(raw) -> out
@@ -140,6 +168,7 @@ fn write_html(out: Buf, text: View) -> Buf {
   html_from(out, text, at: 0)
 }
 
+// Internal: the loop of write_html.
 fn html_from(out: Buf, text: View, at: Int) -> Buf {
   match {
     at >= len(text) -> out
