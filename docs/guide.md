@@ -1,8 +1,338 @@
 # A guide to Tape
 
 The language, one feature at a time, with the before and after of each. [`LANGUAGE.md`](../LANGUAGE.md) is the
-definition and wins where the two differ; this guide explains. Paths are relative to the repository root, and
-every command runs from there on Node 25.
+definition and wins where the two differ; this guide explains; [`std.md`](std.md) lists every function the standard
+library has. Paths are relative to the repository root, and every command runs from there on Node 25. It starts
+with [a whole REST service](#a-whole-rest-service-worked); the sections after it take one feature each.
+
+## A whole REST service, worked
+
+One program with the parts most services need: routes with an id in the path, a query string, validation that
+answers 400 with the reason, JSON in and out (lists too), SQL with `:name` parameters (insert, select, update), a
+POST a client can retry safely, and 404, 405 and 409. `test/guide.ts` compiles this program with the rules on,
+checks it is in `tape fmt`'s layout, and sends it the requests below, so the answers shown are the ones it gives.
+The functions it uses are in [the std reference](std.md).
+
+```tape items.tape
+migration 1 "items" {
+  CREATE TABLE items(
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    qty INTEGER NOT NULL CHECK (qty >= 0),
+    version INTEGER NOT NULL DEFAULT 1
+  );
+  CREATE TABLE tags(
+    item INTEGER NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (item, tag)
+  )
+}
+
+type Id = Int where self >= 1 and self <= 9007199254740991
+type Key = View where len(self) >= 1 and len(self) <= 64
+type Name = View where len(self) >= 1 and len(self) <= 80
+type Qty = Int where self >= 0 and self <= 1000000
+type Limit = Int where self >= 1 and self <= 100
+type Tag = View where len(self) >= 1 and len(self) <= 20 and tag_from(v: self, at: 0)
+
+// What a client sends: POST /items, PATCH /items/ID, PUT /items/ID/tags.
+type NewItem { NewItem(key: Key, name: Name, qty: Qty, tags: Option[List[Tag]]) }
+type Change { Change(qty: Qty, version: Int) }
+type Tags { Tags(tags: List[Tag]) }
+
+// What it gets back.
+type Item { Item(id: Int, key: View, name: View, qty: Int, version: Int) }
+type Page { Page(items: List[Item], next: Int) }
+type TagRow { TagRow(tag: View) }
+type Problem { Problem(error: View) }
+type Paging { Paging(after: Int, limit: Int) }
+
+type Outcome {
+  Shown(status: Int, item: Item)
+  Failed(status: Int, reason: View)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(method: "GET", path: "/items", query) -> listed(paged: paging(query))
+    Request(method: "POST", path: "/items", body) -> created(body) |> rendered
+    Request(method: "GET", path: "/items/" ++ decimal(Id(id))) -> found(item: load(id)) |> rendered
+    Request(method: "PATCH", path: "/items/" ++ decimal(Id(id)), body) -> changed(id, body)
+      |> rendered
+    Request(method: "GET", path: "/items/" ++ decimal(Id(id)) ++ "/tags") -> tags_of(id)
+    Request(method: "PUT", path: "/items/" ++ decimal(Id(id)) ++ "/tags", body) -> tagged(id, body)
+    Request(path: "/items/" ++ decimal(Id(id))) -> rendered(
+      outcome: Failed(status: 405, reason: "GET or PATCH")
+    )
+    Request(
+      path: "/items/" ++ decimal(Id(id)) ++ "/tags"
+    ) -> rendered(outcome: Failed(status: 405, reason: "GET or PUT"))
+    Request(path: "/items/" ++ _) -> rendered(
+      outcome: Failed(status: 400, reason: "an item is /items/ID, ID a whole number from 1")
+    )
+    _ -> rendered(outcome: Failed(status: 404, reason: "no such route"))
+  }
+}
+
+// GET /items?after=ID&limit=N: both optional; anything else is a 400 that says which and why
+fn paging(query: Option[View]) -> Result[Paging, View] {
+  let q = query_text(query)
+  let Some(value: after) = number(
+    q,
+    name: "after",
+    none: 0
+  ) else -> Err(error: "after: not a whole number")
+  let Some(value: Limit(limit)) = number(q, name: "limit", none: 10) else {
+    _ -> Err(error: "limit: not a whole number from 1 to 100")
+  }
+  Ok(value: Paging(after, limit))
+}
+
+fn query_text(query: Option[View]) -> View {
+  match query {
+    Some(value) -> value
+    None -> ""
+  }
+}
+
+// the parameter `name` as a number: `none` when it is absent, None when it is there but not a number
+fn number(q: View, name: View, none: Int) -> Option[Int] {
+  match form_field(body: q, name) {
+    None -> Some(value: none)
+    Some(value: decimal(n)) -> Some(value: n)
+    _ -> None
+  }
+}
+
+// a page of items by id, as {"items": [...], "next": ID}: pass `next` as ?after= for the next page; 0 at the end
+fn listed(paged: Result[Paging, View]) -> Buf {
+  let Ok(value: Paging(after, limit)) = paged else {
+    Err(error) -> rendered(outcome: Failed(status: 400, reason: error))
+  }
+  let items = collect(rows: sql_all(
+    row: Item,
+    query: "SELECT * FROM items WHERE id > :after ORDER BY id LIMIT :limit",
+    after,
+    limit
+  ))
+  respond_as(status: 200, content: Json)
+    |> write_json(value: Page(items, next: next_after(items, limit)))
+}
+
+fn collect(rows: Rows[Item]) -> List[Item] {
+  match next(rows) {
+    Next(value, rest) -> Cons(head: value, tail: collect(rows: rest))
+    End -> Nil
+  }
+}
+
+fn next_after(items: List[Item], limit: Int) -> Int {
+  match {
+    length(list: items) < limit -> 0
+    else -> last_id(items)
+  }
+}
+
+fn last_id(items: List[Item]) -> Int {
+  match items {
+    Cons(head: Item(id), tail: Nil) -> id
+    Cons(tail) -> last_id(items: tail)
+    Nil -> 0
+  }
+}
+
+// POST /items: made once per client key. The same key again answers the item it made (200), so a client that
+// got no answer can send it again; the same key with another name is a conflict (409).
+fn created(body: View) -> Outcome {
+  let Ok(value: NewItem(key, name, qty, tags)) = decode(json: body, as: NewItem) else {
+    Err(error) -> Failed(status: 400, reason: error)
+  }
+  let Some(value: item) = sql_first(
+    row: Item,
+    query: "INSERT INTO items(key, name, qty) VALUES (:key, :name, :qty) ON CONFLICT(key) \
+        DO NOTHING RETURNING *",
+    key,
+    name,
+    qty
+  ) else {
+    None -> again(
+      key,
+      name,
+      found: sql_first(row: Item, query: "SELECT * FROM items WHERE key = :key", key)
+    )
+  }
+  do insert_tags(item: item.id, tags: listed_tags(tags))
+  Shown(status: 201, item)
+}
+
+fn again(key: Key, name: Name, found: Option[Item]) -> Outcome {
+  match found {
+    Some(value: item = Item(name: had)) if had == name -> Shown(status: 200, item)
+    Some(value) -> Failed(status: 409, reason: "key \(key) was used for another item")
+    None -> Failed(status: 500, reason: "the key is taken but its item is gone")
+  }
+}
+
+fn listed_tags(tags: Option[List[Tag]]) -> List[Tag] {
+  match tags {
+    Some(value) -> value
+    None -> Nil
+  }
+}
+
+// PATCH /items/ID {"qty": 3, "version": 1}: a compare-and-set on the version, so two clients that read version
+// 1 cannot both write; the second gets 409 and reads again.
+fn changed(id: Id, body: View) -> Outcome {
+  let Ok(value: Change(qty, version)) = decode(json: body, as: Change) else {
+    Err(error) -> Failed(status: 400, reason: error)
+  }
+  match sql_move(
+    row: Item,
+    query: "UPDATE items SET qty = :qty, version = version + 1 WHERE id = :id \
+        AND version = :version RETURNING *",
+    qty,
+    id,
+    version
+  ) {
+    Moved(value) -> Shown(status: 200, item: value)
+    Raced(now) -> Failed(status: 409, reason: "the item is at version \(now.version)")
+    NoRow -> Failed(status: 404, reason: "no such item")
+  }
+}
+
+// PUT /items/ID/tags {"tags": ["red", "big"]}: the item's tags become these (a list in, rows out)
+fn tagged(id: Id, body: View) -> Buf {
+  let Ok(value: Tags(tags)) = decode(json: body, as: Tags) else {
+    Err(error) -> rendered(outcome: Failed(status: 400, reason: error))
+  }
+  let Some(value: item) = load(id) else -> rendered(
+    outcome: Failed(status: 404, reason: "no such item")
+  )
+  do sql_exec(query: "DELETE FROM tags WHERE item = :id", id)
+  do insert_tags(item: item.id, tags)
+  tags_of(id)
+}
+
+fn insert_tags(item: Int, tags: List[Tag]) -> Int {
+  match tags {
+    Cons(head, tail) -> sql_exec(
+      query: "INSERT INTO tags(item, tag) VALUES (:item, :head) ON CONFLICT DO NOTHING",
+      item,
+      head
+    ) + insert_tags(item, tags: tail)
+    Nil -> 0
+  }
+}
+
+fn tags_of(id: Id) -> Buf {
+  respond_as(status: 200, content: Json)
+    |> write_rows(
+    rows: sql_all(row: TagRow, query: "SELECT tag FROM tags WHERE item = :id ORDER BY tag", id)
+  )
+}
+
+fn load(id: Int) -> Option[Item] {
+  sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)
+}
+
+fn found(item: Option[Item]) -> Outcome {
+  match item {
+    Some(value) -> Shown(status: 200, item: value)
+    None -> Failed(status: 404, reason: "no such item")
+  }
+}
+
+fn rendered(outcome: Outcome) -> Buf {
+  match outcome {
+    Shown(status, item) -> respond_as(status, content: Json) |> write_json(value: item)
+    Failed(status, reason) -> respond_as(status, content: Json)
+      |> write_json(value: Problem(error: reason))
+  }
+}
+
+// a tag: a-z, 0-9 and -
+fn tag_from(v: View, at: Int) -> Bool {
+  match {
+    at >= len(v) -> True
+    (v[at] >= 97 and v[at] <= 122) or is_digit(v[at]) or v[at] == 45 -> tag_from(v, at: at + 1)
+    else -> False
+  }
+}
+```
+
+What to notice:
+
+- **Routes** are one `match request(raw)`. `"/items/" ++ decimal(Id(id))` takes the path apart, parses the number
+  and checks its range in one pattern; a path that does not fit falls through to the next arm, so the 405 and 400
+  arms come after the ones that serve.
+- **The query** is `Request(query)`: the raw text after `?`. `form_field(body: q, name: "limit")` reads one
+  parameter; `number` says absent (the default) apart from present but wrong (a 400 that names it).
+- **Validation** is the types: `decode(json: body, as: NewItem)` checks every refined field (`Qty`, `Tag`, each
+  element of `tags`) and refuses unknown keys, and its `Err` is a sentence that names the field. It goes back as
+  the 400's body as it is.
+- **JSON out** is `respond_as(status, content: Json)` and then `write_json` of a record (a `List` field is an
+  array) or `write_rows` of a query. A `List` cannot be written on its own: `Page` wraps it.
+- **SQL** names each value: `WHERE id = :id`, and the argument `id`. A row type's fields name the columns
+  (`SELECT *` is `Item`'s five).
+- **A retried POST** makes nothing twice: the client's `key` is `UNIQUE`, the INSERT is `ON CONFLICT(key) DO
+  NOTHING RETURNING *`, and when it returns no row the request looks the key up and answers what the first one
+  made. Take away the `UNIQUE` and the `ON CONFLICT`, and a retried POST would make a second item: the compiler
+  refuses that INSERT (C55).
+- **A lost update** is a 409: PATCH sends the version it read, and `sql_move` sets the row only if it is still at
+  that version (`Raced` when it is not, `NoRow` when there is no row).
+
+The requests, in order on one database, and what each answers (a request line, its body after the target, then
+the status and body of the answer; every answer is `application/json`):
+
+```text items.tape
+POST /items {"key":"a1","name":"lamp","qty":2,"tags":["red","big"]}
+201 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
+POST /items {"key":"a1","name":"lamp","qty":2,"tags":["red","big"]}
+200 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
+POST /items {"key":"a1","name":"desk","qty":1}
+409 {"error":"key a1 was used for another item"}
+POST /items {"key":"b2","name":"desk","qty":-1}
+400 {"error":"qty: not a valid Qty"}
+POST /items {"key":"b2","name":"desk","qty":1,"color":"red"}
+400 {"error":"unknown key \"color\""}
+POST /items {"key":"b2","name":"desk","qty":1,"tags":["Red"]}
+400 {"error":"tags[0]: not a valid Tag"}
+POST /items {"key":"b2","name":"desk","qty":1}
+201 {"id":2,"key":"b2","name":"desk","qty":1,"version":1}
+GET /items/1
+200 {"id":1,"key":"a1","name":"lamp","qty":2,"version":1}
+GET /items/9
+404 {"error":"no such item"}
+GET /items/abc
+400 {"error":"an item is /items/ID, ID a whole number from 1"}
+DELETE /items/1
+405 {"error":"GET or PATCH"}
+GET /items?limit=1
+200 {"items":[{"id":1,"key":"a1","name":"lamp","qty":2,"version":1}],"next":1}
+GET /items?after=1&limit=1
+200 {"items":[{"id":2,"key":"b2","name":"desk","qty":1,"version":1}],"next":2}
+GET /items?after=2
+200 {"items":[],"next":0}
+GET /items?limit=500
+400 {"error":"limit: not a whole number from 1 to 100"}
+PATCH /items/1 {"qty":5,"version":1}
+200 {"id":1,"key":"a1","name":"lamp","qty":5,"version":2}
+PATCH /items/1 {"qty":6,"version":1}
+409 {"error":"the item is at version 2"}
+PATCH /items/9 {"qty":6,"version":1}
+404 {"error":"no such item"}
+GET /items/1/tags
+200 [{"tag":"big"},{"tag":"red"}]
+PUT /items/1/tags {"tags":["blue"]}
+200 [{"tag":"blue"}]
+GET /nothing
+404 {"error":"no such route"}
+```
+
+To try it: save the program as `items.tape` and run `node tape.ts items.tape 'GET /items'`, or send it to the
+hosted `run` tool ([docs/mcp.md](mcp.md)) with these requests (there, a body goes after a line feed:
+`"POST /items\n{\"key\":\"a1\",…}"`).
 
 ## Patterns
 
