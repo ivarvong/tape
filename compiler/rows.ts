@@ -3,6 +3,7 @@
 import { sqlModel } from '../rules.ts';
 import type { ResultCol, Schema } from '../sql/ast.ts';
 import { tryParse } from '../sql.ts';
+import { asName } from '../sql/tokens.ts';
 import { type At, type Call, type Program, eachExpr } from './ast.ts';
 import { CompileError } from './common.ts';
 
@@ -83,12 +84,12 @@ export function rowColumns(prog: Program): void {
       given.set(name, q.slice(c.s, c.e));
     }
     const cols = new Set(table.cols.map(c => c.name)),
-      pre = star.table ? `${star.table}.` : src.alias ? `${src.alias}.` : '';
+      pre = star.table ? `${asName(star.table)}.` : src.alias ? `${asName(src.alias)}.` : '';
     const out = fields.map(
       f =>
         given.get(f.name) ??
         (cols.has(f.name)
-          ? pre + f.name
+          ? pre + asName(f.name) // a field named by a keyword the table quotes: "from"
           : err(
               qa,
               `field ${f.name} of ${R} is not a column of ${from1}`,

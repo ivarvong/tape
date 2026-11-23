@@ -29,6 +29,15 @@ PRAGMA PRECEDING PRIMARY QUERY RAISE RANGE RECURSIVE REFERENCES REGEXP REINDEX R
 RIGHT ROLLBACK ROW ROWS SAVEPOINT SELECT SET TABLE TEMP TEMPORARY THEN TIES TO TRANSACTION TRIGGER UNBOUNDED UNION
 UNIQUE UPDATE USING VACUUM VALUES VIEW VIRTUAL WHEN WHERE WINDOW WITH WITHOUT`.split(/\s+/),
 );
+/**
+ * A name as a statement must write it to be read as one: bare when it is a plain name or a keyword SQLite takes as
+ * a name (`key`), in double quotes when it is any other keyword (`"from"`) or holds other characters. What
+ * compiler/rows.ts writes for `*`.
+ */
+export const asName = (n: string): string =>
+  /^[A-Za-z_][A-Za-z0-9_]*$/.test(n) && (!KEYWORDS.has(n.toUpperCase()) || NAME_OK.has(n.toUpperCase()))
+    ? n
+    : `"${n.replaceAll('"', '""')}"`;
 // keywords SQLite also takes as names where a name is expected (its "fallback" list, the ones programs use)
 export const NAME_OK = new Set([
   'KEY',
