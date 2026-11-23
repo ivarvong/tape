@@ -38,9 +38,23 @@ const tests = readdirSync(root + 'test')
 // name, command, and optionally `expect`: a pattern the output must contain (the recorded number)
 type Expect = RegExp | ((out: string) => boolean);
 type Part = readonly [name: string, cmd: string[] | null, expect?: Expect, cwd?: string];
-const service: Part = existsSync(`${root}service/node_modules`)
-  ? ['service suite (workerd)', ['npx', 'vitest', 'run'], /Tests\s+\d+ passed/, 'service']
-  : ['service suite (workerd): SKIPPED, run npm ci in service/ first', null];
+// the service suite in two workerd runs side by side: the seams (the longest file) and every other file
+const service: Part[] = existsSync(`${root}service/node_modules`)
+  ? [
+      [
+        'service suite (workerd): test/seams.test.ts',
+        ['npx', 'vitest', 'run', 'test/seams.test.ts'],
+        /Tests\s+\d+ passed/,
+        'service',
+      ],
+      [
+        'service suite (workerd): every file but test/seams.test.ts',
+        ['npx', 'vitest', 'run', '--exclude', 'test/seams.test.ts'],
+        /Tests\s+\d+ passed/,
+        'service',
+      ],
+    ]
+  : [['service suite (workerd): SKIPPED, run npm ci in service/ first', null]];
 const mcpReady = existsSync(`${root}mcp/node_modules`);
 const mcpSuite: Part = mcpReady
   ? [
@@ -88,7 +102,7 @@ const slow: Part[] = [
     [node, 'mcp/test.ts', '--plants'],
     /^all 31 plants caught$/m,
   ],
-  service,
+  ...service,
   mcpSuite,
 ];
 const all: Part[] = [
