@@ -326,7 +326,9 @@ View where len(self) >= 1 and len(self) <= 64` is `expected Key, 1 to 64 bytes`;
 `at most 3 characters`; `Qty = Int where self >= 1 and self <= 9` is `expected Qty, 1 to 9`; `self > 0.00` is
 `more than 0.00`. Only bounds on the length in bytes, in characters or on the value, each a literal, are said; any
 other condition (a call such as `every_byte`, a bound that is a flag) is `not a valid Slug`: a 400 never shows the
-program's source. Of the body as a whole the reasons are `empty`, `not JSON`, and `expected an object` (or
+program's source. An `else "…"` message is printed after the path, so it says what the value must be and does not
+name its field: `else "lowercase letters, digits and -"`, not `else "url: …"`, which would print `url: url: …`. Of
+the body as a whole the reasons are `empty`, `not JSON`, and `expected an object` (or
 `expected an array` for `as: List[T]`). The first problem is the reason: each field's kind is checked in order,
 then each refinement, then what is inside its records and lists. So `{"key": "", "items": [{"sku": "a", "price":
 "1.505"}]}` as an order is `key: expected Key, 1 to 64 bytes`, and with a right key, `items[0].price: expected a
