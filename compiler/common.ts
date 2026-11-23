@@ -58,6 +58,8 @@ export const DEFAULTS = {
   localSteps: true,
   // a call that hands over a value a function only walks calls a copy that gives the cells back (gen/call.ts owning)
   owningCopies: true,
+  // for test/ownership.ts only: ownership read by rounds of every function, as it was, the worklist's oracle
+  ownershipRounds: false,
   exports: ['handle'],
   rules: true,
 };

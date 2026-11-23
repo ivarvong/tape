@@ -159,7 +159,7 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
   const { tables, callsOf } = parts;
   const { fns, ctors, types } = prog;
   const find = (n: string, file: string, at?: Place): FnDecl | null => mod.find(prog, n, file, at);
-  const ownedParams = ownedParameters(fns, find, opts.reuse);
+  const ownedParams = ownedParameters(fns, find, opts.reuse, opts.ownershipRounds);
   const fingerprint = (method: string, send: Type, reply: Type, at: Place): string =>
     sha256(UTF8.encode(JSON.stringify([method, layout.describe(L, send, at), layout.describe(L, reply, at)]))).slice(
       0,

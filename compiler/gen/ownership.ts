@@ -2,13 +2,23 @@
 // on, store them or release them) and which it only reads; and for every use of a variable, whether it is a read,
 // and whether an owning use is `clean`: every other use of the same variable on the same path is a read that
 // finishes before the owner runs. Anything not proven clean marks the value shared, which only costs a missed reuse.
-import { partsOf } from '../ast.ts';
+import { eachExpr, partsOf } from '../ast.ts';
 import type { Expr, Field, FnDecl, Pattern, UsePos, Var } from '../ast.ts';
 import { INTRINSICS } from '../types.ts';
 
 type Role = 'x' | 'arg' | 'let' | 'result' | 'subject' | 'guard' | 'body';
 /** One step from a function's body down to a use: the expression, the part of it gone into, and which one. */
 type Step = { readonly n: Expr; readonly r: Role; readonly i: number };
+/**
+ * The steps down to where the walk is, innermost first, sharing every step above: a use copies it into an array
+ * once (the walk did that at every expression: 16-33% of what a compile allocated, heap profiles of tape 5ee13e6b).
+ */
+type Path = { readonly step: Step; readonly up: Path } | null;
+const stepsOf = (p: Path): Step[] => {
+  const out: Step[] = [];
+  for (let q = p; q; q = q.up) out.push(q.step);
+  return out.toReversed();
+};
 type Flags = { readonly guard?: boolean; readonly lambda?: boolean; readonly argOwn?: boolean };
 type Use = {
   readonly node: Var | Field;
@@ -67,11 +77,20 @@ function use(
   name: string,
   field: string | null,
   pos: UsePos,
-  path: readonly Step[],
+  path: Path,
   fl: Flags,
 ): void {
   node.pos = fl.lambda ? 'own' : pos;
-  rd.uses.push({ node, name, field, pos: node.pos, path, guard: !!fl.guard, lambda: !!fl.lambda, argOwn: !!fl.argOwn });
+  rd.uses.push({
+    node,
+    name,
+    field,
+    pos: node.pos,
+    path: stepsOf(path),
+    guard: !!fl.guard,
+    lambda: !!fl.lambda,
+    argOwn: !!fl.argOwn,
+  });
 }
 
 /** How each argument of a call is taken: an intrinsic reads; a function owns unless it is known only to read. */
@@ -93,9 +112,12 @@ function argPositions(rd: Reading, e: Extract<Expr, { k: 'call' }>): UsePos[] {
   });
 }
 
-function goMatch(rd: Reading, e: Extract<Expr, { k: 'match' }>, pos: UsePos, path: readonly Step[], fl: Flags): void {
-  const at = (r: Role, i: number): Step[] => [...path, { n: e, r, i }];
-  const plain = { ...fl, argOwn: false };
+/** The flags with argOwn as given: the same object when it already says so (most of the walk: no copy a node). */
+const argOwnAs = (fl: Flags, argOwn: boolean): Flags => (!!fl.argOwn === argOwn ? fl : { ...fl, argOwn });
+
+function goMatch(rd: Reading, e: Extract<Expr, { k: 'match' }>, pos: UsePos, path: Path, fl: Flags): void {
+  const at = (r: Role, i: number): Path => ({ step: { n: e, r, i }, up: path });
+  const plain = argOwnAs(fl, false);
   if (e.subject) go(rd, e.subject, 'subject', at('subject', 0), plain);
   const root = rootOf(rd, e.subject);
   e.arms.forEach((a, i) => {
@@ -106,9 +128,9 @@ function goMatch(rd: Reading, e: Extract<Expr, { k: 'match' }>, pos: UsePos, pat
   });
 }
 
-function go(rd: Reading, e: Expr, pos: UsePos, path: readonly Step[], fl: Flags): void {
-  const at = (r: Role, i: number): Step[] => [...path, { n: e, r, i }];
-  const plain = { ...fl, argOwn: false };
+function go(rd: Reading, e: Expr, pos: UsePos, path: Path, fl: Flags): void {
+  const at = (r: Role, i: number): Path => ({ step: { n: e, r, i }, up: path });
+  const plain = argOwnAs(fl, false);
   switch (e.k) {
     case 'int':
     case 'float':
@@ -131,7 +153,7 @@ function go(rd: Reading, e: Expr, pos: UsePos, path: readonly Step[], fl: Flags)
       const takes = argPositions(rd, e);
       e.args.forEach((a, i) => {
         const p = takes[i] ?? 'own';
-        go(rd, a.value, p, at('arg', i), { ...fl, argOwn: p === 'own' });
+        go(rd, a.value, p, at('arg', i), argOwnAs(fl, p === 'own'));
       });
       return;
     }
@@ -175,7 +197,7 @@ const clean = (o: Use, uses: readonly Use[]): boolean => o.pos !== 'read' && las
 /** Reads one function: marks its uses, and its parameters it turns out to own. True when a parameter was new. */
 function ownership(f: FnDecl, find: Find, owned: Map<string, boolean[]>): boolean {
   const rd: Reading = { f, find, owned, uses: [], derived: new Map(), mine: new Set(f.params.map(pm => pm.name)) };
-  go(rd, f.body, 'own', [], {});
+  go(rd, f.body, 'own', null, {});
   for (const o of rd.uses) {
     o.node.clean = clean(o, rd.uses);
     o.node.last = last(o, rd.uses);
@@ -195,9 +217,42 @@ function ownership(f: FnDecl, find: Find, owned: Map<string, boolean[]>): boolea
 }
 
 /** For each function, by name: whether it owns each of its parameters. With `reuse` off, none is known to. */
-export function ownedParameters(fns: ReadonlyMap<string, FnDecl>, find: Find, reuse: boolean): Map<string, boolean[]> {
+export function ownedParameters(
+  fns: ReadonlyMap<string, FnDecl>,
+  find: Find,
+  reuse: boolean,
+  rounds = false,
+): Map<string, boolean[]> {
   const owned = new Map([...fns.values()].map((f): [string, boolean[]] => [f.name, f.params.map(() => false)]));
   if (!reuse) return owned;
-  while ([...fns.values()].map(f => ownership(f, find, owned)).includes(true));
+  // rounds: every function read again until a round changes nothing (test/ownership.ts's oracle)
+  if (rounds) {
+    while ([...fns.values()].map(f => ownership(f, find, owned)).includes(true));
+    return owned;
+  }
+  // read every function once, then again only those that call one whose parameters changed: what a reading
+  // depends on, beside the function itself, is its callees' parameters (argPositions). Reading every function every
+  // round, until a round changed nothing, was most of what ownership allocated.
+  const callers = new Map<string, Set<FnDecl>>();
+  for (const f of fns.values())
+    eachExpr(f.body, e => {
+      if (e.k !== 'call') return;
+      let g: FnDecl | null = null;
+      try {
+        g = find(e.name, f.file);
+      } catch {
+        g = null;
+      }
+      if (!g) return;
+      const of = callers.get(g.name) ?? new Set<FnDecl>();
+      of.add(f);
+      callers.set(g.name, of);
+    });
+  let todo = new Set(fns.values());
+  while (todo.size > 0) {
+    const next = new Set<FnDecl>();
+    for (const f of todo) if (ownership(f, find, owned)) for (const c of callers.get(f.name) ?? []) next.add(c);
+    todo = next;
+  }
   return owned;
 }
