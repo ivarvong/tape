@@ -536,9 +536,15 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   const SLUG =
     'type Slug = View where len(self) >= 1 and every_byte(self, fn(b: Int) -> Bool { is_lower(b) or b == 45 })\n\nfn handle(raw: View) -> Buf {\n  match request(raw).path {\n    "/s/" ++ Slug(s) -> respond(status: 200) |> append(view: s)\n    _ -> respond(status: 404)\n  }\n}\n';
   const s = said(SLUG);
-  same('every_byte(self, …): C11 at the call', code(s), 'C11:1');
-  same('…and its fix writes the call with names', hint(s).includes('write `every_byte(v: self, keep: …)`'), true);
+  // the first argument may go without its name now (`self` is `v`); the second still names its parameter
+  same('every_byte(self, fn …): C10 at the second argument', code(s), 'C10:1');
+  same('…and its fix writes the call with names', hint(s).includes('`every_byte(v: self, keep: …)`'), true);
   same('…which compiles', said(SLUG.replace('every_byte(self, fn', 'every_byte(v: self, keep: fn')), 'compiled');
+  same(
+    '…and so does the first bare',
+    said(SLUG.replace('every_byte(self, fn', 'every_byte(self, keep: fn')),
+    'compiled',
+  );
 }
 
 // ---- a subquery in FROM with no name. `… FROM (SELECT … GROUP BY region) ORDER BY total` (2 runs on the 2026-11-23f

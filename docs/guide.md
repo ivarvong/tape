@@ -673,8 +673,8 @@ fn fact(n: Int) -> Int {
 }
 ```
 
-`fact(n - 1)` passes its argument bare because `fact` has one parameter; a function of two names the others,
-`pow(b, e: e - 1)`, and C10 shows that rewrite when it is missing. A hash or a checksum that means arithmetic
+`fact(n - 1)` and `pow(b, e: e - 1)` pass their first argument without its name; every argument after the first
+is named, and C10 shows that rewrite when it is missing. A hash or a checksum that means arithmetic
 modulo 2^64 says so with `wrapping_add`, `wrapping_sub` or `wrapping_mul`. A loop over text, `at + 1` after
 `at >= len(v)` did not hold or after `v[at]` was read, costs no overflow test: the compiler knows `at` is a length
 at most ([`compiler/gen/range.ts`](../compiler/gen/range.ts)).

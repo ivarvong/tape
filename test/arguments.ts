@@ -75,17 +75,16 @@ fn f() -> Int {
   pow(b: 2, e: 10)
 }
 `;
-const RULE =
-  "A variable with the parameter's name can be passed bare, and so can the one argument of a function with one parameter.";
+const RULE = "A variable with the parameter's name can be passed bare.";
 same(
   'two parameters: an unnamed expression is refused, and the fix is shown',
   refusal(POW),
-  `C10 4: arguments must be named | function pow takes (b, e), so each argument is \`name: value\`, as in \`pow(b, e: e - 1)\`. ${RULE}`,
+  `C10 4: arguments must be named | function pow takes (b, e): the first argument may be written without its name, and each one after it is \`name: value\`, as in \`pow(b, e: e - 1)\`. ${RULE}`,
 );
 same(
   'two parameters, both unnamed',
   refusal('fn add(a: Int, b: Int) -> Int {\n  a + b\n}\n\nfn f() -> Int {\n  add(1, 2 * 3)\n}\n'),
-  `C10 6: arguments must be named | function add takes (a, b), so each argument is \`name: value\`, as in \`add(a: 1, b: 2 * 3)\`. ${RULE}`,
+  `C10 6: arguments must be named | function add takes (a, b): the first argument may be written without its name, and each one after it is \`name: value\`, as in \`add(a: 1, b: 2 * 3)\`. ${RULE}`,
 );
 same('named, it compiles', refusal(POW.replace('pow(b, e - 1)', 'pow(b, e: e - 1)')), 'compiled');
 
@@ -140,7 +139,7 @@ same(
 same(
   'C10 names the written parameters only, and the call written that way',
   ambientRefusal(AMBIENT.replace('total(id: invoice_id, scale: 2)', 'total(invoice_id + 0, 2)')),
-  `C10 8: arguments must be named | function total takes (id, scale), so each argument is \`name: value\`, as in \`total(id: invoice_id + 0, scale: 2)\`. ${RULE}`,
+  `C10 8: arguments must be named | function total takes (id, scale): the first argument may be written without its name, and each one after it is \`name: value\`, as in \`total(id: invoice_id + 0, scale: 2)\`. ${RULE}`,
 );
 same(
   'the added db passed by hand is taken too',

@@ -1,7 +1,12 @@
-// compiler/pipes.ts: `a |> f(b: 1)` is `f(first: a, b: 1)`.
+// compiler/pipes.ts: `a |> f(b: 1)` is `f(first: a, b: 1)`, and `f(a, b: 1)` is too.
 // The piped value fills the callee's first parameter, as declared. Built-ins whose arguments are checked by name
 // say which parameter comes first here; every other built-in lists its parameters in INTRINSICS.
-import { type At, type FnDecl, type Program, eachExpr } from './ast.ts';
+//
+// The one rule for an argument with no name: a bare name that is one of the callee's parameters passes that
+// parameter (`f(at)` is `f(at: at)`); any other argument written first with no name passes the first parameter
+// (`every_byte(self, keep: is_lower)` is `every_byte(v: self, keep: is_lower)`). Every argument after the first is
+// named or a name of the callee's. A function of one parameter takes its argument bare, as before.
+import { type At, type Expr, type FnDecl, type Program, eachExpr } from './ast.ts';
 import { fail, stemOf } from './common.ts';
 import { INTRINSICS } from './types.ts';
 
@@ -62,6 +67,49 @@ export function resolvePipes(prog: Program): void {
       )
     );
   };
+  // the names of the parameters a program writes at a call (the capabilities the compiler adds are not yet among
+  // them), or null for a built-in checked by name or a function value
+  const paramsOf = (name: string, file: string): readonly string[] | null => {
+    if (PIPE_FIRST[name]) return null;
+    const builtIn = INTRINSICS.get(name);
+    if (builtIn) return builtIn;
+    if (name.includes('.')) return null;
+    const own = prog.byFile.get(file)?.get(name),
+      keys = own ? [own] : (prog.defs.get(name) ?? []).map(d => d.key),
+      lists = keys.map(
+        k =>
+          prog.fns
+            .get(k)
+            ?.params.filter(pm => !pm.implicit)
+            .map(pm => pm.name) ?? [],
+      );
+    const [one] = lists;
+    return one !== undefined && lists.every(l => l.join() === one.join()) ? one : null;
+  };
+  // every function's body, and every refinement's condition (`where every_byte(self, keep: is_lower)`)
+  const roots: [string, Expr][] = [
+    ...[...prog.fns.values()].map((f): [string, Expr] => [f.file, f.body]),
+    ...[...prog.types.values()].flatMap((t): [string, Expr][] => (t.refine ? [[t.file, t.refine.pred]] : [])),
+  ];
+  for (const [file, root] of roots)
+    eachExpr(root, e => {
+      if (e.k !== 'call') return;
+      const [first] = e.args;
+      if (first && !first.piped && (first.label === null || first.pun)) {
+        // written first with no name: the first parameter, unless it is a name of one of the parameters
+        const params = paramsOf(e.name, file);
+        const [p0] = params ?? [];
+        if (
+          params &&
+          params.length > 1 &&
+          p0 !== undefined &&
+          (first.label === null || !params.includes(first.label))
+        ) {
+          first.label = p0;
+          delete first.pun;
+        }
+      }
+    });
   for (const f of prog.fns.values())
     eachExpr(f.body, e => {
       const piped = e.k === 'call' ? e.args[0] : undefined;

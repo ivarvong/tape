@@ -152,8 +152,8 @@ const DOCS = 'https://github.com/ivarvong/tape/blob/main/docs';
  * and could not find (bench/usability, 2026-11-22: respond_as, Request's fields, the query). Every function named
  * here is in std/ or a built-in (mcp/test.ts, list).
  */
-export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a whole service, worked: ${DOCS}/guide.md#quickstart-a-service-in-one-file; the language: https://github.com/ivarvong/tape/blob/main/LANGUAGE.md):
-- Entry: \`fn handle(raw: View, db: Sql) -> Buf\`, with only the capabilities it uses (db: Sql, clock: Clock, timer: Timer). Arguments are named, \`f(a: 1)\`, or bare when the value is named so, \`f(a)\`.
+export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a whole service: ${DOCS}/guide.md#quickstart-a-service-in-one-file; the language: https://github.com/ivarvong/tape/blob/main/LANGUAGE.md):
+- Entry: \`fn handle(raw: View, db: Sql) -> Buf\`, with the capabilities it uses (db: Sql, clock: Clock, timer: Timer). Arguments are named, \`f(a: 1)\`, bar the first, \`f(1, b: 2)\`, and a value named so, \`f(a)\`.
 - Request: \`match request(raw) { Request(method: "GET", path: "/items/" ++ decimal(id)) -> … }\`. Fields: method, path (before \`?\`), query: Option[View] (raw, after \`?\`; one parameter: \`form_field(body: q, name: "limit")\`), body, caller, headers (read one: \`header_of(request: r, name: "accept")\`).
 - Respond: \`respond(status: 404)\` is text/plain; \`respond_as(status: 200, content: Json) |> write_json(value: Item(id, name))\` is JSON (content: Json, Html, Text, Css, Svg or Csv); \`write_rows(rows: sql_all(…))\` writes rows as an array; \`append(view: "text")\` adds text; \`|> header(name: "location", value: url)\` sets a header. write_json writes what decode reads: records, Lists, Option fields (None: no key), several constructors as \`{"Sets": {…}}\`; \`decode(json: body, as: List[Item])\` reads an array.
 - JSON in (an arm of a block is a line of its own):

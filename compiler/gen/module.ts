@@ -233,7 +233,7 @@ function rewrite(what: string, names: readonly string[], args: readonly Arg[]): 
     const name = a.label !== null && names.includes(a.label) ? a.label : names[i];
     return name === undefined ? null : shownArg(name, a);
   });
-  return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `, as in \`${fn}(${shown.join(', ')})\``;
+  return shown.includes(null) ? '' : `, as in \`${fn}(${shown.join(', ')})\``;
 }
 
 /**
@@ -293,7 +293,7 @@ export function orderArgs(
         a,
         'C10',
         'arguments must be named',
-        `${what} takes ${list}, so each argument is \`name: value\`${rewrite(what, written, given)}. A variable with the parameter's name can be passed bare, and so can the one argument of a function with one parameter.`,
+        `${what} takes ${list}: the first argument may be written without its name, and each one after it is \`name: value\`${rewrite(what, written, given)}. A variable with the parameter's name can be passed bare.`,
       );
     if (!names.includes(a.label)) {
       const fix = renamed(what, written, given, a) || (a.pun ? byPosition(what, written, given) : '');
