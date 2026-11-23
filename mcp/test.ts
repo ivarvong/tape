@@ -330,7 +330,7 @@ const tests: Test[] = [
         [{ text: 'x', kind: 'rant' }, 'bad_kind'],
         [{ text: 'x', mood: 'sad' }, 'unknown_argument'],
         [{ text: 'x', files: [{ name: 'a.tape', text: 'x'.repeat(64 * 1024 + 1) }] }, 'source_too_large'],
-        [{ text: 'x', requests: Array.from({ length: 21 }, () => 'GET /') }, 'too_many_requests'],
+        [{ text: 'x', requests: Array.from({ length: 51 }, () => 'GET /') }, 'too_many_requests'],
         [{ text: 'x', expected: 'x'.repeat(8 * 1024 + 1) }, 'field_too_large'],
         [{ text: 'x', actual: 7 }, 'bad_field'],
       ];
@@ -476,7 +476,7 @@ const tests: Test[] = [
       if (!String(run?.['description']).includes('Hello again, ada #2!'))
         out.push('run: its description does not give the second body');
       const req = F(F(run?.['inputSchema'])['properties'])['requests'];
-      if (F(req)['maxItems'] !== 20 || JSON.stringify(F(run?.['inputSchema'])['required']) !== '["requests"]')
+      if (F(req)['maxItems'] !== 50 || JSON.stringify(F(run?.['inputSchema'])['required']) !== '["requests"]')
         out.push(`run: requests ${JSON.stringify(req)}`);
       return out;
     },
@@ -545,6 +545,26 @@ const tests: Test[] = [
       );
       if (http.status !== 200 || !same(http.body, r))
         out.push(`POST /v1/run is not what the tool gives: ${http.status}`);
+      return out;
+    },
+  },
+  {
+    name: 'lenient arguments',
+    run: async m => {
+      const out: string[] = [];
+      // 18 of about 120 trace arguments in the usability bench were the mode quoted twice ("\"none\""): taken as the
+      // mode, not refused; a quoted word that is no mode still is
+      const quoted = await tool(m, 'run', { requests: ['GET /hello/ada'], trace: '"none"', effects: '"full"' });
+      if (quoted.isError || RESULTS(quoted.out)[0]?.['trace'] !== null)
+        out.push(`trace quoted none: ${JSON.stringify(quoted.out).slice(0, 200)}`);
+      const unknown = await tool(m, 'run', { requests: ['GET /hello/ada'], trace: '"otlp"' });
+      if (unknown.out['error'] !== 'bad_arguments') out.push(`trace quoted otlp: ${JSON.stringify(unknown.out)}`);
+      // 50 requests a call (one call of 50 hello requests took about 8 ms in Node)
+      const { out: r, isError } = await tool(m, 'run', {
+        requests: Array.from({ length: 50 }, (_, i) => `GET /hello/n${i}`),
+      });
+      if (isError || r['ok'] !== true || RESULTS(r).length !== 50)
+        out.push(`50 requests: ${RESULTS(r).length} results, ${JSON.stringify(r).slice(0, 120)}`);
       return out;
     },
   },
@@ -767,8 +787,8 @@ const tests: Test[] = [
       await expect('a file with another field', { requests: ok, files: [{ ...hello, path: 'x' }] }, 400, 'bad_files');
       await expect('no files', { requests: ok, files: [] }, 400, 'bad_files');
       await expect(
-        '21 requests',
-        { requests: Array.from({ length: 21 }, () => 'GET /hello/ada') },
+        '51 requests',
+        { requests: Array.from({ length: 51 }, () => 'GET /hello/ada') },
         413,
         'too_many_requests',
       );
@@ -818,8 +838,8 @@ const tests: Test[] = [
         out.push(`text/plain: ${form.status}`);
       const page = await post(m, '/mcp', '{}', { headers: { origin: 'https://evil.example' } });
       if (page.status !== 403 || F(page.body)['error'] !== 'origin_refused') out.push(`an Origin: ${page.status}`);
-      const big = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /'], pad: 'x'.repeat(1_000_000) }));
-      if (big.status !== 413 || F(big.body)['error'] !== 'body_too_large') out.push(`a 1 MB body: ${big.status}`);
+      const big = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /'], pad: 'x'.repeat(2_000_000) }));
+      if (big.status !== 413 || F(big.body)['error'] !== 'body_too_large') out.push(`a 2 MB body: ${big.status}`);
       const unsalted = await rpc(m, 'tools/list', {}, 1, { gate: { salt: undefined } });
       if (unsalted.status !== 503 || F(unsalted.body)['error'] !== 'misconfigured')
         out.push(`no IP_SALT: ${unsalted.status}`);

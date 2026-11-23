@@ -87,11 +87,12 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
 
 ### run
 
-Also takes `requests`: 1 to 20, each `METHOD SP TARGET`, then optionally a line feed and a body
+Also takes `requests`: 1 to 50, each `METHOD SP TARGET`, then optionally a line feed and a body
 (`"POST /links\n{\"url\":\"https://example.com\"}"`), or `{"request": "…", "at_ms": 61000}` to send it at a time of
 the run's own clock (below). They run in order against one database, so the second `GET /hello/ada` sees the first
 one's write. Two optional arguments say how much comes back: `trace` (`"summary"`, the default; `"full"`;
-`"none"`) and `effects` (`"compact"`, the default; `"full"`).
+`"none"`) and `effects` (`"compact"`, the default; `"full"`); a mode quoted twice (`"\"none\""`) is taken as the
+mode.
 
 ```json
 { "ok": true, "diagnostics": [],

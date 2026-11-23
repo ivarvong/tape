@@ -228,7 +228,7 @@ const all: Part[] = [
   [
     "mcp/test.ts: tape-mcp's tools and HTTP face, in Node, against README.md and the playground's traces",
     [node, 'mcp/test.ts'],
-    /^all 21 tests pass$/m,
+    /^all 22 tests pass$/m,
   ],
   [
     'apps/trace/test.ts: trace.tape against what the OTLP alone says the picture should show',

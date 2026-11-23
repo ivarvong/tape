@@ -254,7 +254,7 @@ describe('tape-mcp in workerd', () => {
     expect((await post('/v1/run', '{}', { 'content-type': 'text/plain' })).status).toBe(415);
     const bad = await post('/mcp', '{"jsonrpc":');
     expect([bad.status, F(bad.json['error'])['code']]).toEqual([400, -32700]);
-    expect((await post('/v1/run', { requests: Array.from({ length: 21 }, () => 'GET /') })).json).toMatchObject({
+    expect((await post('/v1/run', { requests: Array.from({ length: 51 }, () => 'GET /') })).json).toMatchObject({
       ok: false,
       error: 'too_many_requests',
     });

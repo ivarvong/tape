@@ -21,7 +21,8 @@ export const LIMITS = {
   /** every file's text together, in UTF-8 bytes */
   sourceBytes: 64 * 1024,
   files: 8,
-  requests: 20,
+  /** one call of 50 hello requests: about 8 ms of wall time in Node (20: about 3 ms) */
+  requests: 50,
   /** a request's first line (METHOD SP TARGET) */
   lineBytes: 2 * 1024,
   /** a request's body, after its first line feed */
@@ -261,15 +262,17 @@ export function requestsOf(args: Fields): RunRequest[] | Refusal {
 
 /** An argument that is one of a few words, or its default when it is absent. */
 function modeOf<T extends string>(args: Fields, name: string, modes: readonly T[], fallback: T): T | Refusal {
-  const v = args[name];
-  if (v === undefined || v === null) return fallback;
+  const given = args[name];
+  if (given === undefined || given === null) return fallback;
+  // the mode quoted twice ("\"none\"", JSON inside the JSON) is the mode: agents send it often enough to accept it
+  const v = typeof given === 'string' && /^"[a-z]+"$/.test(given) ? given.slice(1, -1) : given;
   const found = modes.find(m => m === v);
   return (
     found ??
     refused(
       400,
       'bad_arguments',
-      `\`${name}\` is ${JSON.stringify(v)}; it is one of ${modes.map(m => `"${m}"`).join(', ')}`,
+      `\`${name}\` is ${JSON.stringify(given)}; it is one of ${modes.map(m => `"${m}"`).join(', ')}`,
     )
   );
 }
