@@ -44,8 +44,8 @@ line or in parentheses (P02 says so). The formatter breaks a line that is too lo
 `and` and `or`, and indents a carried line once more. A backslash at the end of a line inside a
 text literal carries the text on after the next line's indentation.
 
-Reserved words: `fn export type schema migration flag match with let do if else and or not`. Words with a meaning
-only where they stand: `interface machine invariant where contract settled private final read write`. A reserved
+Reserved words: `fn export type schema migration match with let do if else and or not`. Words with a meaning
+only where they stand: `interface flag machine invariant where contract settled private final read write`. A reserved
 word can name a record's field, since a field is never a variable: `Event(type: View)`, `e.type`, and in a pattern
 `Event(type: kind)`, which binds `kind` (a bare `Event(type)` would bind a variable named `type`, and is P01). So a
 JSON key that is a reserved word is decoded and written like any other.

@@ -168,7 +168,6 @@ fn reserved(w: View) -> Bool {
     "type" -> True
     "schema" -> True
     "migration" -> True
-    "flag" -> True
     "match" -> True
     "with" -> True
     "let" -> True
@@ -185,6 +184,7 @@ fn reserved(w: View) -> Bool {
 fn contextual(w: View) -> Bool {
   match w {
     "interface" -> True
+    "flag" -> True
     "machine" -> True
     "invariant" -> True
     "where" -> True

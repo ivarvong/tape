@@ -408,16 +408,16 @@ fn handle(raw: View, db: Sql) -> Buf {
 // "expected an expression but found `flag`" (the P01 that names the reserved word comes only at the definition).
 {
   const FLAG =
-    'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_int(value: flag(b: True))\n}\n\nfn flag(b: Bool) -> Int {\n  1\n}\n';
+    'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_int(value: schema(b: True))\n}\n\nfn schema_(b: Bool) -> Int {\n  1\n}\n';
   const s1 = said(FLAG);
   same(
     'a reserved word called: P02 that says so',
     [code(s1), s1 === 'compiled' ? '' : s1.message],
-    ['P02:2', '`flag` is a reserved word, so no function has that name'],
+    ['P02:2', '`schema` is a reserved word, so no function has that name'],
   );
   same(
     '…and renamed where it is defined and called, as the fix says, it compiles',
-    said(FLAG.replaceAll('flag(', 'flag_(')),
+    said(FLAG.replaceAll('schema(', 'schema_(')),
     'compiled',
   );
 }
@@ -471,6 +471,31 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
     ['compiled', 'compiled'],
   );
   same('…and a key that is the same every time is still C65', code(said(field('ForOrder(order: 1)'))), 'C65:19');
+}
+
+// ---- `flag` is a word with a meaning only where a top-level `flag` declaration starts, as `invariant` is: a todo
+// service's `done` flag was named `flag` in 3 runs of each of the last two bench rounds (P01, P02 and P04 by where it
+// stood). As a function, a parameter, a variable and a binder it is a name now, and a declaration still declares;
+// a reserved word in a pattern is P04 that names it, as P01 and P02 do.
+{
+  same(
+    'flag as a function, a parameter, a let and a pattern binder compiles',
+    said(
+      'fn flag(flag: Bool) -> Int {\n  match flag {\n    True -> 1\n    False -> 0\n  }\n}\n\nfn g(o: Option[Bool]) -> Int {\n  let n = match o {\n    Some(value: flag) if flag -> 1\n    _ -> 0\n  }\n  n\n}\n\nfn handle(raw: View) -> Buf {\n  let flag = True\n  respond(status: 200) |> write_int(value: flag(flag))\n}\n',
+    ),
+    'compiled',
+  );
+  const FLAGGED =
+    'flag limit: Int = 7\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_int(value: flags.limit)\n}\n';
+  same('a flag declaration still declares one', said(FLAGGED), 'compiled');
+  const s = said(
+    'fn f(o: Option[Int]) -> Int {\n  match o {\n    Some(value: match) -> 1\n    _ -> 0\n  }\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n',
+  );
+  same(
+    'a reserved word as a pattern: P04 that names it',
+    [code(s), s === 'compiled' ? '' : s.message],
+    ['P04:3', 'expected a pattern but found `match`, a reserved word'],
+  );
 }
 
 finish();

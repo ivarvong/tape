@@ -388,8 +388,10 @@ function simplePattern(c: Cursor, inLet: boolean): Pattern {
     return fail(
       t,
       'P04',
-      `expected a pattern but found ${shown(t)}`,
-      'A pattern is a constructor, a number, a text literal, a name or `_`.',
+      `expected a pattern but found ${shown(t)}${t.t === 'kw' ? ', a reserved word' : ''}`,
+      t.t === 'kw'
+        ? `A reserved word (${[...KEYWORDS].join(' ')}) cannot be bound: bind another name (\`${t.v}_\`). As a field it is named: \`Event(${t.v}: x)\`.`
+        : 'A pattern is a constructor, a number, a text literal, a name or `_`.',
     );
   const subs = c.eat('op', '(') ? c.list(fieldPattern) : [];
   if (subs.length > 0) c.expect('op', ')');

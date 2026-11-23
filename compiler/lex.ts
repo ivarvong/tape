@@ -8,7 +8,6 @@ export const KEYWORDS = new Set([
   'type',
   'schema',
   'migration',
-  'flag',
   'match',
   'with',
   'let',

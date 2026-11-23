@@ -6,14 +6,15 @@ import { fail } from './common.ts';
 import { Cursor, shown, textOf } from './parse/cursor.ts';
 import { flag, fnDecl, interfaceDecl, invariant, machine, migration, typeDecl } from './parse/decl.ts';
 
-// one declaration, whose first token has been read. `private`, `invariant`, `machine` and `interface` are names
-// with a meaning here and nowhere else: they are not keywords.
+// one declaration, whose first token has been read. `private`, `invariant`, `machine`, `interface` and `flag` are
+// names with a meaning here and nowhere else: they are not keywords (`flag limit: Int = 7` declares one; a function,
+// a parameter or a variable may be named flag).
 function declaration(c: Cursor, prog: Program, t: Token): void {
   const word = t.t === 'kw' || t.t === 'id' ? t.v : null,
     kw = t.t === 'kw';
   if (kw && word === 'schema') prog.schema.push(textOf(c.expect('str').v));
   else if (kw && word === 'migration') migration(c, prog);
-  else if (kw && word === 'flag') flag(c, prog);
+  else if (!kw && word === 'flag' && c.is('id') && c.peek(1).t === 'op') flag(c, prog);
   else if (kw && word === 'type') typeDecl(c, prog, false);
   // `private type`: its constructors build values only in this file (C66)
   else if (!kw && word === 'private' && c.eat('kw', 'type')) typeDecl(c, prog, true);
