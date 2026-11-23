@@ -2,6 +2,7 @@
 // (lab_notebook/tape-2026-11-21/usability-baseline.md). Each form is checked compiled and, where it gives a program a
 // meaning, in the reference interpreter too; each refusal by its code.
 import '../node25.ts';
+import { DatabaseSync } from 'node:sqlite';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
@@ -322,5 +323,113 @@ T(
 `).split(' | ')[0],
   'P01 expected a name but found `type`, a reserved word',
 );
+
+// ---- 5. C69: a PRIMARY KEY column read into a field that cannot be NULL. SQLite is the oracle: each table is made
+// in node:sqlite and sent a NULL key; the compiler must take a View/Int field exactly when SQLite refuses the NULL.
+{
+  const tables = [
+    'CREATE TABLE t(id TEXT PRIMARY KEY, n INTEGER NOT NULL)',
+    'CREATE TABLE t(id TEXT PRIMARY KEY NOT NULL, n INTEGER NOT NULL)',
+    'CREATE TABLE t(id TEXT PRIMARY KEY, n INTEGER NOT NULL) STRICT',
+    'CREATE TABLE t(id TEXT PRIMARY KEY, n INTEGER NOT NULL) WITHOUT ROWID',
+    'CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER NOT NULL)',
+    'CREATE TABLE t(id INTEGER PRIMARY KEY DESC, n INTEGER NOT NULL)',
+    'CREATE TABLE t(id INT PRIMARY KEY, n INTEGER NOT NULL)',
+    'CREATE TABLE t(id INTEGER, n INTEGER NOT NULL, PRIMARY KEY(id))',
+  ];
+  for (const ddl of tables) {
+    const db = new DatabaseSync(':memory:');
+    db.exec(ddl);
+    let refusesNull = false;
+    try {
+      db.exec('INSERT INTO t(id, n) VALUES (NULL, 1)');
+      refusesNull = db.prepare('SELECT id FROM t').all()[0]?.['id'] !== null;
+    } catch {
+      refusesNull = true;
+    }
+    const field = ddl.includes('id TEXT') ? 'View' : 'Int';
+    const src = `migration 1 "t" {
+  ${ddl}
+}
+
+type Row {
+  Row(id: ${field}, n: Int)
+}
+
+fn f(db: Sql) -> Int {
+  match sql_first(row: Row, query: "SELECT id, n FROM t") {
+    Some(value) -> value.n
+    None -> 0
+  }
+}
+`;
+    T(
+      `C69 agrees with SQLite: ${ddl.slice(13)} ${refusesNull ? 'never holds' : 'may hold'} a NULL key`,
+      codes(src),
+      refusesNull ? [] : ['C69:10'],
+    );
+  }
+  T(
+    'C69 on a PRIMARY KEY: the fix is the declaration to write',
+    fix(`migration 1 "t" {
+  CREATE TABLE t(id TEXT PRIMARY KEY, n INTEGER NOT NULL)
+}
+
+type Row {
+  Row(id: View, n: Int)
+}
+
+fn f(db: Sql) -> Int {
+  match sql_first(row: Row, query: "SELECT id, n FROM t") {
+    Some(value) -> value.n
+    None -> 0
+  }
+}
+`).split(' | ')[1],
+    'Add NOT NULL to the column in its migration: `id TEXT PRIMARY KEY NOT NULL`.',
+  );
+}
+
+// ---- 9. every pattern a match arm takes stands in `let … else`, text patterns that open with a name too
+{
+  const Q = `fn f(n: Int) -> Int {
+  let text = match n {
+    0 -> "a=12&b=3"
+    1 -> "b=3"
+    _ -> "a=x"
+  }
+  value_of(text)
+}
+
+fn value_of(text: View) -> Int {
+  let head ++ "&" ++ rest = text else -> -1
+  let "a=" ++ digits = head else -> -2
+  let decimal(v) = digits else -> -3
+  v * 10 + len(rest)
+}
+`;
+  T(
+    'let: a split, a prefix and a function pattern, each with else',
+    [0n, 1n, 2n].map(n => run(Q, 'f', [n])),
+    [123, -1, -1],
+  );
+  T(
+    'let: name = Pattern still binds the whole value inside brackets',
+    run(
+      `type W {
+  W(text: View)
+}
+
+fn f(n: Int) -> Int {
+  let W(text: whole = "x" ++ rest) = W(text: "xyz") else -> 0
+  len(whole) * 10 + len(rest)
+}
+`,
+      'f',
+      [0n],
+    ),
+    32,
+  );
+}
 
 finish();

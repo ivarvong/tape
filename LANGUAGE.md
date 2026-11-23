@@ -106,8 +106,22 @@ A body is steps, then one expression that is its value. There are three steps:
 | Step | Meaning |
 |---|---|
 | `let x = e` | name a value. `let Order(id, amount) = e` takes apart a value whose pattern cannot fail |
-| `let P = e else { arms }` | go on with the case `P`; every other case leaves the function through an arm. `else -> e` takes all of them. `P` is any pattern: `let 1 = sql_exec(…) else -> …` goes on when one row changed |
+| `let P = e else { arms }` | go on with the case `P`; every other case leaves the function through an arm. `else -> e` takes all of them. `P` is any pattern a match arm takes: `let 1 = sql_exec(…) else -> …` goes on when one row changed, `let key ++ "=" ++ value = pair else -> …` splits a text. An `=` outside brackets ends the pattern; `name = P` binds a whole value inside them |
 | `do f(…)` | run a call for what it does. The call must return an `Int`, which is dropped |
+
+```tape gives
+fn version(n: Int) -> Int {
+  let tag = match n {
+    1 -> "v12"
+    _ -> "12"
+  }
+  let "v" ++ decimal(v) = tag else -> -1
+  v
+}
+
+// version(1) is 12
+// version(2) is -1
+```
 
 Branching is `match`, and a match is an expression: a function's or an arm's value, a `let`'s value, an argument,
 an operand, the left side of a pipe:
@@ -199,7 +213,7 @@ View, …capabilities) -> Buf` serves requests. `woken` serves timers.
 
 | Declaration | States |
 |---|---|
-| `migration 1 "name" { SQL }` | the tables. Migrations only add (C51); one marked `contract` may remove |
+| `migration 1 "name" { SQL }` | the tables. Migrations only add (C51); one marked `contract` may remove. A column read into a field that is not an `Option` is never NULL: declare it NOT NULL. SQLite lets a PRIMARY KEY column hold NULL too, unless it is an `INTEGER PRIMARY KEY` (the rowid; not `DESC`) or its table is `WITHOUT ROWID` or `STRICT`, so `id TEXT PRIMARY KEY NOT NULL` (C69) |
 | `machine orders.state { "a" -> "b" }` | the moves a column may make. Every write of the column is checked against them, and the host installs triggers that refuse any other |
 | `invariant "name" { SELECT … }` | rows that must not exist: the SELECT returns what is wrong. Checked after every commit by `tape sim`, and by `app.invariants()` in the host |
 | `invariant "name" settled { … }` | the same, once nothing is in flight and every timer has run |
@@ -541,6 +555,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | a `let` whose pattern opened with a name (`let head ++ "&" ++ rest = q else …`) read as a plain `let` (P01) | every pattern a match arm takes stands there; a `STRICT` table's PRIMARY KEY is known NOT NULL (C69), and C69's fix is the declaration to write |
 | 23 November 2026 | a reserved word could not name a field (P01), so a JSON key such as `"type"` could not be decoded | it can: `Event(type: View)`, `e.type`, `Event(type: kind)` |
 | 23 November 2026 | `match` only as the last expression of a function or of an arm (refused elsewhere), so a decision in a `let`, an argument or an operand was a function of its own | a match is an expression wherever a value is (its code is retired) |
 | 22 November 2026 | `Int` arithmetic that did not fit wrapped around (`fact(21)` answered `-4249290049419214848`), and so did a literal too large for an `Int` | a trap, integer overflow (trap 6; division by zero is trap 4 alone, a shift outside 0..63 is trap 7); `wrapping_add`, `wrapping_sub`, `wrapping_mul` where wrapping is meant; a literal out of range is P08 |

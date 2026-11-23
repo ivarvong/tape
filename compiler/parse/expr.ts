@@ -249,8 +249,10 @@ export function expr(c: Cursor): Expr {
 // ---- patterns
 // `P ++ "text"` matches text ending in "text"; `P ++ "sep" ++ Q` splits at the first "sep": P matches what is
 // before it, Q what is after. With `"prefix" ++ …` this gives mid-path captures: `"/runs/" ++ decimal(id) ++ "/advance"`.
-export function pattern(c: Cursor): Pattern {
-  const head = simplePattern(c);
+/** A pattern. `inLet`: it is a `let`'s, so an `=` outside brackets ends it (`let head ++ "," ++ rest = text`)
+ * rather than binding the whole value (`name = Pattern`, which stands inside brackets there). */
+export function pattern(c: Cursor, inLet = false): Pattern {
+  const head = simplePattern(c, inLet);
   if (head.k === 'str' || head.k === 'prefix' || !c.is('op', '++')) return head;
   const at = c.at(c.next());
   const sep =
@@ -262,13 +264,13 @@ export function pattern(c: Cursor): Pattern {
       'Write `decimal(id) ++ "/advance"`: the text that ends the capture.',
     );
   return c.eat('op', '++')
-    ? { k: 'split', head, bytes: sep.v, rest: pattern(c), ...at }
+    ? { k: 'split', head, bytes: sep.v, rest: pattern(c, inLet), ...at }
     : { k: 'suffix', head, bytes: sep.v, ...at };
 }
 // a pattern that opens with a name: `name = Pattern` (the whole value, once it matches), `decimal(n)`, or a binding
-function namedPattern(c: Cursor, t: Token & { t: 'id' }): Pattern {
+function namedPattern(c: Cursor, t: Token & { t: 'id' }, inLet: boolean): Pattern {
   const at = c.at(t);
-  if (c.eat('op', '=')) return { k: 'as', name: t.v, pat: pattern(c), ...at };
+  if (!inLet && c.eat('op', '=')) return { k: 'as', name: t.v, pat: pattern(c), ...at };
   if (!c.eat('op', '(')) return { k: 'bind', name: t.v, ...at };
   const sub = pattern(c);
   c.expect('op', ')', 'A function pattern takes one pattern: `decimal(n)`.');
@@ -287,15 +289,17 @@ function fieldPattern(c: Cursor): { field: string; pat: Pattern; pun?: true } {
     );
   return { field: f.v, pun: true, pat: { k: 'bind', name: f.v, ...c.at(f) } };
 }
-function simplePattern(c: Cursor): Pattern {
+function simplePattern(c: Cursor, inLet: boolean): Pattern {
   const t = c.next(),
     at = c.at(t);
   if (t.t === 'op' && t.v === '_') return { k: 'any', ...at };
   if (t.t === 'int') return { k: 'int', v: intLiteral(t, t.v), ...at };
   if (t.t === 'op' && t.v === '-') return { k: 'int', v: intLiteral(t, -c.expect('int').v), ...at };
   if (t.t === 'str')
-    return c.eat('op', '++') ? { k: 'prefix', bytes: t.v, rest: pattern(c), ...at } : { k: 'str', bytes: t.v, ...at };
-  if (t.t === 'id') return namedPattern(c, t);
+    return c.eat('op', '++')
+      ? { k: 'prefix', bytes: t.v, rest: pattern(c, inLet), ...at }
+      : { k: 'str', bytes: t.v, ...at };
+  if (t.t === 'id') return namedPattern(c, t, inLet);
   if (t.t !== 'Id')
     return fail(
       t,
@@ -388,6 +392,15 @@ function plainLet(c: Cursor): Let {
   c.expect('nl');
   return { name: n.v, value, ...c.at(n) };
 }
+/** Does the `let` at the cursor take a value apart with a pattern, rather than name it? */
+const patternLet = (c: Cursor): boolean => {
+  const first = c.peek(),
+    next = c.peek(1);
+  if (first.t === 'Id' || first.t === 'str' || first.t === 'int') return true;
+  if (first.t === 'op' && first.v === '-') return next.t === 'int';
+  if (first.t === 'op' && first.v === '_') return true;
+  return first.t === 'id' && next.t === 'op' && (next.v === '++' || next.v === '(');
+};
 function steps(c: Cursor): Steps {
   const lets: Let[] = [];
   for (;;) {
@@ -395,11 +408,16 @@ function steps(c: Cursor): Steps {
     else if (!c.eat('kw', 'let')) return { lets, result: expr(c) };
     // `let Order(id, sku) = e` takes a value apart; the pattern must always match (checked where it is compiled),
     // unless an `else` takes the other cases. Any pattern can stand here: a constructor, a text, a number
-    // (`let 1 = sql_exec(…) else -> …`: go on when one row changed).
-    else if (c.is('Id') || c.is('str') || c.is('int') || (c.is('op', '-') && c.peek(1).t === 'int')) {
+    // (`let 1 = sql_exec(…) else -> …`: go on when one row changed), a text pattern that opens with a name
+    // (`let head ++ "&" ++ rest = query else -> …`) or a function pattern (`let decimal(n) = text else -> …`).
+    else if (patternLet(c)) {
       const at = c.at(c.peek()),
-        pat = pattern(c);
-      c.expect('op', '=', 'A destructuring `let` is `let Ctor(field, …) = expression`.');
+        pat = pattern(c, true);
+      c.expect(
+        'op',
+        '=',
+        'A `let` that takes a value apart is `let Pattern = expression`, with `else` when it can fail.',
+      );
       const value = expr(c);
       if (c.is('kw', 'else')) return { lets, result: letElse(c, at, pat, value) };
       lets.push({ pat, value, ...at });

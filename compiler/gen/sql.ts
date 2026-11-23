@@ -58,9 +58,9 @@ function checkColumn(qa: Arg, c: Column, f: FlatField, i: number, kinds: string,
     stop(
       qa,
       'C69',
-      `column ${c.name} may be NULL, and field ${f.name} is ${key(f.type)}, which cannot hold it: reading such a row stops the request${c.pkNull ? ` (${c.pkNull} is a PRIMARY KEY, but SQLite lets a PRIMARY KEY column hold NULL unless it is declared NOT NULL, it is an INTEGER PRIMARY KEY, or the table is WITHOUT ROWID)` : ''}`,
+      `column ${c.name} may be NULL, and field ${f.name} is ${key(f.type)}, which cannot hold it: reading such a row stops the request${c.pkNull ? ` (${c.pkNull} is a PRIMARY KEY, but SQLite lets a PRIMARY KEY column hold NULL unless it is declared NOT NULL, it is an INTEGER PRIMARY KEY, or its table is WITHOUT ROWID or STRICT)` : ''}`,
       c.pkNull
-        ? `Declare it NOT NULL: \`${c.pkNull.split('.')[1]} … PRIMARY KEY NOT NULL\`.`
+        ? `Add NOT NULL to the column in its migration: \`${c.pkNull.split('.')[1]} ${c.t === 'int' ? 'INTEGER' : 'TEXT'} PRIMARY KEY NOT NULL\`.`
         : `Make the field Option[${base}], or select coalesce(${c.name}, …), or declare the column NOT NULL.`,
     );
   if (!c.null && opt)

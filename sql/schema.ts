@@ -87,7 +87,10 @@ export function applyToSchema(sc: Schema, ast: Statement): string | null {
         ast.cols.find(d => d.name === one.name)?.pkDir !== 'DESC'
           ? one.name
           : null;
-      for (const c of cols) if (c.name === rowid || (ast.withoutRowid && pk.includes(c.name))) c.notNull = true;
+      // SQLite (sqlite.org/lang_createtable.html#the_primary_key): a PRIMARY KEY column may hold NULL unless it is
+      // the rowid, declared NOT NULL, or of a WITHOUT ROWID or a STRICT table
+      for (const c of cols)
+        if (c.name === rowid || ((ast.withoutRowid || ast.strict) && pk.includes(c.name))) c.notNull = true;
       if (ast.strict)
         for (const c of cols)
           if (!/^(INT|INTEGER|REAL|TEXT|BLOB|ANY)$/i.test(c.type))
