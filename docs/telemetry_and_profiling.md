@@ -91,5 +91,15 @@ go tool pprof -http=: profiles/<file>.sym.pb              # flame graph
 14 cpu profiles (10 s each; files `service/profiles/dddd2c92-cpu-*`): compile is 81-96 % of the Worker's CPU on every
 load; gc ~8 %; rendering, JSON and the runner RPC under 1 % together. Inside compile: lexer `opensSql` 19.8 % (it was
 quadratic), `sha256` 11.9 % (its constants were recomputed per call), lex + parse ~31 %. A one-request run (line trace
-by default) compiles twice. Fixed in ac74985 (opensSql, sha256); the next steps are one compile for both builds, std's
-lex/parse cached per isolate, and a compile cache by content hash.
+by default) compiles twice. What came of it, the same 14 loads on 56539ce5 (opensSql, sha256, one compile for both
+builds) against dddd2c92, cpuTimeMs p50: hello-lines 262 → 118 ms, fulfillment 401 → 253, compile-kv 360 → 177, hello
+133 → 85, hello50 164 → 92, compile-hello 100 → 90. Since then: std's tokens kept per isolate, a compile cache by
+content (8 MiB counted per isolate; in its first 90 minutes on prod one client's calls spread over 10 isolates and
+14% of compiles hit), and allocation per compile cut 11-13% (the inliner, the build name's hash).
+
+Memory (Node 25; measured 2026-11-23): an isolate holds ~15 MB at rest, 1.8 MB of std's tokens and at most 8 MiB of
+kept builds; one compile needs ~2-16 MB live beyond that (the smallest old space a compile completes in: hello 15 MB,
+tickets.tape with its traced build 31 MB) and allocates 66-190 MB, most of it collected young. A program's Dynamic
+Worker holds sql.js's 16 MiB heap (its minimum: sql.js keeps a 5 MB stack, so it cannot start under ~5.1 MB without
+being built again; started at 6 MiB it grew to 6-9 MiB on the bench's SQL loads, but cost 12-38% more CPU on crud and
+ledger, so it stays) and the program's memory (2 pages, 128 KiB, on every run so far).
