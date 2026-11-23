@@ -23,7 +23,7 @@ function transfer(v: unknown, i: number): Transfer {
       refuse(`${at}${k}: expected ${k === 'amount' ? 'a whole number' : 'text'}`);
     if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
   }
-  const extra = Object.keys(v).find(k => !(FIELDS as readonly string[]).includes(k));
+  const extra = Object.keys(v).find(k => !FIELDS.some(f => f === k));
   if (extra !== undefined) refuse(`${at}unknown key ${JSON.stringify(extra)}`);
   // the loop above refused any other kind; these checks only tell the type checker so
   const t: Transfer = {

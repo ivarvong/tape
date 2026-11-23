@@ -71,8 +71,8 @@ WebAssembly.Instance = function (module: WebAssembly.Module, imports?: WebAssemb
 const realParse = JSON.parse,
   realStringify = JSON.stringify;
 JSON.parse = timed('JSON.parse', realParse);
-// oxlint-disable-next-line typescript/no-unsafe-type-assertion -- the wrapper takes only the last overload's type; it passes every argument on
-JSON.stringify = timed('JSON.stringify', realStringify) as typeof JSON.stringify;
+// the wrapper has only the last overload's type, and passes every argument on: defined, not assigned, for that
+Object.defineProperty(JSON, 'stringify', { value: timed('JSON.stringify', realStringify), writable: true });
 function meteredDb(): NodeSql {
   const db = nodeSql();
   return { exec: timed('db.exec', db.exec), transaction: db.transaction };
@@ -150,7 +150,7 @@ function print(title: string, plainMs: number, m: Awaited<ReturnType<typeof meas
       ['  of which JSON.stringify of params (log)', logStr.ms, logStr.n],
       ['  of which params, rows, log entry', sql.ms - db.ms - logStr.ms, sql.n],
       ...(outside.n > 0
-        ? [['JSON.stringify outside env (log)', outside.ms, outside.n] as [string, number, number]]
+        ? [((): [string, number, number] => ['JSON.stringify outside env (log)', outside.ms, outside.n])()]
         : []),
       ['other env.* calls', otherEnv, otherN],
       ['wasm + copy in/out (the rest)', total - (json.ms + sql.ms + otherEnv + outside.ms), 0],

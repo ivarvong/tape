@@ -19,17 +19,19 @@ import traceWasm from './trace.wasm';
 
 type Entry = { js: (b: Uint8Array) => Uint8Array; module: WebAssembly.Module; make: (k: number) => Uint8Array };
 // the Wasm imports have no type (see above); workerd binds each to a compiled WebAssembly.Module
-/* oxlint-disable typescript/no-unsafe-type-assertion -- the bindings above, typed here */
+const wasm = (m: unknown): WebAssembly.Module => {
+  if (m instanceof WebAssembly.Module) return m;
+  throw new TypeError('workerd bound no Wasm module');
+};
 const WORKLOADS: Record<string, Entry> = {
   csv: {
     js: csvJs,
-    module: csvWasm as WebAssembly.Module,
+    module: wasm(csvWasm),
     make: k => new Uint8Array(csvGen(2_000_000, k + 7, k % 2 === 0)),
   },
-  words: { js: wordsJs, module: wordsWasm as WebAssembly.Module, make: k => prose(2_000_000, k + 11) },
-  trace: { js: traceJs, module: traceWasm as WebAssembly.Module, make: k => enc.encode(traceOf(2000, k)) },
+  words: { js: wordsJs, module: wasm(wordsWasm), make: k => prose(2_000_000, k + 11) },
+  trace: { js: traceJs, module: wasm(traceWasm), make: k => enc.encode(traceOf(2000, k)) },
 };
-/* oxlint-enable typescript/no-unsafe-type-assertion */
 const inputs = new Map<string, Uint8Array[]>();
 const apps = new Map<string, ReturnType<typeof instantiate>>();
 

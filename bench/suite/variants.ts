@@ -21,7 +21,7 @@ for (const name of names.length > 0 ? names : NAMES) {
   const ways = VARIANTS.map(([label, o]) => {
     const r = compile([...std, { name: w.tape, text: readFileSync(`${ROOT}${w.tape}`, 'utf8') }], o);
     if (!r.wasm) throw new Error(`${w.tape} (${label}) does not compile`);
-    return { label, run: makeWay(w, 'tape-nolog', new WebAssembly.Module(r.wasm)), ms: [] as number[] };
+    return { label, run: makeWay(w, 'tape-nolog', new WebAssembly.Module(r.wasm)), ms: Array.of<number>() };
   });
   for (let k = 0; k < 10 + SAMPLES; k++) {
     const req = w.request(k, 1);
