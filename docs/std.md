@@ -1549,6 +1549,8 @@ One field of an application/x-www-form-urlencoded body (what an HTML form POSTs)
 Some(value: "ada lö")
 > form_field(body: "qty=2", name: "buyer")
 None
+> form_field(body: "x=1&done", name: "done")
+Some(value: "")
 ```
 
 ### fn write_html
@@ -1575,7 +1577,8 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn token_byte(b: Int) -> Bool`: a token character (RFC 9110): a letter, a digit, or one of !#$%&'*+-.^_`|~.
 - `fn token_mark(b: Int) -> Bool`: the marks among the token characters.
 - `fn value_byte(b: Int) -> Bool`: a byte a header value may hold.
-- `fn form_from(body: View, name: View, at: Int) -> Option[View]`: form_field, from the pair that starts at `at`.
+- `fn form_from(body: View, name: View, at: Int) -> Option[View]`: form_field, from the pair that starts at `at`. The pair's name is compared with `name` as it is decoded, in place: a lookup makes nothing for the pairs it passes, only the value it finds.
+- `fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool`: whether raw[at..], `+` and %XX decoded as form_bytes decodes them, is name[n..].
 - `fn form_decoded(raw: View) -> View`: one name or value of a form, `+` and %XX decoded.
 - `fn form_bytes(out: Buf, raw: View, at: Int) -> Buf`: the loop of form_decoded.
 - `fn html_from(out: Buf, text: View, at: Int) -> Buf`: the loop of write_html.
