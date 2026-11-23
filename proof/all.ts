@@ -221,6 +221,11 @@ const all: Part[] = [
     /^204 requests answered three ways, 0 differ$/m,
   ],
   [
+    'bench/usability/transcript-test.ts: the usability bench counts refusals, rate limits and oversized results right',
+    [node, 'bench/usability/transcript-test.ts'],
+    /^all passed$/m,
+  ],
+  [
     'apps/highlight/test.ts: highlight.tape against compiler/lex.ts, LANGUAGE.md and hand-written HTML',
     [node, 'apps/highlight/test.ts'],
     /^all 6 gates pass$/m,
