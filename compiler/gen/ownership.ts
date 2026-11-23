@@ -160,9 +160,8 @@ function go(rd: Reading, e: Expr, pos: UsePos, path: readonly Step[], fl: Flags)
   }
 }
 
-/** Is an owning use clean: every other use of the same value on its path is a read that is over before it? */
-const clean = (o: Use, uses: readonly Use[]): boolean =>
-  o.pos !== 'read' &&
+/** Is a use the last of its value: every other use of it on its path is a read that is over before it? */
+const last = (o: Use, uses: readonly Use[]): boolean =>
   !o.guard &&
   !o.lambda &&
   uses.every(u => {
@@ -170,12 +169,17 @@ const clean = (o: Use, uses: readonly Use[]): boolean =>
     const r = sequence(u, o);
     return r === 'skip' || (r === 'before' && u.pos !== 'own');
   });
+/** Is an owning use clean: it owns, and it is the last use of its value on its path? */
+const clean = (o: Use, uses: readonly Use[]): boolean => o.pos !== 'read' && last(o, uses);
 
 /** Reads one function: marks its uses, and its parameters it turns out to own. True when a parameter was new. */
 function ownership(f: FnDecl, find: Find, owned: Map<string, boolean[]>): boolean {
   const rd: Reading = { f, find, owned, uses: [], derived: new Map(), mine: new Set(f.params.map(pm => pm.name)) };
   go(rd, f.body, 'own', [], {});
-  for (const o of rd.uses) o.node.clean = clean(o, rd.uses);
+  for (const o of rd.uses) {
+    o.node.clean = clean(o, rd.uses);
+    o.node.last = last(o, rd.uses);
+  }
   const mine = owned.get(f.name) ?? [];
   let changed = false;
   f.params.forEach((pm, i) => {

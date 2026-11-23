@@ -204,7 +204,8 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
     constData: (bytes: readonly number[]) => mod.constData(tables, bytes),
     room: (size: number) => mod.room(tables, size),
     queryId: (q: Omit<QueryEntry, 'run'>) => mod.queryId(tables, q),
-    reads: (f: FnDecl, i: number) => opts.reuse && ownedParams.get(f.base ?? f.name)?.[i] === false,
+    reads: (f: FnDecl, i: number) =>
+      opts.reuse && !(f.owns?.includes(i) ?? false) && ownedParams.get(f.base ?? f.name)?.[i] === false,
     rowOf: (t: Type, at: Place) => layout.rowOf(L, t, at),
     shapeOf: (t: Type, at: Place, decoding: boolean) => layout.shapeOf(L, t, at, decoding),
     sig: (params: readonly number[], results: readonly number[]) => mod.sig(tables, params, results),

@@ -171,6 +171,77 @@ export function instance(
   return made;
 }
 
+// ---- owning copies: a function that walks a value it only reads (std's `length`, a count written the same way)
+// borrows it, so the cells it takes apart are never given back, and n lists of n walked so hold 24 B * n^2 (report
+// 6aa052143e0a). Owning such a parameter for every call (the reporter's fix) made each caller that keeps its value
+// mark it shared, which ends its reuse for good: csv.tape held 10x the memory and the suite's words ran out. So the
+// function is copied: a call that hands its value over (a call's or a constructor's result, or a variable owned
+// here at its last use) calls the copy, which owns the parameters it takes apart and gives their cells back as it
+// goes; every other call reads, as before. A shared value stays safe in the copy: its parts are shared too
+// (pattern.ts), and a shared cell is never given back (fn.ts release).
+
+/**
+ * The parameters of g an owning copy of it owns: those it only reads and either takes apart (`match p { … }`, of a
+ * boxed value where its type is known) or hands, at their last use, to a parameter another function's copy owns
+ * (std's `length` hands its list to `length_from`, which takes it apart).
+ */
+const takenApart = new WeakMap<FnDecl, number[]>();
+function apart(c: Ctx, g: FnDecl): number[] {
+  const had = takenApart.get(g);
+  if (had) return had;
+  // while g is read, a call back into it owns nothing (a cycle adds nothing a step around it did not)
+  takenApart.set(g, []);
+  const subjects = new Set<string>(),
+    passed = new Set<string>();
+  eachExpr(g.body, e => {
+    if (e.k === 'match' && e.subject?.k === 'var') subjects.add(e.subject.name);
+    if (e.k !== 'call') return;
+    let h: FnDecl | null = null;
+    try {
+      h = c.B.find(e.name, g.file, e);
+    } catch {
+      h = null;
+    }
+    if (!h || h === g) return;
+    const callee: FnDecl = h,
+      owned = apart(c, callee);
+    e.args.forEach(arg => {
+      if (arg.value.k !== 'var' || arg.value.last !== true) return;
+      const j = callee.params.findIndex(pm => pm.name === arg.label);
+      const k = j < 0 && callee.params.length === 1 ? 0 : j;
+      if (owned.includes(k)) passed.add(arg.value.name);
+    });
+  });
+  const out = g.params.flatMap((pm, i) => {
+    const t = pm.type;
+    const boxed = t ? c.B.adtOrNull(c.B.strip(t), g)?.boxed === true : true;
+    const taken = (boxed && subjects.has(pm.name)) || passed.has(pm.name);
+    return taken && c.B.reads(g, i) ? [i] : [];
+  });
+  takenApart.set(g, out);
+  return out;
+}
+/** Is an argument handed over: the result of a call or a constructor, or a variable owned here at its last use? */
+function handedOver(c: Ctx, e: Expr): boolean {
+  if (e.k === 'call' || e.k === 'ctor') return true;
+  if (e.k !== 'var' || e.last !== true) return false;
+  return c.env.get(e.name)?.mode === 'owned';
+}
+/** The function a call runs: g, or g's owning copy when every parameter the copy owns is handed over here. */
+function owning(c: Ctx, g: FnDecl, args: readonly ({ value: Expr } | undefined)[]): FnDecl {
+  const { B } = c;
+  if (!B.opts.reuse || !B.opts.owningCopies || g.owns || g.trampoline || g.math !== undefined) return g;
+  const own = apart(c, g);
+  if (own.length === 0 || !own.every(i => args[i] !== undefined && handedOver(c, args[i]?.value ?? g.body))) return g;
+  const name = `${g.name}$own`;
+  const had = B.fns.get(name);
+  if (had) return had;
+  const made: FnDecl = { ...g, name, base: g.base ?? g.name, owns: own };
+  B.fns.set(name, made);
+  B.callsOf.set(name, new Set([...(B.callsOf.get(g.name) ?? []), name]));
+  return made;
+}
+
 // ---- functions as values
 
 /** The entry function of a function value: (captured values' pointer, arguments...) -> result. */
@@ -420,7 +491,7 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
     e,
     new Set(named.params.filter(x => x.implicit).map(x => x.name)),
   );
-  const g = named.tparams.length > 0 ? instance(c, named, args, expected, e) : named;
+  const g = owning(c, named.tparams.length > 0 ? instance(c, named, args, expected, e) : named, args);
   g.params.forEach((pm, i) => {
     const arg = args[i];
     if (arg) need(c, c.emit(arg.value, typeOf(pm, g), false), typeOf(pm, g), arg, `argument ${pm.name}`);

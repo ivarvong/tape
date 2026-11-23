@@ -54,8 +54,11 @@ export type DecLit = At & { k: 'dec'; v: bigint; s: number };
 export type Str = At & { k: 'str'; bytes: number[]; written?: string };
 /** How a use of a variable takes its value: as the owner, only to read it, or as the subject of a match. */
 export type UsePos = 'own' | 'read' | 'subject';
-/** Set by the build (compiler/gen/ownership.ts): `clean`, an owning use that nothing else on its path outlives. */
-type Used = { pos?: UsePos; clean?: boolean };
+/**
+ * Set by the build (compiler/gen/ownership.ts): `clean`, an owning use that nothing else on its path outlives; `last`,
+ * a use (owning or not) that nothing else on its path outlives, the last thing done with the value there.
+ */
+type Used = { pos?: UsePos; clean?: boolean; last?: boolean };
 /** Text with holes, `"Hello, \(name)"`: its parts in order, a Str between holes and any expression in one. */
 export type Interp = At & { k: 'interp'; parts: Expr[] };
 export type Var = At & Used & { k: 'var'; name: string };
@@ -236,6 +239,11 @@ export type FnDecl = At & {
   /** set by the build: the result type; for a generic function made for one set of type arguments, its `base` */
   ret?: Resolved;
   base?: string;
+  /**
+   * set by the build on a function's owning copy (compiler/gen/call.ts owning): the parameters it takes over from
+   * its caller, so the cells it takes apart go to the next values of their size
+   */
+  owns?: readonly number[];
   /** set by the build on an exported function: its message and reply, its capabilities, the name it is called by */
   message?: TypeAst;
   reply?: TypeAst;

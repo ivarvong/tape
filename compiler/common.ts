@@ -56,6 +56,8 @@ export const DEFAULTS = {
   inline: true,
   // a recursive function that calls nothing counts its steps in a local (compiler/gen/meter.ts)
   localSteps: true,
+  // a call that hands over a value a function only walks calls a copy that gives the cells back (gen/call.ts owning)
+  owningCopies: true,
   exports: ['handle'],
   rules: true,
 };

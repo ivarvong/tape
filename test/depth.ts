@@ -236,7 +236,7 @@ function slotsOf(wasm: Uint8Array, name: RegExp): number {
 const plain = builtOf(DEPTH);
 const flat = builtOf(DEPTH, { inline: false });
 const weight = LEVEL_BASE + slotsOf(flat.wasm, /^depth$/);
-const generic = LEVEL_BASE + slotsOf(flat.wasm, /^depth\.count\[(Int|View)\]$/);
+const generic = LEVEL_BASE + slotsOf(flat.wasm, /^depth\.count\[(Int|View)\](\$own)?$/);
 // count is depth.count: std has a count too, so the program's is known by its file's name
 same(
   'the weights the build says are its frames',
