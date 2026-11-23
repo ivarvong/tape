@@ -401,7 +401,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made | C55 |
 | Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
-| Change a number in a row | a compare-and-set, an op-id guard, or `repeat: True` on the call when every attempt should count | C54 |
+| Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves), or `repeat: True` on the call when every attempt should count | C54 |
 | Pass a value to a query | `:name` in the query, and an argument of that name | C11, C13, C32 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
 | Command another program | `call` with `within:` and a `once:` key that names the row | C39, C41, C71 |
@@ -577,6 +577,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | a debit after its transfer id was inserted (`ON CONFLICT DO NOTHING`, the row required by a step) was C54, and agents marked it `repeat: True` | the claim is an op-id guard: C54 takes a write that runs only once the claim inserted its row |
 | 23 November 2026 | byte classes, a number with a sign or leading zeros, min and max written by hand in each program | std: `is_digit is_alpha is_alnum is_space is_lower is_upper`, `every_byte(v, keep)`, `parse_int(text)`, `min`, `max` |
 | 23 November 2026 | `Some("")` as a pattern was P01 (a name expected), though `Some("")` builds one; parse errors named only the token | the one field of a constructor takes its pattern unnamed; a backtick, `;`, `&&`, `!`, a single quote, `if`, `return` and `let x: T` are each named for what they are, with what Tape writes instead |
 | 23 November 2026 | a field given a pattern bound only what the pattern bound, so `Some(value: Account(…)) -> value` was C16 | the field's name is bound too, where the arm reads it and nothing else binds it |

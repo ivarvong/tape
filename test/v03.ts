@@ -8,6 +8,7 @@ import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
 import { instantiate } from '../host.ts';
 import { rng } from '../sim.ts';
+import { nodeSql } from '../nodesql.ts';
 import { call, finish, functionsOf, same as T } from './harness.ts';
 
 /** f(args) compiled and interpreted, as one answer when the two agree. */
@@ -744,6 +745,77 @@ fn f(p: P) -> Int {
       [0n],
     ),
     130,
+  );
+}
+
+// ---- 11. C54: a debit that runs only after its op id was claimed (an INSERT … ON CONFLICT DO NOTHING whose row a
+// step requires) runs once per op id, so it needs no `repeat: True` (the ledger task's transfer)
+{
+  const LEDGER = `migration 1 "ledger" {
+  CREATE TABLE accounts(id TEXT PRIMARY KEY NOT NULL, balance INTEGER NOT NULL);
+  CREATE TABLE transfers(transfer_id TEXT PRIMARY KEY NOT NULL, from_id TEXT NOT NULL, amount INTEGER NOT NULL)
+}
+
+type Transfer {
+  Transfer(transfer_id: View, from_id: View, amount: Int)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let r = request(raw)
+  match r.path {
+    "/t/" ++ id -> moved(id, from: r.body, amount: 5)
+    _ -> respond(status: 404)
+  }
+}
+
+fn moved(id: View, from: View, amount: Int) -> Buf {
+  let Some(value: t) = sql_first(
+    row: Transfer,
+    query: "INSERT INTO transfers(transfer_id, from_id, amount) VALUES (:id, :from, :amount) CLAIM RETURNING *",
+    id,
+    from,
+    amount
+  ) else -> respond(status: 200)
+  let 1 = sql_exec(
+    query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount",
+    amount,
+    from
+  ) else -> rollback(out: respond(status: 409))
+  respond(status: 201) |> append(view: t.transfer_id)
+}
+`;
+  const claimed = LEDGER.replace('CLAIM', 'ON CONFLICT(transfer_id) DO NOTHING');
+  T('C54: a debit after its transfer id is claimed is taken', codes(claimed, ['handle']), []);
+  T(
+    '…and it runs once: the same transfer sent twice debits once',
+    (() => {
+      const r = compile([...std, { name: 't.tape', text: claimed }]);
+      if (!r.wasm) return 'does not compile';
+      const sql = nodeSql();
+      const app = instantiate(new WebAssembly.Module(r.wasm), { sql, log: false });
+      sql.exec("INSERT INTO accounts VALUES ('a', 100)");
+      const send = (): string => new TextDecoder().decode(app.handle(new TextEncoder().encode('POST /t/x1\na')));
+      return [send(), send(), sql.exec("SELECT balance FROM accounts WHERE id = 'a'").toArray()[0]?.['balance']];
+    })(),
+    ['201\nx1', '200\n', 95],
+  );
+  T(
+    'C54: the debit before the claim is still refused',
+    codes(
+      claimed.replace(
+        'fn moved(id: View, from: View, amount: Int) -> Buf {\n',
+        'fn moved(id: View, from: View, amount: Int) -> Buf {\n  do sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
+      ),
+      ['handle'],
+    ).map(x => x.split(':')[0]),
+    ['C54'],
+  );
+  T(
+    'C54: an insert that does not claim (no ON CONFLICT DO NOTHING) does not guard it',
+    codes(LEDGER.replace(' CLAIM', ' ON CONFLICT(transfer_id) DO UPDATE SET amount = :amount'), ['handle']).map(
+      x => x.split(':')[0],
+    ),
+    ['C54'],
   );
 }
 

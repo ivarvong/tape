@@ -26,7 +26,36 @@ export function witnessed(cs: readonly Expr[], q: Query, calls: Calls): boolean 
       countOfGuarded(q.args[String(c.l.n)], q.fn, calls, 0)
     )
       return true;
-  return underMoved(q.at, q.fn, calls, 0);
+  return underMoved(q.at, q.fn, calls, 0) || claimedArms(q.fn).has(q.at);
+}
+// An INSERT … ON CONFLICT DO NOTHING (or INSERT OR IGNORE) whose row a step requires (`let Some(value: t) =
+// sql_first(… RETURNING …) else …`, `let 1 = sql_exec(…) else …`) claims an op id: a second run of the request meets
+// the first one's row, inserts nothing, and leaves through the else. What runs only after the claim runs once per
+// op id (the ledger's debit after its transfer-id insert). The claim must be in the write's own function: a claim
+// in a caller says only that this call runs once, not that the function, called from elsewhere too, writes once.
+function claims(e: TapeExpr | undefined): boolean {
+  if (e?.k !== 'call' || (e.name !== 'sql_first' && e.name !== 'sql_exec')) return false;
+  const qq = e.args.find(a => a.label === 'query')?.value;
+  if (qq?.k !== 'str') return false;
+  const ast = treeOf(dec(qq.bytes)).ast;
+  return ast?.k === 'insert' && (ast.upsert?.action === 'nothing' || ast.or === 'IGNORE') && !!ast.cols;
+}
+const CLAIMED = new WeakMap<FnDecl, Set<Node>>();
+function claimedArms(fn: FnDecl): Set<Node> {
+  const known = CLAIMED.get(fn);
+  if (known) return known;
+  const inside = new Set<Node>();
+  CLAIMED.set(fn, inside);
+  walk(fn.body, n => {
+    if (n.k !== 'match' || !n.subject || !claims(n.subject)) return;
+    const rows = n.subject.k === 'call' && n.subject.name === 'sql_exec';
+    for (const a of n.arms)
+      if ((rows && a.pat.k === 'int' && a.pat.v >= 1n) || (!rows && a.pat.k === 'ctor' && a.pat.name === 'Some'))
+        walk(a.body, x => {
+          inside.add(x);
+        });
+  });
+  return inside;
 }
 // A write that runs only in the Moved arm of a match on a sql_move outcome runs once per move of that row: a second
 // run (a retry) finds the row moved already, and takes Raced. The node is in such an arm in its function, or every
