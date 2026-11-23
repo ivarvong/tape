@@ -20,7 +20,7 @@ export const secured = (res: Response, path: string, version?: string): Response
     type = h.get('content-type') ?? '',
     active = /^(text\/html|image\/svg\+xml)\b/.test(type);
   h.set('tape-version', SHA);
-  // tape-mcp's answers through the binding keep the compiler it names: the deploy's parity check compares the two
+  // the hosted runner's answers (mcp/src) keep the compiler it names: the deploy's parity check compares the two
   if (!h.has('tape-compiler')) h.set('tape-compiler', COMPILER);
   if (version !== undefined) h.set('tape-worker-version', version);
   h.set('x-content-type-options', 'nosniff');

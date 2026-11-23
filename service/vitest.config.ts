@@ -1,6 +1,7 @@
 import { cloudflareTest } from '@cloudflare/vitest-plugin';
 import { defineConfig } from 'vitest/config';
 import { erased } from './erased.ts';
+import { bytes } from '../mcp/bytes.ts';
 
 // The plugin does not read cloudflare.config.ts bindings or exports yet, so the loader and DO are declared again here.
 const miniflare = {
@@ -14,25 +15,22 @@ const miniflare = {
     U3: process.env.U3 ?? '',
     PARITY_SEEDS: process.env.PARITY_SEEDS ?? '',
     SEAMS_SLICES: process.env.SEAMS_SLICES ?? '6',
+    KILL_SWITCH: 'off',
+    IP_SALT: 'test-salt',
   },
   durableObjects: { NAMES: { className: 'Name', useSQLite: true } },
-  // tape-mcp stands in as an echo of the request it is given (test/mcp-route.test.ts)
-  serviceBindings: {
-    MCP: async (request: Request): Promise<Response> =>
-      Response.json(
-        {
-          method: request.method,
-          url: request.url,
-          headers: Object.fromEntries(request.headers),
-          body: await request.text(),
-        },
-        { status: 299, headers: { 'tape-mcp-version': 'echo' } },
-      ),
-  },
+  // the hosted compiler and runner's (mcp/src): as cloudflare.config.ts, with a test salt; TIGHT is a second rate
+  // limit, of two calls a minute, for mcp's test that sees the real binding refuse
+  r2Buckets: { FEEDBACK: 'tape-feedback' },
+  ratelimits: {
+    RATE: { namespace_id: '7101', simple: { limit: 1000, period: 60 } },
+    FEEDBACK_RATE: { namespace_id: '7103', simple: { limit: 1000, period: 60 } },
+    TIGHT: { namespace_id: '7102', simple: { limit: 2, period: 60 } },
+  } as const,
 };
 // Files run one at a time: some tests give a call a 50 ms budget, which a cold Durable Object meets only when another
 // test file is not loading the machine at the same time.
 export default defineConfig({
-  plugins: [erased(), cloudflareTest({ main: './src/index.ts', miniflare })],
+  plugins: [erased(), bytes(), cloudflareTest({ main: './src/index.ts', miniflare })],
   test: { fileParallelism: false },
 });

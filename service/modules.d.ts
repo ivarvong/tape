@@ -8,6 +8,16 @@ declare module '*?erased' {
   const text: string;
   export default text;
 }
+// a `.wasm` import is a module of a Dynamic Worker (mcp/src/loaded.ts), compiled by the runtime when it loads it
+declare module '*.wasm' {
+  const module: WebAssembly.Module;
+  export default module;
+}
+// `?base64` is a file's bytes as base64 (mcp/bytes.ts): sql.js's Wasm, for the hosted runner's Dynamic Workers
+declare module '*?base64' {
+  const base64: string;
+  export default base64;
+}
 
 // The rows of a Durable Object SQLite cursor, raw(), have toArray() in workerd; the generated type (an
 // IterableIterator) leaves it out.
@@ -23,8 +33,15 @@ declare namespace Cloudflare {
     TOKEN: string;
     // the version this is (cloudflare.config.ts); the tests have none
     VERSION?: WorkerVersionMetadata;
-    // tape-mcp, the hosted compiler and runner (cloudflare.config.ts); in the tests, an echo (vitest.config.ts)
-    MCP: Fetcher;
+    // the hosted compiler and runner (mcp/src, cloudflare.config.ts)
+    RATE: RateLimit;
+    KILL_SWITCH: string;
+    /** a Worker secret: what client addresses are hashed with (mcp/src/serve.ts, ipHash) */
+    IP_SALT?: string;
+    FEEDBACK: R2Bucket;
+    FEEDBACK_RATE: RateLimit;
+    // a second limiter, of two calls a minute, for the tests only (vitest.config.ts)
+    TIGHT?: RateLimit;
     // the tests' seeds and switches (vitest.config.ts)
     JEPSEN_SEEDS: string;
     KV_SEEDS: string;
@@ -44,6 +61,7 @@ declare namespace Cloudflare {
     durableNamespaces: 'Name';
   }
 }
+type Env = Cloudflare.Env;
 
 // workerd has WebAssembly.compile and refuses to compile bytes with it at runtime (test/service.test.ts checks
 // that it does); the generated types leave it out.

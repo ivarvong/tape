@@ -1,71 +1,72 @@
-// Runs in workerd: /mcp, /v1/compile, /v1/run and /v1/feedback are the hosted compiler and runner (docs/mcp.md), another Worker,
-// tape-mcp, reached through the MCP service binding. They need no token; the request reaches tape-mcp as it came
-// (its client address, which tape-mcp hashes, and its Origin, which tape-mcp refuses), and the answer comes back with
-// the headers every answer of this Worker has. Here tape-mcp is an echo (vitest.config.ts). /mcp/:account is still
-// an account's tools, behind its agent token.
+// Runs in workerd: /mcp, /v1/compile, /v1/run and /v1/feedback are the hosted compiler and runner (docs/mcp.md,
+// mcp/src), served in this Worker with its own bindings: there is no MCP service binding (until 2026-11-22 it was a
+// Worker of its own, tape-mcp). They need no token, refuse a request with an Origin, and come back with the headers
+// every answer of this Worker has. /mcp/:account is still an account's tools, behind its agent token. mcp/test/ checks
+// the tools in depth in workerd; this checks that this Worker serves them.
+import { env } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import { anyone, call, fields } from './help.ts';
 
 const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
-const echoed = async (
-  r: Response,
-): Promise<{ method: string; url: string; headers: Record<string, string>; body: string }> => {
-  const j = fields(await r.json());
-  return {
-    method: String(j['method']),
-    url: String(j['url']),
-    headers: Object.fromEntries(Object.entries(fields(j['headers'])).map(([k, v]) => [k, String(v)])),
-    body: String(j['body']),
-  };
-};
+const client = { 'content-type': 'application/json', 'cf-connecting-ip': '198.51.100.7', 'user-agent': 'mcp-route' };
 
-describe('the hosted compiler and runner, through the MCP binding', () => {
-  it('passes /mcp, /v1/compile, /v1/run and /v1/feedback to tape-mcp without a token, as they came', async () => {
+describe('the hosted compiler and runner, in this Worker', () => {
+  it('serves /mcp with no MCP binding: initialize and tools/list, with no token', async () => {
+    expect('MCP' in env).toBe(false);
+    const init = await anyone('/mcp', {
+      method: 'POST',
+      headers: client,
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'x', version: '1' } },
+      }),
+    });
+    expect(init.status).toBe(200);
+    expect(fields(fields(await init.json())['result'])).toMatchObject({ serverInfo: { name: 'tape' } });
+    for (const [k, v] of Object.entries({
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'content-security-policy': API_CSP,
+      'tape-version': 'dev',
+      'tape-compiler': 'dev',
+    }))
+      expect([k, init.headers.get(k)]).toEqual([k, v]);
+    const list = await anyone('/mcp', {
+      method: 'POST',
+      headers: client,
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }),
+    });
+    const tools = fields(fields(await list.json())['result'])['tools'];
+    expect(Array.isArray(tools) ? tools.map(t => fields(t)['name']) : tools).toEqual(['compile', 'run', 'feedback']);
+  });
+
+  it('compiles hello.tape at /v1/compile, and runs it at /v1/run in a Dynamic Worker', async () => {
+    const c = await anyone('/v1/compile', { method: 'POST', headers: client, body: '{}' });
+    expect([c.status, fields(await c.json())['ok']]).toEqual([200, true]);
+    const r = await anyone('/v1/run', {
+      method: 'POST',
+      headers: client,
+      body: JSON.stringify({ requests: ['GET /hello/ada'] }),
+    });
+    const out = fields(await r.json());
+    expect([r.status, out['ok']]).toEqual([200, true]);
+    expect(JSON.stringify(out['results'])).toContain('ada');
+  });
+
+  it('refuses a request with an Origin, even with the operator token, and drains its body', async () => {
     for (const path of ['/mcp', '/v1/compile', '/v1/run', '/v1/feedback']) {
-      const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list', path });
-      const r = await anyone(`${path}?q=1`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'cf-connecting-ip': '198.51.100.7',
-          origin: 'https://a.example',
-          'user-agent': 'mcp-route-test',
-        },
-        body,
-      });
-      expect(r.status).toBe(299);
-      const e = await echoed(r);
-      expect(e.method).toBe('POST');
-      expect(new URL(e.url).pathname + new URL(e.url).search).toBe(`${path}?q=1`);
-      expect(e.body).toBe(body);
-      expect(e.headers).toMatchObject({
-        'content-type': 'application/json',
-        'cf-connecting-ip': '198.51.100.7',
-        origin: 'https://a.example',
-        'user-agent': 'mcp-route-test',
-      });
-      expect(e.headers['authorization']).toBeUndefined();
-      // tape-mcp's own headers are kept, and the ones every answer of this Worker has are added
-      expect(r.headers.get('tape-mcp-version')).toBe('echo');
-      expect(r.headers.get('x-content-type-options')).toBe('nosniff');
-      expect(r.headers.get('x-frame-options')).toBe('DENY');
+      const r = await call(path, { method: 'POST', headers: { ...client, origin: 'https://a.example' }, body: '{}' });
+      expect([path, r.status, fields(await r.json())['error']]).toEqual([path, 403, 'origin_refused']);
       expect(r.headers.get('content-security-policy')).toBe(API_CSP);
-      expect(r.headers.get('tape-version')).not.toBeNull();
     }
   });
 
-  it('passes any method, and the operator token unchanged', async () => {
-    const get = await anyone('/mcp');
-    expect([get.status, (await echoed(get)).method]).toEqual([299, 'GET']);
-    const op = await call('/v1/run', { method: 'POST', body: '{}' });
-    expect([op.status, (await echoed(op)).headers['authorization']]).toEqual([299, 'Bearer test-token']);
-  });
-
-  it('passes nothing else: /mcp/:account is the tools, /v1 and the like are the API', async () => {
+  it('serves nothing else: /mcp/:account is the tools, /v1 and the like are the API', async () => {
     for (const path of ['/mcp/ivar', '/mcp/', '/v1', '/v1/', '/v1/runs', '/v1/compile/x', '/v1/feedbacks', '/MCP']) {
       const r = await anyone(path, { method: 'POST', body: '{}' });
       expect([path, r.status]).toEqual([path, 401]);
-      expect(r.headers.get('tape-mcp-version')).toBeNull();
     }
   });
 });

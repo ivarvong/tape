@@ -1,6 +1,6 @@
 // mcp.ts: MCP over streamable HTTP (2025-06-18), JSON responses only: initialize, ping, tools/list, tools/call.
 // What a server serves is its tools, already in MCP's shape, and what calling one gives. Two servers use it: the
-// service's tools of an account (tools.ts, mcp()) and the hosted compiler and runner (mcp/, tape-mcp).
+// service's tools of an account (tools.ts, mcp()) and the hosted compiler and runner (mcp/, served at /mcp).
 export type Fields = Readonly<Record<string, unknown>>;
 export const fieldsOf = (v: unknown): Fields => (typeof v === 'object' && v !== null ? { ...v } : {});
 

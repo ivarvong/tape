@@ -28,10 +28,10 @@
 //   POST /tools/:account/:name/:fn  body: the JSON message -> { ok, output | error, trace_url, otlp_url }
 //   POST /mcp/:account              MCP (streamable HTTP, JSON responses): initialize, tools/list, tools/call
 //
-// The hosted compiler and runner, with no token: tape-mcp (mcp/, docs/mcp.md), through the MCP service binding.
+// The hosted compiler and runner, with no token (mcp/src, docs/mcp.md), served in this Worker.
 //   POST /mcp                       MCP: the tools compile and run, over any program posted, and feedback
 //   POST /v1/compile, POST /v1/run  the same two tools as plain JSON
-//   POST /v1/feedback               the third, feedback: a report to the maintainers, stored in tape-mcp's bucket
+//   POST /v1/feedback               the third, feedback: a report to the maintainers, stored in the tape-feedback bucket
 //
 // One Durable Object per account/name (Name). Each upload is a row in its SQLite: source, the plain and traced
 // Wasm, the trace sites, the hash, its migration chain and the time; the row id is the version. The data is per
@@ -51,6 +51,7 @@ import { secured } from './headers.ts';
 import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
 import type { CallMeta } from './records.ts';
 import { manifest, mcp, policyOf, refusal } from './tools.ts';
+import hosted from '../../mcp/src/index.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
 import {
   PUBLISHED,
@@ -516,16 +517,16 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
   return reply({ error: 'no such route' }, 404);
 };
 
-// The hosted compiler and runner (docs/mcp.md) is tape-mcp, a Worker of its own, reached through the MCP service
-// binding (/v1/feedback too). Its routes need no token, so they are passed before the token check, and the request is passed as it came:
-// tape-mcp keys its rate limit and log on the client's address (cf-connecting-ip) and refuses a request with an
-// Origin. /mcp/:account is not one of them: it is an account's tools.
+// The hosted compiler and runner (docs/mcp.md) is mcp/src, called in this Worker with its bindings (until 2026-11-22
+// it was a Worker of its own, tape-mcp, behind a service binding). Its routes need no token, so they are served
+// before the token check, with the request as it came: it keys its rate limit and log on the client's address
+// (cf-connecting-ip) and refuses a request with an Origin. /mcp/:account is not one of them: it is an account's tools.
 const HOSTED: ReadonlySet<string> = new Set(['/mcp', '/v1/compile', '/v1/run', '/v1/feedback']);
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const path = new URL(request.url).pathname;
-    if (HOSTED.has(path)) return secured(await env.MCP.fetch(request), path, env.VERSION?.id);
+    if (HOSTED.has(path)) return secured(await hosted.fetch(request, env, ctx), path, env.VERSION?.id);
     return secured(await route(request, env, ctx), path, env.VERSION?.id);
   },
 } satisfies ExportedHandler<Env>;
