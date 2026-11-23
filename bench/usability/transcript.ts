@@ -14,6 +14,8 @@ export type Attempt = {
   /** each diagnostic's first line, for the report's excerpts */
   messages: { code: string; message: string; fix: string }[];
   refusal: string | null;
+  /** the answer was too large for the CLI to show; whether it compiled is read from the schema it showed instead */
+  tooLarge: boolean;
 };
 export type Feedback = { kind: string; text: string; id: string | null; t: number };
 export type Metrics = {
@@ -30,7 +32,10 @@ export type Metrics = {
   lostMsByCode: Record<string, number>;
   attempts: Attempt[];
   feedback: Feedback[];
+  /** calls prod's rate limit refused: not attempts, since they say nothing of Tape */
   rateLimited: number;
+  /** attempts whose answer was too large for the CLI to show */
+  tooLarge: number;
   /** compile or run calls with a stand-in text, not a program */
   probes: number;
   costUsd: number;
@@ -50,6 +55,23 @@ const textOf = (content: unknown): string =>
         .join('');
 const short = (name: string): string => name.replace(/^mcp__tape__/, '');
 
+/** The CLI wraps an HTTP error of the MCP server's: `Error POSTing to endpoint: {…}` (prod's 429 comes this way). */
+const POSTING = /^Error POSTing to endpoint: (\{[\s\S]*\})\s*$/;
+/** An answer over the CLI's limit is saved to a file; the agent is shown its schema, e.g. `{ok: boolean, …, results: [{...}]}`. */
+const TOO_LARGE = /^Error: result \([\d,]+ characters\) exceeds maximum allowed tokens/;
+
+/** Whether the session's tape server connected with its tools (the init message says); run.ts retries a session it did not. */
+export const connected = (lines: string[]): boolean => {
+  for (const line of lines) {
+    const msg = field(parseObj(line), 'm');
+    if (!isObj(msg) || msg['type'] !== 'system' || msg['subtype'] !== 'init') continue;
+    const tape = recs(msg['mcp_servers']).find(s => s['name'] === 'tape');
+    const tools = Array.isArray(msg['tools']) ? msg['tools'] : [];
+    return tape?.['status'] === 'connected' && tools.includes('mcp__tape__compile') && tools.includes('mcp__tape__run');
+  }
+  return false;
+};
+
 export const analyse = (lines: string[], wallMs: number): Metrics => {
   const m: Metrics = {
     wallMs,
@@ -65,6 +87,7 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
     attempts: [],
     feedback: [],
     rateLimited: 0,
+    tooLarge: 0,
     probes: 0,
     costUsd: 0,
     tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -95,8 +118,13 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
         if (b['type'] !== 'tool_result' || typeof b['tool_use_id'] !== 'string') continue;
         const call = pending.get(b['tool_use_id']);
         if (call === undefined) continue;
-        const answer = parseObj(textOf(b['content'])) ?? {};
-        if (answer['error'] === 'rate_limited' || answer['error'] === 'feedback_rate_limited') m.rateLimited++;
+        const text = textOf(b['content']);
+        const answer = parseObj(text) ?? parseObj(POSTING.exec(text)?.[1] ?? '') ?? {};
+        const limited = answer['error'] === 'rate_limited' || answer['error'] === 'feedback_rate_limited';
+        if (limited) m.rateLimited++;
+        // a compile or run the limit refused is no attempt (a feedback is still listed, with no id, as before)
+        if (limited && call.name !== 'feedback') continue;
+        const tooLarge = TOO_LARGE.test(text);
         if (call.name === 'feedback') {
           m.feedback.push({
             kind: str(call.input['kind']),
@@ -114,7 +142,16 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
           continue;
         }
         const diags = recs(answer['diagnostics']);
-        const compiled = call.name === 'compile' ? answer['ok'] === true : recs(answer['results']).length > 0;
+        // Too large to show: a run compiled when the schema shown has results, a compile when it has no diagnostics.
+        const at = Math.max(0, text.indexOf('schema:'));
+        const compiled = tooLarge
+          ? call.name === 'run'
+            ? text.includes('results: [{', at)
+            : text.includes('diagnostics: []', at)
+          : call.name === 'compile'
+            ? answer['ok'] === true
+            : recs(answer['results']).length > 0;
+        if (tooLarge) m.tooLarge++;
         const a: Attempt = {
           tool: call.name,
           t,
@@ -127,6 +164,7 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
             fix: str(d['fix']).split('\n')[0] ?? '',
           })),
           refusal: typeof answer['error'] === 'string' ? `${answer['error']}: ${str(answer['reason'])}` : null,
+          tooLarge,
         };
         m.attempts.push(a);
         const program = files.map(f => ({ name: str(f['name']), text: str(f['text']) }));

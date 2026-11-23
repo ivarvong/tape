@@ -124,7 +124,9 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
   );
   put(
     `- Compile attempts ${jobs.reduce((s, j) => s + j.compileAttempts, 0)}, of which refused ${jobs.reduce((s, j) => s + j.failedAttempts, 0)}; ` +
-      `feedback reports filed ${jobs.reduce((s, j) => s + j.feedback.length, 0)}; calls rate-limited ${jobs.reduce((s, j) => s + j.rateLimited, 0)}; schema probes (a stand-in text, not counted as attempts) ${jobs.reduce((s, j) => s + (j.probes ?? 0), 0)}.`,
+      `feedback reports filed ${jobs.reduce((s, j) => s + j.feedback.length, 0)}; calls rate-limited (not counted as attempts) ${jobs.reduce((s, j) => s + j.rateLimited, 0)}; ` +
+      `answers too large for the CLI to show ${jobs.reduce((s, j) => s + (j.tooLarge ?? 0), 0)}; ` +
+      `sessions started again because the tape server did not connect ${jobs.reduce((s, j) => s + (j.connectRetries ?? 0), 0)}; schema probes (a stand-in text, not counted as attempts) ${jobs.reduce((s, j) => s + (j.probes ?? 0), 0)}.`,
   );
   put(
     `- Cost $${cost.toFixed(2)} (CLI-reported list price), ${jobs.reduce((s, j) => s + j.tokens.output, 0).toLocaleString('en-US')} output tokens.`,
