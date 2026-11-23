@@ -5,7 +5,8 @@
 // (fixtures/greet-93137b6.json was written by building fixtures/greet.tape with that commit's compiler.)
 import { runInDurableObject } from 'cloudflare:test';
 import { env } from 'cloudflare:workers';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import alarm from './fixtures/alarm.tape?raw';
 import greet from './fixtures/greet.tape?raw';
 import old from './fixtures/greet-93137b6.json' with { type: 'json' };
 import { at, call, got, json, list } from './help.ts';
@@ -65,5 +66,31 @@ describe('a stored build is a cache of the source', () => {
     // the other version still serves
     const v2 = await hello('/ivar/gone/v/2/');
     expect([v2.status, await v2.text()]).toEqual([200, 'hello ada']);
+  });
+
+  it('keeps a timer of a version that cannot be rebuilt, logs no error, and tries again later', async () => {
+    expect(at(await got('/ivar/alarm', { method: 'POST', body: alarm }), 'version')).toBe(1);
+    const set = await call('/ivar/alarm/v/1/set', { method: 'POST' });
+    expect([set.status, await set.text()]).toEqual([202, 'set']);
+    expect(list(at(await got('/ivar/alarm/wakes'), 'set')).map(w => at(w, 'key'))).toEqual([1]);
+    // the version as an older compiler left it: its build stale, its source one this compiler refuses
+    await stale('ivar/alarm', 1, alarm.replace('respond(status: 202)', 'respond_with(status: 202)'));
+    const errors = vi.spyOn(console, 'error');
+    const before = Date.now();
+    // the alarm, run as the runtime runs it (runDurableObjectAlarm would delete the alarm it sets again)
+    await runInDurableObject(stub('ivar/alarm'), async instance => {
+      const run: unknown = Reflect.get(instance, 'alarm');
+      if (typeof run !== 'function') throw new TypeError('the object has no alarm');
+      await Reflect.apply(run, instance, []);
+    });
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+    // the timer is kept, and the alarm set again, an hour on
+    const wakes = await got('/ivar/alarm/wakes');
+    expect(list(at(wakes, 'set')).map(w => at(w, 'key'))).toEqual([1]);
+    expect(Date.parse(String(at(wakes, 'alarm')))).toBeGreaterThanOrEqual(before + 3_500_000);
+    expect(at(wakes, 'runs')).toEqual([]);
+    const r = await call('/ivar/alarm/v/1/');
+    expect([r.status, at(await json(r), 'error')]).toEqual([503, 'rebuild_failed']);
   });
 });

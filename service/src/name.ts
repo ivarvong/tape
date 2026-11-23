@@ -79,6 +79,8 @@ const chainIn = (text: unknown): Chain =>
       hash: str(m.hash),
     }));
 /** Run a statement that may already have been run: adding a column that is there. */
+/** How long timers wait when the latest version cannot be rebuilt (alarm). */
+const REBUILD_RETRY_MS = 3_600_000;
 /** A rebuild_failed column: the compiler that could not build the source, and why. */
 const failedOf = (text: string): { compiler: string; errors: Reported[] } => {
   const v: unknown = JSON.parse(text);
@@ -318,9 +320,23 @@ export class Name extends DurableObject {
   // A run cut short (this object reset meanwhile) left its timer in place, and the alarm is retried, so each timer
   // is run at least once; a run that fails on storage keeps its timer, set for later (host/run.ts WAKE_RETRY); a
   // run that traps is recorded here and not retried.
+  // A latest version that cannot be rebuilt (#fresh) runs no timer: its timers are kept, and the alarm is set again
+  // an hour on (another compiler may build it, or a new version may be uploaded), with a warning, not an error.
   override async alarm(): Promise<void> {
     const [self] = this.#sql.exec('SELECT account, name FROM _tape_self').toArray();
     if (!self || !this.#alive()) return;
+    const latest = this.plan().latest,
+      unbuilt = this.#fresh(latest);
+    if (unbuilt) {
+      const at = Date.now() + REBUILD_RETRY_MS;
+      console.warn(
+        JSON.stringify({
+          'tape.timers_deferred': { version: latest, reason: 'rebuild_failed', until: at, errors: unbuilt.length },
+        }),
+      );
+      await this.ctx.storage.setAlarm(at);
+      return;
+    }
     const account = str(self.account),
       name = str(self.name);
     const data = this.data(account, name);
@@ -596,8 +612,14 @@ export class Name extends DurableObject {
     if (!row || row.compiler === COMPILER) return null;
     const known = typeof row.rebuild_failed === 'string' ? failedOf(row.rebuild_failed) : null;
     if (known?.compiler === COMPILER) return known.errors;
-    const from = strOrNull(row.compiler) ?? 'unknown',
+    const from = strOrNull(row.compiler) ?? 'unknown';
+    let made: Stored | Refusal;
+    try {
       made = build(str(row.source), { rules: false });
+    } catch (e) {
+      // the compiler itself failing on an old source is a rebuild that failed too, not a failed request
+      made = { status: 500, error: `the compiler failed on this source: ${messageOf(e)}` };
+    }
     if (isRefusal(made)) {
       const errors = made.errors ?? [{ code: 'C99', line: 0, message: made.error }];
       this.#sql.exec(
@@ -605,7 +627,8 @@ export class Name extends DurableObject {
         version,
         JSON.stringify({ compiler: COMPILER, errors }),
       );
-      console.error(JSON.stringify({ 'tape.rebuild_failed': { version, from, compiler: COMPILER, errors } }));
+      // an expected outcome for an old source (the version answers 503 rebuild_failed), so a warning, not an error
+      console.warn(JSON.stringify({ 'tape.rebuild_failed': { version, from, compiler: COMPILER, errors } }));
       return errors;
     }
     const at = Date.now();

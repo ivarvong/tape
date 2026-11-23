@@ -56,7 +56,7 @@ again, so a version accepted once is not refused later for a rule that came afte
 `rebuilt_from` (the old compiler's hash, or `unknown`) and `rebuilt_at`, and the log has a `tape.rebuilt` line. If
 the current compiler cannot build the source, the version answers 503 `{"error": "rebuild_failed", "errors": […]}`
 with the compiler's diagnostics (logged as `tape.rebuild_failed`, tried again only under another compiler) and its
-old build is never run; the other versions are unaffected. Every version of a name shares the name's tables. Migrations
+old build is never run; the other versions are unaffected. When that version is the latest, its timers are kept and not run: the alarm is set again an hour later, with a `tape.timers_deferred` warning. Neither is logged as an error. Every version of a name shares the name's tables. Migrations
 (`migration n "…" { … }`) are applied before the first request after an upload; one that removes something must be
 marked `contract` and waits until every older live version is retired. An upload whose migrations would break a
 live version, or whose machine the stored rows do not satisfy, is refused with 409. A program's `Remote`
