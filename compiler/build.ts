@@ -4,7 +4,7 @@
 import { emptyProgram } from './ast.ts';
 import type { FnDecl, Program } from './ast.ts';
 import { ambient, granted } from './ambient.ts';
-import { CompileError, fail } from './common.ts';
+import { CompileError, LEVEL_BASE, fail } from './common.ts';
 import type { Problem } from './common.ts';
 import { functionCompiler } from './function.ts';
 import { assemble } from './gen/assemble.ts';
@@ -65,6 +65,8 @@ type HostParam = { name: string; type: string };
 export type Built = {
   wasm: Uint8Array<ArrayBuffer>;
   errors: never[];
+  /** each recursive function's weight against the depth budget, by its name (common.ts DEPTH_BUDGET; interp.ts) */
+  levels: Record<string, number>;
   /** what the rules found, when the build was asked to go on anyway (`rules: false`) */
   refused: Problem[];
   queries: QueryEntry[];
@@ -196,6 +198,7 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
     adtOf: (t: Type, at: Place) => layout.adtOf(L, t, at),
     adtOrNull: (t: Type, at: Place) => layout.adtOrNull(L, t, at),
     fnIndex: (n: string) => mod.fnIndex(tables, n),
+    fnAt: (index: number) => tables.order[index - tables.first],
     freeList: (size: number) => mod.freeList(tables, size),
     literal: (bytes: readonly number[]) => mod.literal(tables, bytes),
     constData: (bytes: readonly number[]) => mod.constData(tables, bytes),
@@ -240,7 +243,35 @@ function compileAll(fr: Front, opts: Options, L: layout.Layouts) {
         `flag ${fl.name} is never read`,
         `Delete the declaration, or read it with \`flags.${fl.name}\`. A flag nothing reads is a rollout that already finished.`,
       );
-  return { imports, tables, compiled, fingerprint: kit.fingerprint, resolve: kit.resolve, ...filled };
+  const levels = levelsOf(compiled);
+  return { imports, tables, compiled, levels, fingerprint: kit.fingerprint, resolve: kit.resolve, ...filled };
+}
+
+/** n as an i32.const's 5-byte LEB, the size of the place left for it (function.ts WEIGHT_SLOT). */
+const leb5 = (n: number): number[] => [
+  (n & 127) | 128,
+  ((n >> 7) & 127) | 128,
+  ((n >> 14) & 127) | 128,
+  ((n >> 21) & 127) | 128,
+  (n >> 28) & 7,
+];
+/**
+ * Each recursive function's weight against the depth budget: LEVEL_BASE and the most parameters and locals of any
+ * copy of it (a generic function's copies share one weight, so it is a function's, by name, as the interpreter
+ * knows it), written where each copy's code left a place for it.
+ */
+function levelsOf(compiled: Compiled[]): Map<string, number> {
+  const w = new Map<string, number>();
+  for (const c of compiled)
+    if (c.level) w.set(c.level.of, Math.max(w.get(c.level.of) ?? 0, LEVEL_BASE + c.level.slots));
+  compiled.forEach((c, i) => {
+    if (!c.level) return;
+    const body = [...c.body],
+      bytes = leb5(w.get(c.level.of) ?? 0);
+    for (const at of c.level.at) body.splice(at, 5, ...bytes);
+    compiled[i] = { ...c, body };
+  });
+  return w;
 }
 
 /**
@@ -361,6 +392,7 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
     invariants,
     json: about.json,
     functions: tables.order.map(f => f.name),
+    levels: Object.fromEntries(done.levels),
     options: opts,
   };
 }

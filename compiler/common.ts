@@ -14,7 +14,18 @@ export const TRAP = {
   OVERFLOW: 6,
   SHIFT: 7,
   FLOAT: 8,
+  DEPTH: 9,
 } as const;
+/**
+ * The recursion a request may hold, in units of 8 bytes of stack: each call of a recursive function that is not
+ * its own result holds LEVEL_BASE units and one more for each of the values its frame keeps (its parameters and its
+ * locals, as the function compiler writes them), until it returns. Deterministic: the same in every build, every
+ * engine and every tier, where the engine's own stack is not (12,400 frames of a small function on one tier of V8,
+ * 41,500 on another, 9,696 in a Worker). Sized under the smallest stack measured (a Dynamic Worker's: 9,696 frames
+ * of a function with one local, 304 with 400 locals, ~0.98 MB), with a third of it left over.
+ */
+export const DEPTH_BUDGET = 80_000;
+export const LEVEL_BASE = 12;
 /** Which f64 load and store, i64, or i32 a value of a Wasm type takes in memory (8 bytes each in the arena). */
 export const loadOp = (vt: number): number => (vt === F64 ? 0x2b : vt === I64 ? 0x29 : 0x28);
 export const storeOp = (vt: number): number => (vt === F64 ? 0x39 : vt === I64 ? 0x37 : 0x36);

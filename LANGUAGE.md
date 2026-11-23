@@ -645,10 +645,20 @@ first takes 2002 and 24 bytes a number. Steps are a count of reductions, as in E
 measure all the same: on Workers a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's
 duration) can time its work.
 
+A request may also hold 80,000 units of recursion: a call of a recursive function holds, until it returns, 12 units
+and one for each value its frame keeps (its parameters and the values it names, a record one for each of its
+fields), unless the function only ever calls itself as its result and calls no other recursive function nor any
+function value (a loop, which holds nothing), and a call made as a function's result gives the caller's units back
+first, so a function of one `Int` that adds 1 to its own call goes 5,332 deep and one keeping 400 values 191, the
+same on every engine and tier (the engine's own stack is not: 9,696 frames of the first on Workers, 11,263 to 41,527
+in Node by tier), and past that the request stops: `trap 9: recursion too deep in depth (80010 units)`, naming the
+function and the units held.
+
 A trap ends the request, undoes its writes and is recorded: out of memory (64 MB), more than 50,000,000 steps, an
 index out of bounds, a division by zero (trap 4), an `Int` or `Dec` result that does not fit in 64 bits (trap 6,
 integer overflow), a shift by less than 0 or more than 63 (trap 7), a Float operation whose result would be infinite or
-not a number (trap 8, float not finite). Nothing else stops a program: every other failure is a
+not a number (trap 8, float not finite), recursion past its budget (trap 9, recursion too deep). Nothing else stops a
+program: every other failure is a
 value. A request that traps is answered 500 with the reason, `trap 6: integer overflow`. Each line `// f(…) is v`
 or `// f(…) traps: reason` below is a call `test/definition.ts` makes, compiled and in the reference interpreter:
 

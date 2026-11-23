@@ -16,6 +16,8 @@ export type Fn = {
   readonly body: Block;
   readonly file: string;
   readonly env: Env | null;
+  /** a function of the program, by its name: a recursive one holds its weight against the depth budget */
+  readonly name?: string;
 };
 /** The rows of `sql_all`, read with `next`. */
 export type Rows = { readonly k: 'rows'; readonly rows: readonly Value[]; readonly at: number };

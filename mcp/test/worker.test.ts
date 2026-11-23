@@ -9,6 +9,7 @@ import hello from '../../examples/hello.tape?raw';
 import limits from './limits.tape?raw';
 import clock from './clock.tape?raw';
 import remote from './remote.tape?raw';
+import depth from './depth.tape?raw';
 import failures from '../../testdata/doctest-failures.tape?raw';
 
 type Fields = Record<string, unknown>;
@@ -196,6 +197,23 @@ describe('tape-mcp in workerd', () => {
       [503, ''],
     ]);
     expect(rs.map(r => r['replayed'])).toEqual([true, true, true]);
+  });
+
+  it('stops a recursion at the depth budget in the Dynamic Worker, at the depth Node stops it (test/depth.ts)', async () => {
+    // 5,332 deep holds 79,995 of the 80,000 units (15 a call of depth); 5,333 passes the budget. Before the budget the
+    // engine's stack decided: 9,696 frames here, 11,263 in Node, 41,527 on TurboFan alone
+    const { out } = await call('run', {
+      files: [{ name: 'depth.tape', text: depth }],
+      requests: ['GET /depth/5332', 'GET /depth/5333', 'GET /depth/10'],
+    });
+    const [deepest, past, after] = results(out);
+    expect([deepest?.['status'], deepest?.['body']]).toEqual([200, '5332']);
+    expect([past?.['status'], past?.['error'], past?.['replayed']]).toEqual([
+      500,
+      'trap 9: recursion too deep in depth (80010 units)',
+      true,
+    ]);
+    expect([after?.['status'], after?.['body']]).toEqual([200, '10']);
   });
 
   it("keeps Tape's budget and the body limit inside the Dynamic Worker", async () => {

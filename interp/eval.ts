@@ -11,7 +11,7 @@ import {
   type TypeAst,
   unreachable,
 } from '../compiler/ast.ts';
-import { TRAP } from '../compiler/common.ts';
+import { DEPTH_BUDGET, TRAP } from '../compiler/common.ts';
 import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
 import { Unsupported } from './json.ts';
@@ -42,6 +42,13 @@ export type Interp = {
   undone: boolean;
   /** a call of a name that is no function of the program and no intrinsic: an effect, or nothing known */
   readonly effect: (name: string, e: Call, env: Env, file: string) => Value;
+  /**
+   * each recursive function's weight against the depth budget, as the compiler weighed it (Built.levels), or null:
+   * then depth is not counted, as steps are not. With it, a run stops at the build's depth, with the build's trap.
+   */
+  readonly levels?: Readonly<Record<string, number>> | null;
+  /** the recursion held now, in units (compiler/common.ts DEPTH_BUDGET) */
+  depth?: number;
 };
 /** A call in tail position, handed back to the loop in `run` so that a long recursion does not grow the stack. */
 class Tail {
@@ -89,15 +96,34 @@ export const callable = (g: FnDecl): Fn => ({
   body: g.body,
   file: g.file,
   env: null,
+  name: g.name,
 });
+/** A function's weight against the depth budget: a recursive function of the program's, when weights are given. */
+const weightOf = (it: Interp, fn: Fn): number => (fn.name !== undefined && it.levels ? (it.levels[fn.name] ?? 0) : 0);
+/** Hold a function's weight, as its call in a build does (compiler/function.ts holdLevel), or stop past the budget. */
+function hold(it: Interp, fn: Fn): void {
+  const w = weightOf(it, fn);
+  if (w === 0) return;
+  it.depth = (it.depth ?? 0) + w;
+  if (it.depth > DEPTH_BUDGET)
+    throw new Trap(TRAP.DEPTH, `recursion too deep in ${fn.name ?? '?'} (${it.depth} units)`);
+}
 export function run(it: Interp, fn: Fn, args: Value[]): Value {
+  hold(it, fn);
   for (let next = new Tail(fn, args); ;) {
     const env: Env = new Map(next.fn.env ?? []);
     next.fn.params.forEach((p, i) => {
       env.set(p, next.args[i] ?? stop(`missing argument ${p}`));
     });
     const r = step(it, next.fn.body, env, next.fn.file, true);
-    if (!(r instanceof Tail)) return r;
+    if (!(r instanceof Tail)) {
+      it.depth = (it.depth ?? 0) - weightOf(it, next.fn);
+      return r;
+    }
+    // a tail call: the function called takes this one's place, as `return_call` does in a build; a call of itself
+    // as its result (a loop in a build) gives back and takes the same weight
+    it.depth = (it.depth ?? 0) - weightOf(it, next.fn);
+    hold(it, r.fn);
     next = r;
   }
 }

@@ -30,7 +30,63 @@ const TRAPS: Readonly<Record<number, string>> = {
   6: 'integer overflow',
   7: 'shift amount outside 0 to 63',
   8: 'float not finite',
+  9: 'recursion too deep',
 };
+
+/** A module's function names, by index (its name section): the function a trap 9 names. */
+function functionNames(module: WebAssembly.Module): Map<number, string> {
+  const out = new Map<number, string>();
+  const [s] = WebAssembly.Module.customSections(module, 'name');
+  if (!s) return out;
+  const b = new Uint8Array(s);
+  let i = 0;
+  const u = (): number => {
+    let n = 0,
+      shift = 0;
+    for (;;) {
+      const c = b[i++];
+      if (c === undefined) return n;
+      n += (c & 127) * 2 ** shift;
+      shift += 7;
+      if (c < 128) return n;
+    }
+  };
+  const text = (): string => {
+    const n = u();
+    const t = new TextDecoder().decode(b.subarray(i, i + n));
+    i += n;
+    return t;
+  };
+  while (i < b.length) {
+    const sub = b[i++];
+    const size = u();
+    const end = i + size;
+    if (sub === 1)
+      for (let n = u(); n > 0; n--) {
+        const index = u();
+        out.set(index, text());
+      }
+    i = end;
+  }
+  return out;
+}
+
+/**
+ * What a run that stopped says. A trap gives its number and reason; a trap 9 also the function whose call passed
+ * the depth budget (a generic function by its own name, not its copy's) and the depth it reached, in units. The
+ * engine's own stack running out first (it should not: the budget is under the smallest stack measured, compiler/
+ * common.ts DEPTH_BUDGET) is a trap 9 too, said so, never the engine's "Maximum call stack size exceeded".
+ */
+function stopped(L: Linked, why: number, err: unknown): string {
+  if (why === 9) {
+    const name = (L.names().get(globalOf(L, 'deepest')) ?? 'a recursive function').replace(/\[.*$/, '');
+    return `trap 9: ${TRAPS[9]} in ${name} (${globalOf(L, 'depth')} units)`;
+  }
+  if (why) return `trap ${why}: ${TRAPS[why]}`;
+  const engine = err instanceof RangeError || (err instanceof Error && err.cause instanceof RangeError);
+  if (engine) return `trap 9: ${TRAPS[9]}: the engine's stack ran out first`;
+  return err instanceof Error ? err.message : String(err);
+}
 /** the longest a timer may be set for: 30 days */
 export const MAX_WAKE_MS = 30 * 24 * 3600 * 1000;
 
@@ -100,6 +156,8 @@ type Linked = {
   readonly M: Method[];
   readonly o: Required<Omit<LinkOptions, 'sql' | 'timers'>> & { sql: Sql | undefined; timers: Timers };
   readonly live: boolean;
+  /** the module's function names by index, read when a trap 9 asks */
+  readonly names: () => Map<number, string>;
   readonly mem: Mem;
   readonly raw: Record<string, WebAssembly.ExportValue>;
   readonly flagNow: Flags;
@@ -438,9 +496,7 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
     const [head] = L.effects;
     if (head && isHead(head) && L.live) head.bytes = globalOf(L, 'heap') - floor;
     const why = globalOf(L, 'why');
-    throw new Error(why ? `trap ${why}: ${TRAPS[why]}` : err instanceof Error ? err.message : String(err), {
-      cause: err,
-    });
+    throw new Error(stopped(L, why, err), { cause: err });
   }
   return finished(L, bytes, h, floor);
 }
@@ -849,6 +905,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
   const { sql, log = true, recorded = null, trace = null, services = {}, name = null } = options;
   const { sink = null, heap = null, random = null, timers = REAL_TIMERS, observe = null } = options;
   const holder: { L: Linked | null } = { L: null };
+  let names: Map<number, string> | null = null;
   const raw = new WebAssembly.Instance(module, {
     env: envOf(() => holder.L ?? fail('the module called its host while it was being linked')),
   }).exports;
@@ -868,6 +925,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     mem: { memory, alloc: size => Number(alloc(size)) },
     raw,
     flagNow: Object.fromEntries(F.map(f => [f.name, f.default])),
+    names: () => (names ??= functionNames(module)),
     target: { name: 'handle', params: E },
     remotes: [],
     families: [],

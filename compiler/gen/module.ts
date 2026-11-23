@@ -317,7 +317,12 @@ export function orderArgs(
 export const G_HP = 0,
   G_COST = 1,
   G_WHY = 2,
-  G_UNDO = 3;
+  G_UNDO = 3,
+  // the recursion held now, in units (common.ts DEPTH_BUDGET), and the function whose call passed the budget
+  G_DEPTH = 4,
+  G_DEEPEST = 5;
+/** The first global past the fixed ones: the free lists' heads. */
+const G_FREE = 6;
 // Flags live at fixed addresses, 8 bytes each, before the text literals.
 export const FLAG_BASE = 16;
 /** Stop, saying why. */
@@ -437,7 +442,7 @@ export function queryId(t: Tables, q0: Omit<QueryEntry, 'run'>): number {
 export function freeList(t: Tables, size: number): number {
   const had = t.freeLists.get(size);
   if (had !== undefined) return had;
-  const g = 4 + t.freeLists.size;
+  const g = G_FREE + t.freeLists.size;
   t.freeLists.set(size, g);
   return g;
 }

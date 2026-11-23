@@ -8,7 +8,7 @@ import { I32, fail, loadOp, sleb, stemOf, storeOp, uleb, utf8 } from '../common.
 import { ROW_CALLS } from '../rows.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, RETIRED, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
-import { fresh, get, mark, need, set } from './fn.ts';
+import { fresh, get, mark, need, releaseLevel, set } from './fn.ts';
 import type { Binding, Build, CExpr, Ctx, Stored } from './fn.ts';
 import type { Compiled } from './assemble.ts';
 import { emitCallOut } from './callout.ts';
@@ -429,6 +429,10 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
     // a call of itself as its result: the arguments become the parameters, and the function starts again
     for (let i = c.nparams - 1; i >= 0; i--) c.code.push(...set(i));
     c.code.push(0x0c, ...uleb(c.depth - 1));
-  } else c.code.push(tail && B.opts.tailCalls ? 0x12 : 0x10, ...uleb(B.fnIndex(g.name)));
+  } else {
+    // a tail call puts g in this function's place: this one's weight is given back first
+    if (tail && B.opts.tailCalls) releaseLevel(c);
+    c.code.push(tail && B.opts.tailCalls ? 0x12 : 0x10, ...uleb(B.fnIndex(g.name)));
+  }
   return retOf(g);
 }

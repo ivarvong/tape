@@ -10,6 +10,7 @@ import type { Type } from '../types.ts';
 import type { Wire } from '../wire.ts';
 import type { Adt, BoxedField, FlatAdt, Shape } from './layout.ts';
 import type { CallGraph, Imports, Options, QueryEntry } from './module.ts';
+import { G_DEPTH } from './module.ts';
 
 /** What to write where an Int and a Float meet: there is no conversion but the one written. */
 export const MIXED =
@@ -42,6 +43,8 @@ export type Build = Imports & {
   fingerprint: (method: string, send: Type, reply: Type, at: Place) => string;
   flagRead: Set<string>;
   fnIndex: (n: string) => number;
+  /** the function at an index of the module, once named (fnIndex); none for an import or the runtime's */
+  fnAt: (index: number) => FnDecl | undefined;
   fns: Map<string, FnDecl>;
   freeList: (size: number) => number;
   isLinear: (t: Type) => boolean;
@@ -94,9 +97,33 @@ export type Ctx = {
   binderMode: 'owned' | 'borrowed';
   consuming: boolean;
   emit: (e: CExpr, expected: Type | null, tail: boolean) => Type;
+  /** where in `code` the function's weight goes (function.ts holdLevel), once its locals are all known */
+  readonly levels?: number[];
+  /** the code that holds and gives back the weight, [start, end) in `code`: cut when the function is a loop */
+  readonly levelSpans?: [number, number][];
 };
 /** A call out of the program; one made through an interface carries the type of what it sends. */
 export type CallOut = Call & { sendType?: Type };
+
+/** A function that can reach itself: its calls count steps, and hold recursion against the depth budget. */
+export const isRecursive = (B: Build, f: FnDecl): boolean =>
+  B.recursive.has(f.name) || (f.base !== undefined && B.recursive.has(f.base));
+/** The weight's place: an i32.const of 5 bytes, filled by build.ts (levelsOf) when every function is compiled. */
+export const WEIGHT_SLOT = [0x80, 0x80, 0x80, 0x80, 0x00];
+export const weightAt = (c: Ctx): void => {
+  c.code.push(0x41);
+  c.levels?.push(c.code.length);
+  c.code.push(...WEIGHT_SLOT);
+};
+/** The weight given back: where the function ends, and before a tail call puts another function in its place. */
+export function releaseLevel(c: Ctx): void {
+  if (!isRecursive(c.B, c.f)) return;
+  const start = c.code.length;
+  c.code.push(0x23, ...uleb(G_DEPTH));
+  weightAt(c);
+  c.code.push(0x6b, 0x24, ...uleb(G_DEPTH));
+  c.levelSpans?.push([start, c.code.length]);
+}
 
 export const get = (l: number): number[] => [0x20, ...uleb(l)];
 export const set = (l: number): number[] => [0x21, ...uleb(l)];

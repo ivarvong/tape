@@ -1,6 +1,6 @@
 // compiler/gen/runtime.ts: the three functions every module has, written as Wasm instructions.
 import { I32, TRAP, sleb, uleb, vec } from '../common.ts';
-import { G_COST, G_HP, G_UNDO, G_WHY, trap } from './module.ts';
+import { G_COST, G_DEEPEST, G_DEPTH, G_HP, G_UNDO, G_WHY, trap } from './module.ts';
 
 type Code = number | readonly number[];
 const code = (...parts: Code[]): number[] => parts.flat();
@@ -50,9 +50,21 @@ export function allocBody(profile: number | null): number[] {
   return code(vec([[2, I32]]), report, span, wrapped, grown, lg(2), gset(G_HP), lg(1), END);
 }
 
-/** reset(): the arena's end back to `heap`, the cost, the reason and the undo log cleared, the free lists emptied. */
+/** reset(): the arena's end back to `heap`; the cost, the reason, the undo log and the recursion held cleared; the
+ * free lists emptied. */
 export function resetBody(heap: number, freeLists: readonly number[]): number[] {
-  const cleared = code(I64_ZERO, gset(G_COST), i32(0), gset(G_WHY), i32(0), gset(G_UNDO));
+  const cleared = code(
+    I64_ZERO,
+    gset(G_COST),
+    i32(0),
+    gset(G_WHY),
+    i32(0),
+    gset(G_UNDO),
+    i32(0),
+    gset(G_DEPTH),
+    i32(-1),
+    gset(G_DEEPEST),
+  );
   return code(0, i32(heap), gset(G_HP), cleared, ...freeLists.map(g => code(i32(0), gset(g))), END);
 }
 

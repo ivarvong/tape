@@ -3,9 +3,12 @@ import type { Cell } from './json.ts';
 
 export class Trap extends Error {
   readonly code: number;
-  constructor(code: number) {
+  /** what a trap says beyond its number, as the host says it (host/run.ts stopped): a trap 9's function and depth */
+  readonly detail: string | null;
+  constructor(code: number, detail: string | null = null) {
     super(`trap ${code}`);
     this.code = code;
+    this.detail = detail;
   }
 }
 /** The longest a timer may be set for: 30 days. */

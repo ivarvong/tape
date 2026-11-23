@@ -1,13 +1,19 @@
 // compiler/gen/assemble.ts: the module's bytes, from the functions compiled and the tables they filled.
 import { F64, I32, I64, name, section, sleb, uleb, utf8, vec } from '../common.ts';
-import { FLAG_BASE, G_COST, G_HP, G_UNDO, G_WHY, sig } from './module.ts';
+import { FLAG_BASE, G_COST, G_DEEPEST, G_DEPTH, G_HP, G_UNDO, G_WHY, sig } from './module.ts';
 import type { Imports, Options, Tables } from './module.ts';
 import { inline } from './inline.ts';
 import { meter } from './meter.ts';
 import { allocBody, reserveBody, resetBody } from './runtime.ts';
 
 /** A function as compiled: the index of its type, and its locals and code. */
-export type Compiled = { readonly sig: number; readonly body: readonly number[] };
+export type Compiled = {
+  readonly sig: number;
+  readonly body: readonly number[];
+  /** a recursive function's weight, to fill in where it goes in `body` (build.ts levelsOf): by the function it is
+   * of (a generic function's copies share one), with its parameters and locals */
+  readonly level?: { readonly of: string; readonly slots: number; readonly at: readonly number[] };
+};
 export type Parts = {
   readonly imports: Imports;
   readonly opts: Options;
@@ -64,6 +70,8 @@ function exportsSection({ imports, opts, tables }: Parts): number[] {
       global('heap', G_HP),
       global('undo', G_UNDO),
       global('why', G_WHY),
+      global('depth', G_DEPTH),
+      global('deepest', G_DEEPEST),
       ...opts.exports.map(n => fn(n, tables.indexOf.get(n) ?? 0)),
     ]),
   );
@@ -78,6 +86,9 @@ function globalsSection(heap: number, freeLists: number): number[] {
       [I64, 1, 0x42, 0, 0x0b],
       zero,
       zero,
+      // the recursion held (G_DEPTH), and the function that passed the budget (G_DEEPEST: none, -1)
+      zero,
+      [I32, 1, 0x41, 0x7f, 0x0b],
       ...Array.from({ length: freeLists }, () => zero),
     ]),
   );
