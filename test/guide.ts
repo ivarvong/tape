@@ -1,6 +1,6 @@
 // docs/guide.md's quickstart against the compiler and the hosted runner's code: the program (the ```tape orders.tape
 // block) compiles with the rules on and is in fmt's layout, and the `run` call of the ```json orders.tape block, made
-// through mcp/src/runner.ts (what the hosted `run` tool runs, `remotes` and all), answers each request with the status
+// through mcp/src/runner.ts (what the hosted `run` tool runs, with its `remotes` if it has any), answers each request with the status
 // and body of the ```text orders.tape block, as application/json. The answers in the guide were written from what the
 // section says the service does, not copied from a run.
 import '../node25.ts';

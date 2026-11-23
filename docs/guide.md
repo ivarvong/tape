@@ -10,8 +10,8 @@ feature each.
 
 Start here. [`LANGUAGE.md`](../LANGUAGE.md) is the definition and [`std.md`](std.md) lists every std function and
 its parameters; read them too: section 9 of LANGUAGE.md gives the form for each task, and section 8 is the reference
-for a call that must finish later (a pending state, a timer that sends it again). The program takes orders: a POST that a client may retry, validated by its types, a count kept once
-per order, and a call to another program (payments) that may answer, refuse or not answer at all. `test/guide.ts`
+for a call that must finish later (a pending state, a timer that sends it again). The program takes orders: a POST that a client may retry, validated by its types and a guard, and a
+count kept once per order. `test/guide.ts`
 compiles it with the rules on and runs the `run` call below through the hosted runner's code, so every answer
 shown is the one it gives.
 
@@ -33,13 +33,10 @@ type Amount = Int where self >= 1 and self <= 1000000
 type NewOrder { NewOrder(key: Key, item: View, amount: Amount) }
 type Order { Order(id: Int, key: View, item: View, amount: Int) }
 type Item { Item(item: View, sold: Int) }
-type Charge { Charge(order: Int, amount: Int) }
-type Charged { Charged(payment: Int) }
-type ForOrder { ForOrder(order: Int) }
-type Paid { Paid(order: Int, payment: Int) }
+type Placed { Placed(order: Int, new: Bool) }
 type Problem { Problem(error: View) }
 
-fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+fn handle(raw: View, db: Sql) -> Buf {
   match request(raw) {
     Request(method: "POST", path: "/orders", body) -> placed(body)
     Request(method: "GET", path: "/items/" ++ item) -> shown(
@@ -49,49 +46,41 @@ fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
   }
 }
 
-// POST /orders: the client's key is claimed first, so a retried POST counts the sale once and charges the same
-// order again under the same once key; a call that got no answer is a 202, and the client sends the POST again
+// POST /orders: the client's key is claimed first, so a retried POST counts the sale once and answers the
+// order it made (new: False)
 fn placed(body: View) -> Buf {
   let Ok(value: NewOrder(key, item, amount)) = decode(json: body, as: NewOrder) else {
     Err(error) -> problem(status: 400, error)
   }
+  let True = item != "" else -> problem(status: 400, error: "item: empty")
   let 1 = sql_exec(
     query: "INSERT INTO orders(key, item, amount) VALUES (:key, :item, :amount) ON CONFLICT(key) \
         DO NOTHING",
     key,
     item,
     amount
-  ) else -> charged(found: by_key(key))
+  ) else -> answered(
+    found: by_key(key),
+    new: False
+  )
   let 1 = sql_exec(
     query: "UPDATE items SET sold = sold + 1 WHERE item = :item",
     item
   ) else -> rollback(
     out: problem(status: 404, error: "no such item \(item)")
   )
-  charged(found: by_key(key))
+  answered(found: by_key(key), new: True)
 }
 
 fn by_key(key: View) -> Option[Order] {
   sql_first(row: Order, query: "SELECT * FROM orders WHERE key = :key", key)
 }
 
-fn charged(found: Option[Order]) -> Buf {
-  let Some(value: order) = found else -> problem(status: 500, error: "the order is gone")
-  match call(
-    to: payments,
-    method: "charge",
-    send: Charge(order: order.id, amount: order.amount),
-    reply: Charged,
-    within: 2000,
-    once: ForOrder(order: order.id)
-  ) {
-    Ok(value: Charged(payment)) -> respond_as(status: 201, content: Json)
-      |> write_json(value: Paid(order: order.id, payment))
-    Err(error: Rejected(reason)) -> problem(status: 402, error: reason)
-    Err(error) -> problem(
-      status: 202,
-      error: "no answer from payments yet: send the same POST again"
-    )
+fn answered(found: Option[Order], new: Bool) -> Buf {
+  match found {
+    Some(value: Order(id)) -> respond_as(status: 201, content: Json)
+      |> write_json(value: Placed(order: id, new))
+    None -> problem(status: 500, error: "the order is gone")
   }
 }
 
@@ -107,8 +96,7 @@ fn problem(status: Int, error: View) -> Buf {
 }
 ```
 
-Sent to the `run` tool ([`mcp.md`](mcp.md)), with `remotes` standing in for the payments program (each call takes
-the next answer; a `once` key that got a reply gets it again):
+Sent to the `run` tool ([`mcp.md`](mcp.md)):
 
 ```json orders.tape
 {
@@ -117,28 +105,25 @@ the next answer; a `once` key that got a reply gets it again):
     "POST /orders\n{\"key\":\"a1\",\"item\":\"lamp\",\"amount\":30}",
     "POST /orders\n{\"key\":\"a1\",\"item\":\"lamp\",\"amount\":30}",
     "POST /orders\n{\"key\":\"b2\",\"item\":\"lamp\",\"amount\":20}",
-    "POST /orders\n{\"key\":\"b2\",\"item\":\"lamp\",\"amount\":20}",
-    "POST /orders\n{\"key\":\"c3\",\"item\":\"lamp\",\"amount\":10}",
+    "POST /orders\n{\"key\":\"c3\",\"item\":\"\",\"amount\":5}",
     "POST /orders\n{\"key\":\"d4\",\"item\":\"desk\",\"amount\":5}",
     "POST /orders\n{\"key\":\"\",\"item\":\"lamp\",\"amount\":5}",
     "GET /items/lamp",
     "GET /nothing"
-  ],
-  "remotes": {"payments": {"charge": [{"payment": 7}, "timeout", {"payment": 8}, {"error": "Rejected", "reason": "card declined"}]}}
+  ]
 }
 ```
 
 The answers, one a request (every one `application/json`):
 
 ```text orders.tape
-201 {"order":1,"payment":7}
-201 {"order":1,"payment":7}
-202 {"error":"no answer from payments yet: send the same POST again"}
-201 {"order":2,"payment":8}
-402 {"error":"card declined"}
+201 {"order":1,"new":true}
+201 {"order":1,"new":false}
+201 {"order":2,"new":true}
+400 {"error":"item: empty"}
 404 {"error":"no such item desk"}
 400 {"error":"key: not a valid Key"}
-200 {"item":"lamp","sold":3}
+200 {"item":"lamp","sold":2}
 404 {"error":"no such route"}
 ```
 
@@ -148,15 +133,17 @@ What to notice:
   no arm falls through to the last, the 404.
 - **Validation is the types.** `decode(json: body, as: NewOrder)` checks each refined field (`Key`, `Amount`), leaves
   a key it does not name unread, and its `Err` names the field: the 400's body as it is.
+- **A guard** is a step on a condition: `let True = item != "" else -> …` goes on when it holds and answers the
+  `else` when it does not. Bool values are `True` and `False` (`new: False`).
 - **A POST a client may retry** claims the client's key first: `UNIQUE`, `ON CONFLICT(key) DO NOTHING`, and
   `let 1 = sql_exec(…) else -> …`, so a second run finds the key taken and leaves by the `else`. The count after the
   claim needs nothing more (C54 sees the claim); `repeat: True` is only for a write meant to apply on every attempt.
   Without the `UNIQUE` key and its `ON CONFLICT` the compiler refuses the INSERT (C55).
 - **`rollback(out:)`** answers and undoes this request's writes: the claim of an order for an unknown item goes too.
-- **A call** has a time budget (`within:`) and a `once:` key that names the row it is for, so sending it again from
-  a retried request runs it once. Its three outcomes are three arms: `Ok`, `Rejected` (a refusal: final), and no
-  answer (`Timeout` or `Unreachable`: the outcome is unknown, so the same key is sent again later).
 - **JSON out** is `respond_as(status, content: Json)` and `write_json` of a record.
+- **A call to another program** (a payment, say) is in [`LANGUAGE.md`](../LANGUAGE.md) section 8, a whole program
+  with one: a `once:` key that names the row, a pending state, and a timer (`wake`, `woken`) that sends the call
+  again until it is answered. The `run` tool answers such calls from its `remotes` argument ([`mcp.md`](mcp.md)).
 
 Where to look next, by section below: Patterns (what a route can match), Steps (`let … else`), JSON (lists and
 records inside records), Rules (the retry rules and their codes), Machines (a status column), Timers (retrying
