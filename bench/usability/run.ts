@@ -13,15 +13,20 @@
 // Results go to bench/usability/results/<date>-<prod tape-version>/ (or --out): per job a directory with the
 // transcript, the solution and metrics.json (all ignored by git), then results.json and summary.md (tracked).
 // Needs the `claude` CLI logged in, and Node 25.
-// Two runs at once from one machine (two models side by side, say) pass prod's per-address rate limit: sessions then
-// start with the tape server not connected and test nothing. So --model takes a list, run one after another, and a
-// session whose tape server did not connect is stopped and started again after a minute (--connect-retries, 3).
+// Prod limits calls per address per minute. Two runs at once from one machine (two models side by side, say), or
+// Haiku 4 at a time, meet the limit: a session then starts with the tape server not connected, or has a compile or
+// run refused for it, and its counts are the limiter's. So --model takes a list, run one after another; a model runs
+// at most its --max-concurrent-per-model cap at a time (`haiku=3` unless the flag says otherwise, whatever --parallel
+// says); and a spoiled session (sessions.ts) is stopped and started again after a jittered, growing wait (65 s·2^(k−1)
+// plus up to 65 s), up to --retries (3) times. A job still spoiled after that is graded, marked `spoiled` with the
+// reason, and left out of summary.md's numbers.
 import '../../node25.ts';
 import { execSync, spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { analyse, connected } from './transcript.ts';
+import { backoffMs, concurrencyFor, DEFAULT_CAPS, parseCaps, spoiledBy } from './sessions.ts';
 import type { Metrics } from './transcript.ts';
 import { grade, TASKS } from './grade.ts';
 import { MCP_URL } from './lib.ts';
@@ -52,8 +57,10 @@ export type JobResult = Metrics & {
   id: string;
   exit: number | null;
   timedOut: boolean;
-  /** sessions started again because the tape server did not connect (prod's per-address rate limit, say) */
-  connectRetries: number;
+  /** sessions started again because they were spoiled (sessions.ts: no tape server, or a rate-limited call) */
+  restarts: number;
+  /** why the session that counts is spoiled after the last restart (then summary.md leaves it out), or null */
+  spoiled: string | null;
   solution: string[];
   solutionFrom: 'solution/' | 'last compiled call' | 'last call' | 'none';
   grade: Awaited<ReturnType<typeof grade>>;
@@ -115,10 +122,8 @@ Work until the program passes your own tests of the whole spec, or until you con
 (then do the rest, report why with feedback, and say so). End with a short summary: what works, what does not, and
 what was hardest.`;
 
-/** How many times a job whose tape server did not connect is started again, and how long it waits first: prod's
- * rate limit is per address and per minute, so a wait of a minute and more lets it pass. */
-const CONNECT_RETRIES = Number(opt('connect-retries', '3'));
-const CONNECT_WAIT_MS = 65_000;
+/** How many times a spoiled session is started again (--connect-retries is the flag's old name). */
+const RETRIES = Number(opt('retries', opt('connect-retries', '3')));
 const pause = async (ms: number): Promise<void> => {
   await new Promise<void>(done => {
     setTimeout(done, ms);
@@ -187,6 +192,8 @@ const session = async (job: Job, info: RunInfo, dir: string): Promise<Session> =
             seenInit = true;
             if (!connected([wrapped])) child.kill('SIGTERM');
           }
+          // a compile or run the limit refused spoils the session: stop it now rather than pay for the rest
+          if (line.includes('rate_limited') && spoiledBy(lines) !== null) child.kill('SIGTERM');
         }
         nl = buf.indexOf('\n');
       }
@@ -213,17 +220,17 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
   const dir = join(outDir, job.id);
   mkdirSync(dir, { recursive: true });
   let s = await session(job, info, dir);
-  let connectRetries = 0;
-  while (!connected(s.lines) && connectRetries < CONNECT_RETRIES) {
-    connectRetries++;
-    // the session that did not connect is kept beside the one that counts, for the record
-    writeFileSync(join(dir, `unconnected-${connectRetries}.jsonl`), `${s.lines.join('\n')}\n`);
-    console.log(
-      `${job.id}: the tape server did not connect (${connectRetries} of ${CONNECT_RETRIES}); again in ${CONNECT_WAIT_MS / 1000} s`,
-    );
-    await pause(CONNECT_WAIT_MS);
+  let restarts = 0;
+  for (let why = spoiledBy(s.lines); why !== null && restarts < RETRIES; why = spoiledBy(s.lines)) {
+    restarts++;
+    // the spoiled session is kept beside the one that counts, for the record
+    writeFileSync(join(dir, `spoiled-${restarts}.jsonl`), `${s.lines.join('\n')}\n`);
+    const wait = backoffMs(restarts);
+    console.log(`${job.id}: ${why} (${restarts} of ${RETRIES}); again in ${Math.round(wait / 1000)} s`);
+    await pause(wait);
     s = await session(job, info, dir);
   }
+  const spoiled = spoiledBy(s.lines);
   const { work, lines, exit, timedOut } = s;
   const transcript = join(dir, 'transcript.jsonl');
   writeFileSync(transcript, `${lines.join('\n')}\n`);
@@ -257,7 +264,8 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
     id: job.id,
     exit,
     timedOut,
-    connectRetries,
+    restarts,
+    spoiled,
     solution: files.map(f => f.name),
     solutionFrom,
     grade: graded,
@@ -265,7 +273,8 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
   writeFileSync(join(dir, 'metrics.json'), JSON.stringify(result, null, 2));
   console.log(
     `${job.id}: ${graded.passed}/${graded.total} checks, first compile ${metrics.firstCompileMs === null ? 'never' : `${Math.round(metrics.firstCompileMs / 1000)} s`}, ` +
-      `${metrics.compileAttempts} attempts, $${metrics.costUsd.toFixed(2)}, ${metrics.feedback.length} feedback`,
+      `${metrics.compileAttempts} attempts, $${metrics.costUsd.toFixed(2)}, ${metrics.feedback.length} feedback` +
+      (spoiled === null ? '' : ` (spoiled: ${spoiled}; left out of the summary's numbers)`),
   );
   return result;
 };
@@ -292,7 +301,7 @@ const regrade = async (outDir: string): Promise<void> => {
       const lines = readFileSync(transcript, 'utf8')
         .split('\n')
         .filter(l => l !== '');
-      saved.jobs[i] = Object.assign(j, analyse(lines, j.wallMs), { transcript });
+      saved.jobs[i] = Object.assign(j, analyse(lines, j.wallMs), { transcript, spoiled: spoiledBy(lines) });
     }
     const sol = join(outDir, j.id, 'solution');
     const files = existsSync(sol)
@@ -311,6 +320,7 @@ if (args[0] === '--regrade') {
   const tasks = opt('tasks', TASKS.join(',')).split(',');
   for (const t of tasks) if (!TASKS.some(x => x === t)) throw new Error(`no task ${t}: ${TASKS.join(', ')}`);
   const models = opt('model', 'sonnet').split(',');
+  const caps = parseCaps(opt('max-concurrent-per-model', DEFAULT_CAPS));
   const date = new Date().toISOString().slice(0, 10);
   // resolved: the agent's cwd is a temporary directory, so a relative path would not find mcp.json
   const base = resolve(opt('out', ''));
@@ -324,7 +334,7 @@ if (args[0] === '--regrade') {
       benchSha: gitSha(),
       model,
       n: Number(opt('n', '1')),
-      parallel: Number(opt('parallel', '4')),
+      parallel: concurrencyFor(model, Number(opt('parallel', '4')), caps),
       budgetUsd: Number(opt('budget-usd', '6')),
       timeoutMin: Number(opt('timeout-min', '45')),
       mcpUrl: MCP_URL,

@@ -96,7 +96,12 @@ export const rank = (jobs: JobResult[]): Hit[] => {
   );
 };
 
-export const render = (info: RunInfo, jobs: JobResult[]): string => {
+/** The jobs whose counts are Tape's: a job still spoiled after its last restart (sessions.ts) is left out. */
+export const counted = (jobs: JobResult[]): JobResult[] => jobs.filter(j => (j.spoiled ?? null) === null);
+
+export const render = (info: RunInfo, all: JobResult[]): string => {
+  const jobs = counted(all);
+  const left = all.filter(j => !jobs.includes(j));
   const out: string[] = [];
   const put = (...ls: string[]): void => {
     out.push(...ls);
@@ -115,6 +120,11 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
     '',
   );
   put('## Headline', '');
+  if (left.length > 0)
+    put(
+      `- **${left.length} of ${all.length} jobs are left out of every number below**: still spoiled after their last restart, ` +
+        `so their counts are prod's rate limit, not Tape (${left.map(j => `${j.id}: ${j.spoiled ?? ''}`).join('; ')}).`,
+    );
   put(
     `- **Tasks fully accepted: ${full} of ${jobs.length}.** Acceptance checks passed: ${passed} of ${total} (${total === 0 ? 0 : Math.round((100 * passed) / total)}%).`,
   );
@@ -126,7 +136,7 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
     `- Compile attempts ${jobs.reduce((s, j) => s + j.compileAttempts, 0)}, of which refused ${jobs.reduce((s, j) => s + j.failedAttempts, 0)}; ` +
       `feedback reports filed ${jobs.reduce((s, j) => s + j.feedback.length, 0)}; calls rate-limited (not counted as attempts) ${jobs.reduce((s, j) => s + j.rateLimited, 0)}; ` +
       `answers too large for the CLI to show ${jobs.reduce((s, j) => s + (j.tooLarge ?? 0), 0)}; ` +
-      `sessions started again because the tape server did not connect ${jobs.reduce((s, j) => s + (j.connectRetries ?? 0), 0)}; schema probes (a stand-in text, not counted as attempts) ${jobs.reduce((s, j) => s + (j.probes ?? 0), 0)}.`,
+      `sessions started again because they were spoiled (no tape server, or a rate-limited compile or run) ${all.reduce((s, j) => s + (j.restarts ?? 0), 0)}; schema probes (a stand-in text, not counted as attempts) ${jobs.reduce((s, j) => s + (j.probes ?? 0), 0)}.`,
   );
   put(
     `- Cost $${cost.toFixed(2)} (CLI-reported list price), ${jobs.reduce((s, j) => s + j.tokens.output, 0).toLocaleString('en-US')} output tokens.`,
@@ -201,7 +211,8 @@ export const render = (info: RunInfo, jobs: JobResult[]): string => {
   put('## Re-running', '');
   put(
     'After a release (prod answers a new `tape-version`): `node bench/usability/run.ts` (all tasks, once each; `--n 3` for ' +
-      'variance, `--tasks a,b`, `--model`, `--parallel`, `--budget-usd`, `--timeout-min`). To see whether the old solutions ' +
+      'variance, `--tasks a,b`, `--model a,b` (one after another), `--parallel`, `--max-concurrent-per-model haiku=3`, ' +
+      '`--retries 3`, `--budget-usd`, `--timeout-min`). To see whether the old solutions ' +
       'still pass on the new release without new agents: `node bench/usability/run.ts --regrade <results dir>`. To grade one ' +
       'program by hand: `node bench/usability/grade.ts <task> <file.tape>...`. To rewrite this file: `node bench/usability/summary.ts <results dir>`.',
     '',

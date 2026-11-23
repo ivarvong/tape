@@ -34,6 +34,8 @@ export type Metrics = {
   feedback: Feedback[];
   /** calls prod's rate limit refused: not attempts, since they say nothing of Tape */
   rateLimited: number;
+  /** of those, the compile and run calls: a session with any is spoiled (run.ts starts it again) */
+  limitedTools: number;
   /** attempts whose answer was too large for the CLI to show */
   tooLarge: number;
   /** compile or run calls with a stand-in text, not a program */
@@ -87,6 +89,7 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
     attempts: [],
     feedback: [],
     rateLimited: 0,
+    limitedTools: 0,
     tooLarge: 0,
     probes: 0,
     costUsd: 0,
@@ -123,7 +126,10 @@ export const analyse = (lines: string[], wallMs: number): Metrics => {
         const limited = answer['error'] === 'rate_limited' || answer['error'] === 'feedback_rate_limited';
         if (limited) m.rateLimited++;
         // a compile or run the limit refused is no attempt (a feedback is still listed, with no id, as before)
-        if (limited && call.name !== 'feedback') continue;
+        if (limited && call.name !== 'feedback') {
+          if (call.name === 'compile' || call.name === 'run') m.limitedTools++;
+          continue;
+        }
         const tooLarge = TOO_LARGE.test(text);
         if (call.name === 'feedback') {
           m.feedback.push({
