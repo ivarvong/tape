@@ -432,4 +432,36 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// ---- a reserved word called before its definition is read, and a line that starts with `and`. `flag(True)` in
+// handle, above `fn flag`, was P02 "expected an expression but found `flag`" (the P01 that names the reserved word
+// comes only at the definition); a condition wrapped onto a line starting with `and` was the same generic P02.
+{
+  const FLAG =
+    'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_int(value: flag(b: True))\n}\n\nfn flag(b: Bool) -> Int {\n  1\n}\n';
+  const s1 = said(FLAG);
+  same(
+    'a reserved word called: P02 that says so',
+    [code(s1), s1 === 'compiled' ? '' : s1.message],
+    ['P02:2', '`flag` is a reserved word, so no function has that name'],
+  );
+  same(
+    '…and renamed where it is defined and called, as the fix says, it compiles',
+    said(FLAG.replaceAll('flag(', 'flag_(')),
+    'compiled',
+  );
+  const AND =
+    'fn f(a: Int, b: Int) -> Bool {\n  let ok = a > 1\n    and b > 1\n  ok\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n';
+  const s2 = said(AND);
+  same(
+    'a let whose value goes on to a line starting with `and`',
+    [code(s2), s2 === 'compiled' ? '' : s2.message],
+    ['P02:3', 'an expression does not go on to a line that starts with `and`'],
+  );
+  same(
+    '…in parentheses, as the fix says, it compiles',
+    said(AND.replace('a > 1\n    and b > 1', '(a > 1\n    and b > 1)')),
+    'compiled',
+  );
+}
+
 finish();

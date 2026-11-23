@@ -19,6 +19,7 @@ import type {
 } from '../ast.ts';
 import { decText, fail, utf8 } from '../common.ts';
 import { numbered } from '../sqltext.ts';
+import { KEYWORDS } from '../lex.ts';
 import { Cursor, shown } from './cursor.ts';
 
 // how tightly each operator binds; `|>` is read here and becomes a call
@@ -180,6 +181,16 @@ function atom(c: Cursor, t: Token): Expr {
     );
   if (t.t === 'nl' && before && (before.t === 'op' || before.t === 'kw') && isBinOp(before.v))
     return fail(t, 'P02', `an expression does not go on past the end of a line after \`${before.v}\``, ONE_LINE);
+  if ((t.t === 'op' || t.t === 'kw') && isBinOp(t.v) && before?.t === 'nl')
+    return fail(t, 'P02', `an expression does not go on to a line that starts with \`${t.v}\``, ONE_LINE);
+  // a reserved word called as a function (`flag(x)`, before any definition of it is read)
+  if (t.t === 'kw' && c.is('op', '('))
+    return fail(
+      t,
+      'P02',
+      `\`${t.v}\` is a reserved word, so no function has that name`,
+      `A reserved word (${[...KEYWORDS].join(' ')}) cannot name a variable, a parameter or a function: give the function another name (\`${t.v}_\`) where it is defined and called.`,
+    );
   return fail(
     t,
     'P02',
