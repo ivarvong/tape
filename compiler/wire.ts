@@ -3,14 +3,17 @@
 //   json_as_T(obj)          the first constructor whose keys and kinds fit the object (or why not, from the one that
 //                           got furthest), its refined fields checked in order, then its records and lists decoded,
 //                           each reason with the path to it
-// and for a record type with a field that is a record or a List (`nested`):
-//   wire_write_T(out, value)  the object, field by field (types with one constructor and no Option, as write_json)
-// decode calls json_decode_T. A field is: Int, Bool, View (or a refinement); a record; List[…] of those; Option[…] of
+//   json_decode_top_L(json)  for each `decode(json:, as: List[…])`: the array, its elements decoded in turn
+// and for each record type that is not one flat constructor (`written`):
+//   wire_write_T(out, value)  the object, field by field: an Option field that is None has no key, and a type with
+//                             several constructors is {"Constructor": {…}}, the form json_as_T reads first
+// decode calls json_decode_T; write_json calls wire_write_T. A field is: Int, Bool, View (or a refinement); a record; List[…] of those; Option[…] of
 // any. What decode accepts and the reasons it gives are those of the host's decode before it (JSON.parse, then the
 // shape), with numbers read exactly (std/json.tape json_int). The code calls std's functions by their qualified names
 // (json.json_get, text.write_int, json.json_append for append) and names only std types a program cannot define
 // (shadow.ts CORE), so a program's own max, push or List does not take their place.
-import type { Program, TypeAst, Variant } from './ast.ts';
+import { asType, partsOf } from './ast.ts';
+import type { Expr, Program, TypeAst, Variant } from './ast.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
 export type WireKind =
@@ -24,8 +27,10 @@ export type Wire = {
   /** the record types that have a field that is a record or a list */
   nested: Set<string>;
   kind: (t: TypeAst, inList: boolean, busy: Set<string>) => WireKind | null;
-  /** those of `nested` that can also be written */
-  writable: Set<string>;
+  /** the record types written by wire_write_T: all that can be JSON but one flat constructor without Option */
+  written: Set<string>;
+  /** every record type that can be JSON (written by wire_write_T or, one flat constructor, by write_json itself) */
+  encodable: Set<string>;
   /** the record types that have a decoder (json_decode_T) */
   decodable: Set<string>;
 };
@@ -36,6 +41,24 @@ const vr = (field: string): string => `w_${field}`;
 const stop = (what: string): never => {
   throw new Error(`wire: ${what}`);
 };
+const astText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(astText).join(', ')}]` : t.name);
+/** A type's text as part of a generated name: `List[Item]` is `List_Item`. */
+export const mangled = (text: string): string => text.replaceAll(/[^A-Za-z0-9]+/g, '_').replace(/_$/, '');
+/** Every List type the program decodes on its own, `decode(json:, as: List[T])`. */
+function topLists(prog: Program): TypeAst[] {
+  const out = new Map<string, TypeAst>();
+  const visit = (e: Expr): void => {
+    if (e.k === 'call' && e.name === 'decode') {
+      const as = e.args.find(a => a.label === 'as')?.value,
+        t = as ? asType(as) : null;
+      if (t?.name === 'List') out.set(astText(t), t);
+    }
+    partsOf(e).forEach(visit);
+  };
+  for (const f of prog.fns.values()) visit(f.body);
+  return [...out.values()];
+}
+
 export function wireSource(prog: Program): Wire {
   const types = prog.types,
     memo = new Map<string, boolean>(),
@@ -124,15 +147,23 @@ export function wireSource(prog: Program): Wire {
     )
       add(n);
   // the helpers are std/json.tape's: a build without it decodes nothing (decode says so)
-  if (!prog.fns.has('json_tree') || !prog.fns.has('write_bool'))
-    return { text: '', nested: new Set(), decodable: new Set(), kind, writable: new Set() };
+  if (!prog.fns.has('json_tree') || !prog.fns.has('write_bool') || !prog.fns.has('wire_key'))
+    return { text: '', nested: new Set(), decodable: new Set(), kind, written: new Set(), encodable: new Set() };
+  const fieldKinds = (n: string): (WireKind | null)[] =>
+    (types.get(n)?.variants ?? []).flatMap(v => v.fields.map(f => kind(f.type, false, new Set())));
+  // std's own types are written only as one flat constructor: no writer is generated for them
+  const written = new Set(
+    [...decodable].filter(
+      n =>
+        nested.has(n) ||
+        (!types.get(n)?.file.startsWith('std/') &&
+          ((types.get(n)?.variants.length ?? 0) > 1 || fieldKinds(n).some(k => k?.k === 'opt'))),
+    ),
+  );
   const out: string[] = [],
     lists = new Map<string, boolean>(),
     helpers = new Set<string>(),
-    mangle = (t: TypeAst): string =>
-      text(t)
-        .replaceAll(/[^A-Za-z0-9]+/g, '_')
-        .replace(/_$/, '');
+    mangle = (t: TypeAst): string => mangled(text(t));
   const once = (name: string, src: () => string): string => {
     if (!helpers.has(name)) {
       helpers.add(name);
@@ -255,10 +286,11 @@ export function wireSource(prog: Program): Wire {
     out.push(
       vs.length === 1
         ? `fn json_as_${n}(obj: Json_Tree) -> Result[${n}, View] {\n  json_one_${n}_0(obj)\n}\n`
-        : `fn json_as_${n}(obj: Json_Tree) -> Result[${n}, View] {\n${vs.map((_, i) => `  let c${i} = json_named_${n}_${i}(obj)\n`).join('')}  let b0 = 0\n  let m0 = c0\n${steps.join('')}  match {\n    m${last} < 0 -> json_try_${n}_0(obj, far: -1, why: "")\n${vs
-            .slice(0, -1)
-            .map((_, i) => `    b${last} == ${i} -> json_one_${n}_${i}(obj)\n`)
-            .join('')}    else -> json_one_${n}_${last}(obj)\n  }\n}\n`,
+        : `fn json_as_${n}(obj: Json_Tree) -> Result[${n}, View] {\n  match json.json_tag(obj) {\n${vs.map((v, i) => `    "${v.name}" -> json_tagged_${n}_${i}(found: json.json_get(obj, key: "${v.name}"))\n`).join('')}    _ -> json_untagged_${n}(obj)\n  }\n}\n` +
+            `fn json_untagged_${n}(obj: Json_Tree) -> Result[${n}, View] {\n${vs.map((_, i) => `  let c${i} = json_named_${n}_${i}(obj)\n`).join('')}  let b0 = 0\n  let m0 = c0\n${steps.join('')}  match {\n    m${last} < 0 -> json_try_${n}_0(obj, far: -1, why: "")\n${vs
+              .slice(0, -1)
+              .map((_, i) => `    b${last} == ${i} -> json_one_${n}_${i}(obj)\n`)
+              .join('')}    else -> json_one_${n}_${last}(obj)\n  }\n}\n`,
     );
     vs.forEach((v, i) => {
       const ks = kindsOf(v);
@@ -267,6 +299,10 @@ export function wireSource(prog: Program): Wire {
         `fn json_one_${n}_${i}(obj: Json_Tree) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(obj) {\n    Json_Hit -> json_build_${n}_${i}(obj)\n    Json_Miss(why) -> Err(error: why)\n  }\n}\n`,
       );
       if (vs.length > 1) {
+        // {"Name": {…}}, as write_json writes it: that constructor, from the object inside
+        out.push(
+          `fn json_tagged_${n}_${i}(found: Option[Json_Tree]) -> Result[${n}, View] {\n  let inner = json.json_value_of(found)\n  match {\n    json.json_is_object(item: inner) -> json_one_${n}_${i}(obj: inner)\n    else -> Err(error: "${v.name}: expected an object")\n  }\n}\n`,
+        );
         const required = v.fields.filter((_, j) => kAt(j).k !== 'opt').map(f => `json.json_has(obj, key: "${f.name}")`);
         const count = v.fields.length > 0 ? v.fields.map(f => `json.json_one(obj, key: "${f.name}")`).join(' + ') : '0';
         out.push(
@@ -327,66 +363,66 @@ export function wireSource(prog: Program): Wire {
       );
     });
   }
-  const write = (o: string, e: string, k: WireKind): string =>
-    k.k === 's'
-      ? k.base === 'Int'
-        ? `text.write_int(out: ${o}, value: ${e})`
-        : k.base === 'Float'
-          ? `json.json_write_float(out: ${o}, value: ${e})`
-          : k.base === 'Bool'
-            ? `json.write_bool(out: ${o}, value: ${e})`
-            : `json.write_json_string(out: ${o}, text: ${e})`
-      : k.k === 'rec'
-        ? nested.has(k.name)
-          ? `wire_write_${k.name}(out: ${o}, value: ${e})`
-          : `write_json(out: ${o}, value: ${e})`
-        : k.k === 'list'
-          ? `${list(k.of)}(out: ${o}, list: ${e})`
-          : stop('a field that may be absent is not written');
-  function list(k: WireKind): string {
-    const m = mangle(k.t),
-      lt = `List[${text(k.t)}]`;
-    if (!lists.has(m)) {
-      lists.set(m, true);
-      out.push(
-        `fn wire_write_list_${m}(out: Buf, list: ${lt}) -> Buf {\n  wire_write_rest_${m}(out: json.json_push(out, byte: 91), list, first: True)\n}\n`,
-        `fn wire_write_rest_${m}(out: Buf, list: ${lt}, first: Bool) -> Buf {\n  match list {\n    Cons(head, tail) if first -> wire_write_rest_${m}(out: ${write('out', 'head', k)}, list: tail, first: False)\n    Cons(head, tail) -> wire_write_rest_${m}(out: ${write('json.json_push(out, byte: 44)', 'head', k)}, list: tail, first: False)\n    Nil -> json.json_push(out, byte: 93)\n  }\n}\n`,
-      );
-    }
-    return `wire_write_list_${m}`;
+  for (const t of topLists(prog)) {
+    const k = kind(t, false, new Set());
+    if (k?.k !== 'list') continue;
+    out.push(
+      `fn json_decode_top_${mangle(t)}(json: View) -> Result[${text(t)}, View] {\n  match json.json_array(v: json) {\n    Ok(value) -> ${each(k.of)}(arr: value)\n    Err(error) -> Err(error)\n  }\n}\n`,
+    );
   }
-  const writable = new Set<string>();
-  const canWrite = (n: string, busy = new Set<string>()): boolean => {
-    const only = types.get(n)?.variants.length === 1 ? types.get(n)?.variants[0] : undefined;
-    if (busy.has(n) || !only) return false;
-    busy.add(n);
-    const ok = only.fields.every(f => {
-      const go = (k: WireKind | null): boolean =>
-        !!k && (k.k === 's' || (k.k === 'rec' && canWrite(k.name, busy)) || (k.k === 'list' && go(k.of)));
-      return go(kind(f.type, false, new Set()));
-    });
-    busy.delete(n);
-    return ok;
+  // the kind of a constructor's i-th field: every field of a type that can be JSON has one
+  const kinds = (v: Variant): ((i: number) => WireKind) => {
+    const all = v.fields.map(f => kind(f.type, false, new Set()));
+    return i => all[i] ?? stop(`${v.name} has no field ${i} that can be JSON`);
   };
-  for (const n of nested) {
-    const d = types.get(n) ?? stop(`no type ${n}`),
-      // the kind of a constructor's i-th field: every field of a nested type has one
-      kinds = (v: Variant): ((i: number) => WireKind) => {
-        const all = v.fields.map(f => kind(f.type, false, new Set()));
-        return i => all[i] ?? stop(`${v.name} has no field ${i} that can be JSON`);
-      };
-    if (canWrite(n)) {
-      writable.add(n);
-      const v = d.variants[0] ?? stop(`${n} has no constructor`),
-        ks = kinds(v);
-      let acc = 'out';
-      v.fields.forEach((f, i) => {
-        acc = write(`json.json_append(out: ${acc}, view: "${i ? ',' : '{'}\\"${f.name}\\":")`, vr(f.name), ks(i));
-      });
-      out.push(
-        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${v.fields.length > 0 ? `  let ${v.name}(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')}) = value\n  json.json_append(out: ${acc}, view: "}")` : '  json.json_append(out, view: "{}")'}\n}\n`,
+  // A constructor's object: its fields in order, each written by write_json. An Option field that is None has no
+  // key, so a key that may be the first one written is put after a comma only when a field before it is there.
+  const object = (v: Variant, buf: string): string => {
+    const ks = kinds(v),
+      key = (name: string): string => `\\"${name}\\":`;
+    if (v.fields.length === 0) return `  json.json_append(out: ${buf}, view: "{}")`;
+    if (!v.fields.some((_, i) => ks(i).k === 'opt')) {
+      const acc = v.fields.reduce(
+        (o, f, i) =>
+          `write_json(out: json.json_append(out: ${o}, view: "${i ? ',' : '{'}${key(f.name)}"), value: ${vr(f.name)})`,
+        buf,
       );
+      return `  json.json_append(out: ${acc}, view: "}")`;
     }
+    // whether something is written before field i: a field there for certain, or an Option field that is Some
+    const before = (i: number): string => {
+      const earlier = v.fields.slice(0, i);
+      if (earlier.some((_, j) => ks(j).k !== 'opt')) return 'True';
+      return earlier.map(f => `json.json_there(found: ${vr(f.name)})`).join(' or ') || 'False';
+    };
+    const acc = v.fields.reduce(
+      (o, f, i) =>
+        ks(i).k === 'opt'
+          ? `json.wire_field(out: ${o}, more: ${before(i)}, key: "${key(f.name)}", found: ${vr(f.name)})`
+          : `write_json(out: json.wire_key(out: ${o}, more: ${before(i)}, key: "${key(f.name)}"), value: ${vr(f.name)})`,
+      `json.json_append(out: ${buf}, view: "{")`,
+    );
+    return `  json.json_append(out: ${acc}, view: "}")`;
+  };
+  const bound = (v: Variant): string =>
+    `${v.name}${v.fields.length > 0 ? `(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')})` : ''}`;
+  for (const n of written) {
+    const d = types.get(n) ?? stop(`no type ${n}`),
+      [only] = d.variants;
+    if (d.variants.length === 1 && only) {
+      out.push(
+        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${only.fields.length > 0 ? `  let ${bound(only)} = value\n` : ''}${object(only, 'out')}\n}\n`,
+      );
+      continue;
+    }
+    // several constructors: {"Constructor": {…}}, each constructor's object written by a function of its own
+    out.push(
+      `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n  match value {\n${d.variants.map(v => `    ${bound(v)} -> json.json_append(out: wire_object_${v.name}(out: json.json_append(out, view: "{\\"${v.name}\\":")${v.fields.map(f => `, ${vr(f.name)}`).join('')}), view: "}")`).join('\n')}\n  }\n}\n`,
+      ...d.variants.map(
+        v =>
+          `fn wire_object_${v.name}(out: Buf${v.fields.map(f => `, ${vr(f.name)}: ${text(f.type)}`).join('')}) -> Buf {\n${object(v, 'out')}\n}\n`,
+      ),
+    );
   }
-  return { text: out.join('\n'), nested, decodable, kind, writable };
+  return { text: out.join('\n'), nested, decodable, kind, written, encodable: new Set(decodable) };
 }

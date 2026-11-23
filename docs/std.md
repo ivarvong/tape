@@ -111,20 +111,30 @@ Uses: [`decode`](#builtin-decode), [`Result`](#type-result).
 
 ### Build a JSON list
 
-`write_rows(rows: sql_all(…))` writes the rows of a query as an array. A `List[T]` field of a record is written as an array by `write_json`. A list on its own is not a value `write_json` takes (C09): wrap it in a record, as here, or write `[`, `,` and `]` yourself.
+`write_json` writes a `List` as an array, on its own or as a field, and `decode(json:, as: List[Item])` reads one back. For items computed from others, `map` them into a record type and write that. `write_rows(rows: sql_all(…))` writes the rows of a query as an array.
 
 ```tape
 type Item {
   Item(name: View, qty: Int)
 }
 
-type Items {
-  Items(items: List[Item], count: Int)
+type Line {
+  Line(name: View, double: Int)
 }
 
 fn handle(raw: View) -> Buf {
-  let items = stock()
-  respond_as(status: 200, content: Json) |> write_json(value: Items(items, count: length(list: items)))
+  match request(raw) {
+    Request(method: "POST", body) -> counted(items: decode(json: body, as: List[Item]))
+    _ -> respond_as(status: 200, content: Json)
+      |> write_json(value: map(list: stock(), by: fn(i: Item) -> Line { Line(name: i.name, double: 2 * i.qty) }))
+  }
+}
+
+fn counted(items: Result[List[Item], View]) -> Buf {
+  match items {
+    Ok(value) -> respond(status: 200) |> append(view: "\(length(list: value)) items")
+    Err(error) -> respond(status: 400) |> append(view: error)
+  }
 }
 
 // A list is built with Cons and Nil, in a function that says its type (a `let` cannot tell which List a Nil is: C21).
@@ -133,7 +143,7 @@ fn stock() -> List[Item] {
 }
 ```
 
-Uses: [`write_rows`](#fn-write_rows), [`write_json`](#builtin-write_json), [`List`](#type-list), [`write_json_string`](#fn-write_json_string).
+Uses: [`write_rows`](#fn-write_rows), [`write_json`](#builtin-write_json), [`List`](#type-list), [`map`](#fn-map).
 
 ### Money and other fractions, in fixed point
 
@@ -203,7 +213,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
-- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`write_json_list`](#fn-write_json_list), [`join`](#fn-join)
+- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 
@@ -433,7 +443,7 @@ The number of bytes written so far.
 write_json(out: Buf, value: T) -> Buf
 ```
 
-Appends a record as a JSON object, its fields by name: `Int`, `Float` (the shortest digits that read back as it), `Bool`, `View` (and refinements of them), records and `List[…]` of these. Refused (C09): an `Option` field (write two record types, or the JSON by hand), and a `List` on its own (put it in a field, or use `write_rows` for the rows of a query).
+Appends a value as JSON, exactly the form `decode` reads back: a record as an object, its fields by name (`Int`, `Float` (the shortest digits that read back as it), `Bool`, `View` and refinements of them, records, `List[…]` of these, `Option[…]` of one); an `Option` field that is `None` has no key, and `Some(value)` is its value; a type with several constructors as `{"Constructor": {…}}` (`{"AlwaysUp": {}}` for one without fields); a `List` as an array; `Int`, `Bool`, `View` as themselves. Refused (C09): what cannot be JSON (a `Buf`, a function, `Option` inside a `List`).
 
 ### builtin decode
 
@@ -441,7 +451,7 @@ Appends a record as a JSON object, its fields by name: `Int`, `Float` (the short
 decode(json: View, as: T) -> Result[T, View]
 ```
 
-Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
+Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: List[Item]`). Of a type with several constructors it takes the one the object's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
 
 ### builtin next
 
@@ -1198,6 +1208,9 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code`: a high surrogate at the escape before `at`: with the low one after it, one code point; alone, lone.
 - `fn json_bad(v: View) -> View`: "empty" or "not JSON", as decode says of bytes that are not JSON.
 - `fn json_object(v: View) -> Result[Json_Tree, View]`: the object v holds (whitespace around it allowed), or why decode refuses it: "empty", "not JSON" or "not an object". The decoders compiler/wire.ts writes start here.
+- `fn json_array(v: View) -> Result[Json_Tree, View]`: the array v holds, or why decode refuses it: "empty", "not JSON" or "not an array" (decode as List[T]).
+- `fn json_tag(obj: Json_Tree) -> View`: the key of an object whose one key it is (`{"Sets": {…}}`, as write_json writes a type with several constructors), or "" when it has none or more than one.
+- `fn json_all_key(list: List[Json_Member], key: View) -> Bool`: is every member named `key`?
 - `fn json_is_object(item: Json_Tree) -> Bool`: is the value an object?
 - `fn json_value_of(found: Option[Json_Tree]) -> Json_Tree`: the value of a member that json_check found (null when there is none).
 - `fn json_get(obj: Json_Tree, key: View) -> Option[Json_Tree]`: the value of the last member of the object `obj` named `key` (JSON.parse keeps the last).
@@ -1212,6 +1225,11 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn json_has_in(list: List[Json_Member], key: View) -> Bool`: the loop of json_has.
 - `fn json_one(obj: Json_Tree, key: View) -> Int`: 1 when there is a member named `key`, else 0.
 - `fn json_append(out: Buf, view: View) -> Buf`: text appended (append, here so a decoder's writer names only std's functions, which a program's own cannot take the place of).
+- `fn wire_write_list[T](out: Buf, list: List[T]) -> Buf`: write_json of a list: an array of its items, each as write_json writes it.
+- `fn wire_items[T](out: Buf, list: List[T], first: Bool) -> Buf`: the loop of wire_write_list.
+- `fn wire_key(out: Buf, more: Bool, key: View) -> Buf`: a key of an object being written, after a comma when something was written before it (`more`).
+- `fn wire_field[T](out: Buf, more: Bool, key: View, found: Option[T]) -> Buf`: an Option field: its key and value when it is there, nothing when it is not.
+- `fn json_there[T](found: Option[T]) -> Bool`: is an Option field there?
 - `fn json_push(out: Buf, byte: Int) -> Buf`: a byte appended (push, likewise).
 - `fn json_most(a: Int, b: Int) -> Int`: the larger of two counts (text.max, likewise).
 - `fn json_better(best: Int, most: Int, at: Int, n: Int) -> Int`: the constructor at `at` when it names more keys (n) than the best so far (most), else the best.
@@ -1527,21 +1545,6 @@ Write each item into a Buf, first to last. A Buf has one owner, so it is not kep
 "1020"
 ```
 
-### fn write_json_list
-
-```tape
-fn write_json_list[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf
-```
-
-A JSON array of the items, each written by `by`, with the commas between them: for items that are not records as they stand (a line with a computed total, a value formatted by hand). A list of records is `write_json`.
-
-```
-> buf() |> write_json_list(list: Cons(head: "a", tail: Cons(head: "b", tail: Nil)), by: fn(out: Buf, s: View) -> Buf { out |> write_json_string(text: s) }) |> freeze
-"[\"a\",\"b\"]"
-> buf() |> write_json_list(list: Nil, by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n) }) |> freeze
-"[]"
-```
-
 ### fn join
 
 ```tape
@@ -1563,7 +1566,6 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn reverse_onto[T](list: List[T], acc: List[T]) -> List[T]`: the loop of reverse.
 - `fn map_onto[A, B](list: List[A], by: Fn[A, B], acc: List[B]) -> List[B]`: the loop of map, last item first.
 - `fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A]`: the loop of filter, last item first.
-- `fn json_rest[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf`: write_json_list's items after the first, each after a comma.
 - `fn join_rest(out: Buf, list: List[View], sep: View) -> Buf`: join's texts after the first, each after `sep`.
 
 ## std/map.tape

@@ -180,7 +180,7 @@ function banned(ft: Type, f: { name: string; type: TypeAst }): void {
     'C08',
     `field ${f.name} cannot have type ${ft.name}`,
     ft.name === 'Buf'
-      ? 'A Buf has one owner at a time, so it is passed and returned, never stored. To write a list, hand the Buf from item to item: `out |> write_json_list(list, by: fn(out: Buf, item: Line) -> Buf { … })` (or `write_each`); fold the list again for a total.'
+      ? 'A Buf has one owner at a time, so it is passed and returned, never stored. To write a list as JSON, `write_json(value: list)` (`map` it into a record type first for computed items); for other text, hand the Buf from item to item with `write_each(list, by: fn(out: Buf, item: Line) -> Buf { … })`; fold the list again for a total.'
       : 'A capability is passed as a parameter, so every call that uses it names it.',
   );
 }
@@ -295,7 +295,7 @@ export function shapeOf(L: Layouts, t: Type, at: Place, decoding: boolean): Shap
       at,
       'C09',
       `${key(t)} cannot be ${decoding ? 'decoded from' : 'written as'} JSON`,
-      `Its fields must be Int, Bool, View, a record of such fields, or a List of them${decoding ? ', or Option[…] of one for a key that may be absent' : '; it must have one constructor and no Option'}.`,
+      'Its fields must be Int, Float, Bool, View, a record of such fields, a List of them, or Option[…] of one for a key that may be absent (not inside a List).',
     );
   if (!a || a.boxed || (!decoding && a.variants.length !== 1)) return cannot();
   const field = (f: FlatField): FieldKind => ({ name: f.name, ...(jsonKind(L, f.type, decoding) ?? cannot()) });

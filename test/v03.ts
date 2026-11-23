@@ -820,33 +820,32 @@ fn moved(id: View, from: View, amount: Int) -> Buf {
 }
 
 // ---- 4. a JSON list of computed items (the invoice task kept a Buf in a record to fold over its lines, C08):
-// write_json_list hands the Buf from item to item; a nested Cons needs nothing around it to say its type
+// the items are mapped into a record type and write_json writes the list; a nested Cons needs nothing around it
+// to say its type
 {
   const INV = `type Line {
   Line(name: View, qty: Int, cents: Int)
 }
 
+type Shown {
+  Shown(name: View, total: Int)
+}
+
+type Invoice {
+  Invoice(lines: List[Shown], total: Int, names: View)
+}
+
 fn handle(raw: View) -> Buf {
   let lines = Cons(head: Line(name: "a", qty: 2, cents: 150), tail: Cons(head: Line(name: "b\\"", qty: 1, cents: 5), tail: Nil))
   let total = fold(list: lines, from: 0, by: fn(sum: Int, l: Line) -> Int { sum + l.qty * l.cents })
-  respond(status: 200)
-    |> append(view: "{\\"lines\\":")
-    |> write_json_list(list: lines, by: fn(out: Buf, l: Line) -> Buf {
-      out
-        |> append(view: "{\\"name\\":")
-        |> write_json_string(text: l.name)
-        |> append(view: ",\\"total\\":")
-        |> write_int(value: l.qty * l.cents)
-        |> append(view: "}")
-    })
-    |> append(view: ",\\"total\\":\\(total),\\"names\\":")
-    |> write_json_string(text: join(list: map(list: lines, by: fn(l: Line) -> View { l.name }), sep: "+"))
-    |> append(view: "}")
+  let shown = map(list: lines, by: fn(l: Line) -> Shown { Shown(name: l.name, total: l.qty * l.cents) })
+  let names = join(list: map(list: lines, by: fn(l: Line) -> View { l.name }), sep: "+")
+  respond(status: 200) |> write_json(value: Invoice(lines: shown, total, names))
 }
 `;
   const out = served(INV)('GET /');
   T(
-    'write_json_list, fold and join: the answer is the JSON JavaScript reads back',
+    'map, fold, join and write_json: the answer is the JSON JavaScript reads back',
     out.startsWith('200\n') ? JSON.parse(out.slice(4)) : out,
     {
       lines: [
@@ -861,7 +860,7 @@ fn handle(raw: View) -> Buf {
     'C08 on a Buf in a record says how to write a list',
     fix('type Acc {\n  Acc(out: Buf, n: Int)\n}\n\nfn f(n: Int) -> Int {\n  let a = Acc(out: buf(), n)\n  a.n\n}\n')
       .split(' | ')[1]
-      ?.includes('write_json_list'),
+      ?.includes('write_json(value: list)'),
     true,
   );
 }

@@ -236,10 +236,10 @@ ok(
   ) === 'C09',
 );
 ok(
-  'C09: writing a record with an optional key',
+  'C09: a list on its own of something that cannot be JSON',
   codes(
     build(
-      `type V { V(a: Int) }\ntype T { T(v: V, n: Option[Int]) }\nfn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_json(value: T(v: V(a: 1), n: None))\n}\n`,
+      `type T { T(n: Int) }\nfn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_json(value: Cons(head: Some(value: 1), tail: Nil))\n}\n`,
     ),
   ) === 'C09',
 );

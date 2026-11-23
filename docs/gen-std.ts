@@ -191,12 +191,12 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'write_json',
     sig: 'write_json(out: Buf, value: T) -> Buf',
-    doc: 'Appends a record as a JSON object, its fields by name: `Int`, `Float` (the shortest digits that read back as it), `Bool`, `View` (and refinements of them), records and `List[…]` of these. Refused (C09): an `Option` field (write two record types, or the JSON by hand), and a `List` on its own (put it in a field, or use `write_rows` for the rows of a query).',
+    doc: 'Appends a value as JSON, exactly the form `decode` reads back: a record as an object, its fields by name (`Int`, `Float` (the shortest digits that read back as it), `Bool`, `View` and refinements of them, records, `List[…]` of these, `Option[…]` of one); an `Option` field that is `None` has no key, and `Some(value)` is its value; a type with several constructors as `{"Constructor": {…}}` (`{"AlwaysUp": {}}` for one without fields); a `List` as an array; `Int`, `Bool`, `View` as themselves. Refused (C09): what cannot be JSON (a `Buf`, a function, `Option` inside a `List`).',
   },
   {
     name: 'decode',
     sig: 'decode(json: View, as: T) -> Result[T, View]',
-    doc: 'Reads a JSON object into the record type `T` (or, of a type with several constructors, into the one that has all its fields among the keys and names the most of them). A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.',
+    doc: 'Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: List[Item]`). Of a type with several constructors it takes the one the object\'s only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.',
   },
   {
     name: 'next',
@@ -355,19 +355,29 @@ fn created(body: View) -> Buf {
   },
   {
     title: 'Build a JSON list',
-    uses: ['fn write_rows', 'builtin write_json', 'type List', 'fn write_json_string'],
-    text: '`write_rows(rows: sql_all(…))` writes the rows of a query as an array. A `List[T]` field of a record is written as an array by `write_json`. A list on its own is not a value `write_json` takes (C09): wrap it in a record, as here, or write `[`, `,` and `]` yourself.',
+    uses: ['fn write_rows', 'builtin write_json', 'type List', 'fn map'],
+    text: '`write_json` writes a `List` as an array, on its own or as a field, and `decode(json:, as: List[Item])` reads one back. For items computed from others, `map` them into a record type and write that. `write_rows(rows: sql_all(…))` writes the rows of a query as an array.',
     program: `type Item {
   Item(name: View, qty: Int)
 }
 
-type Items {
-  Items(items: List[Item], count: Int)
+type Line {
+  Line(name: View, double: Int)
 }
 
 fn handle(raw: View) -> Buf {
-  let items = stock()
-  respond_as(status: 200, content: Json) |> write_json(value: Items(items, count: length(list: items)))
+  match request(raw) {
+    Request(method: "POST", body) -> counted(items: decode(json: body, as: List[Item]))
+    _ -> respond_as(status: 200, content: Json)
+      |> write_json(value: map(list: stock(), by: fn(i: Item) -> Line { Line(name: i.name, double: 2 * i.qty) }))
+  }
+}
+
+fn counted(items: Result[List[Item], View]) -> Buf {
+  match items {
+    Ok(value) -> respond(status: 200) |> append(view: "\\(length(list: value)) items")
+    Err(error) -> respond(status: 400) |> append(view: error)
+  }
 }
 
 // A list is built with Cons and Nil, in a function that says its type (a \`let\` cannot tell which List a Nil is: C21).

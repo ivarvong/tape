@@ -1,6 +1,6 @@
 // interp/effects.ts: the calls that reach outside the program. Each is asked of the host, with what a log records
 // of it: the statement and its parameters, the call and its message, the timer and its key.
-import { type Arg, type Call, unreachable } from '../compiler/ast.ts';
+import { type Arg, type Call, type TypeAst, asType, unreachable } from '../compiler/ast.ts';
 import { movePlan, tablesOf } from '../rules.ts';
 import { type Interp, callable, ev, find, meets, run, stop } from './eval.ts';
 import { type CallRequest, type Host, MAX_WAKE_MS, type SqlParam } from './host.ts';
@@ -48,8 +48,14 @@ const host = <K extends keyof Host>(it: Interp, k: K): Host[K] =>
   (it.host ?? fail(new Unsupported(k)))[k] ?? fail(new Unsupported(k));
 
 // ---- JSON
-export const decoded = (it: Interp, bytes: Uint8Array, name: string, file: string): Adt =>
-  decode(it.prog, bytes, name, (t, v) => meets(it, t, v, file));
+export const decoded = (it: Interp, bytes: Uint8Array, type: TypeAst, file: string): Adt =>
+  decode(it.prog, bytes, type, (t, v) => meets(it, t, v, file));
+// a type named where an argument goes: `as: Order`, `as: List[Order]`
+const typeArg = (s: Site, label: string): TypeAst => {
+  const a = argOf(s, label)?.value,
+    t = a ? asType(a) : null;
+  return t ?? stop(`${s.name}: argument ${label} should be a type name`);
+};
 /** v written into `out` as JSON, its text by the program's own write_json_string */
 export const jsonInto = (it: Interp, out: Buf, v: Value, file: string): Buf =>
   writeJson(it.prog, out, asAdt(v), (o, text) => {
@@ -115,7 +121,7 @@ function remoteCall(s: Site): Value {
   switch (status) {
     case 'ok': {
       // a reply that is not what the caller expects is Skew, with what was wrong with it
-      const got = decoded(s.it, reply, typeName(s, 'reply'), s.file);
+      const got = decoded(s.it, reply, typeArg(s, 'reply'), s.file);
       return got.c === 'Ok' ? got : refused('Skew', asBytes(got.f['error']));
     }
     case 'timeout':
@@ -155,7 +161,7 @@ function effectOf(s: Site): Value {
     case 'sql_move':
       return sql(s);
     case 'decode':
-      return decoded(s.it, asBytes(value(s, 'json')), typeName(s, 'as'), s.file);
+      return decoded(s.it, asBytes(value(s, 'json')), typeArg(s, 'as'), s.file);
     case 'write_json':
       return jsonInto(s.it, asBuf(value(s, 'out')), value(s, 'value'), s.file);
     case 'next':

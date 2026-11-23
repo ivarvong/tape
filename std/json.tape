@@ -746,6 +746,33 @@ fn json_object(v: View) -> Result[Json_Tree, View] {
   }
 }
 
+// Internal: the array v holds, or why decode refuses it: "empty", "not JSON" or "not an array" (decode as List[T]).
+fn json_array(v: View) -> Result[Json_Tree, View] {
+  match json_tree(v) {
+    Some(value: Json_Arr(items)) -> Ok(value: Json_Arr(items))
+    None -> Err(error: json_bad(v))
+    _ -> Err(error: "not an array")
+  }
+}
+
+// Internal: the key of an object whose one key it is (`{"Sets": {…}}`, as write_json writes a type with several
+// constructors), or "" when it has none or more than one.
+fn json_tag(obj: Json_Tree) -> View {
+  match obj {
+    Json_Obj(members: Cons(head: Json_Member(key), tail)) if json_all_key(list: tail, key) -> key
+    _ -> ""
+  }
+}
+
+// Internal: is every member named `key`?
+fn json_all_key(list: List[Json_Member], key: View) -> Bool {
+  match list {
+    Cons(head: Json_Member(key: k), tail) if k == key -> json_all_key(list: tail, key)
+    Cons -> False
+    Nil -> True
+  }
+}
+
 // Internal: is the value an object?
 fn json_is_object(item: Json_Tree) -> Bool {
   match item {
@@ -886,6 +913,52 @@ fn json_one(obj: Json_Tree, key: View) -> Int {
 // cannot take the place of).
 fn json_append(out: Buf, view: View) -> Buf {
   append(buf: out, view)
+}
+
+// Internal: write_json of a list: an array of its items, each as write_json writes it.
+fn wire_write_list[T](out: Buf, list: List[T]) -> Buf {
+  wire_items(out: push(buf: out, byte: 91), list, first: True)
+}
+
+// Internal: the loop of wire_write_list.
+fn wire_items[T](out: Buf, list: List[T], first: Bool) -> Buf {
+  match list {
+    Cons(head, tail) if first -> wire_items(
+      out: write_json(out, value: head),
+      list: tail,
+      first: False
+    )
+    Cons(head, tail) -> wire_items(
+      out: write_json(out: push(buf: out, byte: 44), value: head),
+      list: tail,
+      first: False
+    )
+    Nil -> push(buf: out, byte: 93)
+  }
+}
+
+// Internal: a key of an object being written, after a comma when something was written before it (`more`).
+fn wire_key(out: Buf, more: Bool, key: View) -> Buf {
+  match more {
+    True -> append(buf: push(buf: out, byte: 44), view: key)
+    False -> append(buf: out, view: key)
+  }
+}
+
+// Internal: an Option field: its key and value when it is there, nothing when it is not.
+fn wire_field[T](out: Buf, more: Bool, key: View, found: Option[T]) -> Buf {
+  match found {
+    Some(value) -> write_json(out: wire_key(out, more, key), value)
+    None -> out
+  }
+}
+
+// Internal: is an Option field there?
+fn json_there[T](found: Option[T]) -> Bool {
+  match found {
+    Some -> True
+    None -> False
+  }
 }
 
 // Internal: a byte appended (push, likewise).

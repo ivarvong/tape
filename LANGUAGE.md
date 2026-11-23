@@ -416,9 +416,9 @@ made to the program above by `test/definition.ts`; each must be refused with the
 
 | Job | The form | Otherwise |
 |---|---|---|
-| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors. A key the type does not name is left unread (clients send more than a service reads); `null` for an `Option` field is refused: it is there or it is not. Of several constructors, decode takes the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
-| Write a record, or the rows of a query | `write_json(value)`, `write_rows(rows)` | |
-| Write a list of computed items | `out \|> write_json_list(list, by: fn(out: Buf, item: T) -> Buf { … })`: the Buf is handed from item to item, never kept in a record (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
+| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); `null` for an `Option` field is refused: it is there or it is not. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
+| Write JSON | `write_json(value)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows)` for the rows of a query | C09 |
+| Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
 | Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
@@ -622,6 +622,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | `write_json` writes what `decode` reads (feedback 20261123T030026.990Z-e454772fe5c9: a 5-constructor result was 30 lines of hand JSON): an `Option` field (`None` has no key), a type with several constructors (`{"Sets": {…}}`, which decode now reads back as that constructor), a `List` on its own and `Int`, `Bool`, `View`; `decode(json:, as: List[T])` reads an array. C09 no longer refuses an `Option` field, several constructors or a list on its own |
 | 23 November 2026 | a Float in JSON (a finite number in, the shortest digits out, in records and lists) and in SQL (bound as a number, kept REAL by SQLite; a REAL column reads into a Float field) |
 | 23 November 2026 | `sin`, `cos`, `atan2`, `exp`, `log`, `pow` on Float: musl's libm ported to Wasm (compiler/math), only what a program calls goes into its module; never the host's `Math`, whose results differ between engines |
 | 23 November 2026 | `Float`: a finite 64-bit IEEE 754 number for measurements. Literals end in `f` (`1.5f`; `1.5` is L06, kept for an exact decimal); `+ - * /` and comparisons; trap 8 (float not finite) where IEEE would give NaN or an infinity; `float(n)` and `trunc(x)` the only conversions; `floor`, `ceil`, `abs`, `sqrt`; `abs`, `min`, `max` built in for Int and Float (std's `min` and `max` of Ints, and `apps/trace`'s own, are gone); a hole writes the shortest digits, as JavaScript's `String` does (env.float_text) |
@@ -641,13 +642,14 @@ what went before.
 - What a version built by an older compiler may rely on. Today: its source is built again by the current compiler (the rules not asked again), and it runs if that builds; it has no claim to what the old build did.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
 - Who is calling. A program is handed the request; identity is its own business.
-- JSON for bytes and maps; writing a record with an `Option` field.
+- JSON for bytes and maps.
 - An exact decimal (`Dec`): a number with a point and no `f` is kept for it.
 
 ## 13. What went
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | `write_json_list(list, by:)`, and JSON written by hand for an `Option` field, a type with several constructors or a list on its own (C09 refused them) | `write_json(value)` of the value itself, which `decode` reads back; computed items are `map`ped into a record type |
 | 23 November 2026 | no response headers (a redirect had no Location) and no request headers | `header(name:, value:)` on an answer and `header_of(request:, name:)`; the status line carries them, `STATUS CR name: value LF BODY`, checked by the host (host.ts responseOf) |
 | 23 November 2026 | a JSON list of computed items needed a Buf kept in a record (C08), and `Cons(head: 1, tail: Nil)` in a `let` could not tell its type (C21) | std: `write_json_list`, `write_each`, `join`; a constructor's later fields take the type parameters its earlier ones gave |
 | 23 November 2026 | a debit after its transfer id was inserted (`ON CONFLICT DO NOTHING`, the row required by a step) was C54, and agents marked it `repeat: True` | the claim is an op-id guard: C54 takes a write that runs only once the claim inserted its row |

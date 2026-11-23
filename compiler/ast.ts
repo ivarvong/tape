@@ -79,6 +79,13 @@ export type Held = At & { k: 'held'; held: { type: Resolved; locals: number[] } 
 export type Expr =
   Int | FloatLit | Str | Interp | Var | Field | Index | Neg | Not | Bin | Call | Ctor | Lambda | Block | Match | Held;
 
+/** decode's `as:` as a type: a name, or `List[…]` of one (an index expression as parsed); null for anything else. */
+export function asType(e: Expr): TypeAst | null {
+  if (e.k === 'ctor' && e.args.length === 0) return { name: e.name, args: [], line: e.line, file: e.file };
+  if (e.k !== 'index' || e.e.k !== 'ctor' || e.e.name !== 'List' || e.e.args.length > 0) return null;
+  const of = asType(e.i);
+  return of ? { name: 'List', args: [of], line: e.line, file: e.file } : null;
+}
 /** The expressions written directly inside e, in the order they are written. */
 export const partsOf = (e: Expr): Expr[] => {
   switch (e.k) {

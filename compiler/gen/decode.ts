@@ -1,8 +1,10 @@
 // compiler/gen/decode.ts: JSON and rows read into values. JSON is decoded by Tape source written for each type
 // (compiler/wire.ts); the rows of a query are read from the block the host wrote.
-import type { Call, TypeAst } from '../ast.ts';
+import { asType } from '../ast.ts';
+import type { Call } from '../ast.ts';
+import { mangled } from '../wire.ts';
 import { F64, I32, I64, fail, sleb, uleb, utf8 } from '../common.ts';
-import { T, VIEW } from '../types.ts';
+import { T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { buildVariant, close, fresh, get, inLocals, need, open, set, store } from './fn.ts';
 import type { Ctx, Place } from './fn.ts';
@@ -25,14 +27,14 @@ export function emitDecode(c: Ctx, e: Call): Type {
   for (const a of e.args)
     if (a !== ja && a !== ta)
       fail(a, 'C11', 'decode takes (json, as)', 'Write `decode(json: body, as: T)` and nothing else.');
-  if (ta.value.k !== 'ctor' || ta.value.args.length > 0)
-    return fail(
+  const named =
+    asType(ta.value) ??
+    fail(
       ta,
       'C14',
       'argument as should be a type name',
-      'Name the type itself, `as: NewTodo`, not a value of it.',
+      'Name the type itself, `as: NewTodo` or `as: List[NewTodo]`, not a value of it.',
     );
-  const named: TypeAst = { name: ta.value.name, args: [], line: ta.line, file: ta.file };
   const t = c.B.resolve(named);
   const v = inLocals(c, ja.value, VIEW);
   need(c, v.type, VIEW, ja, 'argument json');
@@ -49,8 +51,17 @@ export function emitDecode(c: Ctx, e: Call): Type {
   return res;
 }
 
-// json_decode_T(json) -> Result[T, View] (compiler/wire.ts): its Ok fills `out`, its Err is the reason
-function decodeNested(c: Ctx, t: Type, view: readonly number[], out: readonly number[], at: Place, why: Why): void {
+// json_decode_T(json) -> Result[T, View] (compiler/wire.ts), or another generated decoder `fn`: its Ok fills
+// `out`, its Err is the reason
+function decodeNested(
+  c: Ctx,
+  t: Type,
+  fn: string,
+  view: readonly number[],
+  out: readonly number[],
+  at: Place,
+  why: Why,
+): void {
   const res = c.B.adtOf(T('Result', t, VIEW), at);
   if (res.boxed) return;
   const rl = res.slots.map(vt => fresh(c, vt));
@@ -60,7 +71,7 @@ function decodeNested(c: Ctx, t: Type, view: readonly number[], out: readonly nu
       ...get(rl[sl] ?? 0),
       ...set(to[j] ?? 0),
     ]);
-  c.code.push(...get(view[0] ?? 0), ...get(view[1] ?? 0), 0x10, ...uleb(c.B.fnIndex(`json_decode_${t.name}`)));
+  c.code.push(...get(view[0] ?? 0), ...get(view[1] ?? 0), 0x10, ...uleb(c.B.fnIndex(fn)));
   for (const l of rl.toReversed()) c.code.push(...set(l));
   c.code.push(...get(rl[0] ?? 0), ...i32(okI), 0x46);
   open(c, 0x04, [I32]);
@@ -74,11 +85,23 @@ function decodeNested(c: Ctx, t: Type, view: readonly number[], out: readonly nu
  */
 export function decodeTo(c: Ctx, t: Type, view: readonly number[], out: readonly number[], at: Place, why: Why): void {
   const { B } = c;
+  if (t.name === 'List') {
+    // decode(json:, as: List[T]): the array's generated decoder
+    const fn = `json_decode_top_${mangled(key(t))}`;
+    if (B.find(fn, 'wire') === null)
+      fail(
+        at,
+        'C09',
+        `${key(t)} cannot be decoded from JSON`,
+        'A list is decoded from an array of Int, Float, Bool, View, records that can be JSON, or lists of them.',
+      );
+    return decodeNested(c, t, fn, view, out, at, why);
+  }
   if (!Object.hasOwn(B.SIMJSON.decodes, t.name)) B.SIMJSON.decodes[t.name] = [t, at];
   if (!B.WIRE.decodable.has(t.name)) B.shapeOf(t, at, true);
   if (!B.WIRE.decodable.has(t.name))
     fail(at, 'C30', `decode of ${t.name} needs std/json.tape`, 'Compile the program together with std.');
-  decodeNested(c, t, view, out, at, why);
+  decodeNested(c, t, `json_decode_${t.name}`, view, out, at, why);
 }
 
 export const decodeRow = (c: Ctx, rowT: Type, cur: number, at: Place): number[] =>

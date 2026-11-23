@@ -2,10 +2,10 @@
 // parsed program directly: no types, no Wasm, no arena, nothing released or reused. Whatever this gives is what a
 // program means; every compiled build must agree (proof/verify.ts, proof/interp-effects.ts). It shares the parser,
 // and for sql_move the statement that reads the row back (rules/move.ts).
-// Covers the language and its effects: SQL, decode and write_json of flat records, call and ask, timers, the
+// Covers the language and its effects: SQL, decode and write_json, call and ask, timers, the
 // clock, random numbers, flags, rollback, exported methods. Every effect is asked of a `host`, in order: given a
 // recorded log as the host, a run here must ask for what the compiled run asked for and answer the same bytes.
-// Not here, and thrown as Unsupported: records nested in JSON, lists in JSON, interfaces, the Git capability.
+// Not here, and thrown as Unsupported: interfaces, the Git capability.
 // In interp/: value.ts (what a value is), eval.ts (expressions and patterns), effects.ts, json.ts, host.ts.
 import type { FnDecl } from './compiler/ast.ts';
 import { parseProgram } from './compiler.ts';
@@ -62,7 +62,7 @@ export function interpret(sources: Source[], host: Partial<Host> | null = null) 
       const named = (f: FnDecl): boolean => f.exported && f.name.slice(f.name.lastIndexOf('.') + 1) === method,
         g = [...prog.fns.values()].find(named) ?? stop(`no exported function ${method}`),
         takes = g.params.find(p => ![...CAPABILITIES, 'Remote', 'Remotes'].includes(p.typeAst.name)),
-        got = decoded(it, bytes, (takes ?? stop(`${method} takes no message`)).typeAst.name, g.file);
+        got = decoded(it, bytes, (takes ?? stop(`${method} takes no message`)).typeAst, g.file);
       if (got.c === 'Err') return refusal(got.f['error']);
       const r = asAdt(run(it, callable(g), given(g, got.f['value'] ?? null)));
       if (r.c !== 'Ok') return refusal(r.f['error']);

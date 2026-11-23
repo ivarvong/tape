@@ -96,8 +96,20 @@ const object = (L: Layouts, v: Fields, at: Place): JsonSchema => ({
   additionalProperties: false,
 });
 
+// a type with several constructors is one of {"Name": {…}}, as write_json writes it (decode reads that, and an
+// object with one constructor's fields)
 export function jsonSchema(L: Layouts, t: Type, at: Place): JsonSchema {
+  const [item] = t.name === 'List' && t.args.length === 1 ? t.args : [];
+  if (item) return field(L, t, at);
   const a = adtOf(L, t, at);
   const [only] = a.variants;
-  return a.variants.length === 1 && only ? object(L, only, at) : { oneOf: a.variants.map(v => object(L, v, at)) };
+  if (a.variants.length === 1 && only) return object(L, only, at);
+  return {
+    oneOf: a.variants.map(v => ({
+      type: 'object',
+      properties: { [v.name]: object(L, v, at) },
+      required: [v.name],
+      additionalProperties: false,
+    })),
+  };
 }

@@ -143,20 +143,47 @@ function size(u: Use): Type {
 
 // ---- JSON out
 
+// write_json(value): a scalar, a list (an array of its items), or a record; a record that is not one flat
+// constructor is written by its generated wire_write_T (compiler/wire.ts), a flat one here.
 function writeJson(u: Use): Type {
   const { c, e } = u;
   const { B } = c;
   need(c, c.emit(argAt(u, 0).value, BUF, false), BUF, argAt(u, 0), 'argument out');
   const value = argAt(u, 1);
   const s = inLocals(c, value.value);
-  if (B.WIRE.nested.has(s.type.name)) {
-    if (!B.WIRE.writable.has(s.type.name))
+  const base = B.strip(s.type).name;
+  // std's function of (out, label) that writes it, by its file's stem: a program's own of that name is not it
+  const via = (fn: string, label: string): Type => {
+    const o = fresh(c, I32);
+    c.code.push(...set(o));
+    const at = { line: e.line, file: e.file };
+    const held = (h: { type: Type; locals: number[] }) => ({ k: 'held' as const, held: h, ...at });
+    const args = [
+      { label: 'out', value: held({ type: BUF, locals: [o] }), ...at },
+      { label, value: held(s), ...at },
+    ];
+    return c.emit({ k: 'call', name: fn, args, ...at }, BUF, false);
+  };
+  const json = (t: Type): boolean =>
+    ['Int', 'Float', 'Bool', 'View'].includes(B.strip(t).name) ||
+    B.WIRE.encodable.has(t.name) ||
+    (t.name === 'List' && t.args.length === 1 && t.args.every(json));
+  const has = (fn: string): boolean => B.find(fn, c.f.file) !== null;
+  if (base === 'Int' && has('text.write_int')) return via('text.write_int', 'value');
+  if (base === 'Float' && has('json.json_write_float')) return via('json.json_write_float', 'value');
+  if (base === 'Bool' && has('json.write_bool')) return via('json.write_bool', 'value');
+  if (base === 'View' && has('json.write_json_string')) return via('json.write_json_string', 'text');
+  if (s.type.name === 'List') {
+    if (!json(s.type) || !has('json.wire_write_list'))
       fail(
         value,
         'C09',
         `${key(s.type)} cannot be written as JSON`,
-        'It, and each record inside it, must have one constructor and no Option.',
+        'A list is written as an array of its items: Int, Float, Bool, View, records that can be JSON, or lists of them.',
       );
+    return via('json.wire_write_list', 'list');
+  }
+  if (B.WIRE.written.has(s.type.name)) {
     for (const l of s.locals) c.code.push(...get(l));
     c.code.push(0x10, ...uleb(B.fnIndex(`wire_write_${s.type.name}`)));
     return BUF;

@@ -158,6 +158,8 @@ type Wait { Wait(id: Int, tier: Int, buyer: View, qty: Int, state: View, hold: I
 type Price { Price(price: Int) }
 type Count { Count(n: Int) }
 type Id { Id(id: Int) }
+type Failed { Failed(error: View) }
+type Finished { Finished(done: View) }
 
 // the pay program's methods
 type Charge { Charge(card: View, amount: Int, ref: View) }
@@ -1098,21 +1100,11 @@ fn rendered(outcome: Outcome) -> Buf {
     ShowTicket(status, ticket) -> write_json(out: json_head(status), value: ticket)
     ShowWait(status, wait) -> write_json(out: json_head(status), value: wait)
     ShowTier(status, tier) -> write_json(out: json_head(status), value: tier)
-    Problem(status, reason) -> json_head(status)
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-    Done(status, what) -> json_head(status)
-      |> append(view: "{\"done\":")
-      |> write_json_string(text: what)
-      |> append(view: "}")
-    Undo(status, reason) -> rollback(out: json_head(status) |> append(
-      view: "{\"error\":"
-    ) |> write_json_string(
-        text: reason
-      ) |> append(
-        view: "}"
-    ))
+    Problem(status, reason) -> write_json(out: json_head(status), value: Failed(error: reason))
+    Done(status, what) -> write_json(out: json_head(status), value: Finished(done: what))
+    Undo(status, reason) -> rollback(
+      out: write_json(out: json_head(status), value: Failed(error: reason))
+    )
   }
 }
 

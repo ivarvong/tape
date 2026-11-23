@@ -1,6 +1,9 @@
 // interp/json.ts: `decode` and `write_json` in the reference interpreter, and the rows of a query as values.
-// Flat records only: a record or a list inside JSON is Unsupported, and counted where the interpreter is compared.
+// Written from the rules (LANGUAGE.md), not from the compiler's generated functions (compiler/wire.ts): records,
+// records inside records, lists, Option fields and types with several constructors, each reason worded as the
+// compiled build words it.
 import type { Program, TypeAst, TypeDecl, Variant } from '../compiler/ast.ts';
+import { unreachable } from '../compiler/ast.ts';
 import { type Adt, type Buf, type Value, adt } from './value.ts';
 
 export class Unsupported extends Error {}
@@ -89,13 +92,153 @@ const isObject = (v: unknown): v is Readonly<Record<string, unknown>> =>
   v !== null && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Num);
 const err = (why: string): Adt => adt('Err', { error: enc.encode(why) });
 
+type Meets = (t: TypeAst, v: Value) => boolean;
+/** A value decoded, or why not. */
+type Got = { value: Value } | { why: string };
+/** What a type is in JSON: a scalar, a list of something, or a record. */
+type Shape = { k: 'scalar'; kind: Kind } | { k: 'list'; of: TypeAst } | { k: 'record' };
+const shapeOf = (prog: Program, t: TypeAst): Shape => {
+  const [of] = t.args;
+  if (t.name === 'List' && of) return { k: 'list', of };
+  const b = baseOf(prog, t).name;
+  return b === 'View' || b === 'Int' || b === 'Float' || b === 'Bool'
+    ? { k: 'scalar', kind: kindOf(prog, t) }
+    : { k: 'record' };
+};
+const scalarOf = (k: Kind, x: unknown): Value | null =>
+  k === 't'
+    ? typeof x === 'string'
+      ? enc.encode(x)
+      : null
+    : k === 'b'
+      ? typeof x === 'boolean'
+        ? x
+        : null
+      : k === 'f'
+        ? finiteOf(x)
+        : x instanceof Num
+          ? whole(x.source)
+          : typeof x === 'number' && Number.isSafeInteger(x)
+            ? BigInt(x)
+            : null;
+// "[2]: reason", or "[2][0]: reason" when the element was itself a list
+const at = (i: number, why: string): string => (why.startsWith('[') ? `[${i}]${why}` : `[${i}]: ${why}`);
+
+/** A JSON value as type t, below the top: a record from an object, a list from an array, a scalar. */
+function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
+  const sh = shapeOf(prog, t);
+  switch (sh.k) {
+    case 'record':
+      return recordAs(prog, meets, t.name, x);
+    case 'list':
+      return Array.isArray(x) ? listAs(prog, meets, sh.of, x) : { why: 'expected an array' };
+    case 'scalar': {
+      const v = scalarOf(sh.kind, x);
+      if (v === null) return { why: `expected ${KIND[sh.kind]}` };
+      if (typeof x === 'string' && !wellFormed(x)) return { why: 'text with a lone surrogate' };
+      return meets(t, v) ? { value: v } : { why: `not a valid ${t.name}` };
+    }
+    default:
+      return unreachable(sh, 'shape');
+  }
+}
+/** An array's elements, each as type `of`, as a List; the first that is not one is the reason, with its index. */
+function listAs(prog: Program, meets: Meets, of: TypeAst, xs: readonly unknown[]): Got {
+  const items: Value[] = [];
+  for (const [i, x] of xs.entries()) {
+    const got = valueAs(prog, meets, of, x);
+    if ('why' in got) return { why: at(i, got.why) };
+    items.push(got.value);
+  }
+  return { value: items.reduceRight((tail: Value, head) => adt('Cons', { head, tail }), adt('Nil')) };
+}
+
 /**
- * decode(json:, as:): JSON.parse, then the constructor that has its fields among the object's keys and names the
- * most of them (the first such), its values of the right kinds, then each refined field's condition (`meets`). A
- * key no field names is left unread. When no constructor has its fields, the reason is from the one that got
- * furthest. A number is read exactly from its text, as the module reads it (std/json.tape).
+ * An object as a record type: the constructor its only key names, with an object of its fields as that key's
+ * value (as write_json writes a type with several constructors), or else the constructor that has its fields
+ * among the keys and names the most of them (the first such). A key no field names is left unread. Each field is
+ * checked in order for its kind, then each refined scalar's condition, then each field that is a record or a list,
+ * inside it (its reason after the field's name). When no constructor has its fields, the reason is from the one
+ * that got furthest.
  */
-export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t: TypeAst, v: Value) => boolean): Adt {
+function recordAs(prog: Program, meets: Meets, name: string, x: unknown): Got {
+  if (!isObject(x)) return { why: 'not an object' };
+  const variants = recordOf(prog, name, 'decode').decl.variants,
+    keys = Object.keys(x),
+    [only = ''] = keys,
+    tagged = variants.length > 1 && keys.length === 1 ? variants.find(v => v.name === only) : undefined;
+  if (tagged) {
+    const inner = x[only];
+    if (!isObject(inner)) return { why: `${only}: expected an object` };
+    const got = fit(prog, meets, tagged, inner);
+    return 'depth' in got ? { why: got.why } : got;
+  }
+  const has = (fl: Variant['fields'][number]): boolean => Object.hasOwn(x, fl.name);
+  const named = (v: Variant): number =>
+    v.fields.some(fl => fl.type.name !== 'Option' && !has(fl)) ? -1 : v.fields.filter(has).length;
+  let best: Variant | undefined,
+    most = -1;
+  for (const v of variants) if (named(v) > most) [best, most] = [v, named(v)];
+  if (best) {
+    const got = fit(prog, meets, best, x);
+    return 'depth' in got ? { why: got.why } : got;
+  }
+  let far = { depth: -1, why: '' };
+  for (const v of variants) {
+    const got = fit(prog, meets, v, x);
+    if ('depth' in got && got.depth > far.depth) far = got;
+  }
+  return { why: far.why };
+}
+/** One constructor from an object: its value, why not (a refined condition, something inside), or how far it got. */
+function fit(
+  prog: Program,
+  meets: Meets,
+  variant: Variant,
+  object: Readonly<Record<string, unknown>>,
+): Got | { depth: number; why: string } {
+  const f: Record<string, Value> = {},
+    later: (() => string | null)[] = [],
+    refined: { name: string; type: TypeAst; value: Value }[] = [];
+  for (const [depth, fl] of variant.fields.entries()) {
+    const inner = fl.type.name === 'Option' ? fl.type.args[0] : undefined,
+      type = inner ?? fl.type,
+      sh = shapeOf(prog, type),
+      x = object[fl.name];
+    if (!Object.hasOwn(object, fl.name)) {
+      if (!inner) return { depth, why: `missing key ${JSON.stringify(fl.name)}` };
+      f[fl.name] = adt('None');
+      continue;
+    }
+    const some = (v: Value): Value => (inner ? adt('Some', { value: v }) : v);
+    if (sh.k === 'scalar') {
+      const value = scalarOf(sh.kind, x);
+      if (value === null) return { depth, why: `${fl.name}: expected ${KIND[sh.kind]}` };
+      if (typeof x === 'string' && !wellFormed(x)) return { depth, why: `${fl.name}: text with a lone surrogate` };
+      f[fl.name] = some(value);
+      refined.push({ name: fl.name, type, value });
+      continue;
+    }
+    if (sh.k === 'list' ? !Array.isArray(x) : !isObject(x))
+      return { depth, why: `${fl.name}: expected ${sh.k === 'list' ? 'an array' : 'an object'}` };
+    later.push(() => {
+      const got = valueAs(prog, meets, type, x);
+      if ('why' in got) return `${fl.name}${sh.k === 'list' ? '' : ': '}${got.why}`;
+      f[fl.name] = some(got.value);
+      return null;
+    });
+  }
+  const bad = refined.find(r => !meets(r.type, r.value));
+  if (bad) return { why: `${bad.name}: not a valid ${bad.type.name}` };
+  for (const step of later) {
+    const why = step();
+    if (why !== null) return { why };
+  }
+  return { value: adt(variant.name, f) };
+}
+
+/** decode(json:, as: T): Ok with the value, or Err with why the bytes are not one. T is a record type or List[…]. */
+export function decode(prog: Program, bytes: Uint8Array, t: TypeAst, meets: Meets): Adt {
   let parsed: unknown;
   let text: string;
   try {
@@ -112,88 +255,61 @@ export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t
   } catch {
     // RangeError: nested too deep for the reviver
   }
-  if (!isObject(parsed)) return err('not an object');
-  const object = parsed;
-  let issue = '',
-    far = -1;
-  const no = (depth: number, why: string): null => {
-    if (depth > far) [far, issue] = [depth, why];
-    return null;
-  };
-  const fit = (variant: Variant): Adt | null => {
-    const f: Record<string, Value> = {},
-      read: { name: string; type: TypeAst; value: Value }[] = [];
-    let depth = 0;
-    for (const fl of variant.fields) {
-      const inner = fl.type.name === 'Option' ? fl.type.args[0] : undefined,
-        type = inner ?? fl.type,
-        k = kindOf(prog, type),
-        x = object[fl.name];
-      if (!Object.hasOwn(object, fl.name)) {
-        if (!inner) return no(depth, `missing key ${JSON.stringify(fl.name)}`);
-        f[fl.name] = adt('None');
-        depth++;
-        continue;
-      }
-      const value: Value | null =
-        k === 't'
-          ? typeof x === 'string'
-            ? enc.encode(x)
-            : null
-          : k === 'b'
-            ? typeof x === 'boolean'
-              ? x
-              : null
-            : k === 'f'
-              ? finiteOf(x)
-              : x instanceof Num
-                ? whole(x.source)
-                : typeof x === 'number' && Number.isSafeInteger(x)
-                  ? BigInt(x)
-                  : null;
-      if (value === null) return no(depth, `${fl.name}: expected ${KIND[k]}`);
-      if (typeof x === 'string' && !wellFormed(x)) return no(depth, `${fl.name}: text with a lone surrogate`);
-      f[fl.name] = inner ? adt('Some', { value }) : value;
-      read.push({ name: fl.name, type, value });
-      depth++;
-    }
-    const bad = read.find(r => !meets(r.type, r.value));
-    return bad ? err(`${bad.name}: not a valid ${bad.type.name}`) : adt('Ok', { value: adt(variant.name, f) });
-  };
-  // the constructor that has its fields among the keys and names the most of them; a key none names is unread
-  const variants = recordOf(prog, name, 'decode').decl.variants;
-  const has = (fl: Variant['fields'][number]): boolean => Object.hasOwn(object, fl.name);
-  const named = (v: Variant): number =>
-    v.fields.some(fl => fl.type.name !== 'Option' && !has(fl)) ? -1 : v.fields.filter(has).length;
-  let best: Variant | undefined,
-    most = -1;
-  for (const v of variants) if (named(v) > most) [best, most] = [v, named(v)];
-  if (best) return fit(best) ?? err(issue);
-  for (const v of variants) fit(v);
-  return err(issue);
+  const [of] = t.args;
+  const got: Got =
+    t.name === 'List' && of
+      ? Array.isArray(parsed)
+        ? listAs(prog, meets, of, parsed)
+        : { why: 'not an array' }
+      : recordAs(prog, meets, t.name, parsed);
+  return 'why' in got ? err(got.why) : adt('Ok', { value: got.value });
 }
 
+const isAdt = (v: Value | undefined): v is Adt => typeof v === 'object' && !(v instanceof Uint8Array) && v.k === 'adt';
 /**
- * write_json: a record with one constructor, as an object in the order its fields are declared. `writeText` writes
- * one text as a JSON string (the program's own `write_json_string`).
+ * write_json: a value as JSON. A record as an object, its fields in the order they are declared, an Option field
+ * that is None left out and one that is Some written as its value; a type with several constructors as
+ * {"Constructor": {…}}; a List as an array; Int, Bool and View as themselves. `writeText` writes one text as a
+ * JSON string (the program's own `write_json_string`).
  */
-export function writeJson(prog: Program, out: Buf, v: Adt, writeText: (out: Buf, text: Uint8Array) => void): Buf {
-  const d = prog.ctors.get(v.c)?.decl,
-    only = d?.variants.length === 1 ? d.variants[0] : undefined;
-  if (!only) throw new Unsupported(`write_json of ${v.c}`);
+export function writeJson(prog: Program, out: Buf, v: Value, writeText: (out: Buf, text: Uint8Array) => void): Buf {
   const text = (t: string): void => {
     for (const b of enc.encode(t)) out.buf.push(b);
   };
-  only.fields.forEach((fl, i) => {
-    text(`${i ? ',' : '{'}${JSON.stringify(fl.name)}:`);
-    const x = v.f[fl.name];
-    if (typeof x === 'bigint') text(String(x));
-    else if (typeof x === 'boolean') text(x ? 'true' : 'false');
-    else if (x instanceof Uint8Array) writeText(out, x);
+  const write = (x: Value | undefined): void => {
+    if (typeof x === 'bigint') return text(String(x));
+    if (typeof x === 'boolean') return text(x ? 'true' : 'false');
+    if (x instanceof Uint8Array) return writeText(out, x);
     // the shortest digits that read back as it, as the host's float_text
-    else if (typeof x === 'number') text(String(x));
-    else throw new Unsupported(`write_json of ${x?.k === 'adt' ? `a ${x.c}` : 'a value'} inside ${v.c}`);
-  });
-  text(only.fields.length > 0 ? '}' : '{}');
+    if (typeof x === 'number') return text(String(x));
+    if (!isAdt(x)) throw new Unsupported(`write_json of ${x === undefined ? 'nothing' : `a ${x.k}`}`);
+    const made = prog.ctors.get(x.c),
+      decl = made?.decl,
+      variant = decl?.variants[made?.vi ?? -1];
+    if (!decl || !variant || decl.name === 'Option' || decl.name === 'Result')
+      throw new Unsupported(`write_json of ${x.c}`);
+    if (decl.name === 'List') {
+      text('[');
+      for (let item: Value | undefined = x, first = true; isAdt(item) && item.c === 'Cons'; first = false) {
+        if (!first) text(',');
+        write(item.f['head']);
+        item = item.f['tail'];
+      }
+      return text(']');
+    }
+    const several = decl.variants.length > 1;
+    text(several ? `{${JSON.stringify(x.c)}:{` : '{');
+    let first = true;
+    for (const fl of variant.fields) {
+      const field = x.f[fl.name],
+        optional = fl.type.name === 'Option' && isAdt(field);
+      if (optional && field.c === 'None') continue;
+      text(`${first ? '' : ','}${JSON.stringify(fl.name)}:`);
+      first = false;
+      write(optional ? field.f['value'] : field);
+    }
+    text(several ? '}}' : '}');
+  };
+  write(v);
   return out;
 }
