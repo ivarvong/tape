@@ -1,15 +1,17 @@
-// Inlining (compiler/gen/inline.ts) changes nothing a program does: a build with it and one without give the same
-// answers, the same traps and the same step count, on generated programs, on the pure examples and on the
+// Inlining (compiler/gen/inline.ts) and counting steps in a local (compiler/gen/meter.ts) change nothing a program
+// does: a build with them and one without give the same answers, the same traps and the same step count, on generated programs, on the pure examples and on the
 // simulator's runs of every program that takes requests (each replayed from its effect log through both builds,
 // which must take the whole log). Then the inliner itself, on modules written here: a body with a `return`, a
 // tail call, several results, a local read before it is written; a function that counts steps, one that calls
-// itself, and an instruction the inliner does not know are each left alone.
+// itself, and an instruction the inliner does not know are each left alone. And a loop counting in a local: the
+// count after it ends and after it stops on the budget is the global's.
 import '../node25.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile } from '../compiler.ts';
 import type { Options, Source } from '../compiler.ts';
 import { section, uleb, vec } from '../compiler/common.ts';
 import { inline } from '../compiler/gen/inline.ts';
+import { meter } from '../compiler/gen/meter.ts';
 import type { Fn } from '../compiler/gen/inline.ts';
 import { gen as csvGen } from '../bench/csv-gen.ts';
 import { link } from '../host/run.ts';
@@ -20,7 +22,7 @@ import { auto, search } from '../sim.ts';
 import { finish, ok, same, std } from './harness.ts';
 
 const ROOT = new URL('../', import.meta.url).pathname;
-const OFF: Partial<Options> = { inline: false };
+const OFF: Partial<Options> = { inline: false, localSteps: false };
 const dec = new TextDecoder();
 
 type Run = {
@@ -374,6 +376,47 @@ const C = (n: number): number[] => [0x41, n];
     'an instruction the inliner does not know leaves every function as it was',
     out,
     [f, counts, self, strange].map(x => x.body),
+  );
+}
+
+{
+  // fn0(x): a loop that counts each round (global 0), stops past 5, and ends at x = 0; fn1 calls it
+  const count = [0x03, I32, 0x23, 0, 0x42, 1, 0x7c, 0x24, 0, 0x23, 0, 0x42, 5, 0x56, 0x04, 0x40, 0x00, 0x0b];
+  const back = [0x0c, 1, 0x0b, 0x0b, 0x0b];
+  const loop: Fn = {
+    params: [I32],
+    results: [I32],
+    body: [0, ...count, ...L(0), 0x45, 0x04, I32, ...C(0), 0x05, ...L(0), ...C(1), 0x6b, ...S(0), ...back],
+  };
+  const caller: Fn = { params: [I32], results: [I32], body: [0, ...L(0), 0x10, 0, 0x0b] };
+  const fns = [loop, caller];
+  const bodies = meter(fns, 0);
+  ok('the loop counts in a local', bodies[0] !== loop.body && JSON.stringify(bodies[0]) !== JSON.stringify(loop.body));
+  same('a function that calls is left as it is', bodies[1], caller.body);
+  const counted = (m: WebAssembly.Module, x: number): string => {
+    const { exports } = new WebAssembly.Instance(m, {});
+    const f = exports['fn1'],
+      c = exports['c'];
+    let r: string;
+    try {
+      r = typeof f === 'function' ? String(Reflect.apply(f, null, [x])) : 'none';
+    } catch {
+      r = 'trap';
+    }
+    return `${r} @${c instanceof WebAssembly.Global ? String(c.value) : '?'}`;
+  };
+  same(
+    'it ends and stops with the count the global would have',
+    [0, 3, 4, 5, 9].map(x => counted(moduleOf(fns, bodies), x)),
+    [0, 3, 4, 5, 9].map(x =>
+      counted(
+        moduleOf(
+          fns,
+          fns.map(f => f.body),
+        ),
+        x,
+      ),
+    ),
   );
 }
 

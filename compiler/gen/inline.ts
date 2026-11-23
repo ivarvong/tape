@@ -30,7 +30,7 @@ export type Inlining = {
   limit: number;
 };
 
-class Unknown extends Error {}
+export class Unknown extends Error {}
 
 const readU = (b: Body, i: number): [number, number] => {
   let n = 0,
@@ -113,8 +113,8 @@ function next(b: Body, i: number): Ins {
 }
 
 /** A function taken apart: the types of its locals after the parameters, and its instructions without the last end. */
-type Parsed = { params: readonly number[]; results: readonly number[]; locals: number[]; code: number[] };
-function parse(f: Fn): Parsed {
+export type Parsed = { params: readonly number[]; results: readonly number[]; locals: number[]; code: number[] };
+export function parse(f: Fn): Parsed {
   const b = f.body;
   let [runs, p] = readU(b, 0);
   const locals: number[] = [];
@@ -127,7 +127,7 @@ function parse(f: Fn): Parsed {
   if (b.at(-1) !== 0x0b) throw new Unknown('no end');
   return { params: f.params, results: f.results, locals, code: b.slice(p, -1) };
 }
-function bodyOf(p: Parsed): number[] {
+export function bodyOf(p: Parsed): number[] {
   const runs: [number, number][] = [];
   for (const t of p.locals) {
     const last = runs.at(-1);
@@ -138,7 +138,7 @@ function bodyOf(p: Parsed): number[] {
 }
 
 /** Every instruction of some code, in order. */
-function* each(code: readonly number[]): Generator<Ins> {
+export function* each(code: readonly number[]): Generator<Ins> {
   for (let i = 0; i < code.length;) {
     const ins = next(code, i);
     yield ins;

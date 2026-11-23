@@ -3,6 +3,7 @@ import { F64, I32, I64, name, section, sleb, uleb, utf8, vec } from '../common.t
 import { FLAG_BASE, G_COST, G_HP, G_UNDO, G_WHY, sig } from './module.ts';
 import type { Imports, Options, Tables } from './module.ts';
 import { inline } from './inline.ts';
+import { meter } from './meter.ts';
 import { allocBody, reserveBody, resetBody } from './runtime.ts';
 
 /** A function as compiled: the index of its type, and its locals and code. */
@@ -131,7 +132,15 @@ export function assemble(parts: Parts): Uint8Array<ArrayBuffer> {
     ...compiled.map(c => c.body),
   ];
   const slots = table.map(n => uleb(tables.indexOf.get(n) ?? 0));
-  const bodies = opts.inline && !opts.profile ? inlined(parts, runtime, written) : written;
+  const inl = opts.inline && !opts.profile ? inlined(parts, runtime, written) : written;
+  // a recursive function that calls nothing counts its steps in a local (gen/meter.ts)
+  const sigs = [...runtime, ...compiled.map(c => c.sig)];
+  const bodies = opts.localSteps
+    ? meter(
+        inl.map((code, i) => ({ ...typesOf(tables, sigs[i] ?? 0), body: code })),
+        G_COST,
+      )
+    : inl;
   const stored = [...flagBytes, ...tables.data];
   return new Uint8Array([
     ...MAGIC,

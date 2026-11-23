@@ -43,6 +43,8 @@ export const DEFAULTS = {
   tailCalls: true,
   // small functions written into their callers (compiler/gen/inline.ts)
   inline: true,
+  // a recursive function that calls nothing counts its steps in a local (compiler/gen/meter.ts)
+  localSteps: true,
   exports: ['handle'],
   rules: true,
 };
