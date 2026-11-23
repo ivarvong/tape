@@ -474,7 +474,8 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Hold money, or any number with a fixed count of decimals | `Dec[s]`, with literals at its scale (`12.30`) | C14 |
 | Change a Dec's scale | `rescale(x, to: 3)` up, exactly; `round(x, to: 2, rounding: HalfEven)` down | C14 |
 | Divide a Dec, or apply a rate | `div(a, by: b, scale: 2, rounding: HalfEven)`, `mul(a, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
-| Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back | C14 |
+| Money in currencies of different places (USD 2, JPY 0) | one scale for all, `Dec[2]`; for a 0-place currency compute at scale 0 and rescale up, `rescale(x: mul(a: sub, by: rate, scale: 0, rounding: HalfUp), to: 2)`, rather than round a 2-place result (that rounds twice) | C14 |
+| Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back. sin, cos, atan2, exp, log and pow are Float's: a Dec has none (`sin(x)` of a Dec is C14), so an exact kernel stays Int, with Dec at its edges | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
 | Count, or do something n times | `fold` over `range(from:, to:)` | |
 | Write each item of a list | `fold(list, from: out, by: fn(out: Buf, item: T) -> Buf { … })` | |
@@ -483,6 +484,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
 | Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves; the write may be in a function every call of which comes after the claim), or `repeat: True` on the call when every attempt should count | C54 |
 | Pass a value to a query | `:name` in the query, and an argument of that name. A Bool is bound as 1 or 0 and read back from an INTEGER column (`done INTEGER NOT NULL DEFAULT 0`, `WHERE done = :done`); an Int is INTEGER, a View TEXT, a Float REAL | C11, C13, C32 |
+| Filter by a value that may be absent | a flag beside it, `WHERE (:all = 1 OR region = :only)`, with `all: True, only: ""` when there is none: a query's values are never `Option` | C14 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
 | Command another program | `call` with `within:` and a `once:` key that names the row (its primary key: `ForOrder(order: id)`, even when the message carries the id too), a key the client sent, or the message itself | C39, C41, C64, C65, C71 |
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
