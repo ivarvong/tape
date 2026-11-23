@@ -1,7 +1,6 @@
 // compiler/gen/expr.ts: an expression checked and written as Wasm; its type is what the emitter gives back.
 import { eachExpr, eachPattern, eachType, patternsIn, unreachable } from '../ast.ts';
 import type { Arg, Expr, Pattern, TypeAst, Variant } from '../ast.ts';
-import { showExpr } from '../../rules/origins.ts';
 import { I32, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
@@ -229,17 +228,46 @@ function emitConcat(c: Ctx, e: Of<'bin'>, lt: Type): Type {
   return VIEW;
 }
 
+// the operators that may stand between a value and None: == and != compare; the rest are C19 there
+const COMPARED_WITH_NONE: Readonly<Record<string, true>> = {
+  '==': true,
+  '!=': true,
+  '<': true,
+  '<=': true,
+  '>': true,
+  '>=': true,
+};
+const isNone = (x: Expr): boolean => x.k === 'ctor' && x.name === 'None' && x.args.length === 0;
+
+/** C19's fix: an Option is asked about None by == and !=, and what it holds by `match`. */
+function compareHint(lt: Type): string {
+  return lt.name === 'Option'
+    ? 'An Option is compared with None only: `x == None`, `x != None`. To compare what it holds, take it apart: `let Some(value) = x else -> …`, or `match x` with a `Some(value)` arm.'
+    : 'Use `match` to take the value apart.';
+}
+
 /**
- * C19's fix. An Option against None (`title != None`) is asked with a match, written out for that value, or with
- * the step that goes on with the value; any other value is taken apart with `match`.
+ * `x == None` and `x != None` (either way round): an Option's constructor compared, True when it is None (for
+ * ==). Any other comparison with None is C19, and None against a value that is not an Option is too.
  */
-function compareHint(e: Of<'bin'>, lt: Type): string {
-  const none = (x: Expr): boolean => x.k === 'ctor' && x.name === 'None' && x.args.length === 0;
-  const other = none(e.r) ? e.l : none(e.l) ? e.r : null;
-  if (lt.name !== 'Option' || other === null) return 'Use `match` to take the value apart.';
-  const v = showExpr(other),
-    has = e.op === '!=';
-  return `An Option is asked what it holds, not compared: write \`match ${v}\` with the arms \`Some -> ${has ? 'True' : 'False'}\` and \`None -> ${has ? 'False' : 'True'}\`, each on its own line; to go on only when it holds a value, \`let Some(value) = ${v} else -> …\`.`;
+function emitNoneTest(c: Ctx, e: Of<'bin'>, other: Expr): Type {
+  const { type, locals } = inLocals(c, other);
+  const t = c.B.strip(type);
+  if (t.name !== 'Option')
+    fail(
+      e,
+      'C19',
+      `None is an Option, and this is ${key(t)}`,
+      'Only an Option is compared with None: `x == None`, `x != None`.',
+    );
+  if (e.op !== '==' && e.op !== '!=')
+    fail(e, 'C19', `${key(t)} values cannot be compared with ${e.op}`, compareHint(t));
+  const adt = c.B.adtOf(t, e);
+  const none = adt.variants.findIndex(v => v.name === 'None');
+  c.code.push(...get(locals[0] ?? 0));
+  if (adt.boxed) c.code.push(0x28, 2, 0); // the constructor's index, at the start of the box
+  c.code.push(0x41, ...sleb(none), e.op === '==' ? 0x46 : 0x47);
+  return BOOL;
 }
 
 function emitEquals(c: Ctx, e: Of<'bin'>, lt: Type): Type {
@@ -247,7 +275,7 @@ function emitEquals(c: Ctx, e: Of<'bin'>, lt: Type): Type {
   if (lt.name === 'Float') return emitFloatBin(c, e);
   if (lt.name === 'Dec') return emitDecBin(c, e, lt);
   if (!['Int', 'Bool', 'View'].includes(lt.name))
-    fail(e, 'C19', `${key(lt)} values cannot be compared with ${op}`, compareHint(e, lt));
+    fail(e, 'C19', `${key(lt)} values cannot be compared with ${op}`, compareHint(lt));
   need(c, c.emit(e.r, lt, false), lt, e, `the right side of ${op}`);
   if (lt.name === 'View') c.code.push(0x10, ...uleb(c.B.fnIndex('same')));
   else c.code.push(lt.name === 'Int' ? 0x51 : 0x46);
@@ -272,6 +300,8 @@ const BITWISE: Readonly<Record<string, number>> = { '&': 0x83, '|': 0x84, '^': 0
 function emitBin(c: Ctx, e: Of<'bin'>): Type {
   const { op } = e;
   if (op === 'and' || op === 'or') return emitLogic(c, e, op);
+  const notNone = isNone(e.r) && !isNone(e.l) ? e.l : isNone(e.l) && !isNone(e.r) ? e.r : null;
+  if (notNone && op in COMPARED_WITH_NONE) return emitNoneTest(c, e, notNone);
   deferLeft(e);
   const lt = c.B.strip(c.emit(e.l, null, false));
   if (op === '++') return emitConcat(c, e, lt);

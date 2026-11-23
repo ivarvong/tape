@@ -201,6 +201,10 @@ function binary(it: Interp, e: Bin, env: Env, file: string): Value {
     r = ev(it, e.r, env, file);
   if (typeof l === 'number') return floatBinary(e.op, l, asFloat(r));
   if (isDec(l) || isDec(r)) return decBinary(e.op, l, r);
+  // an Option against None: its constructor compared
+  const none = (v: Value): boolean =>
+    typeof v === 'object' && !(v instanceof Uint8Array) && v.k === 'adt' && v.c === 'None';
+  if ((e.op === '==' || e.op === '!=') && (none(l) || none(r))) return (none(l) && none(r)) === (e.op === '==');
   switch (e.op) {
     case '++':
       return concat(asBytes(l), asBytes(r));

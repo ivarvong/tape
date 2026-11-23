@@ -88,6 +88,10 @@ std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `E
 (`Moved(value)`, `Raced(now)`, `NoRow`), `CallError` (`Timeout`, `Unreachable`, `Rejected(reason)`,
 `Skew(reason)`), `Map[T]`, `List[T]`, `Request`, `Wake`.
 
+`x == None` and `x != None` ask whether an Option `x` is `None`: they compare its constructor, not its value.
+Nothing else compares an Option: not two Options, not `<` (C19). To use what it holds, take it apart (`let
+Some(value) = x else -> …`, or `match`).
+
 There are no implicit conversions between numbers, and no null, no exceptions, no mutable variables and no loops.
 
 On `Int`: `+ - *` and unary `-` give the exact result, and trap (integer overflow) when it does not fit in 64 bits.
@@ -495,6 +499,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 
 | Job | The form | Otherwise |
 |---|---|---|
+| Ask whether an Option holds a value | `title != None` (`let True = title != None or done != None else -> …` for a body with something in it); to use the value, `let Some(value: t) = title else -> …` | C19 for two Options compared or `<` |
 | Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); an `Option` field that is absent or `null` is `None`. Its `Err` is `<path>: missing`, `null` or `expected <what>` (section 6), ready to send as a 400. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected an integer")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
 | Write JSON | `write_json(value: …)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows: …)` for the rows of a query | C09 |
 | Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list: …, sep: …)` for text | C08 |
