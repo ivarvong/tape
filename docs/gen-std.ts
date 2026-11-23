@@ -245,8 +245,8 @@ fn limit_of(query: Option[View]) -> Int {
   },
   {
     title: 'Parse an integer, and route on one in the path',
-    uses: ['fn decimal', 'fn digits', 'fn decimal_text'],
-    text: '`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits); `digits(v)` takes leading zeros. Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. There is no parser for negative numbers yet. `decimal_text(value)` and holes (`"\\(n)"`) go the other way.',
+    uses: ['fn decimal', 'fn digits', 'fn parse_int', 'fn decimal_text'],
+    text: '`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits); `digits(v)` takes leading zeros. Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. `parse_int(text)` takes a number as people write one (a sign, leading zeros). `decimal_text(value)` and holes (`"\\(n)"`) go the other way.',
     program: `type Id = Int where self >= 1 and self <= 9007199254740991
 
 fn handle(raw: View) -> Buf {
@@ -314,17 +314,13 @@ fn stock() -> List[Item] {
   },
   {
     title: 'Validate characters',
-    uses: ['fn is_digit', 'fn is_hex', 'builtin len'],
-    text: '`v[i]` is the byte at `i`, as an Int. `is_digit(b)` and `is_hex(b)` test one byte; there is no `is_alpha` yet, so compare with the byte values (`a` is 97, `z` 122, `A` 65, `Z` 90, `-` 45, `_` 95). A check over every byte is a function that calls itself.',
+    uses: ['fn every_byte', 'fn is_lower', 'fn is_digit', 'fn is_alpha', 'fn is_alnum', 'builtin len'],
+    text: '`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v, keep)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.',
     program: `// a slug: 1 to 32 bytes of a-z, 0-9 and -
-type Slug = View where len(self) >= 1 and len(self) <= 32 and slug_from(v: self, at: 0)
+type Slug = View where len(self) >= 1 and len(self) <= 32 and every_byte(v: self, keep: slug_byte)
 
-fn slug_from(v: View, at: Int) -> Bool {
-  match {
-    at >= len(v) -> True
-    (v[at] >= 97 and v[at] <= 122) or is_digit(v[at]) or v[at] == 45 -> slug_from(v, at: at + 1)
-    else -> False
-  }
+fn slug_byte(b: Int) -> Bool {
+  is_lower(b) or is_digit(b) or b == 45
 }
 
 fn handle(raw: View) -> Buf {
@@ -336,12 +332,19 @@ fn handle(raw: View) -> Buf {
 `,
   },
   {
-    title: 'Read a header (not yet possible)',
-    uses: ['type Request'],
-    text: 'The host passes a request as its method, target and body: `Request` has `method`, `path`, `query`, `body` and `caller`, and no headers. A program cannot set response headers either, beyond the content type (`respond_as`): no `Location`, no cookies. Send what the program needs in the path, the query or the body.',
+    title: 'Read a request header, set a response header',
+    uses: ['fn header_of', 'fn header', 'type Request'],
+    text: '`header_of(request: r, name: "if-none-match")` is the header\'s value, `None` when it was not sent (the service passes accept, content-type, if-match, if-none-match, idempotency-key and x-…, never cookie or authorization). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`\'s.',
     program: `fn handle(raw: View) -> Buf {
-  let Request(method, path, query, body) = request(raw)
-  respond(status: 200) |> append(view: method ++ " " ++ path ++ " " ++ body)
+  let r = request(raw)
+  match r {
+    Request(method: "GET", path: "/old") -> respond(status: 301) |> header(name: "location", value: "/new")
+    Request(method: "GET", path: "/new") -> match header_of(request: r, name: "if-none-match") {
+      Some(value: "v1") -> respond(status: 304)
+      _ -> respond(status: 200) |> header(name: "etag", value: "v1") |> append(view: "new")
+    }
+    _ -> respond(status: 404)
+  }
 }
 `,
   },

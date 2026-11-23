@@ -15,7 +15,8 @@ type Move[T] {
   NoRow
 }
 
-// A value or the reason there is none. Errors are values: match on them, or chain steps with `with`.
+// A value or the reason there is none. Errors are values: match on them, or go on with one case a step at a time,
+// `let Ok(value: x) = e else { Err(error) -> … }`.
 type Result[T, E] {
   Ok(value: T)
   Err(error: E)
