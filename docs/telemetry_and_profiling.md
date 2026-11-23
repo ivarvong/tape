@@ -77,6 +77,11 @@ go tool pprof -http=: profiles/<file>.sym.pb              # flame graph
   isolate with no telemetry of its own: no events under any service name, nothing in this profile, and not in the tape
   invocation's cpuTimeMs (50 requests cost the same CPU as one). Its Wasm keeps a name section (compiler/gen/assemble.ts
   `nameSection`), so a local Node profile of the runner names Tape functions. Its wall is the log line's `run_ms`.
+  What we report of it ourselves: its tail (`RunTail`, mcp/src/tail.ts, attached with `tails` on LOADER.get) logs one
+  `{"event": "tape-mcp.run", run_id, method, outcome, cpu_ms, wall_ms, exceptions}` line per invocation, and the
+  call's own line has the same `run_id` and the Wasm memories its isolate held at the end (`program_bytes`,
+  `sqlite_bytes`; the platform reports no memory for it), and `inflight`, the hosted calls its isolate was serving
+  when it began. No tail line appeared in the local workerd suite (mcp/test), so the tail is checked on prod.
 - **The profiled isolate serves real traffic too**: a few % of samples can come from other clients' calls.
 - **~3-20 % of wall is sampled CPU**; compare profiles only under the same load. For A/B numbers use cpu.ts.
 - `compile_ms` in the log reads 0: a Worker's clock does not move during compute. CPU per call is cpuTimeMs.

@@ -44,6 +44,8 @@ export type Gate = {
    * new deploy from the one whose tools it listed, and the log line's and GET /'s version
    */
   release: string;
+  /** the hosted calls this isolate was serving when this one began, itself included (index.ts) */
+  inflight?: number;
 };
 
 const HEADERS = {
@@ -323,6 +325,7 @@ export const logLine = (
     status: number;
     total_ms: number;
     release: string;
+    inflight?: number;
   },
 ): Fields => ({
   event: 'tape-mcp.call',
@@ -347,8 +350,16 @@ export const logLine = (
         cache_bytes: seen.usage.cache_bytes,
         compile_ms: seen.usage.compile_ms,
         run_ms: seen.usage.run_ms,
+        ...(seen.usage.run
+          ? {
+              run_id: seen.usage.run.run_id,
+              program_bytes: seen.usage.run.program_bytes,
+              sqlite_bytes: seen.usage.run.sqlite_bytes,
+            }
+          : {}),
       }
     : {}),
+  ...(meta.inflight === undefined ? {} : { inflight: meta.inflight }),
   total_ms: meta.total_ms,
   ip_hash: meta.ip_hash,
   user_agent: meta.user_agent.slice(0, 200),
@@ -380,6 +391,7 @@ export async function serve(request: Request, deps: Deps, gate: Gate): Promise<R
     status: 0,
     total_ms: 0,
     release: gate.release,
+    ...(gate.inflight === undefined ? {} : { inflight: gate.inflight }),
   };
   const res = secured(await route(request, url, deps, gate, seen, meta));
   // a call refused before its body was read still finishes with the body: reached through the tape Worker's service

@@ -21,6 +21,7 @@ import type * as RunnerM from './src/runner.ts';
 import type * as ToolsM from './src/tools.ts';
 import type * as ServeM from './src/serve.ts';
 import type * as FeedbackM from './src/feedback.ts';
+import { tailLines } from './src/tail.ts';
 import type { SqlJsInit } from './src/runner.ts';
 
 const HERE = new URL('./', import.meta.url).pathname;
@@ -904,6 +905,61 @@ const tests: Test[] = [
         out.push(`held ${held.entries} entries, ${held.bytes} bytes (bound ${m.tools.CACHE.bytes})`);
       const [o1] = await compileTwice(files);
       if (body(o1.body)['cached'] !== false) out.push('the oldest entry was still there after 60 more');
+      return out;
+    },
+  },
+  {
+    // what the platform does not report of a run: its Dynamic Worker's CPU and outcome (the tail's line, tail.ts,
+    // on events shaped as workerd's TraceItem), the Wasm memories its isolate held (the run's log line), and how
+    // many hosted calls the isolate was serving when this one began (inflight, from the gate)
+    name: 'run observability',
+    run: async m => {
+      const out: string[] = [];
+      const lines = tailLines([
+        {
+          event: { rpcMethod: 'run' },
+          logs: [{ message: ['other'] }, { message: ['{"tape-mcp.run_id":"r-1"}'] }],
+          exceptions: [{ name: 'Error', message: 'exceeded CPU' }],
+          outcome: 'exceededCpu',
+          cpuTime: 51,
+          wallTime: 80,
+        },
+        {
+          event: null,
+          logs: [{ message: ['{"tape-mcp.run_id": broken'] }],
+          exceptions: [],
+          outcome: 'ok',
+          cpuTime: 0,
+          wallTime: 1,
+        },
+      ]);
+      const want = [
+        {
+          event: 'tape-mcp.run',
+          run_id: 'r-1',
+          method: 'run',
+          outcome: 'exceededCpu',
+          cpu_ms: 51,
+          wall_ms: 80,
+          exceptions: ['Error: exceeded CPU'],
+        },
+        { event: 'tape-mcp.run', run_id: null, method: null, outcome: 'ok', cpu_ms: 0, wall_ms: 1, exceptions: [] },
+      ];
+      if (JSON.stringify(lines) !== JSON.stringify(want)) out.push(`tail lines: ${JSON.stringify(lines)}`);
+      const ran = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/ada'] }), { gate: { inflight: 3 } });
+      const line = ran.logs[0] ?? {};
+      const program = line['program_bytes'],
+        sqlite = line['sqlite_bytes'];
+      // a Wasm memory is whole 64 KiB pages: the program's and sql.js's, each at least one
+      if (typeof program !== 'number' || program < 65536 || program % 65536 !== 0)
+        out.push(`program_bytes ${String(program)}`);
+      if (typeof sqlite !== 'number' || sqlite < 65536 || sqlite % 65536 !== 0)
+        out.push(`sqlite_bytes ${String(sqlite)}`);
+      if (line['inflight'] !== 3) out.push(`inflight ${String(line['inflight'])}`);
+      if (!('run_id' in line)) out.push('no run_id in the run line');
+      const compiled = (await post(m, '/v1/compile', JSON.stringify({}))).logs[0] ?? {};
+      if ('program_bytes' in compiled || 'inflight' in compiled)
+        out.push('a compile with no gate inflight says run or inflight');
       return out;
     },
   },

@@ -20,7 +20,9 @@ import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
+import { WorkerEntrypoint } from 'cloudflare:workers';
 import { serve } from './serve.ts';
+import { tailLines } from './tail.ts';
 import { LIMITS } from './tools.ts';
 import type { Deps, Program } from './tools.ts';
 import type { RanAll, RunRequest, Scripts } from './runner.ts';
@@ -56,7 +58,7 @@ const codeOf = (): Promise<string> =>
     .then(b => hexOf(b).slice(0, 16)));
 
 /** The Dynamic Worker that runs a build (and, for a line trace, its traced build), by their hash: warm when sent again. */
-async function runnerOf(env: Env, program: Uint8Array, traced: Uint8Array) {
+async function runnerOf(env: Env, ctx: ExecutionContext, program: Uint8Array, traced: Uint8Array) {
   const both = new Uint8Array(program.length + traced.length);
   both.set(program);
   both.set(traced, program.length);
@@ -66,6 +68,8 @@ async function runnerOf(env: Env, program: Uint8Array, traced: Uint8Array) {
     mainModule: 'loaded.js',
     globalOutbound: null,
     limits: { cpuMs: LIMITS.cpuMs, subRequests: 0 },
+    // each invocation's CPU, wall time, outcome and exceptions, which nothing else reports (tail.ts)
+    tails: [ctx.exports.RunTail({})],
     modules: {
       ...MODULES,
       'sqlite3.wasm': { wasm: sqlite3 },
@@ -77,17 +81,29 @@ async function runnerOf(env: Env, program: Uint8Array, traced: Uint8Array) {
 }
 
 const runIn =
-  (env: Env) =>
+  (env: Env, ctx: ExecutionContext) =>
   async (program: Program, requests: readonly RunRequest[], remotes: Scripts = {}): Promise<RanAll> => {
     const traced = program.traced ?? program.wasm;
-    const runner = await runnerOf(env, program.wasm, traced);
-    return runner.run([...requests], program.traced !== undefined, remotes);
+    const runner = await runnerOf(env, ctx, program.wasm, traced);
+    // the run's id: the runner logs it, so its tail's line (RunTail) and the call's line name the same run
+    const runId = crypto.randomUUID();
+    return { ...(await runner.run([...requests], program.traced !== undefined, remotes, runId)), run_id: runId };
   };
 /** A doc examples build (doctest.ts), its functions called in a Dynamic Worker: this Worker cannot compile Wasm. */
 const examplesIn =
-  (env: Env) =>
+  (env: Env, ctx: ExecutionContext) =>
   async (wasm: Uint8Array, fns: readonly string[]): Promise<Called[]> =>
-    (await runnerOf(env, wasm, wasm)).examples([...fns]);
+    (await runnerOf(env, ctx, wasm, wasm)).examples([...fns]);
+
+/** The tail of each program's Dynamic Worker: one log line per invocation (tail.ts), in this Worker's logs. */
+export class RunTail extends WorkerEntrypoint {
+  override tail(events: TraceItem[]): void {
+    for (const line of tailLines(events)) console.log(JSON.stringify(line));
+  }
+}
+
+/** The hosted calls this isolate is serving now: measured at each call's start (its log line's inflight). */
+let inflight = 0;
 
 /** The commit this deploy was built from (vite.config.ts), as the tape-version header and MCP's serverInfo.version. */
 const RELEASE = typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev';
@@ -102,25 +118,32 @@ const feedbackStore = (bucket: R2Bucket, limiter: RateLimit | null): Store => ({
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    void ctx;
     const deps: Deps = {
       std: STD,
       hello: { name: 'hello.tape', text: helloText },
-      run: runIn(env),
-      examples: examplesIn(env),
+      run: runIn(env, ctx),
+      examples: examplesIn(env, ctx),
       compiler: typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev',
     };
-    const res = await serve(request, deps, {
-      killSwitch: env.KILL_SWITCH,
-      salt: env.IP_SALT,
-      limiter: env.RATE,
-      feedback: feedbackStore(env.FEEDBACK, env.FEEDBACK_RATE),
-      version: env.VERSION?.id ?? null,
-      release: RELEASE,
-      log: line => {
-        console.log(JSON.stringify(line));
-      },
-    });
+    inflight++;
+    const at = inflight;
+    let res: Response;
+    try {
+      res = await serve(request, deps, {
+        inflight: at,
+        killSwitch: env.KILL_SWITCH,
+        salt: env.IP_SALT,
+        limiter: env.RATE,
+        feedback: feedbackStore(env.FEEDBACK, env.FEEDBACK_RATE),
+        version: env.VERSION?.id ?? null,
+        release: RELEASE,
+        log: line => {
+          console.log(JSON.stringify(line));
+        },
+      });
+    } finally {
+      inflight--;
+    }
     // which version of tape-mcp answered: for the deploy's pinned smoke, and through the tape Worker's binding
     if (env.VERSION) res.headers.set('tape-mcp-version', env.VERSION.id);
     // the commit and the compiler built in (vite.config.ts), as the tape Worker names its own (parity.ts)

@@ -12,8 +12,12 @@ import { callExamples } from './examples.ts';
 import type { Called } from './examples.ts';
 
 export class Runner extends WorkerEntrypoint {
-  /** `trace`: replay each request through traced.wasm (the build with { trace: true }) for its line trace */
-  async run(requests: RunRequest[], trace = false, remotes: Scripts = {}): Promise<RanAll> {
+  /**
+   * `trace`: replay each request through traced.wasm (the build with { trace: true }) for its line trace. `runId`:
+   * logged first, so the tail of this invocation (index.ts RunTail) can say which call it was.
+   */
+  async run(requests: RunRequest[], trace = false, remotes: Scripts = {}, runId = ''): Promise<RanAll> {
+    if (runId) console.log(JSON.stringify({ 'tape-mcp.run_id': runId }));
     await startSqlite(initSqlJs, sqlite3);
     return runAll(program, requests, trace ? traced : null, remotes);
   }

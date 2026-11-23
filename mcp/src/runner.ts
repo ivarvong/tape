@@ -25,6 +25,23 @@ export type SqlJsInit = (config: {
   ) => WebAssembly.Instance['exports'];
 }) => Promise<SqlJs>;
 
+/** An object's own values (none for anything else). */
+const valuesOf = (o: unknown): unknown[] =>
+  typeof o === 'object' && o !== null
+    ? Reflect.ownKeys(o).map(k => {
+        const v: unknown = Reflect.get(o, k);
+        return v;
+      })
+    : [];
+/** The first Wasm memory among these values, their values and theirs (an instance's exports, an import object). */
+const memoryIn = (...where: unknown[]): WebAssembly.Memory | null => {
+  const near = where.flatMap(w => [w, ...valuesOf(w)]);
+  const found = [...near, ...near.flatMap(valuesOf)].find(v => v instanceof WebAssembly.Memory);
+  return found instanceof WebAssembly.Memory ? found : null;
+};
+/** sql.js's Wasm memory, once started: how far its heap has grown (a Wasm memory never shrinks). */
+let sqliteMemory: WebAssembly.Memory | null = null;
+
 /** Start sql.js once per isolate, from its module: sql.js would otherwise compile its Wasm from bytes. */
 export async function startSqlite(init: SqlJsInit, module: WebAssembly.Module): Promise<void> {
   if (sqliteReady()) return;
@@ -33,6 +50,7 @@ export async function startSqlite(init: SqlJsInit, module: WebAssembly.Module): 
       ...config,
       instantiateWasm(imports, done) {
         const instance = new WebAssembly.Instance(module, imports);
+        sqliteMemory = memoryIn(instance.exports, imports);
         done(instance, module);
         return instance.exports;
       },
@@ -78,7 +96,14 @@ export type Ran = {
 export const TRACE_STEPS = 200_000;
 /** Every request, or why the program could not be linked to a database (a schema statement SQLite refused). */
 export type RanAll =
-  { ok: true; runs: Ran[]; timers?: { fired: number; pending: number } } | { ok: false; error: string };
+  | { ok: true; runs: Ran[]; timers?: { fired: number; pending: number }; memory?: RunMemory; run_id?: string }
+  | { ok: false; error: string; memory?: RunMemory; run_id?: string };
+/**
+ * What the run's isolate held at the end, which no platform metric says (the Dynamic Worker reports no memory): the
+ * program's Wasm memory and sql.js's, in bytes, each as far as it has grown (a Wasm memory never shrinks; sql.js's
+ * is the isolate's, shared by every run in it).
+ */
+export type RunMemory = { program_bytes: number; sqlite_bytes: number };
 
 export const NAME = 'tape-mcp/program';
 /** What a call to another program gets: this service runs one program, so there is nothing to call. */
@@ -328,7 +353,11 @@ async function runEach(
         ...(traced === null ? {} : { trace: lineTrace(traced, bytes, effects, steps) }),
       });
     }
-    return own ? { ok: true, runs, timers: { fired, pending: dueTimes(db).size } } : { ok: true, runs };
+    const memory: RunMemory = {
+      program_bytes: memoryIn(app.exports)?.buffer.byteLength ?? 0,
+      sqlite_bytes: sqliteMemory?.buffer.byteLength ?? 0,
+    };
+    return own ? { ok: true, runs, timers: { fired, pending: dueTimes(db).size }, memory } : { ok: true, runs, memory };
   } finally {
     db.close();
   }

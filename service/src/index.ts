@@ -51,7 +51,7 @@ import { secured } from './headers.ts';
 import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
 import type { CallMeta } from './records.ts';
 import { manifest, mcp, policyOf, refusal } from './tools.ts';
-import hosted from '../../mcp/src/index.ts';
+import hosted, { RunTail } from '../../mcp/src/index.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
 import {
   PUBLISHED,
@@ -71,6 +71,8 @@ import {
 
 // only entrypoints and functions: with static assets, a main module that exports a string or a number does not load
 export { build, rulesNow, Name, targetOf, buyerOf };
+// the tail of the hosted runner's Dynamic Workers (mcp/src/tail.ts): ctx.exports.RunTail there is this export
+export { RunTail };
 
 const enc = new TextEncoder();
 type Env = Cloudflare.Env;

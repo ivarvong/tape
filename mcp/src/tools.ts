@@ -158,6 +158,11 @@ export type Usage = {
   steps: number;
   compile_ms: number;
   run_ms: number;
+  /**
+   * the run, when there was one in a Dynamic Worker: its id (its tail's line says the same, tail.ts) and the Wasm
+   * memories its isolate held at the end (runner.ts RunMemory)
+   */
+  run?: { run_id: string | null; program_bytes: number | null; sqlite_bytes: number | null };
 };
 
 const enc = new TextEncoder(),
@@ -816,6 +821,12 @@ export async function runTool(
     };
   }
   usage.run_ms = Date.now() - t0;
+  if (all !== 'timeout')
+    usage.run = {
+      run_id: all.run_id ?? null,
+      program_bytes: all.memory?.program_bytes ?? null,
+      sqlite_bytes: all.memory?.sqlite_bytes ?? null,
+    };
   if (all === 'timeout')
     return {
       result: refused(
