@@ -131,13 +131,15 @@ T0=$(python3 -c 'import time; print(int(time.time() * 1000))')
 
 # ---- 5. pinned smoke
 say "pinned smoke"
-ok=0
-for i in 1 2 3 4 5 6 7 8 9 10; do
+# five pinned answers in a row from NEW before the smokes, not one: a pinned request to an edge machine the
+# deployment has not reached yet is answered by the 100% version (ship.sh says what that broke, 2026-11-23)
+n=0
+for i in $(seq 1 30); do
   v=$(curl -s -o /dev/null -D - -H "x-tape-synthetic: deploy" -H "cloudflare-workers-version-overrides: $WORKER=\"$NEW\"" "$BASE/ivar/hello" | awk 'tolower($1)=="tape-worker-version:"{gsub("\r","",$2); print $2}')
-  [ "$v" = "$NEW" ] && { ok=1; break; }
-  sleep 3
+  if [ "$v" = "$NEW" ]; then n=$((n + 1)); [ $n -ge 5 ] && break; else n=0; fi
+  sleep 2
 done
-[ $ok = 1 ] || back "pinned requests never reached $NEW"
+[ $n -ge 5 ] || back "pinned requests did not all reach $NEW (five in a row, within 60 s)"
 node scripts/smoke.ts "$BASE" --pin "$NEW" --sha "$SHA" || back "pinned smoke"
 node scripts/mcp-smoke.ts "$BASE/mcp" --pin "$WORKER=$NEW" --mcp-version "$NEW" || back "pinned MCP smoke (/mcp on NEW)"
 node scripts/parity.ts "$BASE" --pin "$NEW" --sha "$SHA" || back "the playground and /mcp compile differently"

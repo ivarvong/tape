@@ -171,15 +171,7 @@ if [ "$DRY" = 1 ]; then
   exit 0
 fi
 
-reaches() {  # reaches <url> <header> <id> <pin header or ''>: one answer from that version, within 30 s
-  for _ in 1 2 3 4 5 6 7 8 9 10; do
-    v=$(curl -s -o /dev/null -D - ${4:+-H "$4"} -H "x-tape-synthetic: deploy" "$1" | awk -v h="$2:" 'tolower($1)==h{gsub("\r","",$2); print $2}')
-    [ "$v" = "$3" ] && return 0
-    sleep 3
-  done
-  return 1
-}
-all_from() {  # all_from <url> <header> <id> [-X POST]: five unpinned answers in a row from that version
+all_from() {  # all_from <url> <header> <id> [curl args: -X POST, a pin header]: five answers in a row from that version
   local n=0
   for _ in $(seq 1 30); do
     v=$(curl -s -o /dev/null -D - -H "x-tape-synthetic: deploy" "${@:4}" "$1" | awk -v h="$2:" 'tolower($1)==h{gsub("\r","",$2); print $2}')
@@ -193,7 +185,12 @@ all_from() {  # all_from <url> <header> <id> [-X POST]: five unpinned answers in
 route "$PREV_tape:100" "$NEW_tape:0"
 T0=$(now_ms)
 say "tape: $NEW_tape 0%; pinned smoke, MCP, parity"
-reaches "$BASE/ivar/hello" tape-worker-version "$NEW_tape" "cloudflare-workers-version-overrides: tape=\"$NEW_tape\"" || back "pinned requests never reached tape $NEW_tape"
+# five pinned answers in a row from NEW, not one: a deployment reaches the edge's machines one by one, and a pinned
+# request to a machine that has not got it yet is answered by the 100% version. One answer was the gate until
+# 2026-11-23, when three ships in a row failed their pinned MCP smoke on it: 3 of 78 checks answered by 67796d9c, up
+# to 5.5 s after the first pinned answer from the new version (Workers Observability, the smoke's invocations), on
+# every route (/ivar/hello, /mcp, /v1/run, the playground's files) and not on the same calls twice.
+all_from "$BASE/ivar/hello" tape-worker-version "$NEW_tape" -H "cloudflare-workers-version-overrides: tape=\"$NEW_tape\"" || back "pinned requests did not all reach tape $NEW_tape (five in a row, within 60 s)"
 node scripts/smoke.ts "$BASE" --pin "$NEW_tape" --sha "$SHA" > "$STATE/smoke.out" 2>&1 &
 S1=$!
 node scripts/mcp-smoke.ts "$BASE/mcp" --pin "tape=$NEW_tape" --mcp-version "$NEW_tape" > "$STATE/smoke-binding.out" 2>&1 &
