@@ -57,7 +57,7 @@ export function type(c: Cursor): TypeAst {
   return { name: t.v, args, ...c.at(t) };
 }
 const field = (c: Cursor): FieldDecl => {
-  const name = c.expect('id').v;
+  const name = c.fieldName().v;
   c.expect('op', ':');
   return { name, type: type(c) };
 };
@@ -93,7 +93,8 @@ function intLiteral(t: Token, v: bigint): bigint {
 function arg(c: Cursor): Arg {
   const first = c.peek(),
     colon = c.peek(1);
-  if (first.t === 'id' && colon.t === 'op' && colon.v === ':') {
+  // a field's name may be a reserved word (`Event(type: "view")`)
+  if ((first.t === 'id' || first.t === 'kw') && colon.t === 'op' && colon.v === ':') {
     c.pos += 2;
     return { label: first.v, value: expr(c), ...c.at(first) };
   }
@@ -150,7 +151,7 @@ function primary(c: Cursor): Expr {
   let e = atom(c, t);
   for (;;) {
     if (c.eat('op', '.')) {
-      const name = c.expect('id').v;
+      const name = c.fieldName().v;
       e =
         e.k === 'var' && c.eat('op', '(')
           ? { k: 'call', name: `${e.name}.${name}`, args: args(c), ...at }
@@ -275,10 +276,16 @@ function namedPattern(c: Cursor, t: Token & { t: 'id' }): Pattern {
 }
 // one field of a constructor pattern: `field: pattern`, or a bare name, which binds the field under its own name
 function fieldPattern(c: Cursor): { field: string; pat: Pattern; pun?: true } {
-  const f = c.expect('id');
-  return c.eat('op', ':')
-    ? { field: f.v, pat: pattern(c) }
-    : { field: f.v, pun: true, pat: { k: 'bind', name: f.v, ...c.at(f) } };
+  const f = c.fieldName();
+  if (c.eat('op', ':')) return { field: f.v, pat: pattern(c) };
+  if (f.t === 'kw')
+    fail(
+      f,
+      'P01',
+      `\`${f.v}\` is a reserved word: a field of that name is matched, not bound by its own name`,
+      `Name what it binds: \`${f.v}: ${f.v === 'type' ? 'kind' : `${f.v}_value`}\`.`,
+    );
+  return { field: f.v, pun: true, pat: { k: 'bind', name: f.v, ...c.at(f) } };
 }
 function simplePattern(c: Cursor): Pattern {
   const t = c.next(),

@@ -35,7 +35,23 @@ except before a line that starts with `|>`, which carries the step on. A backsla
 text literal carries the text on after the next line's indentation.
 
 Reserved words: `fn export type schema migration flag match with let do if else and or not`. Words with a meaning
-only where they stand: `interface machine invariant where contract settled private final read write`.
+only where they stand: `interface machine invariant where contract settled private final read write`. A reserved
+word can name a record's field, since a field is never a variable: `Event(type: View)`, `e.type`, and in a pattern
+`Event(type: kind)`, which binds `kind` (a bare `Event(type)` would bind a variable named `type`, and is P01). So a
+JSON key that is a reserved word is decoded and written like any other.
+
+```tape gives
+type Event {
+  Event(type: Int, at: Int)
+}
+
+fn kind_at(at: Int) -> Int {
+  let Event(type: kind) = Event(type: 7, at)
+  kind * 100 + Event(type: kind, at).at
+}
+
+// kind_at(5) is 705
+```
 
 `tape fmt` rewrites a file in the one layout; `tape fmt --check` is part of the gate. A step that fits in 100
 columns is one line, however it was typed. A wider one is broken in one way: before each `|>`; failing that, inside its widest brackets with one argument to a line;
@@ -525,6 +541,7 @@ fn hash(h: Int, byte: Int) -> Int {
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | a reserved word could not name a field (P01), so a JSON key such as `"type"` could not be decoded | it can: `Event(type: View)`, `e.type`, `Event(type: kind)` |
 | 23 November 2026 | `match` only as the last expression of a function or of an arm (refused elsewhere), so a decision in a `let`, an argument or an operand was a function of its own | a match is an expression wherever a value is (its code is retired) |
 | 22 November 2026 | `Int` arithmetic that did not fit wrapped around (`fact(21)` answered `-4249290049419214848`), and so did a literal too large for an `Int` | a trap, integer overflow (trap 6; division by zero is trap 4 alone, a shift outside 0..63 is trap 7); `wrapping_add`, `wrapping_sub`, `wrapping_mul` where wrapping is meant; a literal out of range is P08 |
 | 22 November 2026 | numbered placeholders, `WHERE id = ?1` with `p1: id` | names: `WHERE id = :id` with `id` (C32) |

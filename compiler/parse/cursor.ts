@@ -2,7 +2,7 @@
 // what it read.
 import type { At, Token, TokenOf } from '../ast.ts';
 import { fail } from '../common.ts';
-import { lex } from '../lex.ts';
+import { KEYWORDS, lex } from '../lex.ts';
 
 const text8 = new TextDecoder();
 export const textOf = (bytes: number[]): string => text8.decode(new Uint8Array(bytes));
@@ -54,6 +54,14 @@ export class Cursor {
     return t;
   }
   expect<K extends Token['t']>(kind: K, v?: string, hint = ''): TokenOf<K> {
+    const found = this.peek();
+    if (kind === 'id' && v === undefined && found.t === 'kw')
+      fail(
+        found,
+        'P01',
+        `expected a name but found \`${found.v}\`, a reserved word`,
+        `A reserved word (${[...KEYWORDS].join(' ')}) cannot name a variable, a parameter or a function: pick another name (\`${found.v === 'type' ? 'kind' : `${found.v}_`}\`). It can name a record's field: \`Event(${found.v}: View)\`, \`e.${found.v}\`.`,
+      );
     return (
       this.eat(kind, v) ??
       fail(
@@ -63,6 +71,10 @@ export class Cursor {
         hint || `Write ${wanted(kind, v)} here.`,
       )
     );
+  }
+  /** a record field's name: any name, a reserved word too (`type`, `match`), since it is never a variable */
+  fieldName(): TokenOf<'id'> | TokenOf<'kw'> {
+    return this.eat('kw') ?? this.expect('id');
   }
   skipNl(): void {
     while (this.eat('nl') !== null);

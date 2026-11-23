@@ -5,6 +5,7 @@ import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
+import { instantiate } from '../host.ts';
 import { call, finish, functionsOf, same as T } from './harness.ts';
 
 /** f(args) compiled and interpreted, as one answer when the two agree. */
@@ -29,6 +30,14 @@ const run = (src: string, fn: string, args: bigint[] = []): unknown => {
   return typeof compiled === 'bigint' && compiled === interpreted
     ? Number(compiled)
     : `compiled ${String(compiled)}, interpreted ${String(interpreted)}`;
+};
+/** A program's handle, as text in and text out. */
+const served = (src: string): ((request: string) => string) => {
+  const r = compile([...std, { name: 't.tape', text: src }]);
+  const [no] = r.errors;
+  if (r.wasm === null) return () => `ERR ${no?.code} line ${no?.line}: ${no?.message}`;
+  const app = instantiate(new WebAssembly.Module(r.wasm), { log: false });
+  return request => new TextDecoder().decode(app.handle(new TextEncoder().encode(request)));
 };
 const codes = (src: string, exports: string[] = ['f']): string[] =>
   compile([...std, { name: 't.tape', text: src }], { exports }).errors.map(e => `${e.code}:${e.line}`);
@@ -232,6 +241,86 @@ T(
 }
 `).replace(/ \|.*/, ''),
   'C21 cannot tell which Option this None is',
+);
+
+// ---- 3. a reserved word names a field: declared, built, read with a dot, matched, decoded and written as JSON
+const EVENT = `type Event {
+  Event(type: View, match: Int)
+}
+
+type Nested {
+  Nested(type: View, list: List[Event])
+}
+
+fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  match r.path {
+    "/flat" -> {
+      let Ok(value: e) = decode(json: r.body, as: Event) else {
+        Err(error) -> respond(status: 400) |> append(view: error)
+      }
+      let Event(type: kind, match: m) = e
+      respond(status: 200) |> append(view: "\\(e.type) \\(kind) \\(m) ") |> write_json(value: e)
+    }
+    _ -> {
+      let Ok(value: n) = decode(json: r.body, as: Nested) else {
+        Err(error) -> respond(status: 400) |> append(view: error)
+      }
+      respond(status: 200) |> write_json(value: n)
+    }
+  }
+}
+`;
+{
+  const app = served(EVENT);
+  T(
+    'a field named type: decoded, read with a dot, matched, written back',
+    app('POST /flat\n{"type":"view","match":3}'),
+    '200\nview view 3 {"type":"view","match":3}',
+  );
+  T(
+    'a field named type, inside a record and a list',
+    app('POST /nested\n{"type":"batch","list":[{"type":"a","match":1},{"type":"b","match":2}]}'),
+    '200\n{"type":"batch","list":[{"type":"a","match":1},{"type":"b","match":2}]}',
+  );
+  T(
+    'a field named type, built',
+    run(
+      `type Event {
+  Event(type: Int, if: Int)
+}
+
+fn f(n: Int) -> Int {
+  let e = Event(type: n, if: 2)
+  e.type * e.if
+}
+`,
+      'f',
+      [4n],
+    ),
+    8,
+  );
+}
+T(
+  'a reserved word cannot be bound by its own name in a pattern (P01 says what to write)',
+  fix(`type Event {
+  Event(type: Int)
+}
+
+fn f(e: Event) -> Int {
+  let Event(type) = e
+  type
+}
+`),
+  'P01 `type` is a reserved word: a field of that name is matched, not bound by its own name | Name what it binds: `type: kind`.',
+);
+T(
+  'a reserved word as a variable: P01 names it and says where it can stand',
+  fix(`fn f(type: Int) -> Int {
+  type
+}
+`).split(' | ')[0],
+  'P01 expected a name but found `type`, a reserved word',
 );
 
 finish();

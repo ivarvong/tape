@@ -26,6 +26,8 @@ export type Wire = {
 };
 // the kind of a field when it is there
 const present = (k: WireKind): WireKind => (k.k === 'opt' ? k.of : k);
+// the variable generated code holds a field in: a field may be named by a reserved word (`type`), a variable not
+const vr = (field: string): string => `w_${field}`;
 const stop = (what: string): never => {
   throw new Error(`wire: ${what}`);
 };
@@ -197,19 +199,19 @@ export function wireSource(prog: Program): Wire {
       };
     out.push(
       `type Wire_${n} {\n${d.variants.map(v => `  Wire_${v.name}${v.fields.length > 0 ? `(${v.fields.map((f, i) => `${f.name}: ${wireType(kinds(v)(i))}`).join(', ')})` : ''}`).join('\n')}\n}\n`,
-      `fn wire_decode_${n}(json: View) -> Result[${n}, View] {\n  match decode(json, as: Wire_${n}) {\n${d.variants.map(v => `    Ok(value: Wire_${v.name}${v.fields.length > 0 ? `(${v.fields.map(f => f.name).join(', ')})` : ''}) -> wire_build_${v.name}(${v.fields.map(f => f.name).join(', ')})`).join('\n')}\n    Err(error) -> Err(error)\n  }\n}\n`,
+      `fn wire_decode_${n}(json: View) -> Result[${n}, View] {\n  match decode(json, as: Wire_${n}) {\n${d.variants.map(v => `    Ok(value: Wire_${v.name}${v.fields.length > 0 ? `(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')})` : ''}) -> wire_build_${v.name}(${v.fields.map(f => vr(f.name)).join(', ')})`).join('\n')}\n    Err(error) -> Err(error)\n  }\n}\n`,
     );
     for (const v of d.variants) {
       const ks = kinds(v),
         steps = v.fields
           .map((f, i) =>
             deep(ks(i))
-              ? `  let Ok(value: wire_${f.name}) = ${dec(f.name, ks(i))} else {\n    Err(error) -> Err(error: "${f.name}${present(ks(i)).k === 'list' ? '' : ': '}" ++ error)\n  }\n`
+              ? `  let Ok(value: wire_${f.name}) = ${dec(vr(f.name), ks(i))} else {\n    Err(error) -> Err(error: "${f.name}${present(ks(i)).k === 'list' ? '' : ': '}" ++ error)\n  }\n`
               : '',
           )
           .join('');
       out.push(
-        `fn wire_build_${v.name}(${v.fields.map((f, i) => `${f.name}: ${wireType(ks(i))}`).join(', ')}) -> Result[${n}, View] {\n${steps}  Ok(value: ${v.name}${v.fields.length > 0 ? `(${v.fields.map((f, i) => (deep(ks(i)) ? `${f.name}: wire_${f.name}` : f.name)).join(', ')})` : ''})\n}\n`,
+        `fn wire_build_${v.name}(${v.fields.map((f, i) => `${vr(f.name)}: ${wireType(ks(i))}`).join(', ')}) -> Result[${n}, View] {\n${steps}  Ok(value: ${v.name}${v.fields.length > 0 ? `(${v.fields.map((f, i) => `${f.name}: ${deep(ks(i)) ? `wire_${f.name}` : vr(f.name)}`).join(', ')})` : ''})\n}\n`,
       );
     }
     if (canWrite(n)) {
@@ -218,10 +220,10 @@ export function wireSource(prog: Program): Wire {
         ks = kinds(v);
       let acc = 'out';
       v.fields.forEach((f, i) => {
-        acc = write(`append(buf: ${acc}, view: "${i ? ',' : '{'}\\"${f.name}\\":")`, f.name, ks(i));
+        acc = write(`append(buf: ${acc}, view: "${i ? ',' : '{'}\\"${f.name}\\":")`, vr(f.name), ks(i));
       });
       out.push(
-        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${v.fields.length > 0 ? `  let ${v.name}(${v.fields.map(f => f.name).join(', ')}) = value\n  append(buf: ${acc}, view: "}")` : '  append(buf: out, view: "{}")'}\n}\n`,
+        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${v.fields.length > 0 ? `  let ${v.name}(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')}) = value\n  append(buf: ${acc}, view: "}")` : '  append(buf: out, view: "{}")'}\n}\n`,
       );
     }
   }
