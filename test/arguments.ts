@@ -89,4 +89,73 @@ same(
 );
 same('named, it compiles', refusal(POW.replace('pow(b, e - 1)', 'pow(b, e: e - 1)')), 'compiled');
 
+// The 0.3 usability bench: `load(order.id)` for `fn load(id: Int)` that reads the database was C10 "takes (id,
+// db)", and `existing(invoice_id)` for a parameter `id` was C11, in 10 of its 12 C11s. The `db` the compiler adds
+// (compiler/ambient.ts) is not a parameter the program wrote: a function of one written parameter takes its
+// argument bare, and no refusal names the added one.
+const AMBIENT = `schema "CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER NOT NULL)"
+
+type Row { Row(id: Int, n: Int) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let invoice_id = 7
+  match load(invoice_id) {
+    Some(value: Row(n)) -> respond(status: 200) |> append(view: "\\(n + total(id: invoice_id, scale: 2))")
+    None -> respond(status: 404)
+  }
+}
+
+fn load(id: Int) -> Option[Row] {
+  sql_first(row: Row, query: "SELECT id, n FROM t WHERE id = :id", id)
+}
+
+fn total(id: Int, scale: Int) -> Int {
+  let Some(value: Row(n)) = load(id) else -> 0
+  n * scale
+}
+`;
+const ambientRefusal = (text: string): string => {
+  const [e] = compile([...std, { name: 't.tape', text }]).errors;
+  return e ? `${e.code} ${e.line}: ${e.message} | ${e.hint}` : 'compiled';
+};
+same(
+  'a function of one written parameter and the added db takes its argument bare',
+  ambientRefusal(AMBIENT),
+  'compiled',
+);
+{
+  // the interpreter binds the bare argument the same way: with the row (7, 5), n + total = 5 + 5 * 2
+  const it = interpret([...std, { name: 't.tape', text: AMBIENT }], { rows: () => [[7, 5]], exec: () => 0 });
+  same(
+    'the interpreter takes the bare argument too',
+    new TextDecoder().decode(it.handle(new TextEncoder().encode('GET /\n'))),
+    '200\n15',
+  );
+}
+same(
+  'with an expression too',
+  ambientRefusal(AMBIENT.replace('match load(invoice_id)', 'match load(invoice_id + 0)')),
+  'compiled',
+);
+same(
+  'C10 names the written parameters only, and the call written that way',
+  ambientRefusal(AMBIENT.replace('total(id: invoice_id, scale: 2)', 'total(invoice_id + 0, 2)')),
+  `C10 8: arguments must be named | function total takes (id, scale), so each argument is \`name: value\`, as in \`total(id: invoice_id + 0, scale: 2)\`. ${RULE}`,
+);
+same(
+  'the added db passed by hand is taken too',
+  ambientRefusal(AMBIENT.replace('total(id: invoice_id, scale: 2)', 'total(id: invoice_id, scale: 2, db)')),
+  'compiled',
+);
+same(
+  'C11 for a shorthand argument shows the call written with the parameter name',
+  ambientRefusal(AMBIENT.replace('total(id: invoice_id, scale: 2)', 'total(scale: 2, invoice_id)')),
+  'C11 8: function total has no parameter invoice_id | function total takes (id, scale). `invoice_id` was read as shorthand for `invoice_id: invoice_id`; write `total(scale: 2, id: invoice_id)`.',
+);
+same(
+  'C11 for a named argument shows the call written with the parameter it most likely meant',
+  ambientRefusal(AMBIENT.replace('total(id: invoice_id, scale: 2)', 'total(id: invoice_id, scal: 2)')),
+  'C11 8: function total has no parameter scal | function total takes (id, scale): write `total(id: invoice_id, scale: 2)`.',
+);
+
 finish();

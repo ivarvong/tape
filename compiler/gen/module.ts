@@ -180,24 +180,58 @@ export function find(prog: Program, n: string, file: string, at?: Place): FnDecl
   return fns.get(n) ?? null;
 }
 
+/** An argument as written: `name: value`, the name alone when the value is a variable of that name. */
+const shownArg = (name: string, a: Arg): string =>
+  a.value.k === 'var' && a.value.name === name ? name : `${name}: ${showExpr(a.value)}`;
+const callee = (what: string): string | undefined => /^(?:function|constructor) (.+)$/.exec(what)?.[1];
+
 /** The call with each unnamed argument given the name of the parameter in its place: `, as in pow(b, e: e - 1)`. */
 function rewrite(what: string, names: readonly string[], args: readonly Arg[]): string {
-  const callee = /^(?:function|constructor) (.+)$/.exec(what)?.[1];
-  if (callee === undefined || args.some(a => a.piped)) return '';
+  const fn = callee(what);
+  if (fn === undefined || args.some(a => a.piped)) return '';
   const shown = args.map((a, i) => {
     const name = a.label !== null && names.includes(a.label) ? a.label : names[i];
-    if (name === undefined) return null;
-    const text = showExpr(a.value);
-    return a.value.k === 'var' && a.value.name === name ? name : `${name}: ${text}`;
+    return name === undefined ? null : shownArg(name, a);
   });
-  return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `, as in \`${callee}(${shown.join(', ')})\``;
+  return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `, as in \`${fn}(${shown.join(', ')})\``;
 }
 
-/** Call arguments in the order of the parameters' names. A one-parameter callee takes its argument bare. */
-export function orderArgs(what: string, names: readonly string[], args: readonly Arg[], at: Place): Arg[] {
-  const list = `(${names.join(', ')})`;
-  const [first] = args;
-  if (names.length === 1 && args.length === 1 && first?.pun && first.label !== names[0]) return [first];
+/** The call with the one argument that names no parameter given the one parameter no argument names, or ''. */
+function renamed(what: string, names: readonly string[], args: readonly Arg[], wrong: Arg): string {
+  const fn = callee(what);
+  const free = names.filter(n => !args.some(a => a.label === n));
+  const [only] = free;
+  if (fn === undefined || free.length !== 1 || only === undefined || args.some(a => a.piped)) return '';
+  const shown = args.map(a => (a === wrong ? shownArg(only, a) : a.label === null ? null : shownArg(a.label, a)));
+  return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `write \`${fn}(${shown.join(', ')})\``;
+}
+
+/**
+ * Call arguments in the order of the parameters' names. A callee of one parameter takes its argument bare. The
+ * `hidden` parameters are those the compiler added (the capabilities of compiler/ambient.ts): they are passed for
+ * the program, so they do not count as parameters it wrote, and no refusal names them.
+ */
+export function orderArgs(
+  what: string,
+  names: readonly string[],
+  args: readonly Arg[],
+  at: Place,
+  hidden: ReadonlySet<string> = new Set(),
+): Arg[] {
+  const written = names.filter(n => !hidden.has(n)),
+    given = args.filter(a => a.label === null || !hidden.has(a.label)),
+    list = `(${written.join(', ')})`;
+  const [first] = given,
+    [one] = written;
+  if (written.length === 1 && given.length === 1 && first?.pun && one !== undefined && first.label !== one) {
+    if (names.length === 1) return [first];
+    const rest = new Map(args.filter(a => a !== first).map(a => [a.label, a]));
+    return names.map(n =>
+      n === one
+        ? first
+        : (rest.get(n) ?? fail(at, 'C13', `${what} is missing argument ${n}`, `${what} takes ${list}.`)),
+    );
+  }
   const by = new Map<string, Arg>();
   for (const a of args) {
     if (a.label === null)
@@ -205,15 +239,19 @@ export function orderArgs(what: string, names: readonly string[], args: readonly
         a,
         'C10',
         'arguments must be named',
-        `${what} takes ${list}, so each argument is \`name: value\`${rewrite(what, names, args)}. A variable with the parameter's name can be passed bare, and so can the one argument of a function with one parameter.`,
+        `${what} takes ${list}, so each argument is \`name: value\`${rewrite(what, written, given)}. A variable with the parameter's name can be passed bare, and so can the one argument of a function with one parameter.`,
       );
-    if (!names.includes(a.label))
+    if (!names.includes(a.label)) {
+      const fix = renamed(what, written, given, a);
       fail(
         a,
         'C11',
         `${what} has no parameter ${a.label}`,
-        `${what} takes ${list}.${a.pun ? ` \`${a.label}\` was read as shorthand for \`${a.label}: ${a.label}\`; write the parameter name, then the value.` : ''}`,
+        a.pun
+          ? `${what} takes ${list}. \`${a.label}\` was read as shorthand for \`${a.label}: ${a.label}\`; ${fix || 'write the parameter name, then the value'}.`
+          : `${what} takes ${list}${fix ? `: ${fix}` : ''}.`,
       );
+    }
     if (by.has(a.label)) fail(a, 'C12', `argument ${a.label} is given twice`, `Give ${a.label} once.`);
     by.set(a.label, a);
   }

@@ -4,6 +4,7 @@ import {
   type Arg,
   type Call,
   type Expr,
+  type Param,
   type FnDecl,
   type Pattern,
   type Program,
@@ -97,6 +98,18 @@ export function run(it: Interp, fn: Fn, args: Value[]): Value {
 // the argument for a parameter: by its label, or the only one there is
 const pickArg = (args: Arg[], name: string, only: boolean): Arg =>
   args.find(a => a.label === name) ?? (only ? args[0] : undefined) ?? stop(`missing argument ${name}`);
+/** A function's arguments in the order of its parameters. With one written parameter (the capabilities the
+ * compiler added do not count), the one argument that names no parameter is that parameter's. */
+const fnArgs = (args: Arg[], params: readonly Param[]): Arg[] => {
+  const written = params.filter(pm => !pm.implicit),
+    [one] = written;
+  return params.map(
+    pm =>
+      args.find(a => a.label === pm.name) ??
+      (written.length === 1 && pm === one ? args.find(a => !params.some(q => q.name === a.label)) : undefined) ??
+      stop(`missing argument ${pm.name}`),
+  );
+};
 export function ev(it: Interp, e: Expr, env: Env, file: string): Value {
   const r = step(it, e, env, file, false);
   return r instanceof Tail ? stop('a tail call outside tail position') : r;
@@ -258,7 +271,7 @@ function call(it: Interp, e: Call, env: Env, file: string, tail: boolean): Value
   }
   const g = find(it, e.name, file);
   if (!g) return it.effect(e.name, e, env, file);
-  const args = g.params.map(pm => ev(it, pickArg(e.args, pm.name, g.params.length === 1).value, env, file)),
+  const args = fnArgs(e.args, g.params).map(a => ev(it, a.value, env, file)),
     fn = callable(g);
   return tail ? new Tail(fn, args) : run(it, fn, args);
 }

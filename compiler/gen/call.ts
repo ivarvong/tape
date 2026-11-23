@@ -393,6 +393,7 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
     named.params.map(x => x.name),
     e.args,
     e,
+    new Set(named.params.filter(x => x.implicit).map(x => x.name)),
   );
   const g = named.tparams.length > 0 ? instance(c, named, args, expected, e) : named;
   g.params.forEach((pm, i) => {

@@ -44,7 +44,13 @@ export type Build = Imports & {
   literal: (bytes: readonly number[]) => [number, number];
   nearest: (n: string, pool: Iterable<string>) => string | null;
   opts: Options;
-  orderArgs: (what: string, names: readonly string[], args: readonly Arg[], at: Place) => Arg[];
+  orderArgs: (
+    what: string,
+    names: readonly string[],
+    args: readonly Arg[],
+    at: Place,
+    hidden?: ReadonlySet<string>,
+  ) => Arg[];
   prog: Program;
   queryId: (q: Omit<QueryEntry, 'run'>) => number;
   reads: (f: FnDecl, i: number) => boolean;

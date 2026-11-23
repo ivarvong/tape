@@ -340,6 +340,13 @@ function arms<A>(c: Cursor, arm: (c: Cursor) => A): A[] {
   return out;
 }
 function patArm(c: Cursor): PatArm {
+  if (c.is('kw', 'else'))
+    fail(
+      c.peek(),
+      'P04',
+      'a match on a value takes patterns; its fallback arm is `_ -> …`, not `else -> …`',
+      'Write `_ -> …` as the last arm, or drop the subject (`match { n > 1 -> … else -> … }`) to match conditions.',
+    );
   const at = c.at(c.peek()),
     pat = pattern(c),
     guard = c.eat('kw', 'if') ? binary(c, 1) : undefined;
@@ -347,6 +354,13 @@ function patArm(c: Cursor): PatArm {
   return { ...at, pat, ...(guard ? { guard } : {}), body: armBody(c) };
 }
 function condArm(c: Cursor): CondArm {
+  if (c.is('op', '_'))
+    fail(
+      c.peek(),
+      'P02',
+      'a match with no subject takes conditions; its fallback arm is `else -> …`, not `_ -> …`',
+      'Write `else -> …` as the last arm, or give the match a subject (`match n { 1 -> … _ -> … }`) to match patterns.',
+    );
   const at = c.at(c.peek()),
     cond = c.eat('kw', 'else') ? null : binary(c, 1);
   c.expect('op', '->', 'An arm is `condition -> expression`, and the last arm is `else -> expression`.');
