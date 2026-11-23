@@ -2,6 +2,7 @@
 import { F64, I32, I64, name, section, sleb, uleb, utf8, vec } from '../common.ts';
 import { FLAG_BASE, G_COST, G_HP, G_UNDO, G_WHY, sig } from './module.ts';
 import type { Imports, Options, Tables } from './module.ts';
+import { inline } from './inline.ts';
 import { allocBody, reserveBody, resetBody } from './runtime.ts';
 
 /** A function as compiled: the index of its type, and its locals and code. */
@@ -88,18 +89,49 @@ function nameSection(imported: readonly [string, number][], { tables }: Parts): 
   return section(0, [...name('name'), 1, ...body(vec(names.map((n, i) => [...uleb(i), ...name(n)])))]);
 }
 
+/** The types a function's signature names: its parameters and its results. */
+function typesOf(tables: Tables, index: number): { params: number[]; results: number[] } {
+  const [, np = 0, ...rest] = tables.sigs[index] ?? [];
+  return { params: rest.slice(0, np), results: rest.slice(np + 1) };
+}
+
+/** The bodies with small functions inlined (gen/inline.ts); the runtime's three are the first, and are not inlined
+ * (alloc written at every allocation made the code 8–10% larger and no request measurably faster). */
+function inlined(
+  { imports, opts, tables, table, compiled }: Parts,
+  runtime: readonly number[],
+  written: readonly (readonly number[])[],
+) {
+  const first = imports.ALLOC;
+  const sigs = [...runtime, ...compiled.map(c => c.sig)];
+  const roots = new Set([imports.ALLOC, imports.RESET, ...opts.exports.map(n => tables.indexOf.get(n) ?? 0)]);
+  for (const n of table) roots.add(tables.indexOf.get(n) ?? 0);
+  return inline({
+    fns: written.map((code, i) => ({ ...typesOf(tables, sigs[i] ?? 0), body: code })),
+    first,
+    roots,
+    kept: new Set([imports.ALLOC, imports.RESET, imports.RESERVE]),
+    blockSig: results => sig(tables, [], results),
+    cost: G_COST,
+    limit: INLINE_LIMIT,
+  });
+}
+/** The most bytes of instructions a function inlined into its callers may have: a checked `a * b / c` is about 100. */
+export const INLINE_LIMIT = 128;
+
 export function assemble(parts: Parts): Uint8Array<ArrayBuffer> {
   const { imports, opts, tables, table, compiled, flagBytes, custom } = parts;
   const heap = (tables.dataBase + tables.data.length + 7) & ~7;
   const runtime = [sig(tables, [I32], [I32]), sig(tables, [], []), sig(tables, [I32, I32], [])];
   const imported = importList(parts);
-  const bodies = [
+  const written = [
     allocBody(opts.profile ? imports.PROFILE_IMPORT : null),
     resetBody(heap, [...tables.freeLists.values()]),
     reserveBody(imports.ALLOC),
     ...compiled.map(c => c.body),
   ];
   const slots = table.map(n => uleb(tables.indexOf.get(n) ?? 0));
+  const bodies = opts.inline && !opts.profile ? inlined(parts, runtime, written) : written;
   const stored = [...flagBytes, ...tables.data];
   return new Uint8Array([
     ...MAGIC,

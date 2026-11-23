@@ -41,6 +41,8 @@ export const DEFAULTS = {
   reductionLimit: 50_000_000,
   reductions: true,
   tailCalls: true,
+  // small functions written into their callers (compiler/gen/inline.ts)
+  inline: true,
   exports: ['handle'],
   rules: true,
 };
