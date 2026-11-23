@@ -2,7 +2,7 @@
 
 How to see what the `tape` Worker does in production: one request's trace, CPU by version and route, and where the
 CPU goes. Every number reported carries its version id (and trace id or profile file). Last checked 2026-11-23 against
-tape dddd2c92 (profiles) and fe833f81 (no spans: traces still off in the script settings, see Traces).
+tape dddd2c92 and 56539ce5 (profiles, traces).
 
 All scripts are in `service/scripts/obs/`, run from `service/` with Node 25, and call the `cf` CLI (never wrangler) with
 the OAuth login: they drop `CLOUDFLARE_API_TOKEN` and need `CLOUDFLARE_ACCOUNT_ID` in the environment (never in a file).
@@ -20,12 +20,19 @@ Reading profiles needs `go` (`go tool pprof`). A request is queryable ~10-30 s a
 `observability.traces` is on with `headSamplingRate: 1` (service/cloudflare.config.ts). **Observability is a script
 setting, not a version's**: a versions upload plus a ramp (deploy.sh, ship.sh) does not apply it. After abd7729 shipped
 that way, `cf workers get tape` still said `traces.enabled: false` and no request had spans (2026-11-23). It takes a
-full deploy or a script-settings edit, and then applies to every version at once. Check with
-`cf workers get tape | grep -A3 '"traces"'`. The runtime makes the spans: the request (`url.full`, the query, method, status,
+full deploy or a script-settings edit (the full deploy of 6e8031e8 turned traces on), and then applies to every version
+at once. `node scripts/observability.ts` compares the live settings with the config's, and ship.sh runs it first: it
+stops before uploading when they differ. A full deploy builds with `cf build`, which hangs without
+`WRANGLER_DOCKER_BIN=/usr/bin/false` in the environment (ship.sh and deploy.sh set it). The runtime makes the spans: the request (`url.full`, the query, method, status,
 `http.request.body.size`, a few request headers, user agent, geo), each `fetch`, R2 and Durable Object call, and each
 `jsRpcSession` / `jsRpcCall` (the method name, not its arguments). **A trace carries no request or response body**, so a
 posted program is not in it; a program's own route (`/<account>/<name>/…`) and its query string are, as they already
 were in the invocation logs. `observability.redactQueryString` would drop query strings from both.
+
+A hosted `/v1/run` on 56539ce5 (trace 207b7a77a8e65871a636da15d885bc57) has four spans: the request (107 ms), its
+`jsRpcSession`, the `jsRpcCall` to the program's Dynamic Worker (`jsrpc.method=run`, 106 ms: the run's wall, the only
+view of it), and `ratelimit_run` (0 ms). The invocation's cpuTimeMs (279 ms) is the compile; the Dynamic Worker's CPU
+is not in it.
 
 `trace.ts` prints the invocation (version, status, cpuTimeMs, wallTimeMs, outcome), the span tree from parent ids, and
 the request's log lines (a hosted call's `tape-mcp.call`). Without spans (a version before traces) it says so.

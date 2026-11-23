@@ -185,6 +185,24 @@ export function callLogOf(e: unknown): CallLog | null {
   };
 }
 
+/**
+ * Each setting the config's `observability` names (camelCase, nested) whose live value (the API's, snake_case) is
+ * not the same, as `traces.enabled: cloudflare.config.ts true, live false`. A setting the config leaves out is not
+ * compared: the platform's default stands for it.
+ */
+export function observabilityDiff(wanted: unknown, live: unknown, path = ''): string[] {
+  if (typeof wanted !== 'object' || wanted === null || Array.isArray(wanted)) {
+    const same = JSON.stringify(wanted) === JSON.stringify(live);
+    return same
+      ? []
+      : [`${path}: cloudflare.config.ts ${JSON.stringify(wanted)}, live ${JSON.stringify(live) ?? 'unset'}`];
+  }
+  return Object.entries(wanted).flatMap(([k, v]) => {
+    const snake = k.replaceAll(/[A-Z]/g, c => `_${c.toLowerCase()}`);
+    return observabilityDiff(v, field(live, snake), path === '' ? snake : `${path}.${snake}`);
+  });
+}
+
 /** The nearest-rank percentile (p in 0..1) of the values: the smallest value at least p of them are at or below. */
 export function pct(values: readonly number[], p: number): number {
   if (values.length === 0) return NaN;

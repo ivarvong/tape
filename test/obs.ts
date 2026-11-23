@@ -2,7 +2,16 @@
 // URL to its route, an invocation event and a call's log line to their rows, nearest-rank percentiles, a span tree
 // from parent ids, and a pprof profile (written here field by field, as profile.proto lays it out) decoded, put in
 // the hosted buckets, and its unnamed frames named from the source with every other byte kept.
-import { callLogOf, grouped, invocationOf, pct, routeOf, spanOf, treeLines } from '../service/scripts/obs/o11y.ts';
+import {
+  callLogOf,
+  grouped,
+  invocationOf,
+  observabilityDiff,
+  pct,
+  routeOf,
+  spanOf,
+  treeLines,
+} from '../service/scripts/obs/o11y.ts';
 import type { Invocation, Span } from '../service/scripts/obs/o11y.ts';
 import { bucketOf, buckets, decode, encVarint, fields, nameAt, renamed } from '../service/scripts/obs/pprof.ts';
 import type { Fn } from '../service/scripts/obs/pprof.ts';
@@ -229,4 +238,28 @@ same(
   [1, 'lex.lex.<anon>', 'lex', '(garbage collector)', p.samples],
 );
 same('nothing to name: the same bytes', [...renamed(raw, () => null).out], [...raw]);
+
+// the live observability against the config's (scripts/observability.ts, ship.sh's preflight): the live shape is
+// the one `cf workers get tape` gave on 2026-11-23 (traces off), and after the full deploy (on)
+const liveOff = {
+  enabled: true,
+  head_sampling_rate: 1,
+  logs: { enabled: true, head_sampling_rate: 1, invocation_logs: true, persist: true },
+  traces: { enabled: false, head_sampling_rate: 1, persist: true },
+};
+const liveOn = { ...liveOff, traces: { ...liveOff.traces, enabled: true } };
+const wanted = { enabled: true, traces: { enabled: true, headSamplingRate: 1 } };
+same('observability: traces on in the config, off live', observabilityDiff(wanted, liveOff), [
+  'traces.enabled: cloudflare.config.ts true, live false',
+]);
+same('observability: as the config says (what it leaves out is not compared)', observabilityDiff(wanted, liveOn), []);
+same(
+  'observability: a sampling rate, a nested setting, and one live does not have',
+  observabilityDiff({ headSamplingRate: 0.5, logs: { invocationLogs: false }, redactQueryString: true }, liveOn),
+  [
+    'head_sampling_rate: cloudflare.config.ts 0.5, live 1',
+    'logs.invocation_logs: cloudflare.config.ts false, live true',
+    'redact_query_string: cloudflare.config.ts true, live unset',
+  ],
+);
 finish();

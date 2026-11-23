@@ -6,7 +6,8 @@
 # As deploy.sh: a clean commit on main (or ALLOW_BRANCH=1) with a passing full-gate record (service/scripts/gate.sh),
 # cf with the OAuth login (CLOUDFLARE_API_TOKEN unset), the same lock, the same deploy log.
 #
-#  1. preflight: a clean tree, the gate's record, the lock; the Worker one version at 100% (PREV)
+#  1. preflight: a clean tree, the gate's record, the lock; the Worker one version at 100% (PREV); the live
+#     observability settings are cloudflare.config.ts's (scripts/observability.ts: no upload or ramp applies them)
 #  2. which path: the stepped ramp (deploy.sh's 10/50/100 with DWELL under the probe) when the diff from the commit
 #     prod serves (its tape-version header) touches Durable Object classes, migrations or storage: service/src/name.ts,
 #     service/src/program.ts, service/cloudflare.config.ts, any service/src file that names DurableObject or
@@ -120,6 +121,9 @@ case "$s" in *" "*|"") echo "tape's deployment is split ($s): finish or roll it 
 [ "${s#*:}" = 100 ] || { echo "tape's deployment is $s, not one version at 100%" >&2; exit 1; }
 PREV_tape=${s%%:*}
 say "previous (rollback): tape $PREV_tape"
+# observability is the script's setting, not a version's: this run's upload and ramp would never apply a change to
+# it (traces stayed off after abd7729 shipped, 2026-11-23). Stop here until the live settings are the config's.
+node scripts/observability.ts || { echo "ship.sh stops: the live observability settings are not cloudflare.config.ts's" >&2; exit 1; }
 
 # ---- 2. which path
 DEPLOYED=$(curl -s -o /dev/null -D - "$BASE/ivar/hello" | awk 'tolower($1)=="tape-version:"{gsub("\r","",$2); print $2}')
