@@ -8,10 +8,14 @@
 // after it: not the checker, the code generator, the memory or the host.
 //
 //   node proof/interp-effects.ts [--seeds 12] [--only name]
+//   --shard i/n   only the program sets and plants whose index is i modulo n, written to
+//                 proof/results/interp-effects.<i>-of-<n>.json; --merge n reads the n shards back and prints and
+//                 records what one run of all of them would (proof/all.ts runs the shards side by side; each program
+//                 set's search is its own, so a shard finds for it what the whole run finds)
 //
 // A run the interpreter cannot follow (a form it does not have) is counted and named, not passed over.
 import '../node25.ts';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { isCall, isHead, isNow, isRandom, isSql, isWake } from '../host.ts';
 import type { Effect, Observed } from '../host.ts';
 import { pack, unpack } from '../host/log.ts';
@@ -175,9 +179,17 @@ async function runsOf(files: readonly File[]): Promise<{ model: Model; runs: Map
   return { model, runs };
 }
 
+const shardArg = arg('shard', ''),
+  merging = Number(arg('merge', '0'));
+const [shardIndex = 0, shardOf = 1] = /^\d+\/\d+$/.test(shardArg) ? shardArg.split('/').map(Number) : [0, 1];
+const mine = (k: number): boolean => k % shardOf === shardIndex;
+const shardName = (i: number, n: number): string => `interp-effects.${i}-of-${n}`;
+type Planted1 = { program: string; edit: string; seen: boolean; differs: number; of: number };
 const out: (Row & { programs: string })[] = [];
+const outAt: number[] = [];
 let failed = 0;
-for (const g of groups) {
+for (const [gi, g] of (merging > 0 ? [] : groups).entries()) {
+  if (!mine(gi)) continue;
   const files = g.map(program);
   const name = g.join(' + ');
   const got = await runsOf(files);
@@ -185,6 +197,7 @@ for (const g of groups) {
   const row = { programs: name, ...compare(files, got.model, got.runs) };
   if (row.differs > 0) failed++;
   out.push(row);
+  outAt.push(gi);
   const un = Object.entries(row.unsupported);
   const notFollowed = un.length > 0 ? `; not followed: ${un.map(([k, n]) => `${k} (${n})`).join(', ')}` : '';
   const differing =
@@ -219,8 +232,10 @@ function edited(path: string, text: string, from: string | null, to: string | nu
   if (next === text) throw new Error(`the planted edit does not apply to ${path}`);
   return next;
 }
-const plants: { program: string; edit: string; seen: boolean; differs: number; of: number }[] = [];
-for (const [path, from, to, what] of only === '' ? PLANTS : []) {
+const plants: Planted1[] = [];
+const plantsAt: number[] = [];
+for (const [pi, [path, from, to, what]] of (only === '' && merging === 0 ? PLANTS : []).entries()) {
+  if (!mine(groups.length + pi)) continue;
   const first = program(path);
   const files = [first, ...(path.endsWith('orders.tape') ? [program('examples/stock.tape')] : [])];
   const got = await runsOf(files);
@@ -230,9 +245,74 @@ for (const [path, from, to, what] of only === '' ? PLANTS : []) {
   );
   const seen = row.differs > 0;
   plants.push({ program: path, edit: what, seen, differs: row.differs, of: row.runs });
+  plantsAt.push(pi);
   if (!seen) failed++;
   console.log(
     `${seen ? 'ok    ' : 'MISSED'} planted in the interpreter's copy of ${path} (${what}): ${row.differs} of ${row.runs} runs differ`,
+  );
+}
+if (shardOf > 1) {
+  record(shardName(shardIndex, shardOf), {
+    out: out.map((row, k) => ({ index: outAt[k], row })),
+    plants: plants.map((row, k) => ({ index: plantsAt[k], row })),
+  });
+  console.log(`shard ${shardIndex} of ${shardOf}: ${out.length} program sets, ${plants.length} plants`);
+  process.exit(failed > 0 ? 1 : 0);
+}
+// ---- --merge n: the shards' rows, in the order one run gives them
+const f = (v: unknown, name: string): unknown =>
+  typeof v === 'object' && v !== null ? Object.fromEntries(Object.entries(v))[name] : undefined;
+const n0 = (v: unknown): number => (typeof v === 'number' ? v : 0);
+const s0 = (v: unknown): string => (typeof v === 'string' ? v : '');
+const items = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+if (merging > 0) {
+  const rows = new Map<number, Row & { programs: string }>(),
+    planted = new Map<number, Planted1>();
+  for (let i = 0; i < merging; i++) {
+    const shard: unknown = JSON.parse(readFileSync(`${root}proof/results/${shardName(i, merging)}.json`, 'utf8'));
+    for (const e of items(f(shard, 'out'))) {
+      const r = f(e, 'row'),
+        u = f(r, 'unsupported');
+      rows.set(n0(f(e, 'index')), {
+        programs: s0(f(r, 'programs')),
+        runs: n0(f(r, 'runs')),
+        agree: n0(f(r, 'agree')),
+        effects: n0(f(r, 'effects')),
+        unsupported: Object.fromEntries(
+          Object.entries(typeof u === 'object' && u !== null ? u : {}).map(([k, x]) => [k, n0(x)]),
+        ),
+        differ: items(f(r, 'differ')).map(d => {
+          const m = f(d, 'method');
+          return { request: s0(f(d, 'request')), method: typeof m === 'string' ? m : null, what: s0(f(d, 'what')) };
+        }),
+        differs: n0(f(r, 'differs')),
+      });
+    }
+    for (const e of items(f(shard, 'plants'))) {
+      const r = f(e, 'row');
+      planted.set(n0(f(e, 'index')), {
+        program: s0(f(r, 'program')),
+        edit: s0(f(r, 'edit')),
+        seen: f(r, 'seen') === true,
+        differs: n0(f(r, 'differs')),
+        of: n0(f(r, 'of')),
+      });
+    }
+  }
+  for (const k of [...rows.keys()].toSorted((a, b) => a - b)) {
+    const r = rows.get(k);
+    if (r) out.push(r);
+  }
+  for (const k of [...planted.keys()].toSorted((a, b) => a - b)) {
+    const r = planted.get(k);
+    if (r) plants.push(r);
+  }
+  if (only === '' && plants.length !== PLANTS.length)
+    throw new Error(`the shards hold ${plants.length} plants, not ${PLANTS.length}`);
+  for (const r of out) if (r.differs > 0) failed++;
+  for (const r of plants) if (!r.seen) failed++;
+  console.log(
+    `merged ${merging} shards: ${out.length} program sets (${groups.length} listed, a set without a model is left out), ${plants.length} plants`,
   );
 }
 const total = (of: (o: Row) => number): number => out.reduce((n, o) => n + of(o), 0);

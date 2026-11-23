@@ -71,8 +71,73 @@ async function hunt(p: Plant): Promise<Row> {
   };
 }
 
+// --shard i/n: only the plants whose index is i modulo n, written to proof/results/sim-plants.<i>-of-<n>.json; then
+// --merge n reads the n shards back and records and prints what one run of every plant would (proof/all.ts runs
+// the shards side by side). Each plant's search is its own, so a shard finds what the whole run finds for it.
+const shardArg = arg('shard', ''),
+  mergeArg = Number(arg('merge', '0'));
+const [index, of] = /^\d+\/\d+$/.test(shardArg) ? shardArg.split('/').map(Number) : [0, 1];
+const shardFile = (i: number, n: number): string => `sim-plants.${i}-of-${n}`;
+/** A row as a shard wrote it, read back. */
+const rowOf = (v: unknown): Row => {
+  const str = (name: string): string | undefined => {
+      const x = field(v, name);
+      return typeof x === 'string' ? x : undefined;
+    },
+    num = (name: string): number | undefined => {
+      const x = field(v, name);
+      return typeof x === 'number' ? x : undefined;
+    },
+    strs = (name: string): string[] | undefined => {
+      const x = field(v, name);
+      return Array.isArray(x) ? x.map(String) : undefined;
+    };
+  const row: Row = { plant: str('plant') ?? '', sim: str('sim') ?? '' };
+  const rules = strs('rules'),
+    run = num('run'),
+    seed = num('seed'),
+    script = strs('script'),
+    ms = num('ms');
+  if (rules !== undefined) row.rules = rules;
+  if (run !== undefined) row.run = run;
+  if (seed !== undefined) row.seed = seed;
+  if (script !== undefined) row.script = script;
+  if (ms !== undefined) row.ms = ms;
+  row.violation = str('violation');
+  row.hand = str('hand');
+  return row;
+};
 const out: Row[] = [];
-for (const p of plants) out.push(await hunt(p));
+if (mergeArg > 0) {
+  const rows = new Map<number, Row>();
+  for (let i = 0; i < mergeArg; i++) {
+    const shard: unknown = JSON.parse(read(`proof/results/${shardFile(i, mergeArg)}.json`));
+    if (!Array.isArray(shard)) throw new TypeError(`shard ${i} of ${mergeArg} is not a list`);
+    for (const r of shard) {
+      const n = Number(field(r, 'index'));
+      rows.set(n, rowOf(field(r, 'row')));
+    }
+  }
+  if (rows.size !== plants.length) throw new Error(`the shards hold ${rows.size} plants, not ${plants.length}`);
+  for (let n = 0; n < plants.length; n++) {
+    const r = rows.get(n);
+    if (r === undefined) throw new Error(`no shard ran plant ${n}`);
+    out.push(r);
+  }
+} else {
+  const mine: { index: number; row: Row }[] = [];
+  for (const [n, p] of plants.entries()) {
+    if (n % (of ?? 1) !== (index ?? 0)) continue;
+    const row = await hunt(p);
+    out.push(row);
+    mine.push({ index: n, row });
+  }
+  if (of !== 1) {
+    record(shardFile(index ?? 0, of ?? 1), mine);
+    console.log(`shard ${index} of ${of}: ${mine.length} plants`);
+    process.exit(0);
+  }
+}
 record('sim-plants', out);
 const ran = out.filter(o => o.rules !== undefined);
 const ruled = (o: Row): boolean => (o.rules?.length ?? 0) > 0;

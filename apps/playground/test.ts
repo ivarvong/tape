@@ -20,10 +20,10 @@
 //              `node tape.ts sim`'s; every link is local or the repository; nothing inline the policy refuses
 import '../../node25.ts';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { compile } from '../../compiler.ts';
@@ -896,8 +896,34 @@ const PLANTS: Plant[] = [
 
 async function main(): Promise<void> {
   if (process.argv.includes('--plants')) {
+    // --shard i/n: the plants whose index is i modulo n, each caught or not written to
+    // proof/results/playground-plants.<i>-of-<n>.json; --merge n: the n shards read back, and the line one run of
+    // every plant prints (proof/all.ts runs the shards side by side; each plant is made in its own copy)
+    const opt = (name: string): string => {
+      const i = process.argv.indexOf(`--${name}`);
+      return i < 0 ? '' : (process.argv[i + 1] ?? '');
+    };
+    const merging = Number(opt('merge') || '0'),
+      [shardIndex = 0, shardOf = 1] = /^\d+\/\d+$/.test(opt('shard')) ? opt('shard').split('/').map(Number) : [0, 1];
+    const shardFile = (i: number, n: number): string =>
+      new URL(`../../proof/results/playground-plants.${i}-of-${n}.json`, import.meta.url).pathname;
+    if (merging > 0) {
+      const seen = new Map<number, boolean>();
+      for (let i = 0; i < merging; i++) {
+        const shard: unknown = JSON.parse(readFileSync(shardFile(i, merging), 'utf8'));
+        const entries: unknown[] = Array.isArray(shard) ? shard : [];
+        for (const e of entries)
+          if (typeof e === 'object' && e !== null && 'index' in e && typeof e.index === 'number' && 'caught' in e)
+            seen.set(e.index, e.caught === true);
+      }
+      const missed = PLANTS.filter((_, k) => seen.get(k) !== true).length;
+      console.log(missed ? `${missed} plants not caught` : `all ${PLANTS.length} plants caught`);
+      process.exit(missed ? 1 : 0);
+    }
     let missed = 0;
-    for (const p of PLANTS) {
+    const mine: { index: number; caught: boolean }[] = [];
+    for (const [index, p] of PLANTS.entries()) {
+      if (index % shardOf !== shardIndex) continue;
       // examples.ts is read by data.ts: plant it there by planting data.ts's import of it
       const plant = p;
       let failing: string[] = [];
@@ -917,7 +943,14 @@ async function main(): Promise<void> {
       }
       const caught = failing.length > 0;
       missed += caught ? 0 : 1;
+      mine.push({ index, caught });
       console.log(`${caught ? 'caught' : 'MISSED'} plant for "${p.test}": ${p.what}${caught ? '' : ''}`);
+    }
+    if (shardOf > 1) {
+      mkdirSync(dirname(shardFile(shardIndex, shardOf)), { recursive: true });
+      writeFileSync(shardFile(shardIndex, shardOf), `${JSON.stringify(mine)}\n`);
+      console.log(`shard ${shardIndex} of ${shardOf}: ${mine.length} plants, ${missed} not caught`);
+      process.exit(missed ? 1 : 0);
     }
     console.log(missed ? `${missed} plants not caught` : `all ${PLANTS.length} plants caught`);
     process.exit(missed ? 1 : 0);

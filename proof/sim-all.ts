@@ -5,8 +5,11 @@
 // asks for one.
 //   node proof/sim-all.ts [--seeds 200]        writes proof/results/sim-all.json; exits 1 if the list of
 //                                               findings is not the one recorded in EXPECTED below
+//   --shard i/n: only the groups whose index is i modulo n, written to proof/results/sim-all.<i>-of-<n>.json;
+//   --merge n: the n shards read back, then the record, the summary and the check one run of every group gives
+//   (proof/all.ts runs the shards side by side; each group's search is its own)
 import '../node25.ts';
-import { readdirSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { auto, search, shrink } from '../sim.ts';
 import type { Auto } from '../sim/model.ts';
 import { arg, program, record, root } from './lib.ts';
@@ -96,8 +99,36 @@ async function simulated(name: string, a: Auto): Promise<Row> {
   return { ...base, result: small.kind, seed: small.seed, violation: small.violations[0], script: small.script };
 }
 
+const shardArg = arg('shard', ''),
+  merging = Number(arg('merge', '0'));
+const [shardIndex = 0, shardOf = 1] = /^\d+\/\d+$/.test(shardArg) ? shardArg.split('/').map(Number) : [0, 1];
+const shardName = (i: number, n: number): string => `sim-all.${i}-of-${n}`;
+/** A row as a shard wrote it (the fields the summary reads are checked). */
+const isRow = (v: unknown): v is Row =>
+  typeof v === 'object' &&
+  v !== null &&
+  'programs' in v &&
+  typeof v.programs === 'string' &&
+  'result' in v &&
+  typeof v.result === 'string';
 const out: Row[] = [];
-for (const g of groups) {
+if (merging > 0) {
+  const rows: { index: number; row: Row }[] = [];
+  for (let i = 0; i < merging; i++) {
+    const shard: unknown = JSON.parse(readFileSync(`${root}proof/results/${shardName(i, merging)}.json`, 'utf8'));
+    const entries: unknown[] = Array.isArray(shard) ? shard : [];
+    for (const e of entries) {
+      const index: unknown = typeof e === 'object' && e !== null && 'index' in e ? e.index : undefined,
+        row: unknown = typeof e === 'object' && e !== null && 'row' in e ? e.row : undefined;
+      if (typeof index !== 'number' || !isRow(row)) throw new TypeError(`shard ${i} of ${merging}: not a row`);
+      rows.push({ index, row });
+    }
+  }
+  for (const r of rows.toSorted((a, b) => a.index - b.index)) out.push(r.row);
+  console.log(`merged ${merging} shards: ${out.length} rows`);
+}
+for (const [gi, g] of (merging > 0 ? [] : groups).entries()) {
+  if (gi % shardOf !== shardIndex) continue;
   const name = g.join(' + ');
   const a = modelOf(name, g.map(program));
   if (a === null) continue;
@@ -111,6 +142,15 @@ for (const g of groups) {
     out.push({ programs: name, result: 'the simulator failed', message: messageOf(e) });
     console.log(`SIMBUG  ${name}: ${messageOf(e).slice(0, 120)}`);
   }
+}
+if (shardOf > 1) {
+  // a row's index is its group's (each group's name is its own); a group with no model has no row
+  record(
+    shardName(shardIndex, shardOf),
+    out.map(row => ({ index: groups.findIndex(g => g.join(' + ') === row.programs), row })),
+  );
+  console.log(`shard ${shardIndex} of ${shardOf}: ${out.length} rows`);
+  process.exit(0);
 }
 record('sim-all', out);
 // the one finding that is meant: trap.tape divides by zero to show a trap
