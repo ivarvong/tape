@@ -28,7 +28,7 @@ export type Stack = Frame[];
 export type AnalyzeOptions = { src?: string; params?: string | null };
 
 /** The SQL kind of each tape kind a parameter can have: Int, Bool, text. */
-export const TAPE_T: Readonly<Record<string, TyName>> = { i: 'int', b: 'int', t: 'text' };
+export const TAPE_T: Readonly<Record<string, TyName>> = { i: 'int', f: 'real', b: 'int', t: 'text' };
 export const AFF_T: Readonly<Record<Affinity, TyName>> = {
   int: 'int',
   text: 'text',

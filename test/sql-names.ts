@@ -87,7 +87,7 @@ same(
 same(
   'a value of a type SQL does not take is C14, and the message says the name',
   refused(READ.replace('title: raw)', 'title: db)'))[0],
-  'C14 argument title should be Int, Bool or View but is Sql',
+  'C14 argument title should be Int, Float, Bool or View but is Sql',
 );
 {
   const [said] = refused(READ.replace('title = :title', "title = :title AND :id = 'x' || :id"));

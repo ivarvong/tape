@@ -61,7 +61,15 @@ const json = (it: Interp, v: Value, file: string): Uint8Array =>
 
 // ---- SQL
 const sqlParam = (x: Value): SqlParam =>
-  x instanceof Uint8Array ? utf8.decode(x) : typeof x === 'boolean' ? (x ? 1 : 0) : exact(asInt(x), 'sql');
+  x instanceof Uint8Array
+    ? utf8.decode(x)
+    : typeof x === 'boolean'
+      ? x
+        ? 1
+        : 0
+      : typeof x === 'number'
+        ? x
+        : exact(asInt(x), 'sql');
 // p1, p2, … in order
 const sqlParams = (s: Site): SqlParam[] => {
   const out: SqlParam[] = [];

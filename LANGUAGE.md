@@ -241,7 +241,10 @@ argument is C13, an argument with no name in the query is C11, and a `?` is C32.
 with the names numbered in the order they first appear (`?1`, `?2`), and that is the form the effect log shows.
 
 SQL is checked at compile time against the program's tables: names, the type of each value against where it is
-used, and the row type's fields against the columns (`*` means the row type's fields, by name).
+used, and the row type's fields against the columns (`*` means the row type's fields, by name). A Float is given
+to a query as a number, which SQLite keeps as REAL, and a REAL column reads into a Float field (a cell that is
+not a finite number stops the request). In JSON a Float is a number: decoded from one that is finite (text, and
+`1e400`, are refused: `r: expected a number`), and written in the shortest digits that read back as it.
 
 **A call is a commit point.** Writes made before a `call` or `ask` are durable when it is sent. The run may end
 there (the object is reset, the reply is lost), so whatever must happen afterwards needs a timer set before the
@@ -619,6 +622,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | a Float in JSON (a finite number in, the shortest digits out, in records and lists) and in SQL (bound as a number, kept REAL by SQLite; a REAL column reads into a Float field) |
 | 23 November 2026 | `sin`, `cos`, `atan2`, `exp`, `log`, `pow` on Float: musl's libm ported to Wasm (compiler/math), only what a program calls goes into its module; never the host's `Math`, whose results differ between engines |
 | 23 November 2026 | `Float`: a finite 64-bit IEEE 754 number for measurements. Literals end in `f` (`1.5f`; `1.5` is L06, kept for an exact decimal); `+ - * /` and comparisons; trap 8 (float not finite) where IEEE would give NaN or an infinity; `float(n)` and `trunc(x)` the only conversions; `floor`, `ceil`, `abs`, `sqrt`; `abs`, `min`, `max` built in for Int and Float (std's `min` and `max` of Ints, and `apps/trace`'s own, are gone); a hole writes the shortest digits, as JavaScript's `String` does (env.float_text) |
 | 23 November 2026 | std `digits(v)` is gone: `decimal` reads an id (no sign, no leading zero), `parse_int` a number as people write one (a sign, leading zeros) |
@@ -635,7 +639,7 @@ what went before.
 - What a version built by an older compiler may rely on. Today: it keeps running as built, and nothing more.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
 - Who is calling. A program is handed the request; identity is its own business.
-- JSON for bytes, maps and floats; writing a record with an `Option` field.
+- JSON for bytes and maps; writing a record with an `Option` field.
 - An exact decimal (`Dec`): a number with a point and no `f` is kept for it.
 
 ## 13. What went

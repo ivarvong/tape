@@ -417,7 +417,7 @@ The number of bytes written so far.
 write_json(out: Buf, value: T) -> Buf
 ```
 
-Appends a record as a JSON object, its fields by name: `Int`, `Bool`, `View` (and refinements of them), records and `List[…]` of these. Refused (C09): an `Option` field (write two record types, or the JSON by hand), and a `List` on its own (put it in a field, or use `write_rows` for the rows of a query).
+Appends a record as a JSON object, its fields by name: `Int`, `Float` (the shortest digits that read back as it), `Bool`, `View` (and refinements of them), records and `List[…]` of these. Refused (C09): an `Option` field (write two record types, or the JSON by hand), and a `List` on its own (put it in a field, or use `write_rows` for the rows of a query).
 
 ### builtin decode
 

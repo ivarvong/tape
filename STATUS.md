@@ -76,7 +76,7 @@ Bugs that are reproduced and not fixed, and gaps in the checks that can hide one
 
 The language's own limits are in [`LANGUAGE.md` section 12](LANGUAGE.md#12-not-defined-yet). In short: a Float's text is the host's `String`;
 call keys (`once:`) are integers; stored replies to keyed calls never expire; JSON has no bytes, no maps with
-arbitrary keys and no floats, and a record with an `Option` field can be decoded but not written; function values
+arbitrary keys, and a record with an `Option` field can be decoded but not written; function values
 take one or two parameters and cannot capture a `Buf` or a capability; each file is a namespace for its functions,
 while types and constructors are shared by the whole program; memory tops out at 64 MB per request, and lists
 rebuilt by `map` and `reverse`, captured variables and `Buf` growth are not reused yet.

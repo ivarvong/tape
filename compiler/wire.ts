@@ -45,7 +45,8 @@ export function wireSource(prog: Program): Wire {
     return n;
   };
   const scalar = (n: string): boolean =>
-    ['Int', 'Bool', 'View'].includes(base(n)) && (['Int', 'Bool', 'View'].includes(n) || !!types.get(n)?.refine);
+    ['Int', 'Float', 'Bool', 'View'].includes(base(n)) &&
+    (['Int', 'Float', 'Bool', 'View'].includes(n) || !!types.get(n)?.refine);
   const isList = (t: TypeAst): boolean =>
     t.name === 'List' &&
     t.args.length === 1 &&
@@ -155,9 +156,11 @@ export function wireSource(prog: Program): Wire {
     k.k === 's'
       ? k.base === 'Int'
         ? `write_int(out: ${o}, value: ${e})`
-        : k.base === 'Bool'
-          ? `write_bool(out: ${o}, value: ${e})`
-          : `write_json_string(out: ${o}, text: ${e})`
+        : k.base === 'Float'
+          ? `write_float(out: ${o}, value: ${e})`
+          : k.base === 'Bool'
+            ? `write_bool(out: ${o}, value: ${e})`
+            : `write_json_string(out: ${o}, text: ${e})`
       : k.k === 'rec'
         ? nested.has(k.name)
           ? `wire_write_${k.name}(out: ${o}, value: ${e})`

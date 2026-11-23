@@ -25,7 +25,12 @@ export type JsonSchema = {
 type Place = object | null | undefined;
 
 const FLIP: Readonly<Record<string, string>> = { '>=': '<=', '<=': '>=', '>': '<', '<': '>' };
-const JSON_TYPE: Readonly<Record<string, string>> = { Int: 'integer', Bool: 'boolean', View: 'string' };
+const JSON_TYPE: Readonly<Record<string, string>> = {
+  Int: 'integer',
+  Float: 'number',
+  Bool: 'boolean',
+  View: 'string',
+};
 
 /** What a side of a comparison measures: '' for self, 'len' for len(self), null for anything else. */
 const measured = (x: Expr): '' | 'len' | null => {

@@ -125,6 +125,10 @@ export function readParams(m: Mem, q: Query, ptr: number): SqlParam[] {
       out.push(textParam(u, d.getUint32(o, true), d.getUint32(o + 4, true)));
       continue;
     }
+    if (kinds[k] === 'f') {
+      out.push(d.getFloat64(o, true));
+      continue;
+    }
     const x = d.getInt32(o + 4, true) * 4294967296 + d.getUint32(o, true);
     if (!Number.isSafeInteger(x)) throw new RangeError('sql: parameter outside ±2^53');
     out.push(x);
@@ -181,6 +185,12 @@ function writeCell(
     if (typeof v !== 'string') throw wrong('text', v === null ? 'NULL' : typeof v);
     return flag + writeText(d, mem, o + flag, v);
   }
+  if (kind === 'f' || kind === 'F') {
+    if (typeof v !== 'number' || !Number.isFinite(v))
+      throw wrong('a finite number', typeof v === 'number' ? String(v) : v === null ? 'NULL' : typeof v);
+    d.setFloat64(o + flag, v, true);
+    return flag + 8;
+  }
   if (v === null || typeof v === 'string') throw wrong('an integer', v === null ? 'NULL' : 'text');
   setInt64(d, o + flag, int(v));
   return flag + 8;
@@ -207,7 +217,7 @@ export function writeRows(m: Mem, q: Query, rows: readonly Cell[][]): number {
 // text that is not well-formed. A key no field names is left unread. Refined types' conditions are checked by the
 // module.
 
-const KIND: Readonly<Record<string, string>> = { t: 'text', b: 'true or false', i: 'a whole number' };
+const KIND: Readonly<Record<string, string>> = { t: 'text', b: 'true or false', i: 'a whole number', f: 'a number' };
 const wellFormed = (s: string): boolean => s.isWellFormed();
 const isObject = (x: unknown): x is Record<string, unknown> => x !== null && typeof x === 'object' && !Array.isArray(x);
 /** Why an object is not one constructor: how many fields in the problem is, and what it is. */
@@ -225,7 +235,13 @@ function nested(f: FieldShape, x: unknown): string | null | undefined {
 }
 
 const ofKind = (kind: string, x: unknown): boolean =>
-  kind === 't' ? typeof x === 'string' : kind === 'b' ? typeof x === 'boolean' : Number.isSafeInteger(x);
+  kind === 't'
+    ? typeof x === 'string'
+    : kind === 'b'
+      ? typeof x === 'boolean'
+      : kind === 'f'
+        ? Number.isFinite(x)
+        : Number.isSafeInteger(x);
 
 /** Whether the object has this constructor's fields, with values of their kinds (other keys are left unread). */
 function fit(shape: readonly FieldShape[], v: Record<string, unknown>): Fit | Miss {
@@ -283,7 +299,8 @@ function writeObject(
       d.setUint32(o, w, true);
       o += 4 + w;
     } else {
-      setInt64(d, o, f.kind === 'b' ? (x === true ? 1 : 0) : Number(x));
+      if (f.kind === 'f') d.setFloat64(o, Number(x), true);
+      else setInt64(d, o, f.kind === 'b' ? (x === true ? 1 : 0) : Number(x));
       o += 8;
     }
   }

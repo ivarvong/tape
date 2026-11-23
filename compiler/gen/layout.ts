@@ -257,7 +257,7 @@ export function adtOf(L: Layouts, t: Type, at: Place): Adt {
 // A row type: one constructor whose fields are Int, Bool or View, or Option of one of those for a column that
 // may be NULL (sql.ts decides which may: the checker refuses Int for a nullable column, and Option for one that
 // never is).
-const SCALAR: Readonly<Record<string, string>> = { Int: 'i', Bool: 'b', View: 't' };
+const SCALAR: Readonly<Record<string, string>> = { Int: 'i', Float: 'f', Bool: 'b', View: 't' };
 const scalar = (name: string | undefined): string | undefined =>
   name !== undefined && Object.hasOwn(SCALAR, name) ? SCALAR[name] : undefined;
 export const rowKind = (f: { type: Type }): string | undefined =>

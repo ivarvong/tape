@@ -9,8 +9,8 @@ export type Cell = number | string | null;
 
 const enc = new TextEncoder(),
   strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
-type Kind = 't' | 'i' | 'b';
-const KIND: Readonly<Record<Kind, string>> = { t: 'text', b: 'true or false', i: 'a whole number' };
+type Kind = 't' | 'i' | 'f' | 'b';
+const KIND: Readonly<Record<Kind, string>> = { t: 'text', b: 'true or false', i: 'a whole number', f: 'a number' };
 
 /** The type a refined type's values are made of: `Key` (View where …) is View. */
 export const baseOf = (prog: Program, t: TypeAst): TypeAst => {
@@ -21,6 +21,7 @@ const kindOf = (prog: Program, t: TypeAst): Kind => {
   const b = baseOf(prog, t).name;
   if (b === 'View') return 't';
   if (b === 'Int') return 'i';
+  if (b === 'Float') return 'f';
   if (b === 'Bool') return 'b';
   throw new Unsupported(`${b} in JSON or a row`);
 };
@@ -35,6 +36,10 @@ export const recordOf = (prog: Program, name: string, what: string): { decl: Typ
 const cell = (prog: Program, t: TypeAst, v: Cell): Value => {
   const k = kindOf(prog, t);
   if (v === null) throw new Error(`NULL in a column read as ${t.name}`);
+  if (k === 'f') {
+    if (typeof v !== 'number' || !Number.isFinite(v)) throw new TypeError(`${String(v)} in a column read as Float`);
+    return v;
+  }
   return k === 't' ? enc.encode(String(v)) : k === 'b' ? Boolean(v) : BigInt(v);
 };
 /** One row as a value of the row type: cells in the order of its fields, NULL as None where the field is an Option. */
@@ -104,9 +109,13 @@ export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t
             ? typeof x === 'boolean'
               ? x
               : null
-            : typeof x === 'number' && Number.isSafeInteger(x)
-              ? BigInt(x)
-              : null;
+            : k === 'f'
+              ? typeof x === 'number' && Number.isFinite(x)
+                ? x
+                : null
+              : typeof x === 'number' && Number.isSafeInteger(x)
+                ? BigInt(x)
+                : null;
       if (value === null) return no(depth, `${fl.name}: expected ${KIND[k]}`);
       if (typeof x === 'string' && !wellFormed(x)) return no(depth, `${fl.name}: text with a lone surrogate`);
       f[fl.name] = inner ? adt('Some', { value }) : value;
@@ -146,7 +155,8 @@ export function writeJson(prog: Program, out: Buf, v: Adt, writeText: (out: Buf,
     if (typeof x === 'bigint') text(String(x));
     else if (typeof x === 'boolean') text(x ? 'true' : 'false');
     else if (x instanceof Uint8Array) writeText(out, x);
-    else if (typeof x === 'number') throw new Unsupported(`write_json of a Float inside ${v.c}`);
+    // the shortest digits that read back as it, as the host's float_text
+    else if (typeof x === 'number') text(String(x));
     else throw new Unsupported(`write_json of ${x?.k === 'adt' ? `a ${x.c}` : 'a value'} inside ${v.c}`);
   });
   text(only.fields.length > 0 ? '}' : '{}');

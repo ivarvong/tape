@@ -5,7 +5,7 @@ import { I32, fail, sleb, uleb } from '../common.ts';
 import { sqlModel, tablesOf } from '../../rules/model.ts';
 import { movePlan } from '../../rules/move.ts';
 import { inNames } from '../sqltext.ts';
-import { analyze } from '../../sql/analyze.ts';
+import { TAPE_T, analyze } from '../../sql/analyze.ts';
 import { tryParse } from '../../sql/parse.ts';
 import { INT, T, key } from '../types.ts';
 import type { Type } from '../types.ts';
@@ -37,7 +37,7 @@ type Column = { name: string; t: string; null: boolean; param?: number; pkNull?:
 function checkColumn(qa: Arg, c: Column, f: FlatField, i: number, kinds: string, stop: Stop): void {
   const opt = f.type.name === 'Option';
   const base = (opt ? f.type.args[0]?.name : undefined) ?? f.type.name;
-  const want = base === 'View' ? 'text' : 'int';
+  const want = base === 'View' ? 'text' : base === 'Float' ? 'real' : 'int';
   if (c.name !== f.name)
     stop(
       qa,
@@ -45,14 +45,17 @@ function checkColumn(qa: Arg, c: Column, f: FlatField, i: number, kinds: string,
       `column ${i + 1} of the query is \`${c.name}\`, and field ${i + 1} of the row type is \`${f.name}\``,
       `Name the column with AS ${f.name}, or reorder the fields.`,
     );
-  const t =
-    c.t === 'any' && c.param !== undefined && c.param !== 0 ? (kinds[c.param - 1] === 't' ? 'text' : 'int') : c.t;
+  const t = c.t === 'any' && c.param !== undefined && c.param !== 0 ? (TAPE_T[kinds[c.param - 1] ?? ''] ?? 'any') : c.t;
   if (t !== want)
     stop(
       qa,
       'C69',
       `column ${c.name} is ${t === 'int' ? 'an integer' : t === 'text' ? 'text' : t === 'real' ? 'a real number' : t === 'blob' ? 'of no declared type' : t === 'null' ? 'always NULL' : 'of a type the checker cannot tell'}, and field ${f.name} is ${key(f.type)}`,
-      base === 'View' ? 'A View field reads a TEXT column.' : 'An Int or Bool field reads an INTEGER column.',
+      base === 'View'
+        ? 'A View field reads a TEXT column.'
+        : base === 'Float'
+          ? 'A Float field reads a REAL column.'
+          : 'An Int or Bool field reads an INTEGER column.',
     );
   if (c.null && !opt)
     stop(
@@ -269,6 +272,7 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
     c.code.push(...get(block));
     const t = c.B.strip(c.emit(a.value, null, false));
     if (t.name === 'Int') c.code.push(0x37, 0, ...uleb(16 * i));
+    else if (t.name === 'Float') c.code.push(0x39, 0, ...uleb(16 * i));
     else if (t.name === 'Bool') c.code.push(0xad, 0x37, 0, ...uleb(16 * i));
     else if (t.name === 'View') {
       const len = fresh(c, I32);
@@ -277,10 +281,10 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
       fail(
         a,
         'C14',
-        `argument ${a.as ?? a.label} should be Int, Bool or View but is ${key(t)}`,
+        `argument ${a.as ?? a.label} should be Int, Float, Bool or View but is ${key(t)}`,
         'A query takes numbers, Bools and text. Pass a field of the record instead: `id: order.id`.',
       );
-    kinds += t.name === 'Int' ? 'i' : t.name === 'Bool' ? 'b' : 't';
+    kinds += t.name === 'Int' ? 'i' : t.name === 'Float' ? 'f' : t.name === 'Bool' ? 'b' : 't';
   }
   return { block, kinds };
 }

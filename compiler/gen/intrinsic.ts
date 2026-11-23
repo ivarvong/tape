@@ -102,9 +102,11 @@ function append(u: Use): Type {
 /** write_float(out, value): the shortest digits that read back as the Float, as the host writes them (u32 length,
  * then the bytes), appended. */
 function writeFloat(u: Use): Type {
-  const { c } = u;
-  const h = bufArg(u, 0);
-  const x = scalar(u, 1, FLOAT, F64);
+  appendFloat(u.c, bufArg(u, 0), scalar(u, 1, FLOAT, F64));
+  return BUF;
+}
+/** The Buf in local h with the text of the Float in local x appended, on the stack. */
+function appendFloat(c: Ctx, h: number, x: number): void {
   const text = fresh(c, I32);
   c.code.push(...get(x), 0x10, ...uleb(c.B.FLOAT_TEXT_IMPORT), ...set(text));
   const len = [...get(text), ...ld(0)];
@@ -113,7 +115,6 @@ function writeFloat(u: Use): Type {
   const reserved = [...get(h), ...len, 0x10, ...uleb(c.B.RESERVE)];
   const from = [...get(text), ...i32(4), 0x6a];
   c.code.push(...reserved, ...end, ...from, ...len, 0xfc, 0x0a, 0, 0, ...longer, ...get(h));
-  return BUF;
 }
 
 /** size(buf): a Buf's length without handing it over, so it takes the variable itself. */
@@ -175,7 +176,12 @@ function writeJson(u: Use): Type {
     text(`${i > 0 ? ',' : '{'}${JSON.stringify(fl.name)}:`);
     write();
     if (fl.kind === 'i') c.code.push(...get(first), 0x10, ...uleb(B.fnIndex('write_int')));
-    else if (fl.kind === 't') c.code.push(...get(first), ...get(second), 0x10, ...uleb(B.fnIndex('write_json_string')));
+    else if (fl.kind === 'f') {
+      const h = fresh(c, I32);
+      c.code.push(...set(h));
+      appendFloat(c, h, first);
+    } else if (fl.kind === 't')
+      c.code.push(...get(first), ...get(second), 0x10, ...uleb(B.fnIndex('write_json_string')));
     else {
       c.code.push(...get(first));
       open(c, 0x04, [I32, I32]);
