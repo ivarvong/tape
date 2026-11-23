@@ -491,7 +491,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Pass a value to a query | `:name` in the query, and an argument of that name. A Bool is bound as 1 or 0 and read back from an INTEGER column (`done INTEGER NOT NULL DEFAULT 0`, `WHERE done = :done`); an Int is INTEGER, a View TEXT, a Float REAL | C11, C13, C32 |
 | Filter by a value that may be absent | a flag beside it, `WHERE (:all = 1 OR region = :only)`, with `all: True, only: ""` when there is none: a query's values are never `Option` | C14 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
-| Command another program | `call` with `within:` and a `once:` key that names the row (its primary key: `ForOrder(order: id)`, even when the message carries the id too), a key the client sent, or the message itself | C39, C41, C64, C65, C71 |
+| Command another program | `call` with `within:` and a `once:` key that names the command: the row's id (`ForOrder(order: id)`), or a key the client sent | C39, C41, C64, C65, C71 |
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |
@@ -733,6 +733,7 @@ what went before.
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | C65 on a key made only of what its message carries: it refused right keys (a row's id the message also carried, found in a pattern, a field, a parameter, an Option, a path: every such refusal in three bench rounds was a right key), and its way out, the message itself as the key, had the defect it refused | gone; C65 keeps only a key that is the same every time, and C71 that a command built from a row names it |
 | 23 November 2026 | a long condition or sum wrapped onto a line starting with `and`, `+`, … (P02), and an arm's value on the line after its `->` (P02) | a line that starts with a binary operator carries the expression on, as `|>` does, and an arm's or step's value may start on the line after `->` |
 | 23 November 2026 | a `once:` key of the row's id was C65 when the message carried that id too (a payment API asks for it), and C65's fix said to key by that id; C71 asks for the id | C65 takes a key that names the row by its primary key; a key made only of other values the message carries (the amount) is still C65 |
 | 23 November 2026 | std `write_each(out, list, by)`, a second fold for a Buf | `fold(list, from: out, by)`: a Buf is handed from item to item as any accumulator is |

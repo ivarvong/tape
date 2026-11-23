@@ -14,13 +14,11 @@ const said = (text: string): Said => {
 const code = (s: Said): string => (s === 'compiled' ? s : `${s.code}:${s.line}`);
 const hint = (s: Said): string => (s === 'compiled' ? '' : s.hint);
 
-// ---- C65 and C71 together, when the message carries the row's id (a payment API asks for it). C71 asks that a
-// command built from a row name that row in its key; C65 refused a key made only of what the message carries; so
-// `once: ForOrder(order: id)` was C65, and its fix, "key it by the id of the row it is for", was the key it had
-// refused. A key that names the row by its primary key names the command (same order, same charge): C65 takes it,
-// held as a field (`order.id`) or bound by the row's pattern (`Order(id, …)`). A key of the amount alone is
-// still C65, the defect the rule is for (the ledger keyed its charge by the amount), and so is an id that is not
-// read from a row (test/calls.ts).
+// ---- a key of the row's id when the message carries it too (a payment API asks for it). C65 refused a key made
+// only of what the message carries; each release taught it one more place a row comes from, and agents found the
+// next. That check is gone (its own way out, the message as the key, had the defect it refused): a key that names
+// the row compiles wherever the row came from, and a key of the amount of a row bound by its pattern is C71's, as
+// it always also was.
 {
   const ORDERS = `migration 1 "t" {
   CREATE TABLE orders(id INTEGER PRIMARY KEY, order_key TEXT NOT NULL UNIQUE, amount INTEGER NOT NULL)
@@ -71,14 +69,12 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 }
 `;
   same("…and bound by the row pattern, C71's form", said(BOUND.replace('@KEY', 'ForOrder(order: id)')), 'compiled');
-  const refused = said(keyed('ForAmount(amount: order.amount)'));
-  same('a key of the amount alone is still C65', code(refused), 'C65:13');
-  same('…bound by the pattern too', code(said(BOUND.replace('@KEY', 'ForAmount(amount)'))), 'C65:13');
   same(
-    "C65's fix names forms that pass: the row's primary key, and the message itself",
-    [/its primary key/.test(hint(refused)), /the same record as `send:`/.test(hint(refused))],
-    [true, true],
+    'a key of the amount of a row bound by its pattern: C71, which asks the key to name the row',
+    code(said(BOUND.replace('@KEY', 'ForAmount(amount)'))),
+    'C71:13',
   );
+  same('a key that is the same every time: still C65', code(said(keyed('ForOrder(order: 1)'))), 'C65:13');
 }
 
 // ---- a capability no entry point declares. `now()` in a handle with no Clock said "write `now(clock)` with the
@@ -474,11 +470,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
     [said(field('ForOrder(order: order.id)')), said(bound('ForOrder(order: id)'))],
     ['compiled', 'compiled'],
   );
-  same(
-    '…and a key of its amount is still C65, both ways',
-    [code(said(field('ForAmount(amount: order.amount)'))), code(said(bound('ForAmount(amount)')))],
-    ['C65:19', 'C65:20'],
-  );
+  same('…and a key that is the same every time is still C65', code(said(field('ForOrder(order: 1)'))), 'C65:19');
 }
 
 finish();

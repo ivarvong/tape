@@ -81,8 +81,10 @@ function named(e: CallOut): Named {
 
 // ---- the key of a command (once): text, or a record that names the command; the host scopes it by this object
 // and the method, and the callee refuses it for another message (host.ts serve). An Int is refused (C64): it names
-// nothing, and one that is the same every time makes every command one (C65; a key made only of what the message
-// carries is C65 in rules/commands.ts, which knows the rows a command is for)
+// nothing, and one that is the same every time makes every command one (C65). That a key names its command is
+// otherwise C71's to check, for a command built from a row: a key made only of what the message carries was C65 too,
+// until 23 November 2026, when it was dropped: its own way out, the message itself as the key, has the defect it
+// refused (two charges of one card and amount are one), and every refusal the bench saw was a key that was right
 
 /** `a.b.c` for a variable or a field of one; null for anything else. */
 const pathOf = (n: Expr): string | null => {

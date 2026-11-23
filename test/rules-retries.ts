@@ -239,7 +239,7 @@ const before = {
   'examples_todo-decode.tape': ['C14:55'],
   'examples_todo-handparsed.tape': ['C15:118'],
   'examples_todo.tape': ['C55:91'],
-  'examples_tools_ledger.tape': ['C65:11'],
+  'examples_tools_ledger.tape': [],
   'examples_trap.tape': ['C55:5'],
   'service_verify_notes-v1.tape': ['C55:7'],
   'service_verify_notes-v2-edited.tape': ['C55:11'],

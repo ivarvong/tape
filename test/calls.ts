@@ -667,9 +667,9 @@ fn stamp(out: Buf, roll: Int) -> Buf {
   const prog = (key: string) =>
     `type M { M(n: Int, text: View) }\ntype ForRow { ForRow(row: Int) }\nfn f(r: Remote, id: Int, raw: View) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: id, text: raw), reply: M, within: 5, once: ${key}))\n}\nfn ignore(reply: Result[M, CallError]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}`;
   T(
-    'C64: a key that is an Int, a Bool or an Option is refused (text and records pass C64, then C65 judges them)',
+    'C64: a key that is an Int, a Bool or an Option is refused; text and records are taken',
     ['id', 'id == 1', 'Some(value: id)', 'raw', 'ForRow(row: id)', '"row-" ++ raw'].map(k => err(prog(k))),
-    ['C64', 'C64', 'C64', 'C65', 'C65', 'C65'],
+    ['C64', 'C64', 'C64', 'compiled', 'compiled', 'compiled'],
   );
   const prog2 = (key: string) => prog(key).replace('send: M(n: id, text: raw)', 'send: M(n: 1, text: "x")');
   T(
@@ -677,16 +677,12 @@ fn stamp(out: Buf, roll: Int) -> Buf {
     [err(prog2('"always"')), err(prog2('ForRow(row: 7)')), err(prog2('ForRow(row: id)')), err(prog2('raw'))],
     ['C65', 'C65', 'compiled', 'compiled'],
   );
+  // a key made only of what the message carries is taken (that half of C65 went on 23 November 2026: the message
+  // itself as the key, its own way out, had the defect it refused); C71 judges a key of a command built from a row
   T(
-    'C65: a key made only of what the message carries is refused, unless it is the message itself',
+    'a key made of what the message carries is taken, and so is the message itself',
     [err(prog('ForRow(row: id)')), err(prog('M(n: id, text: raw)'))],
-    ['C65', 'compiled'],
-  );
-  const c65 = compile([...std, { name: 't', text: prog('ForRow(row: id)') }], { exports: ['f'] }).errors[0];
-  T(
-    'the C65 error names what the key is made of and the two ways out',
-    [c65?.message.includes('(id)'), c65?.hint?.includes('the same record as `send:`')],
-    [true, true],
+    ['compiled', 'compiled'],
   );
   {
     const sql = nodeSql(),
