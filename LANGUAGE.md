@@ -575,6 +575,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | std `digits(v)` is gone: `decimal` reads an id (no sign, no leading zero), `parse_int` a number as people write one (a sign, leading zeros) |
 | 23 November 2026 | `respond_as(status, content: Csv)` answers `text/csv` (the sales task, 3 of 3 Haiku runs) |
 | 23 November 2026 | std: `isqrt(n)`, the square root rounded down (None below 0), exact up to the largest Int, for fixed point (feedback 20261123T015153.800Z-7782f1b2045b) |
 | 23 November 2026 | `decode` leaves a key the type does not name unread, instead of refusing the body (7 reports: providers and clients send more than a service reads). Of several constructors it takes the one that has its fields and names the most of the body's keys. There is no strict mode |

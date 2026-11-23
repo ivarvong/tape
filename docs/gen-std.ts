@@ -245,8 +245,8 @@ fn limit_of(query: Option[View]) -> Int {
   },
   {
     title: 'Parse an integer, and route on one in the path',
-    uses: ['fn decimal', 'fn digits', 'fn parse_int', 'fn decimal_text'],
-    text: '`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits); `digits(v)` takes leading zeros. Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. `parse_int(text)` takes a number as people write one (a sign, leading zeros). `decimal_text(value)` and holes (`"\\(n)"`) go the other way.',
+    uses: ['fn decimal', 'fn parse_int', 'fn decimal_text'],
+    text: '`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits). Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. `parse_int(text)` takes a number as people write one (a sign, leading zeros). `decimal_text(value)` and holes (`"\\(n)"`) go the other way.',
     program: `type Id = Int where self >= 1 and self <= 9007199254740991
 
 fn handle(raw: View) -> Buf {

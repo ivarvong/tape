@@ -244,28 +244,6 @@ fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
   }
 }
 
-// Any run of one or more digits. Leading zeros are fine, and a value above 9007199254740991 stays there.
-//
-//   > digits(v: "007")
-//   Some(value: 7)
-//   > digits(v: "99999999999999999999")
-//   Some(value: 9007199254740991)
-fn digits(v: View) -> Option[Int] {
-  match {
-    len(v) == 0 or digits_end(v, at: 0) < len(v) -> None
-    else -> Some(digits_value(v, at: 0, value: 0))
-  }
-}
-
-// Internal: the loop of digits.
-fn digits_value(v: View, at: Int, value: Int) -> Int {
-  match {
-    at >= len(v) -> value
-    value * 10 + v[at] - 48 > 9007199254740991 -> 9007199254740991
-    else -> digits_value(v, at: at + 1, value: value * 10 + v[at] - 48)
-  }
-}
-
 // A number in decimal, as text.
 //
 //   > decimal_text(value: 2000)

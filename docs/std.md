@@ -59,7 +59,7 @@ Uses: [`Request`](#type-request), [`form_field`](#fn-form_field), [`decimal`](#f
 
 ### Parse an integer, and route on one in the path
 
-`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits); `digits(v)` takes leading zeros. Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. `parse_int(text)` takes a number as people write one (a sign, leading zeros). `decimal_text(value)` and holes (`"\(n)"`) go the other way.
+`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits). Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. `parse_int(text)` takes a number as people write one (a sign, leading zeros). `decimal_text(value)` and holes (`"\(n)"`) go the other way.
 
 ```tape
 type Id = Int where self >= 1 and self <= 9007199254740991
@@ -74,7 +74,7 @@ fn handle(raw: View) -> Buf {
 }
 ```
 
-Uses: [`decimal`](#fn-decimal), [`digits`](#fn-digits), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text).
+Uses: [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text).
 
 ### Decode a JSON body, with a 400 that says why
 
@@ -200,7 +200,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 - [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
-- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`min`](#fn-min), [`max`](#fn-max), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`digits`](#fn-digits), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
+- [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`min`](#fn-min), [`max`](#fn-max), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`write_json_list`](#fn-write_json_list), [`join`](#fn-join)
@@ -777,21 +777,6 @@ None
 None
 ```
 
-### fn digits
-
-```tape
-fn digits(v: View) -> Option[Int]
-```
-
-Any run of one or more digits. Leading zeros are fine, and a value above 9007199254740991 stays there.
-
-```
-> digits(v: "007")
-Some(value: 7)
-> digits(v: "99999999999999999999")
-Some(value: 9007199254740991)
-```
-
 ### fn decimal_text
 
 ```tape
@@ -862,7 +847,6 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn decimal_value(v: View, at: Int, value: Int) -> Int`: the loop of decimal.
 - `fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the least Int fits.
 - `fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits after the first.
-- `fn digits_value(v: View, at: Int, value: Int) -> Int`: the loop of digits.
 - `fn write_digits(out: Buf, value: Int, last: Int) -> Buf`: the loop of write_int.
 - `fn cont(v: View, at: Int) -> Bool`: is the byte at `at` a UTF-8 continuation byte?
 - `fn second_of_3(b: Int, c: Int) -> Bool`: the second byte of a three-byte sequence is allowed after `b` (no overlong forms, no surrogates).
