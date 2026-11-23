@@ -198,7 +198,27 @@ became a function of its own (three of the eight tasks of the usability benchmar
 for it). One way to do each job still holds: `match` is the one way to branch, and it is now used wherever a branch
 is wanted, as an `if` would be elsewhere. A decision used in more than one place is still a function.
 
-Repetition is a function calling itself; a call in tail position does not grow the stack.
+Repetition is a function calling itself; a call in tail position does not grow the stack. Counting is `fold`
+over `range(from:, to:)`, the Ints from `from` up to `to` and not `to` itself (none when `to` is not above
+`from`): `range(from: 1, to: n + 1) |> fold(from: 1, by: …)` is a product, and with `from: out` and a function
+that takes a Buf, each number is written into it. Folded, a range is a counting loop that makes no list (section
+10); anything else (`map`, a `let`, a match) is handed the list.
+
+```tape gives
+fn factorial(n: Int) -> Int {
+  range(from: 1, to: n + 1) |> fold(from: 1, by: fn(acc: Int, k: Int) -> Int { acc * k })
+}
+
+fn dots(n: Int) -> Int {
+  let out = range(from: 0, to: n)
+    |> fold(from: buf(), by: fn(o: Buf, k: Int) -> Buf { o |> push(byte: 46) })
+  len(freeze(buf: out))
+}
+
+// factorial(20) is 2432902008176640000
+// factorial(0) is 1
+// dots(3) is 3
+```
 
 Capabilities are ambient by name: inside a function with a parameter `db: Sql`, `sql_first(…)` uses it without
 naming it, and a function that calls one that needs `db` must declare `db` too (C72).
@@ -454,6 +474,8 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Divide a Dec, or apply a rate | `div(a, by: b, scale: 2, rounding: HalfEven)`, `mul(a, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
 | Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
+| Count, or do something n times | `fold` over `range(from:, to:)` | |
+| Write each item of a list | `fold(list, from: out, by: fn(out: Buf, item: T) -> Buf { … })` | |
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made | C55 |
 | Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
@@ -584,13 +606,16 @@ A program says what must hold, and what must hold in the end (`settled`), and is
 A request may take 50,000,000 steps. A step of that budget (not a step of a body, section 4) is one entry into a
 recursive function, a function that can reach itself through the calls it makes: each time it is called, and each
 time it calls itself again as its result. A call of any other function is free however much it computes, and so is a
-built-in. The standard library's recursive functions count like the program's own: the byte scans behind
-`request()`, `until`, `after` and `decimal` take a few steps per byte. So a request's steps depend on its bytes and
-on the arms tried before the one that answers it, and a route's count can change while the route does not: an arm
-added above it, or a function made recursive by a call added elsewhere. In a program with two `GET` arms and a 404
-fallback, one more `GET` arm on top added 4 steps to every request below it, and a path 12 bytes longer cost 59
-more. Steps are a count of reductions, as in Erlang, not a time. They are the cost measure all the same: on Workers
-a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's duration) can time its work.
+built-in. The standard library's recursive functions count like the program's own: the byte scans behind `request()`,
+`until`, `after` and `decimal` take a few steps per byte. So a request's steps depend on its bytes and on the arms
+tried before the one that answers it, and a route's count can change while the route does not: an arm added above it,
+or a function made recursive by a call added elsewhere. In a program with two `GET` arms and a 404 fallback, one more
+`GET` arm on top added 4 steps to every request below it, and a path 12 bytes longer cost 59 more. `fold` over
+`range(from:, to:)` takes one step a number and one more, as over a list that long, and none to make the list, which
+is never made: summing `range(from: 0, to: 1000)` takes 1001 steps and no memory, where the same fold of a list made
+first takes 2002 and 24 bytes a number. Steps are a count of reductions, as in Erlang, not a time. They are the cost
+measure all the same: on Workers a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's
+duration) can time its work.
 
 A trap ends the request, undoes its writes and is recorded: out of memory (64 MB), more than 50,000,000 steps, an
 index out of bounds, a division by zero (trap 4), an `Int` or `Dec` result that does not fit in 64 bits (trap 6,
@@ -668,6 +693,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | std `range(from:, to:)` (design memo of feedback 20261123T030026.990Z-e454772fe5c9, item 4): `fold` over it is a counting loop that makes no list (compiler/fuse.ts, in the build and the interpreter alike: n + 1 steps and no memory, where the list made first takes 2n + 2 steps and 24 bytes a number). No loop construct |
 | 23 November 2026 | `Dec[s]`: an exact number with s digits after the point (0 to 18), an Int count of 10^-s. `12.30` is a `Dec[2]` (a point and no `f`, which was L06); `+ -` of one scale, `*` adding the scales, comparisons exact across scales, overflow a trap; `rescale` up and `round` down, the one way each; `mul` and `div` rounded once from an exact 128-bit intermediate (compiler/math/dec.ts), with std's `Rounding` (`HalfEven`, `HalfUp`, `Down`, `Up`, `Floor`, `Ceiling`); `dec(n, scale:)`, `to_int`, `float(d)` and `to_dec(x, scale:, rounding:)` the only conversions; `abs`, `min`, `max` |
 | 23 November 2026 | a Dec at the edges: a hole and `write_dec` write its digits; `parse_dec(text, scale:)`; JSON in from a number or text, exact at the field's scale (`amount: not a Dec[2]` otherwise), out as text; SQL as its count, an INTEGER, within ±2^53. apps/tickets and apps/trace write cents and basis points as Decs (`"$\(0.01 * cents)"`) instead of by hand |
 | 23 November 2026 | `write_json` writes what `decode` reads (feedback 20261123T030026.990Z-e454772fe5c9: a 5-constructor result was 30 lines of hand JSON): an `Option` field (`None` has no key), a type with several constructors (`{"Sets": {…}}`, which decode now reads back as that constructor), a `List` on its own and `Int`, `Bool`, `View`; `decode(json:, as: List[T])` reads an array. C09 no longer refuses an `Option` field, several constructors or a list on its own |
@@ -697,6 +723,7 @@ what went before.
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | std `write_each(out, list, by)`, a second fold for a Buf | `fold(list, from: out, by)`: a Buf is handed from item to item as any accumulator is |
 | 23 November 2026 | `write_json_list(list, by:)`, and JSON written by hand for an `Option` field, a type with several constructors or a list on its own (C09 refused them) | `write_json(value)` of the value itself, which `decode` reads back; computed items are `map`ped into a record type |
 | 23 November 2026 | no response headers (a redirect had no Location) and no request headers | `header(name:, value:)` on an answer and `header_of(request:, name:)`; the status line carries them, `STATUS CR name: value LF BODY`, checked by the host (host.ts responseOf) |
 | 23 November 2026 | a JSON list of computed items needed a Buf kept in a record (C08), and `Cons(head: 1, tail: Nil)` in a `let` could not tell its type (C21) | std: `write_json_list`, `write_each`, `join`; a constructor's later fields take the type parameters its earlier ones gave |

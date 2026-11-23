@@ -21,6 +21,7 @@ import type { Served } from './gen/served.ts';
 import { checkInvariants } from './invariants.ts';
 import { parse } from './parse.ts';
 import { resolvePipes } from './pipes.ts';
+import { fuseRanges } from './fuse.ts';
 import { rowColumns } from './rows.ts';
 import { sha256 } from './sha256.ts';
 import { shadow } from './shadow.ts';
@@ -68,6 +69,7 @@ function front(sources: readonly Source[]) {
   shadow(prog);
   bindFieldNames(prog);
   resolvePipes(prog);
+  fuseRanges(prog);
   ambient(prog);
   rowColumns(prog);
   // the rules, read from the program as written (before the generated functions are added); reported only once the

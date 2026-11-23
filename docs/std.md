@@ -218,7 +218,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
-- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`join`](#fn-join)
+- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 
@@ -1653,24 +1653,28 @@ Cons(head: 1, tail: Cons(head: 3, tail: Nil))
 fn fold[A, B](list: List[A], from: B, by: Fn2[B, A, B]) -> B
 ```
 
-Combine the items left to right, starting from `from`: by(by(from, first), second) and so on.
+Combine the items left to right, starting from `from`: by(by(from, first), second) and so on. `from` may be a Buf, handed from item to item, to write each item into it.
 
 ```
 > Cons(head: 3, tail: Cons(head: 4, tail: Nil)) |> fold(from: 100, by: fn(acc: Int, x: Int) -> Int { acc - x })
 93
+> Cons(head: 1, tail: Cons(head: 2, tail: Nil)) |> fold(from: buf(), by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n * 10) }) |> freeze
+"1020"
 ```
 
-### fn write_each
+### fn range
 
 ```tape
-fn write_each[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf
+fn range(from: Int, to: Int) -> List[Int]
 ```
 
-Write each item into a Buf, first to last. A Buf has one owner, so it is not kept in a record or a list while a list is walked: it is handed from item to item. For a total as well, fold the list a second time.
+The Ints from `from` up to `to`, not `to` itself: none when `to` is not above `from`. Folded, it is a counting loop: `fold(list: range(from:, to:), …)` never makes the list, and takes a step a number, as over a list of that length (compiler/fuse.ts).
 
 ```
-> buf() |> write_each(list: Cons(head: 1, tail: Cons(head: 2, tail: Nil)), by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n * 10) }) |> freeze
-"1020"
+> range(from: -1, to: 2)
+Cons(head: -1, tail: Cons(head: 0, tail: Cons(head: 1, tail: Nil)))
+> range(from: 1, to: 5) |> fold(from: 0, by: fn(acc: Int, n: Int) -> Int { acc + n })
+10
 ```
 
 ### fn join
@@ -1694,6 +1698,8 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn reverse_onto[T](list: List[T], acc: List[T]) -> List[T]`: the loop of reverse.
 - `fn map_onto[A, B](list: List[A], by: Fn[A, B], acc: List[B]) -> List[B]`: the loop of map, last item first.
 - `fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A]`: the loop of filter, last item first.
+- `fn range_down(from: Int, at: Int, acc: List[Int]) -> List[Int]`: the loop of range, from the top down (at > from, so at - 1 fits).
+- `fn fold_range[B](from: Int, to: Int, acc: B, by: Fn2[B, Int, B]) -> B`: fold over range(from, to), as compiler/fuse.ts writes it: no list is made (from < to, so from + 1 fits).
 - `fn join_rest(out: Buf, list: List[View], sep: View) -> Buf`: join's texts after the first, each after `sep`.
 
 ## std/map.tape

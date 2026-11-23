@@ -71,10 +71,13 @@ fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A] {
   }
 }
 
-// Combine the items left to right, starting from `from`: by(by(from, first), second) and so on.
+// Combine the items left to right, starting from `from`: by(by(from, first), second) and so on. `from` may be a Buf,
+// handed from item to item, to write each item into it.
 //
 //   > Cons(head: 3, tail: Cons(head: 4, tail: Nil)) |> fold(from: 100, by: fn(acc: Int, x: Int) -> Int { acc - x })
 //   93
+//   > Cons(head: 1, tail: Cons(head: 2, tail: Nil)) |> fold(from: buf(), by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n * 10) }) |> freeze
+//   "1020"
 fn fold[A, B](list: List[A], from: B, by: Fn2[B, A, B]) -> B {
   match list {
     Cons(head, tail) -> fold(list: tail, from: by(from, head), by)
@@ -82,15 +85,31 @@ fn fold[A, B](list: List[A], from: B, by: Fn2[B, A, B]) -> B {
   }
 }
 
-// Write each item into a Buf, first to last. A Buf has one owner, so it is not kept in a record or a list while a
-// list is walked: it is handed from item to item. For a total as well, fold the list a second time.
+// The Ints from `from` up to `to`, not `to` itself: none when `to` is not above `from`. Folded, it is a counting
+// loop: `fold(list: range(from:, to:), …)` never makes the list, and takes a step a number, as over a list of that
+// length (compiler/fuse.ts).
 //
-//   > buf() |> write_each(list: Cons(head: 1, tail: Cons(head: 2, tail: Nil)), by: fn(out: Buf, n: Int) -> Buf { out |> write_int(value: n * 10) }) |> freeze
-//   "1020"
-fn write_each[T](out: Buf, list: List[T], by: Fn2[Buf, T, Buf]) -> Buf {
-  match list {
-    Cons(head, tail) -> write_each(out: by(out, head), list: tail, by)
-    Nil -> out
+//   > range(from: -1, to: 2)
+//   Cons(head: -1, tail: Cons(head: 0, tail: Cons(head: 1, tail: Nil)))
+//   > range(from: 1, to: 5) |> fold(from: 0, by: fn(acc: Int, n: Int) -> Int { acc + n })
+//   10
+fn range(from: Int, to: Int) -> List[Int] {
+  range_down(from, at: to, acc: Nil)
+}
+
+// Internal: the loop of range, from the top down (at > from, so at - 1 fits).
+fn range_down(from: Int, at: Int, acc: List[Int]) -> List[Int] {
+  match {
+    at <= from -> acc
+    else -> range_down(from, at: at - 1, acc: Cons(head: at - 1, tail: acc))
+  }
+}
+
+// Internal: fold over range(from, to), as compiler/fuse.ts writes it: no list is made (from < to, so from + 1 fits).
+fn fold_range[B](from: Int, to: Int, acc: B, by: Fn2[B, Int, B]) -> B {
+  match {
+    from >= to -> acc
+    else -> fold_range(from: from + 1, to, acc: by(acc, from), by)
   }
 }
 

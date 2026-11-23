@@ -77,6 +77,14 @@ fulfillment workflow charged twice, the ledger moved money twice and the KV writ
   defect called for them, so none was built.
 - **Moving the KV router into Tape** would remove R8 only, would put a cluster's traffic through one Durable
   Object, and needs a Worker-side host that does not exist. The router stayed in TypeScript.
+- **Top-level `const` and list literals `[a, b]`** (design memo of feedback 20261123T030026.990Z-e454772fe5c9,
+  item 2), built and measured on 23 November 2026 (an unmerged commit, c996227) on that report's sunset program, with its
+  183-term VSOP87 table rewritten as a `const List[Series]` (answers byte-identical): 1400 -> 1372 lines (the memo
+  estimated ~75 fewer in the table; 24 came out), Wasm 45,809 -> 49,674 bytes (a term in the arena's layout is 40
+  bytes of data against ~23 of code), steps of a year of sunsets 28,498 -> 151,258 (a fold is charged a step an
+  item, a chain of calls nothing) and heap 17.8 KB -> 226 KB (closures), 8.73 -> 9.56 µs a sunset; about 250 lines
+  of compiler. List literals deleted no line in the repository. Dropped; re-propose with a denser layout or new
+  evidence. `range` and a fused `fold` (one step a number, no list) paid and stayed.
 
 ## Soundness of the rules
 

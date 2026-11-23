@@ -191,7 +191,7 @@ function banned(ft: Type, f: { name: string; type: TypeAst }): void {
     'C08',
     `field ${f.name} cannot have type ${ft.name}`,
     ft.name === 'Buf'
-      ? 'A Buf has one owner at a time, so it is passed and returned, never stored. To write a list as JSON, `write_json(value: list)` (`map` it into a record type first for computed items); for other text, hand the Buf from item to item with `write_each(list, by: fn(out: Buf, item: Line) -> Buf { … })`; fold the list again for a total.'
+      ? 'A Buf has one owner at a time, so it is passed and returned, never stored. To write a list as JSON, `write_json(value: list)` (`map` it into a record type first for computed items); for other text, hand the Buf from item to item with `fold(list, from: out, by: fn(out: Buf, item: Line) -> Buf { … })`; fold the list again for a total.'
       : 'A capability is passed as a parameter, so every call that uses it names it.',
   );
 }

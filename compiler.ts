@@ -74,6 +74,7 @@ import { parse } from './compiler/parse.ts';
 import { shadow } from './compiler/shadow.ts';
 import { bindFieldNames } from './compiler/fieldbind.ts';
 import { resolvePipes } from './compiler/pipes.ts';
+import { fuseRanges } from './compiler/fuse.ts';
 import { ambient } from './compiler/ambient.ts';
 import { rowColumns } from './compiler/rows.ts';
 import { build } from './compiler/build.ts';
@@ -118,6 +119,7 @@ export function parseProgram(sources: Sources): Program {
   shadow(prog);
   bindFieldNames(prog);
   resolvePipes(prog);
+  fuseRanges(prog);
   ambient(prog);
   rowColumns(prog);
   return prog;
