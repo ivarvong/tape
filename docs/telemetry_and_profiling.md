@@ -44,7 +44,11 @@ the CPU sum. Routes: `/`, `/mcp`, `/v1/{compile,run,test,feedback}`, `/playgroun
 `/t/:account/…`, `/:account/:program…`, and a Durable Object as `DO Name.<methods>`. Each hosted call is joined to its
 log line by request id, so `/mcp` is split by tool (`/mcp run`) and `--ua` picks one client (profile.ts's load says
 `tape-obs-profile/<load>`). Windows are read in 5-minute slices, split again while a slice comes back at the view's
-1,000-row cap, and deduplicated by the whole `$metadata` (its `id` is not unique). `--json` writes the rows.
+1,000-row cap, and deduplicated by the whole `$metadata` (its `id` is not unique). `--json` writes the rows. A
+call answered from the compile cache (its log line's `cached: true`) is its own route, `/v1/run cached`: the rows of a
+route with and without it give the hit rate and what a hit costs. Every hosted call's log line also says its
+`isolate` (a random id per isolate) and that isolate's `cache_entries` and `cache_bytes` (counted, bound 8 MiB):
+the cache's real occupancy on prod.
 
 ## Profiles (profile.ts)
 

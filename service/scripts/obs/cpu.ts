@@ -68,7 +68,9 @@ if (hosted)
 const rows = inv
   .map(r => {
     const c = logs.get(r.requestId);
-    return { ...r, route: r.route === '/mcp' && c ? `/mcp ${c.tool}` : r.route, ua: c?.ua ?? null, call: c ?? null };
+    const named = r.route === '/mcp' && c ? `/mcp ${c.tool}` : r.route;
+    // a call answered from the compile cache is a route of its own: the hit rate, and what a hit costs
+    return { ...r, route: c?.cached === true ? `${named} cached` : named, ua: c?.ua ?? null, call: c ?? null };
   })
   .filter(r => !route || r.route === route || r.route.startsWith(`${route} `))
   .filter(r => !ua || (r.ua ?? '').startsWith(ua));

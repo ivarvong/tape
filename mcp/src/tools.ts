@@ -6,6 +6,7 @@
 // Few tools on purpose. Others an agent could use (fmt, the simulator, a program's tables) would each be a field of
 // these or a tool of its own; they wait until someone asks (test did: report 1fdd40f44552), so the list stays short.
 import { compileAlso } from '../../compiler.ts';
+import { sha256 } from '../../compiler/sha256.ts';
 import type { Built, Source } from '../../compiler.ts';
 import { isHead } from '../../host.ts';
 import type { Effect, Header } from '../../host.ts';
@@ -67,6 +68,8 @@ export type Deps = {
   examples: (wasm: Uint8Array, fns: readonly string[]) => Promise<Called[]>;
   /** the wall-clock guard on a run call (LIMITS.wallMs; a test shortens it) */
   wallMs?: number;
+  /** the compiler's hash (the tape-compiler header), part of the compile cache's key */
+  compiler?: string;
 };
 
 export type Diagnostic = { file: string; line: number; code: string; message: string; fix: string };
@@ -76,6 +79,8 @@ export type CompileResult = {
   wasm_bytes: number | null;
   /** the SQL statements the program can run */
   statements: number | null;
+  /** the compiler's answer came from this isolate's cache of programs compiled here before */
+  cached: boolean;
 };
 export type EffectOut =
   | {
@@ -130,6 +135,8 @@ export type RunResultOne = {
 export type RunResult = {
   ok: boolean;
   diagnostics: Diagnostic[];
+  /** the build came from this isolate's cache (CompileResult.cached) */
+  cached: boolean;
   error?: string;
   results: RunResultOne[];
   /** on the run's own clock: the timers that ran, and those still set at the end */
@@ -137,6 +144,12 @@ export type RunResult = {
 };
 /** What the log line says of a call, beside what serve.ts knows (serve.ts, logLine). */
 export type Usage = {
+  /** the build came from the compile cache: compile_ms is the lookup's */
+  cached: boolean;
+  /** this isolate (a random id, made on its first call) and its compile cache after the call: occupancy on prod */
+  isolate: string;
+  cache_entries: number;
+  cache_bytes: number;
   codes: string[];
   files: number;
   source_bytes: number;
@@ -400,20 +413,99 @@ type Compiled = {
   traced: Built | null;
   diagnostics: Diagnostic[];
   files: Source[];
+  /** what the compile took (Date.now: in a Worker, the clock does not move while code runs); 0 when cached */
   ms: number;
+  /** the builds came from this isolate's cache: the same program was compiled here before */
+  cached: boolean;
 };
+
+// ---- the compile cache: the builds made in this isolate, by a hash of what they were made from (the compiler,
+// the standard library, the files, and whether a traced build is wanted beside the build), refusals too. Compiling
+// was 80-87% of the hosted Worker's CPU (profiles of tape 56539ce5, 2026-11-23), and in the 72 h before, 64% of 1195
+// hosted calls repeated a program their client had sent already (by its files, size and diagnostics).
+// Memory: an entry is counted as 128 KiB, twice its Wasm (both builds) and 8 bytes a source character, which is at
+// least what one retains: measured in Node 25 over 20 entries each, the count against the retained heap is hello
+// 146/74 KiB, todo 245/69, kv 387/150, tickets 825/100, and with a traced build hello 156/142, todo 327/268, kv
+// 450/200, tickets 1093/359. The least recently used goes once the counted bytes pass
+// CACHE.bytes, 8 MiB: an isolate has 128 MB; ~15 MB is the Worker at rest and 2 MB std's tokens, one compile needs
+// up to ~16 MB live (tickets.tape with its traced build: the smallest old space it completes in is 31 MB, at rest
+// 15), so four at once need 64 MB, and ~20 MB is left for collector slack and answers. Builds are frozen (but their
+// Wasm bytes: a typed array cannot be), so code that changed a cached one would throw. Every log line says the
+// isolate's entries and counted bytes (occupancy), so prod shows what the cache really holds.
+/** The bound on the counted bytes (a test lowers it). */
+export const CACHE = { bytes: 8 << 20 };
+type Kept = Omit<Compiled, 'files' | 'ms' | 'cached'> & { bytes: number };
+const kept = new Map<string, Kept>();
+let keptBytes = 0;
+const stdHashes = new WeakMap<readonly Source[], string>();
+const hashOf = (v: unknown): string => sha256(enc.encode(JSON.stringify(v)));
+const stdHash = (std: readonly Source[]): string => {
+  let h = stdHashes.get(std);
+  if (h === undefined) stdHashes.set(std, (h = hashOf(std.map(s => [s.name, s.text]))));
+  return h;
+};
+const frozen = (v: unknown): void => {
+  if (typeof v !== 'object' || v === null || ArrayBuffer.isView(v) || Object.isFrozen(v)) return;
+  Object.freeze(v);
+  for (const x of Object.values(v)) frozen(x);
+};
+let isolateId: string | null = null;
+/** This isolate's id and its compile cache's entries and counted bytes, for the log line. */
+export const occupancy = (): { isolate: string; cache_entries: number; cache_bytes: number } => ({
+  isolate: (isolateId ??= Math.random().toString(36).slice(2, 10)),
+  cache_entries: kept.size,
+  cache_bytes: keptBytes,
+});
+/** The cache's entries and their counted bytes (test.ts). */
+export const cacheHeld = (): { entries: number; bytes: number } => ({ entries: kept.size, bytes: keptBytes });
+/** What an entry is counted as: see the measurement above CACHE. */
+export const entryBytes = (wasm: number, sourceChars: number): number => 128 * 1024 + 2 * wasm + 8 * sourceChars;
+function remember(key: string, k: Omit<Kept, 'bytes'>, sourceChars: number): void {
+  const bytes = entryBytes((k.built?.wasm.length ?? 0) + (k.traced?.wasm.length ?? 0), sourceChars);
+  frozen(k);
+  for (const [old, e] of kept) {
+    if (keptBytes + bytes <= CACHE.bytes) break;
+    kept.delete(old);
+    keptBytes -= e.bytes;
+  }
+  kept.set(key, { ...k, bytes });
+  keptBytes += bytes;
+}
+
 function compiled(args: Fields, deps: Deps, known: readonly string[], traced = false): Compiled | Refusal {
   const extra = unknownKeys(args, known);
   if (extra) return extra;
   const files = filesOf(args, deps);
   if (!Array.isArray(files)) return files;
-  const t0 = Date.now(),
-    r = compileAlso([...deps.std, ...files], {}, traced ? [{ trace: true }] : []),
-    ms = Date.now() - t0;
-  if (!Array.isArray(r)) return { built: null, traced: null, diagnostics: diagnosticsOf(r.errors), files, ms };
-  return { built: r[0], traced: r[1] ?? null, diagnostics: [], files, ms };
+  const t0 = Date.now();
+  const key = hashOf([deps.compiler ?? '', stdHash(deps.std), traced, files.map(f => [f.name, f.text])]);
+  const had = kept.get(key);
+  if (had) {
+    kept.delete(key);
+    kept.set(key, had);
+    return {
+      built: had.built,
+      traced: had.traced,
+      diagnostics: had.diagnostics,
+      files,
+      ms: Date.now() - t0,
+      cached: true,
+    };
+  }
+  const r = compileAlso([...deps.std, ...files], {}, traced ? [{ trace: true }] : []);
+  const made = Array.isArray(r)
+    ? { built: r[0], traced: r[1] ?? null, diagnostics: [] }
+    : { built: null, traced: null, diagnostics: diagnosticsOf(r.errors) };
+  remember(
+    key,
+    made,
+    files.reduce((n, f) => n + f.text.length, 0),
+  );
+  return { ...made, files, ms: Date.now() - t0, cached: false };
 }
 const usageOf = (c: Compiled, requests = 0): Usage => ({
+  cached: c.cached,
+  ...occupancy(),
   codes: c.diagnostics.map(d => d.code),
   files: c.files.length,
   source_bytes: c.files.reduce((n, f) => n + enc.encode(f.text).length, 0),
@@ -436,6 +528,7 @@ export function compileTool(args: unknown, deps: Deps): { result: CompileResult 
       diagnostics: c.diagnostics,
       wasm_bytes: c.built?.wasm.length ?? null,
       statements: c.built?.queries.length ?? null,
+      cached: c.cached,
     },
     usage: usageOf(c),
   };
@@ -702,7 +795,7 @@ export async function runTool(
   if (isRefusal(remotes)) return { result: remotes, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
-  if (!built) return { result: { ok: false, diagnostics: c.diagnostics, results: [] }, usage };
+  if (!built) return { result: { ok: false, diagnostics: c.diagnostics, cached: c.cached, results: [] }, usage };
   // the line trace: the same program built with { trace: true }, each request replayed through it from its log
   const traced = c.traced;
   const tracedWasm = traced?.wasm ?? null;
@@ -732,7 +825,8 @@ export async function runTool(
       ),
       usage,
     };
-  if (!all.ok) return { result: { ok: false, diagnostics: [], error: all.error, results: [] }, usage };
+  if (!all.ok)
+    return { result: { ok: false, diagnostics: [], cached: c.cached, error: all.error, results: [] }, usage };
   const names = namesOf(c.files);
   const tracedBuilt = traced?.wasm ? traced : null;
   const results = all.runs.map(ran => resultOf(built, tracedBuilt, c.files, ran, names, { trace, effects }));
@@ -742,6 +836,7 @@ export async function runTool(
     result: {
       ok: results.every(r => r.error === null && r.replayed !== false),
       diagnostics: [],
+      cached: c.cached,
       results,
       ...(all.timers ? { timers: all.timers } : {}),
     },
@@ -766,6 +861,8 @@ export type ExampleOut = {
 export type TestResult = {
   ok: boolean;
   diagnostics: Diagnostic[];
+  /** the build came from this isolate's cache (CompileResult.cached) */
+  cached: boolean;
   examples: ExampleOut[];
   passed: number;
   failed: number;
@@ -783,7 +880,10 @@ export async function testTool(
   // examples never call handle: a library of pure functions, with none, is tested as it is (C30 is for a program)
   const library = !c.built && c.diagnostics.length > 0 && c.diagnostics.every(d => d.code === 'C30');
   if (!c.built && !library)
-    return { result: { ok: false, diagnostics: c.diagnostics, examples: [], passed: 0, failed: 0 }, usage };
+    return {
+      result: { ok: false, diagnostics: c.diagnostics, cached: c.cached, examples: [], passed: 0, failed: 0 },
+      usage,
+    };
   const sources = [...deps.std, ...c.files];
   const t0 = Date.now();
   const prepared = c.files.map(f => prepare(sources, f.name));
@@ -828,7 +928,14 @@ export async function testTool(
   );
   const passed = examples.filter(e => e.ok).length;
   return {
-    result: { ok: passed === examples.length, diagnostics: [], examples, passed, failed: examples.length - passed },
+    result: {
+      ok: passed === examples.length,
+      diagnostics: [],
+      cached: c.cached,
+      examples,
+      passed,
+      failed: examples.length - passed,
+    },
     usage,
   };
 }

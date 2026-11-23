@@ -86,6 +86,11 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
 `ok` is true when the program compiles; then `diagnostics` is empty, `wasm_bytes` is the size of its module and
 `statements` the number of SQL statements it can run. `fix` is what to write instead.
 
+`cached` (compile, run and test) is true when the compiler's answer came from the server's cache: the same files
+(names and text) were compiled before by the same compiler, on the same server instance, so they were not compiled
+again. The answer is the same either way. The cache is per instance and bounded, so a program sent again can still
+be compiled again (`cached: false`).
+
 ### run
 
 Also takes `requests`: 1 to 50, each `METHOD SP TARGET`, then optionally a line feed and a body

@@ -171,7 +171,15 @@ export function invocationOf(e: unknown): Invocation | null {
 }
 
 /** The hosted call's own log line ({"event": "tape-mcp.call", …}, mcp/src/serve.ts logLine), when this event is one. */
-export type CallLog = { requestId: string; tool: string; via: string; requests: number; sourceBytes: number };
+export type CallLog = {
+  requestId: string;
+  tool: string;
+  via: string;
+  requests: number;
+  sourceBytes: number;
+  /** the build came from the compile cache; null in a log line from before it */
+  cached: boolean | null;
+};
 export function callLogOf(e: unknown): CallLog | null {
   if (field(e, '$metadata', 'type') !== 'cf-worker') return null;
   const s = field(e, 'source');
@@ -182,6 +190,7 @@ export function callLogOf(e: unknown): CallLog | null {
     via: text(field(s, 'via')),
     requests: num(field(s, 'requests')),
     sourceBytes: num(field(s, 'source_bytes')),
+    cached: typeof field(s, 'cached') === 'boolean' ? field(s, 'cached') === true : null,
   };
 }
 

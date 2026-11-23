@@ -99,7 +99,7 @@ same(
     source: { event: 'tape-mcp.call', tool: 'run', via: 'mcp', requests: 2, source_bytes: 900 },
     $metadata: { type: 'cf-worker', requestId: 'r1' },
   }),
-  { requestId: 'r1', tool: 'run', via: 'mcp', requests: 2, sourceBytes: 900 },
+  { requestId: 'r1', tool: 'run', via: 'mcp', requests: 2, sourceBytes: 900, cached: null },
 );
 same('another log line is not one', callLogOf({ source: { msg: 'x' }, $metadata: { type: 'cf-worker' } }), null);
 if (!inv) throw new Error('the fetch event did not read');
@@ -261,5 +261,11 @@ same(
     'logs.invocation_logs: cloudflare.config.ts false, live true',
     'redact_query_string: cloudflare.config.ts true, live unset',
   ],
+);
+same(
+  "a call answered from the compile cache: its log line's cached",
+  callLogOf({ source: { event: 'tape-mcp.call', tool: 'compile', cached: true }, $metadata: { type: 'cf-worker' } })
+    ?.cached,
+  true,
 );
 finish();

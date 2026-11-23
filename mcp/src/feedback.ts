@@ -13,6 +13,7 @@ import {
   fieldsOfSchema,
   filesOf,
   isRefusal,
+  occupancy,
   refused,
   requestsOf,
   unknownKeys,
@@ -147,6 +148,8 @@ export async function feedbackTool(
     },
   };
   const usage: Usage = {
+    cached: false,
+    ...occupancy(),
     codes,
     files: files?.length ?? 0,
     source_bytes: (files ?? []).reduce((n, f) => n + bytesOf(f.text), 0),

@@ -203,6 +203,8 @@ const VARIES = new Set([
   'timeUnixNano',
   'trace_id',
   'duration_us',
+  // the second of two calls with one program is answered from the compile cache (the cache test checks it)
+  'cached',
 ]);
 /** A value with what differs between two runs of the same input replaced: ids, times, and attributes holding them. */
 function stable(v: unknown): unknown {
@@ -824,6 +826,84 @@ const tests: Test[] = [
       });
       if (isError || r['ok'] !== true || RESULTS(r).length !== 50)
         out.push(`50 requests: ${RESULTS(r).length} results, ${JSON.stringify(r).slice(0, 120)}`);
+      return out;
+    },
+  },
+  {
+    // tools.ts's compile cache, through the routes: a program sent again is answered from it (cached: true) with
+    // the same answer; another name, text, compiler or trace mode is another entry; a refusal is kept too; the log
+    // line says which; the entries stay within CACHE.bytes; and what a cached build gives is what a fresh one gives
+    name: 'compile cache',
+    run: async m => {
+      const out: string[] = [];
+      const nonce = `${Date.now()}-${Math.random()}`;
+      const text = `// ${nonce}\n${HELLO}`;
+      const files = [{ name: 'hello.tape', text }];
+      const body = (v: unknown): Fields => F(v);
+      const compileTwice = async (fs: unknown, deps: Partial<Deps> = {}): Promise<[Answer, Answer]> => {
+        const one = await post(m, '/v1/compile', JSON.stringify({ files: fs }), { deps });
+        return [one, await post(m, '/v1/compile', JSON.stringify({ files: fs }), { deps })];
+      };
+      const [c1, c2] = await compileTwice(files);
+      if (body(c1.body)['cached'] !== false || body(c2.body)['cached'] !== true)
+        out.push(`compile: cached ${String(body(c1.body)['cached'])} then ${String(body(c2.body)['cached'])}`);
+      if (!same(c1.body, c2.body)) out.push('compile: the cached answer is not the first');
+      if (c1.logs[0]?.['cached'] !== false || c2.logs[0]?.['cached'] !== true)
+        out.push(`log lines: cached ${String(c1.logs[0]?.['cached'])} then ${String(c2.logs[0]?.['cached'])}`);
+      // occupancy: one isolate id across calls, and the cache as it stands after each (the first call added one)
+      const [l1, l2] = [c1.logs[0] ?? {}, c2.logs[0] ?? {}];
+      const held0 = m.tools.cacheHeld();
+      if (
+        typeof l1['isolate'] !== 'string' ||
+        l1['isolate'] !== l2['isolate'] ||
+        l2['cache_entries'] !== held0.entries ||
+        l2['cache_bytes'] !== held0.bytes ||
+        held0.entries < 1
+      )
+        out.push(
+          `occupancy in the log: ${JSON.stringify([l1['isolate'], l2['isolate'], l2['cache_entries'], l2['cache_bytes']])}`,
+        );
+      const [n1] = await compileTwice([{ name: 'other.tape', text }]);
+      if (body(n1.body)['cached'] !== false) out.push('another file name was answered from the cache');
+      const [t1] = await compileTwice([{ name: 'hello.tape', text: `${text}\n` }]);
+      if (body(t1.body)['cached'] !== false) out.push('another text was answered from the cache');
+      const [v1] = await compileTwice(files, { compiler: 'another-compiler' });
+      if (body(v1.body)['cached'] !== false) out.push('another compiler was answered from the cache');
+      const bad = [{ name: 'hello.tape', text: `// ${nonce}\n${WITHOUT_REPEAT}` }];
+      const [b1, b2] = await compileTwice(bad);
+      if (body(b1.body)['cached'] !== false || body(b2.body)['cached'] !== true || !same(b1.body, b2.body))
+        out.push(`a refusal: cached ${String(body(b1.body)['cached'])} then ${String(body(b2.body)['cached'])}`);
+      // run: one request (a line trace, so a traced build too) is its own entry; then from the cache, the same results
+      const run = async (trace?: string): Promise<Fields> =>
+        body(
+          (
+            await post(
+              m,
+              '/v1/run',
+              JSON.stringify({ files, requests: ['GET /hello/ada'], ...(trace ? { trace } : {}) }),
+            )
+          ).body,
+        );
+      const r1 = await run(),
+        r2 = await run();
+      if (r1['cached'] !== false || r2['cached'] !== true)
+        out.push(`run with a line trace: cached ${String(r1['cached'])} then ${String(r2['cached'])}`);
+      if (!same(r1, r2)) out.push(`run: the cached build's results differ: ${JSON.stringify(r2).slice(0, 200)}`);
+      if (typeof RESULTS(r2)[0]?.['trace'] !== 'string') out.push('run from the cache has no line trace');
+      if ((await run('none'))['cached'] !== true) out.push('run with no trace did not use the build compile kept');
+      // the bound: many distinct programs, and the entries counted stay within it
+      for (let i = 0; i < 60; i++)
+        // oxlint-disable-next-line no-await-in-loop -- one compile after another, as calls come
+        await post(
+          m,
+          '/v1/compile',
+          JSON.stringify({ files: [{ name: 'hello.tape', text: `// ${nonce} ${i}\n${HELLO}` }] }),
+        );
+      const held = m.tools.cacheHeld();
+      if (held.bytes > m.tools.CACHE.bytes || held.entries < 10)
+        out.push(`held ${held.entries} entries, ${held.bytes} bytes (bound ${m.tools.CACHE.bytes})`);
+      const [o1] = await compileTwice(files);
+      if (body(o1.body)['cached'] !== false) out.push('the oldest entry was still there after 60 more');
       return out;
     },
   },

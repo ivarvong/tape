@@ -108,6 +108,7 @@ export default {
       hello: { name: 'hello.tape', text: helloText },
       run: runIn(env),
       examples: examplesIn(env),
+      compiler: typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev',
     };
     const res = await serve(request, deps, {
       killSwitch: env.KILL_SWITCH,
