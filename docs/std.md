@@ -1478,7 +1478,14 @@ ASCII letters in lower case; every other byte as it is.
 fn respond(status: Int) -> Buf
 ```
 
-A response: the status, a line feed, then the body written by the caller. It is served as text/plain.
+A response: the status, a line feed, then the body written by the caller. It is served as text/plain. The status line is in the Buf, so text to keep (a body to store, a value to compare) starts from `buf()`, not from here.
+
+```
+> freeze(buf: respond(status: 200) |> append(view: "ok"))
+"200\nok"
+> freeze(buf: buf() |> append(view: "ok"))
+"ok"
+```
 
 ### fn header
 
