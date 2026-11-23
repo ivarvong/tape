@@ -1291,11 +1291,7 @@ fn message_page(status: Int, title: View, text: View) -> Buf {
 }
 
 fn money(out: Buf, cents: Int) -> Buf {
-  let rest = cents % 100
-  out
-    |> append(view: "$\(cents / 100).")
-    |> push(byte: 48 + rest / 10)
-    |> push(byte: 48 + rest % 10)
+  out |> append(view: "$\(0.01 * cents)")
 }
 
 fn me_link(out: Buf, buyer: View) -> Buf {

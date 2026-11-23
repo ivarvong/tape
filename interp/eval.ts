@@ -279,6 +279,8 @@ const INTRINSIC = {
   dec: ['n', 'scale'],
   to_int: ['x', 'rounding'],
   to_dec: ['x', 'scale', 'rounding'],
+  parse_dec: ['text', 'scale'],
+  write_dec: ['out', 'value'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -384,6 +386,15 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
       return D.toInt(asDec(a[0]), asAdt(a[1]).c);
     case 'to_dec':
       return D.ofFloat(asFloat(a[0]), Number(asInt(a[1])), asAdt(a[2]).c);
+    case 'parse_dec': {
+      const d = D.parse(new TextDecoder().decode(asBytes(a[0])), Number(asInt(a[1])));
+      return d ? adt('Some', { value: d }) : adt('None');
+    }
+    case 'write_dec': {
+      const out = asBuf(a[0]);
+      for (const b of enc.encode(D.text(asDec(a[1])))) out.buf.push(b);
+      return out;
+    }
     default:
       return unreachable(name, 'intrinsic');
   }
@@ -477,9 +488,11 @@ function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value
           return [
             ...(typeof v === 'bigint'
               ? enc.encode(String(v))
-              : typeof v === 'number'
-                ? enc.encode(String(v))
-                : asBytes(v)),
+              : isDec(v)
+                ? enc.encode(D.text(v))
+                : typeof v === 'number'
+                  ? enc.encode(String(v))
+                  : asBytes(v)),
           ];
         }),
       );

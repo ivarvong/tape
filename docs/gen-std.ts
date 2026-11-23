@@ -156,6 +156,16 @@ const BUILT_INS: BuiltIn[] = [
     doc: 'The quotient at t digits, rounded once: `div(a: 1.00, by: 3.00, scale: 2, rounding: HalfEven)` is 0.33. Exact in between (128 bits), so `a * b / c` loses nothing before the one rounding. By zero it traps (trap 4). `by` may be an Int. A Dec has no `/`.',
   },
   {
+    name: 'parse_dec',
+    sig: 'parse_dec(text: View, scale: s) -> Option[Dec[s]]',
+    doc: "The Dec[s] the text is, exactly: JSON's number syntax (`12.30`, `-0.5`, `1.23e1`), with no more digits after the point than s unless they are zeros (`12.300` is 12.30, `12.345` is None for a Dec[2]). No sign `+`, no spaces, no leading zeros.",
+  },
+  {
+    name: 'write_dec',
+    sig: 'write_dec(out: Buf, value: Dec[s]) -> Buf',
+    doc: 'Appends a Dec with exactly its scale\'s digits after the point: `12.30`, `-0.05`, `0.00` (what a hole, `"\\(x)"`, writes).',
+  },
+  {
     name: 'to_dec',
     sig: 'to_dec(x: Float, scale: t, rounding: Rounding) -> Dec[t]',
     doc: "The Float's exact value (a binary fraction) rounded to t digits: `to_dec(x: 2.675f, scale: 2, rounding: HalfUp)` is 2.67, as 2.675f is a little below 2.675.",
@@ -422,18 +432,23 @@ fn stock() -> List[Item] {
 `,
   },
   {
-    title: 'Money and other fractions, in fixed point',
-    uses: ['fn isqrt', 'fn decimal_text', 'fn parse_int'],
-    text: 'There are no floats yet (`Dec` and `Float` are planned): keep amounts as whole numbers of the smallest unit (cents, thousandths) and scale before you divide or take a root, so `isqrt(n: 2 * 1000 * 1000)` is the root of 2 in thousandths, 1414. Arithmetic that does not fit an Int traps (trap 6) instead of wrapping.',
-    program: `// the length of the diagonal of a w by h rectangle, in thousandths of the unit
-fn diagonal(w: Int, h: Int) -> Int {
-  let Some(value: root) = isqrt(n: (w * w + h * h) * 1000 * 1000) else -> 0
-  root
+    title: 'Money, exactly',
+    uses: ['builtin parse_dec', 'builtin mul', 'builtin div', 'type Rounding'],
+    text: 'Money is a `Dec[2]`: `12.30` is one, `price * qty` is exact, and a hole or `write_json` writes it with its two digits (JSON as text, `"12.30"`; decode takes a number or text, exactly). What loses a digit names its rounding, once: `mul` for a rate, `div` for a share. In the database a Dec is its count, an INTEGER (12.30 is 1230). A measurement is a Float instead (`1.5f`).',
+    program: `// three at the price in the query, with tax at 8.875% rounded once to the cent, half away from zero
+fn handle(raw: View) -> Buf {
+  let Some(value: price) = parse_dec(text: query_of(raw), scale: 2) else -> respond(status: 400)
+  let net = price * 3
+  let tax = mul(a: net, by: 0.08875, scale: 2, rounding: HalfUp)
+  let each = div(a: net + tax, by: 3, scale: 2, rounding: Down)
+  respond(status: 200) |> append(view: "\\(net) + \\(tax) = \\(net + tax), \\(each) each")
 }
 
-fn handle(raw: View) -> Buf {
-  let d = diagonal(w: 3, h: 4)
-  respond(status: 200) |> append(view: "\\(d) thousandths")
+fn query_of(raw: View) -> View {
+  match request(raw) {
+    Request(query: Some(value: q)) -> q
+    _ -> ""
+  }
 }
 `,
   },

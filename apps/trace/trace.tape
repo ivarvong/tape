@@ -2344,13 +2344,9 @@ fn plus(out: Buf, after: Bool) -> Buf {
   }
 }
 
-// A position on the track, as a percentage with two decimals.
+// A position on the track, as a percentage with two decimals: basis points are hundredths of a percent.
 fn write_bp(out: Buf, bp: Int) -> Buf {
-  let whole = out |> write_int(value: bp / 100) |> append(view: ".")
-  match {
-    bp % 100 < 10 -> whole |> append(view: "0") |> write_int(value: bp % 100) |> append(view: "%")
-    else -> whole |> write_int(value: bp % 100) |> append(view: "%")
-  }
+  out |> append(view: "\(0.01 * bp)%")
 }
 
 // A duration, to three significant digits with no trailing zeros: 812 ns, 4.2 µs, 13.5 ms, 2 s, 1234 s.

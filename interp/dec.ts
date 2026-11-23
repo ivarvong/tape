@@ -80,6 +80,21 @@ export function ofFloat(x: number, t: number, rounding: string): Dec {
     n = (u >> 63n === 1n ? -m : m) * pow10(t);
   return dec(p >= 0 ? n << BigInt(p) : divide(n, 1n << BigInt(-p), rounding), t);
 }
+/**
+ * The Dec[s] that text is, exactly: JSON's number syntax, no more digits after the point than s but zeros, and a
+ * count within the Ints; null for anything else.
+ */
+export function parse(written: string, s: number): Dec | null {
+  const m = /^-?(0|[1-9]\d*)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(written);
+  if (!m) return null;
+  const digits = `${m[1] ?? ''}${m[2] ?? ''}`,
+    kept = digits.replace(/0+$/, '');
+  if (/^0*$/.test(digits)) return { k: 'dec', m: 0n, s };
+  const shift = BigInt(m[3] ?? '0') - BigInt((m[2] ?? '').length) + BigInt(digits.length - kept.length) + BigInt(s);
+  if (shift < 0n || shift > 19n) return null;
+  const v = BigInt(kept) * 10n ** shift * (written.startsWith('-') ? -1n : 1n);
+  return v < MIN || v > MAX ? null : { k: 'dec', m: v, s };
+}
 /** The digits, with exactly s after the point: 12.30, -0.05, 0.00. */
 export function text(x: Dec): string {
   const digits = (x.m < 0n ? -x.m : x.m).toString().padStart(x.s + 1, '0'),

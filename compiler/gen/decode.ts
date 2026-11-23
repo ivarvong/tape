@@ -127,7 +127,8 @@ function decodeOption(c: Ctx, fl: Read, cur: number, at: Place, ok: number, why:
   return store(c, fl.type);
 }
 
-/** One scalar at the cursor: text is a u32 length and its bytes; an Int, a Float or a Bool is 8 bytes. */
+/** One scalar at the cursor: text is a u32 length and its bytes; an Int, a Dec (its count), a Float or a Bool is 8
+ * bytes. */
 function decodeScalar(c: Ctx, base: string, cur: number): number[] {
   if (base === 'View') {
     const pt = fresh(c, I32);
@@ -137,7 +138,7 @@ function decodeScalar(c: Ctx, base: string, cur: number): number[] {
     c.code.push(...length, ...bytes, ...get(pt), ...get(n), 0x6a, ...set(cur));
     return [pt, n];
   }
-  const l = fresh(c, base === 'Int' ? I64 : base === 'Float' ? F64 : I32);
+  const l = fresh(c, base === 'Int' || base === 'Dec' ? I64 : base === 'Float' ? F64 : I32);
   c.code.push(...get(cur), base === 'Float' ? 0x2b : 0x29, 0, 0);
   if (base === 'Bool') c.code.push(0x50, 0x45);
   c.code.push(...set(l), ...get(cur), ...i32(8), 0x6a, ...set(cur));

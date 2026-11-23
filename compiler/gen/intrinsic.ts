@@ -3,7 +3,7 @@
 import type { Arg, Call } from '../ast.ts';
 import { F64, I32, I64, TRAP, fail, sleb, uleb, utf8 } from '../common.ts';
 import { stdName } from '../shadow.ts';
-import { BUF, FLOAT, INT, INTRINSICS, REMOTE, T, VIEW, key } from '../types.ts';
+import { BUF, FLOAT, INT, INTRINSICS, REMOTE, T, VIEW, key, scaleOf } from '../types.ts';
 import { written } from './text.ts';
 import type { Type } from '../types.ts';
 import { buildVariant, close, fresh, get, inLocals, need, open, set, trapIf } from './fn.ts';
@@ -166,11 +166,23 @@ function writeJson(u: Use): Type {
     return c.emit({ k: 'call', name: fn, args, ...at }, BUF, false);
   };
   const json = (t: Type): boolean =>
-    ['Int', 'Float', 'Bool', 'View'].includes(B.strip(t).name) ||
+    ['Int', 'Dec', 'Float', 'Bool', 'View'].includes(B.strip(t).name) ||
     B.WIRE.encodable.has(t.name) ||
     (t.name === 'List' && t.args.length === 1 && t.args.every(json));
   const has = (fn: string): boolean => B.find(fn, c.f.file) !== null;
   if (base === 'Int' && has('text.write_int')) return via('text.write_int', 'value');
+  // a Dec is text, its count at its scale: "12.30"
+  const scale = scaleOf(B.strip(s.type));
+  if (scale !== null && has('text.write_units')) {
+    const quote = (): void => {
+      const [at, n] = B.literal(utf8('"'));
+      c.code.push(...i32(at), ...i32(n), 0x10, ...uleb(B.fnIndex('write_text')));
+    };
+    quote();
+    c.code.push(...get(s.locals[0] ?? 0), 0x42, ...sleb(BigInt(scale)), 0x10, ...uleb(B.fnIndex('write_units')));
+    quote();
+    return BUF;
+  }
   if (base === 'Float' && has('json.json_write_float')) return via('json.json_write_float', 'value');
   if (base === 'Bool' && has('json.write_bool')) return via('json.write_bool', 'value');
   if (base === 'View' && has('json.write_json_string')) return via('json.write_json_string', 'text');
@@ -204,7 +216,14 @@ function writeJson(u: Use): Type {
     text(`${i > 0 ? ',' : '{'}${JSON.stringify(fl.name)}:`);
     write();
     if (fl.kind === 'i') c.code.push(...get(first), 0x10, ...uleb(B.fnIndex('write_int')));
-    else if (fl.kind === 'f') {
+    else if (fl.kind.startsWith('d')) {
+      // a Dec is text, its count at its scale: "12.30"
+      text('"');
+      write();
+      c.code.push(...get(first), 0x42, ...sleb(BigInt(fl.kind.slice(1))), 0x10, ...uleb(B.fnIndex('write_units')));
+      text('"');
+      write();
+    } else if (fl.kind === 'f') {
       const h = fresh(c, I32);
       c.code.push(...set(h));
       appendFloat(c, h, first);

@@ -1,6 +1,7 @@
 // compiler/gen/text.ts: text with holes, "Hello, \(name) #\(n)". The holes are evaluated in the order written, then
 // one Buf takes the text between them and each value: a View is copied in, an Int is written in decimal by
-// std/text.tape's write_int, a Float in the shortest digits that read back as it by write_float. It is the code of `buf |> append(…) |> write_int(…)`, and nothing more.
+// std/text.tape's write_int, a Float in the shortest digits that read back as it by write_float, a Dec with its
+// scale's digits by write_dec. It is the code of `buf |> append(…) |> write_int(…)`, and nothing more.
 import type { Expr } from '../ast.ts';
 import { fail } from '../common.ts';
 import { VIEW, key } from '../types.ts';
@@ -33,12 +34,13 @@ export function written(c: Ctx, e: Interp, into: Expr): Expr {
     const value: Expr = { k: 'held', held, line: part.line, file: part.file };
     if (t.name === 'View') out = call('append', 'buf', out, 'view', value);
     else if (t.name === 'Float') out = call('write_float', 'out', out, 'value', value);
+    else if (t.name === 'Dec') out = call('write_dec', 'out', out, 'value', value);
     else if (t.name !== 'Int')
       fail(
         part,
         'C19',
         `a ${key(t)} value cannot stand in a text literal`,
-        'A hole takes text (View) or a number (Int or Float). Turn anything else into text first, or write it into a Buf.',
+        'A hole takes text (View) or a number (Int, Dec or Float). Turn anything else into text first, or write it into a Buf.',
       );
     else if (!c.B.fns.has('write_int'))
       fail(

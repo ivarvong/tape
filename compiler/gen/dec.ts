@@ -5,7 +5,7 @@
 // divides the 128-bit product exactly and rounds once. Overflow stops the run, as it does for an Int.
 import type { Arg, Call, Expr } from '../ast.ts';
 import { I64, TRAP, fail, sleb, uleb } from '../common.ts';
-import { BOOL, FLOAT, INT, T, decType, key, scaleOf } from '../types.ts';
+import { BOOL, BUF, FLOAT, INT, T, VIEW, decType, key, scaleOf } from '../types.ts';
 import type { Type } from '../types.ts';
 import { fresh, get, mathIndex, need, rescaleHint, set, trapIf } from './fn.ts';
 import type { Ctx } from './fn.ts';
@@ -182,9 +182,9 @@ const muldiv = (c: Ctx): void => {
   c.code.push(0x10, ...uleb(mathIndex(c.B, 'dec_muldiv')));
 };
 
-const NAMES = new Set(['rescale', 'round', 'mul', 'div', 'dec', 'to_int', 'to_dec']);
+const NAMES = new Set(['rescale', 'round', 'mul', 'div', 'dec', 'to_int', 'to_dec', 'parse_dec', 'write_dec']);
 
-/** rescale, round, mul, div, dec, to_int, to_dec; null for any other name. */
+/** rescale, round, mul, div, dec, to_int, to_dec, parse_dec, write_dec; null for any other name. */
 export function emitDecIntrinsic(c: Ctx, e: Call, args: () => Arg[]): Type | null {
   if (!NAMES.has(e.name)) return null;
   const a = args();
@@ -269,6 +269,22 @@ export function emitDecIntrinsic(c: Ctx, e: Call, args: () => Arg[]): Type | nul
       muldiv(c);
       return decType(t);
     }
+    case 'parse_dec': {
+      // std/json.tape json_count reads the count; an Option[Int] and an Option[Dec[s]] are the same values
+      const text = a[0];
+      if (text) need(c, c.emit(text.value, VIEW, false), VIEW, text, 'argument text');
+      const t = scaleArg(a[1], 'scale');
+      c.code.push(...i64(BigInt(t)), 0x10, ...uleb(stdFn(c, e, 'json_count')));
+      return T('Option', decType(t));
+    }
+    case 'write_dec': {
+      // the count, written by std/text.tape write_units at the Dec's scale
+      const out = a[0];
+      if (out) need(c, c.emit(out.value, BUF, false), BUF, out, 'argument out');
+      const s = decArg(c, a[1], 'value');
+      c.code.push(...i64(BigInt(s)), 0x10, ...uleb(stdFn(c, e, 'write_units')));
+      return BUF;
+    }
     case 'to_dec': {
       const x = a[0];
       if (x) need(c, c.emit(x.value, FLOAT, false), FLOAT, x, 'argument x');
@@ -281,6 +297,13 @@ export function emitDecIntrinsic(c: Ctx, e: Call, args: () => Arg[]): Type | nul
     default:
       return null;
   }
+}
+
+/** The index of a std function a Dec built-in is written with, or C30 when std is not compiled in. */
+function stdFn(c: Ctx, e: Call, name: string): number {
+  if (!c.B.fns.has(name))
+    fail(e, 'C30', `the program has no function ${name}`, `${e.name} needs std: compile it together with your file.`);
+  return c.B.fnIndex(name);
 }
 
 /** float(d): the Float nearest a Dec, with its count on the stack. */

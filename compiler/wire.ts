@@ -17,7 +17,7 @@ import type { Expr, Program, TypeAst, Variant } from './ast.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
 export type WireKind =
-  | { k: 's'; base: string; t: TypeAst }
+  | { k: 's'; base: string; t: TypeAst; scale?: number }
   | { k: 'rec'; name: string; t: TypeAst }
   | { k: 'list'; of: WireKind; t: TypeAst }
   | { k: 'opt'; of: WireKind; t: TypeAst };
@@ -75,6 +75,16 @@ export function wireSource(prog: Program): Wire {
   const scalar = (n: string): boolean =>
     ['Int', 'Float', 'Bool', 'View'].includes(base(n)) &&
     (['Int', 'Float', 'Bool', 'View'].includes(n) || !!types.get(n)?.refine);
+  // the scale of Dec[s], or of a refinement of one
+  const decScale = (t: TypeAst): number | null => {
+    let at: TypeAst | undefined = t,
+      seen = 0;
+    while (at && types.get(at.name)?.refine && seen++ < 20) at = types.get(at.name)?.refine?.base;
+    const [s] = at?.args ?? [];
+    return at?.name === 'Dec' && at.args.length === 1 && s && /^\d+$/.test(s.name) && (at === t || t.args.length === 0)
+      ? Number(s.name)
+      : null;
+  };
   const isList = (t: TypeAst): boolean =>
     t.name === 'List' &&
     t.args.length === 1 &&
@@ -89,6 +99,8 @@ export function wireSource(prog: Program): Wire {
   // a field's kind: { k: 's' | 'rec' | 'list' | 'opt', … } or null when it cannot be JSON
   const kind = (t: TypeAst, inList: boolean, busy: Set<string>): WireKind | null => {
     const [inner] = t.args;
+    const s = decScale(t);
+    if (s !== null) return { k: 's', base: 'Dec', t, scale: s };
     if (t.args.length === 0 && scalar(t.name)) return { k: 's', base: base(t.name), t };
     if (t.name === 'Option' && inner && t.args.length === 1 && !inList) {
       const of = kind(inner, true, busy);
@@ -188,6 +200,8 @@ export function wireSource(prog: Program): Wire {
   // the check of a field (or a list item, named "value") of kind k, as json_check or, for a Float, json_check_float
   const check = (k: WireKind, found: string, name: string, optional: boolean, depth: number): string => {
     const one = k.k === 'opt' ? k.of : k;
+    if (one.k === 's' && one.base === 'Dec')
+      return `json.json_check_dec(found: ${found}, scale: ${one.scale ?? 0}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`;
     return one.k === 's' && one.base === 'Float'
       ? `json.json_check_float(found: ${found}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`
       : `json.json_check(found: ${found}, kind: ${code(k)}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`;
@@ -215,10 +229,19 @@ export function wireSource(prog: Program): Wire {
       () =>
         `fn json_maybe_${mangle(t)}(found: Option[${of}]) -> Option[Option[${text(t)}]] {\n  match found {\n    Some(value: ${t.name}(x)) -> Some(value: Some(value: x))\n    None -> Some(value: None)\n    _ -> None\n  }\n}\n`,
     );
+  // a Dec's value from the text of the number or string found (json_check_dec has checked it)
+  const decOf = (k: Extract<WireKind, { k: 's' }>, found: string): string =>
+    `parse_dec(text: json.json_number_text(found: ${found}), scale: ${k.scale ?? 0})`;
   // a scalar element's value, its refinement checked
   function itemValue(k: Extract<WireKind, { k: 's' }>): string {
     const m = mangle(k.t);
     return once(`json_value_${m}`, () => {
+      if (k.base === 'Dec') {
+        const value = refined(k.t)
+          ? `  let ${k.t.name}(y) = x else -> Err(error: "not a valid ${k.t.name}")\n  Ok(value: y)\n`
+          : `  Ok(value: x)\n`;
+        return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  let Some(value: x) = ${decOf(k, 'Some(value: item)')} else -> Err(error: "not a Dec[${k.scale ?? 0}]")\n${value}}\n`;
+      }
       const got = scalarOf(k.base, 'Some(value: item)');
       const body = refined(k.t)
         ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "not a valid ${k.t.name}")\n  Ok(value: x)\n`
@@ -326,7 +349,13 @@ export function wireSource(prog: Program): Wire {
       const as = new Map<string, string>();
       v.fields.forEach((f, j) => {
         const k = kAt(j);
-        if (k.k === 's') lines.push(`  let w_${f.name} = ${scalarOf(k.base, get(f.name))}\n`);
+        if (k.k === 's' && k.base === 'Dec')
+          lines.push(
+            `  let Some(value: w_${f.name}) = ${decOf(k, get(f.name))} else -> Err(error: "${f.name}: not a Dec[${k.scale ?? 0}]")\n`,
+          );
+        else if (k.k === 's') lines.push(`  let w_${f.name} = ${scalarOf(k.base, get(f.name))}\n`);
+        else if (k.k === 'opt' && k.of.k === 's' && k.of.base === 'Dec')
+          lines.push(`  let w_${f.name} = ${decOf(k.of, get(f.name))}\n`);
         else if (k.k === 'opt' && k.of.k === 's')
           lines.push(`  let w_${f.name} = ${maybeOf(k.of.base, get(f.name))}\n`);
         else return;
@@ -340,7 +369,7 @@ export function wireSource(prog: Program): Wire {
           );
         else if (k.k === 'opt' && k.of.k === 's' && refined(k.of.t))
           lines.push(
-            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: not a valid ${k.of.t.name}")\n`,
+            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base === 'Dec' ? `Dec[${k.of.scale ?? 0}]` : k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: not a valid ${k.of.t.name}")\n`,
           );
         else return;
         as.set(f.name, `r_${f.name}`);

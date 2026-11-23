@@ -18,7 +18,7 @@ import {
   asInt,
   asRemote,
 } from './value.ts';
-import { asRows, exact } from './value.ts';
+import { asRows, exact, isDec } from './value.ts';
 
 const EFFECTS = [
   ...(['sql_exec', 'sql_first', 'sql_all', 'sql_move', 'decode', 'write_json', 'next'] as const),
@@ -75,7 +75,9 @@ const sqlParam = (x: Value): SqlParam =>
         : 0
       : typeof x === 'number'
         ? x
-        : exact(asInt(x), 'sql');
+        : isDec(x)
+          ? exact(x.m, 'sql')
+          : exact(asInt(x), 'sql');
 // p1, p2, … in order
 const sqlParams = (s: Site): SqlParam[] => {
   const out: SqlParam[] = [];

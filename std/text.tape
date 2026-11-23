@@ -255,6 +255,61 @@ fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   }
 }
 
+// Internal: units · 10^-scale with exactly `scale` digits after the point, as a hole and write_json write a Dec
+// (1230 at scale 2 is 12.30). The least Int is written without being negated.
+//
+//   > buf() |> write_units(units: -5, scale: 2) |> freeze
+//   "-0.05"
+//   > buf() |> write_units(units: 1230, scale: 0) |> freeze
+//   "1230"
+//   > buf() |> write_units(units: -9223372036854775808, scale: 18) |> freeze
+//   "-9.223372036854775808"
+fn write_units(out: Buf, units: Int, scale: Int) -> Buf {
+  let n = units_digits(units: units / 10, scale, n: 1)
+  let signed = match {
+    units < 0 -> push(buf: out, byte: 45)
+    else -> out
+  }
+  write_places(out: signed, units, at: n - 1, p: ten_power(n: n - 1, p: 1), scale)
+}
+
+// Internal: how many digits write_units writes: those of the units (here divided by 10 once already), and at least
+// one more than the scale.
+fn units_digits(units: Int, scale: Int, n: Int) -> Int {
+  match {
+    units != 0 or n <= scale -> units_digits(units: units / 10, scale, n: n + 1)
+    else -> n
+  }
+}
+
+// Internal: p · 10^n.
+fn ten_power(n: Int, p: Int) -> Int {
+  match {
+    n <= 0 -> p
+    else -> ten_power(n: n - 1, p: p * 10)
+  }
+}
+
+// Internal: the digit worth p (10^at) and those after it, with the point after the digit worth 10^scale.
+fn write_places(out: Buf, units: Int, at: Int, p: Int, scale: Int) -> Buf {
+  let d = units / p % 10
+  let digit = push(buf: out, byte: 48 + match {
+    d < 0 -> 0 - d
+    else -> d
+  })
+  match {
+    at == 0 -> digit
+    at == scale -> write_places(
+      out: push(buf: digit, byte: 46),
+      units,
+      at: at - 1,
+      p: p / 10,
+      scale
+    )
+    else -> write_places(out: digit, units, at: at - 1, p: p / 10, scale)
+  }
+}
+
 // Appends text: append(buf: out, view: text) with the names write_* use.
 fn write_text(out: Buf, text: View) -> Buf {
   append(buf: out, view: text)

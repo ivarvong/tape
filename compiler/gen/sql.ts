@@ -271,7 +271,8 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
       );
     c.code.push(...get(block));
     const t = c.B.strip(c.emit(a.value, null, false));
-    if (t.name === 'Int') c.code.push(0x37, 0, ...uleb(16 * i));
+    // a Dec is bound as its count, an INTEGER: 12.30 is 1230 in the database
+    if (t.name === 'Int' || t.name === 'Dec') c.code.push(0x37, 0, ...uleb(16 * i));
     else if (t.name === 'Float') c.code.push(0x39, 0, ...uleb(16 * i));
     else if (t.name === 'Bool') c.code.push(0xad, 0x37, 0, ...uleb(16 * i));
     else if (t.name === 'View') {
@@ -281,10 +282,10 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
       fail(
         a,
         'C14',
-        `argument ${a.as ?? a.label} should be Int, Float, Bool or View but is ${key(t)}`,
+        `argument ${a.as ?? a.label} should be Int, Dec, Float, Bool or View but is ${key(t)}`,
         'A query takes numbers, Bools and text. Pass a field of the record instead: `id: order.id`.',
       );
-    kinds += t.name === 'Int' ? 'i' : t.name === 'Float' ? 'f' : t.name === 'Bool' ? 'b' : 't';
+    kinds += t.name === 'Int' || t.name === 'Dec' ? 'i' : t.name === 'Float' ? 'f' : t.name === 'Bool' ? 'b' : 't';
   }
   return { block, kinds };
 }

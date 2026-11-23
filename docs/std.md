@@ -145,24 +145,29 @@ fn stock() -> List[Item] {
 
 Uses: [`write_rows`](#fn-write_rows), [`write_json`](#builtin-write_json), [`List`](#type-list), [`map`](#fn-map).
 
-### Money and other fractions, in fixed point
+### Money, exactly
 
-There are no floats yet (`Dec` and `Float` are planned): keep amounts as whole numbers of the smallest unit (cents, thousandths) and scale before you divide or take a root, so `isqrt(n: 2 * 1000 * 1000)` is the root of 2 in thousandths, 1414. Arithmetic that does not fit an Int traps (trap 6) instead of wrapping.
+Money is a `Dec[2]`: `12.30` is one, `price * qty` is exact, and a hole or `write_json` writes it with its two digits (JSON as text, `"12.30"`; decode takes a number or text, exactly). What loses a digit names its rounding, once: `mul` for a rate, `div` for a share. In the database a Dec is its count, an INTEGER (12.30 is 1230). A measurement is a Float instead (`1.5f`).
 
 ```tape
-// the length of the diagonal of a w by h rectangle, in thousandths of the unit
-fn diagonal(w: Int, h: Int) -> Int {
-  let Some(value: root) = isqrt(n: (w * w + h * h) * 1000 * 1000) else -> 0
-  root
+// three at the price in the query, with tax at 8.875% rounded once to the cent, half away from zero
+fn handle(raw: View) -> Buf {
+  let Some(value: price) = parse_dec(text: query_of(raw), scale: 2) else -> respond(status: 400)
+  let net = price * 3
+  let tax = mul(a: net, by: 0.08875, scale: 2, rounding: HalfUp)
+  let each = div(a: net + tax, by: 3, scale: 2, rounding: Down)
+  respond(status: 200) |> append(view: "\(net) + \(tax) = \(net + tax), \(each) each")
 }
 
-fn handle(raw: View) -> Buf {
-  let d = diagonal(w: 3, h: 4)
-  respond(status: 200) |> append(view: "\(d) thousandths")
+fn query_of(raw: View) -> View {
+  match request(raw) {
+    Request(query: Some(value: q)) -> q
+    _ -> ""
+  }
 }
 ```
 
-Uses: [`isqrt`](#fn-isqrt), [`decimal_text`](#fn-decimal_text), [`parse_int`](#fn-parse_int).
+Uses: [`parse_dec`](#builtin-parse_dec), [`mul`](#builtin-mul), [`div`](#builtin-div), [`Rounding`](#type-rounding).
 
 ### Validate characters
 
@@ -208,7 +213,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 ## Contents
 
-- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
+- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`parse_dec`](#builtin-parse_dec), [`write_dec`](#builtin-write_dec), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
@@ -324,6 +329,22 @@ div(a: Dec[s], by: Dec[u], scale: t, rounding: Rounding) -> Dec[t]
 ```
 
 The quotient at t digits, rounded once: `div(a: 1.00, by: 3.00, scale: 2, rounding: HalfEven)` is 0.33. Exact in between (128 bits), so `a * b / c` loses nothing before the one rounding. By zero it traps (trap 4). `by` may be an Int. A Dec has no `/`.
+
+### builtin parse_dec
+
+```tape
+parse_dec(text: View, scale: s) -> Option[Dec[s]]
+```
+
+The Dec[s] the text is, exactly: JSON's number syntax (`12.30`, `-0.5`, `1.23e1`), with no more digits after the point than s unless they are zeros (`12.300` is 12.30, `12.345` is None for a Dec[2]). No sign `+`, no spaces, no leading zeros.
+
+### builtin write_dec
+
+```tape
+write_dec(out: Buf, value: Dec[s]) -> Buf
+```
+
+Appends a Dec with exactly its scale's digits after the point: `12.30`, `-0.05`, `0.00` (what a hole, `"\(x)"`, writes).
 
 ### builtin to_dec
 
@@ -1039,6 +1060,19 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the least Int fits.
 - `fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int]`: parse_int's digits after the first.
 - `fn write_digits(out: Buf, value: Int, last: Int) -> Buf`: the loop of write_int.
+- `fn write_units(out: Buf, units: Int, scale: Int) -> Buf`: units · 10^-scale with exactly `scale` digits after the point, as a hole and write_json write a Dec (1230 at scale 2 is 12.30). The least Int is written without being negated.
+
+```
+> buf() |> write_units(units: -5, scale: 2) |> freeze
+"-0.05"
+> buf() |> write_units(units: 1230, scale: 0) |> freeze
+"1230"
+> buf() |> write_units(units: -9223372036854775808, scale: 18) |> freeze
+"-9.223372036854775808"
+```
+- `fn units_digits(units: Int, scale: Int, n: Int) -> Int`: how many digits write_units writes: those of the units (here divided by 10 once already), and at least one more than the scale.
+- `fn ten_power(n: Int, p: Int) -> Int`: p · 10^n.
+- `fn write_places(out: Buf, units: Int, at: Int, p: Int, scale: Int) -> Buf`: the digit worth p (10^at) and those after it, with the point after the digit worth 10^scale.
 - `fn cont(v: View, at: Int) -> Bool`: is the byte at `at` a UTF-8 continuation byte?
 - `fn second_of_3(b: Int, c: Int) -> Bool`: the second byte of a three-byte sequence is allowed after `b` (no overlong forms, no surrogates).
 - `fn second_of_4(b: Int, c: Int) -> Bool`: the second byte of a four-byte sequence is allowed after `b` (no overlong forms, nothing above U+10FFFF).
@@ -1313,6 +1347,29 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn json_write_float(out: Buf, value: Float) -> Buf`: a Float appended, as write_json writes one (write_float, here so a writer names only std's functions).
 - `fn json_maybe_text(found: Option[Json_Tree]) -> Option[View]`: an optional text field (json_check found it absent or text).
 - `fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool]`: an optional true or false.
+- `fn json_check_dec(found: Option[Json_Tree], scale: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: json_check of a Dec[scale] field: a number, or text holding one, that is exactly a Dec[scale] (json_count). Anything else, null too, is `<name>: not a Dec[2]`.
+- `fn json_number_text(found: Option[Json_Tree]) -> View`: the text of a number, or of a string ("" for anything else): what a Dec field is read from.
+- `fn json_count(text: View, scale: Int) -> Option[Int]`: the count of a Dec[scale] that `text` is, exactly: JSON's number syntax, the whole text, with no more digits after the point than the scale but zeros (`12.300` is 1230 at scale 2, `12.345` is None), and a count within the Ints. parse_dec and decode read a Dec with it.
+
+```
+> json_count(text: "12.3", scale: 2)
+Some(value: 1230)
+> json_count(text: "1.25e1", scale: 1)
+Some(value: 125)
+> json_count(text: "12.345", scale: 2)
+None
+> json_count(text: "-92233720368547758.08", scale: 2)
+Some(value: -9223372036854775808)
+> json_count(text: "92233720368547758.08", scale: 2)
+None
+> json_count(text: "012", scale: 0)
+None
+```
+- `fn count_exact(text: View, scale: Int) -> Option[Int]`: json_count of text that is a JSON number.
+- `fn count_fold(text: View, i: Int, d: Int, f: Int, k: Int, to: Int, value: Int) -> Option[Int]`: minus the digits of whole ++ fraction from the k-th up to the `to`-th, folded into `value`: negative, so that the least Int is reached; None past it.
+- `fn count_digit(text: View, i: Int, d: Int, f: Int, k: Int, to: Int, value: Int, digit: Int) -> Option[Int]`: one step of count_fold, the k-th digit read.
+- `fn count_shift(found: Option[Int], n: Int) -> Option[Int]`: the (negative) count times 10^n, None past the least Int.
+- `fn count_signed(found: Option[Int], neg: Bool) -> Option[Int]`: the count with its sign: the negative one as it is, or negated, which the least Int cannot be.
 - `fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int]`: an optional whole number.
 - `fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View]`: a key that was there: its decoded value as Some.
 - `fn json_each[T](arr: Json_Tree, by: Fn[Json_Tree, Result[T, View]]) -> Result[List[T], View]`: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.

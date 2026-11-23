@@ -1051,6 +1051,134 @@ fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool] {
   }
 }
 
+// Internal: json_check of a Dec[scale] field: a number, or text holding one, that is exactly a Dec[scale]
+// (json_count). Anything else, null too, is `<name>: not a Dec[2]`.
+fn json_check_dec(
+  found: Option[Json_Tree],
+  scale: Int,
+  name: View,
+  optional: Bool,
+  depth: Int
+) -> Json_Fit {
+  match found {
+    None -> json_check(found, kind: 0, name, optional, depth)
+    Some(value: Json_Num(text)) if is_some(found: json_count(text, scale)) -> Json_Hit
+    Some(value: Json_Str(text)) if is_some(found: json_count(text, scale)) -> Json_Hit
+    _ -> Json_Miss(depth, why: name ++ ": not a Dec[" ++ decimal_text(value: scale) ++ "]")
+  }
+}
+
+// Internal: the text of a number, or of a string ("" for anything else): what a Dec field is read from.
+fn json_number_text(found: Option[Json_Tree]) -> View {
+  match found {
+    Some(value: Json_Num(text)) -> text
+    Some(value: Json_Str(text)) -> text
+    _ -> ""
+  }
+}
+
+// Internal: the count of a Dec[scale] that `text` is, exactly: JSON's number syntax, the whole text, with no more
+// digits after the point than the scale but zeros (`12.300` is 1230 at scale 2, `12.345` is None), and a count
+// within the Ints. parse_dec and decode read a Dec with it.
+//
+//   > json_count(text: "12.3", scale: 2)
+//   Some(value: 1230)
+//   > json_count(text: "1.25e1", scale: 1)
+//   Some(value: 125)
+//   > json_count(text: "12.345", scale: 2)
+//   None
+//   > json_count(text: "-92233720368547758.08", scale: 2)
+//   Some(value: -9223372036854775808)
+//   > json_count(text: "92233720368547758.08", scale: 2)
+//   None
+//   > json_count(text: "012", scale: 0)
+//   None
+fn json_count(text: View, scale: Int) -> Option[Int] {
+  match number_end(v: text, at: 0) {
+    Some(value: end) if end == len(text) -> count_exact(text, scale)
+    _ -> None
+  }
+}
+
+// Internal: json_count of text that is a JSON number.
+fn count_exact(text: View, scale: Int) -> Option[Int] {
+  let i = skip(v: text, at: 0, byte: 45)
+  let d = digits_end(v: text, at: i)
+  let f = skip(v: text, at: d, byte: 46)
+  let e = digits_end(v: text, at: f)
+  let tail = trailing_zeros(text, from: f, to: e)
+  let tz = match {
+    tail == e - f -> tail + trailing_zeros(text, from: i, to: d)
+    else -> tail
+  }
+  let head = leading_zeros(text, from: i, to: d)
+  let lz = match {
+    head == d - i -> head + leading_zeros(text, from: f, to: e)
+    else -> head
+  }
+  let total = (d - i) + (e - f)
+  let shift = exponent_of(text, at: e) - (e - f) + tz + scale
+  match {
+    total - lz - tz <= 0 -> Some(value: 0)
+    shift < 0 or total - lz - tz + shift > 19 -> None
+    else -> count_signed(
+      found: count_shift(
+        found: count_fold(text, i, d, f, k: lz, to: total - tz, value: 0),
+        n: shift
+      ),
+      neg: i > 0
+    )
+  }
+}
+
+// Internal: minus the digits of whole ++ fraction from the k-th up to the `to`-th, folded into `value`: negative, so
+// that the least Int is reached; None past it.
+fn count_fold(text: View, i: Int, d: Int, f: Int, k: Int, to: Int, value: Int) -> Option[Int] {
+  match {
+    k >= to -> Some(value)
+    k < d - i -> count_digit(text, i, d, f, k, to, value, digit: text[i + k] - 48)
+    else -> count_digit(text, i, d, f, k, to, value, digit: text[f + k - (d - i)] - 48)
+  }
+}
+
+// Internal: one step of count_fold, the k-th digit read.
+fn count_digit(
+  text: View,
+  i: Int,
+  d: Int,
+  f: Int,
+  k: Int,
+  to: Int,
+  value: Int,
+  digit: Int
+) -> Option[Int] {
+  match {
+    value < (-9223372036854775808 + digit) / 10 -> None
+    else -> count_fold(text, i, d, f, k: k + 1, to, value: value * 10 - digit)
+  }
+}
+
+// Internal: the (negative) count times 10^n, None past the least Int.
+fn count_shift(found: Option[Int], n: Int) -> Option[Int] {
+  match found {
+    Some(value) if n <= 0 -> Some(value)
+    Some(value) if value >= -922337203685477580 -> count_shift(
+      found: Some(value: value * 10),
+      n: n - 1
+    )
+    _ -> None
+  }
+}
+
+// Internal: the count with its sign: the negative one as it is, or negated, which the least Int cannot be.
+fn count_signed(found: Option[Int], neg: Bool) -> Option[Int] {
+  match found {
+    Some(value) if neg -> Some(value)
+    Some(value) if value > -9223372036854775808 -> Some(value: 0 - value)
+    _ -> None
+  }
+}
+
 // Internal: an optional whole number.
 fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int] {
   match found {

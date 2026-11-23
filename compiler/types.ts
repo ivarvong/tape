@@ -86,6 +86,8 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     dec: ['n', 'scale'],
     to_int: ['x', 'rounding'],
     to_dec: ['x', 'scale', 'rounding'],
+    parse_dec: ['text', 'scale'],
+    write_dec: ['out', 'value'],
   }),
 );
 /** A type as the compiler holds it: a name applied to types. */

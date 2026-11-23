@@ -2,7 +2,7 @@
 // can contain itself is boxed, and its values are pointers into the arena.
 import type { Program, TypeAst, TypeDecl } from '../ast.ts';
 import { F64, I32, I64, fail } from '../common.ts';
-import { BUILTIN_TYPES, CAPABILITIES, T, key } from '../types.ts';
+import { BUILTIN_TYPES, CAPABILITIES, T, key, scaleOf } from '../types.ts';
 import type { Type } from '../types.ts';
 import type { Wire, WireKind } from '../wire.ts';
 
@@ -268,7 +268,8 @@ export function adtOf(L: Layouts, t: Type, at: Place): Adt {
 // A row type: one constructor whose fields are Int, Bool or View, or Option of one of those for a column that
 // may be NULL (sql.ts decides which may: the checker refuses Int for a nullable column, and Option for one that
 // never is).
-const SCALAR: Readonly<Record<string, string>> = { Int: 'i', Float: 'f', Bool: 'b', View: 't' };
+// A Dec is its count in a row: an INTEGER (`i`), at the field's scale.
+const SCALAR: Readonly<Record<string, string>> = { Int: 'i', Dec: 'i', Float: 'f', Bool: 'b', View: 't' };
 const scalar = (name: string | undefined): string | undefined =>
   name !== undefined && Object.hasOwn(SCALAR, name) ? SCALAR[name] : undefined;
 export const rowKind = (f: { type: Type }): string | undefined =>
@@ -292,7 +293,11 @@ export function rowOf(L: Layouts, t: Type, at: Place): FlatAdt {
 
 /** What a field is in JSON, or null when it cannot be. */
 function jsonKind(L: Layouts, ft: Type, decoding: boolean): { kind: string; optional: boolean } | null {
-  const one = (x: Type | undefined): string | undefined => (x ? scalar(strip(L, x).name) : undefined);
+  // a Dec in JSON is `d` and its scale: text with exactly that many digits after the point
+  const one = (x: Type | undefined): string | undefined => {
+    const s = x ? scaleOf(strip(L, x)) : null;
+    return s !== null ? `d${s}` : x ? scalar(strip(L, x).name) : undefined;
+  };
   const own = one(ft);
   if (own !== undefined) return { kind: own, optional: false };
   const inner = decoding && ft.name === 'Option' ? one(ft.args[0]) : undefined;
@@ -316,7 +321,7 @@ export function shapeOf(L: Layouts, t: Type, at: Place, decoding: boolean): Shap
 export const isLinear = (t: Type): boolean => t.name === 'Buf';
 
 function describeKind(L: Layouts, k: WireKind, at: Place): Described {
-  if (k.k === 's') return { kind: scalar(k.base) };
+  if (k.k === 's') return { kind: k.base === 'Dec' ? `d${k.scale ?? 0}` : scalar(k.base) };
   if (k.k === 'rec') return { kind: 'o', of: describe(L, T(k.name), at) };
   if (k.k === 'list') return { kind: 'l', of: describeKind(L, k.of, at) };
   return { ...describeKind(L, k.of, at), optional: true };

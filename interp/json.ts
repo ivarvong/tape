@@ -4,7 +4,8 @@
 // compiled build words it.
 import type { Program, TypeAst, TypeDecl, Variant } from '../compiler/ast.ts';
 import { unreachable } from '../compiler/ast.ts';
-import { type Adt, type Buf, type Value, adt } from './value.ts';
+import { type Adt, type Buf, type Value, adt, isDec } from './value.ts';
+import { dec, parse, text as decText } from './dec.ts';
 
 export class Unsupported extends Error {}
 /** What a host gives for one cell of a row. */
@@ -12,8 +13,14 @@ export type Cell = number | string | null;
 
 const enc = new TextEncoder(),
   strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
-type Kind = 't' | 'i' | 'f' | 'b';
-const KIND: Readonly<Record<Kind, string>> = { t: 'text', b: 'true or false', i: 'a whole number', f: 'a number' };
+type Kind = 't' | 'i' | 'f' | 'b' | 'd';
+const KIND: Readonly<Record<Kind, string>> = {
+  t: 'text',
+  b: 'true or false',
+  i: 'a whole number',
+  f: 'a number',
+  d: 'a Dec',
+};
 
 /** The type a refined type's values are made of: `Key` (View where …) is View. */
 export const baseOf = (prog: Program, t: TypeAst): TypeAst => {
@@ -26,6 +33,7 @@ const kindOf = (prog: Program, t: TypeAst): Kind => {
   if (b === 'Int') return 'i';
   if (b === 'Float') return 'f';
   if (b === 'Bool') return 'b';
+  if (b === 'Dec') return 'd';
   throw new Unsupported(`${b} in JSON or a row`);
 };
 /** The declaration of a record type and its first constructor (a row and a method's message have one). */
@@ -36,9 +44,16 @@ export const recordOf = (prog: Program, name: string, what: string): { decl: Typ
   return { decl, first };
 };
 
+/** The scale of a Dec type, or of a refinement of one. */
+const scaleIn = (prog: Program, t: TypeAst): number => Number(baseOf(prog, t).args[0]?.name ?? 0);
 const cell = (prog: Program, t: TypeAst, v: Cell): Value => {
   const k = kindOf(prog, t);
   if (v === null) throw new Error(`NULL in a column read as ${t.name}`);
+  // a Dec is stored as its count
+  if (k === 'd') {
+    if (typeof v !== 'number' || !Number.isSafeInteger(v)) throw new TypeError(`${String(v)} in a column read as Dec`);
+    return dec(BigInt(v), scaleIn(prog, t));
+  }
   if (k === 'f') {
     if (typeof v !== 'number' || !Number.isFinite(v)) throw new TypeError(`${String(v)} in a column read as Float`);
     return v;
@@ -95,32 +110,40 @@ const err = (why: string): Adt => adt('Err', { error: enc.encode(why) });
 type Meets = (t: TypeAst, v: Value) => boolean;
 /** A value decoded, or why not. */
 type Got = { value: Value } | { why: string };
+/** Why a value is not one of a scalar shape. */
+const notOf = (sh: { kind: Kind; scale: number }): string =>
+  sh.kind === 'd' ? `not a Dec[${sh.scale}]` : `expected ${KIND[sh.kind]}`;
 /** What a type is in JSON: a scalar, a list of something, or a record. */
-type Shape = { k: 'scalar'; kind: Kind } | { k: 'list'; of: TypeAst } | { k: 'record' };
+type Shape = { k: 'scalar'; kind: Kind; scale: number } | { k: 'list'; of: TypeAst } | { k: 'record' };
 const shapeOf = (prog: Program, t: TypeAst): Shape => {
   const [of] = t.args;
   if (t.name === 'List' && of) return { k: 'list', of };
   const b = baseOf(prog, t).name;
-  return b === 'View' || b === 'Int' || b === 'Float' || b === 'Bool'
-    ? { k: 'scalar', kind: kindOf(prog, t) }
+  return b === 'View' || b === 'Int' || b === 'Float' || b === 'Bool' || b === 'Dec'
+    ? { k: 'scalar', kind: kindOf(prog, t), scale: scaleIn(prog, t) }
     : { k: 'record' };
 };
-const scalarOf = (k: Kind, x: unknown): Value | null =>
-  k === 't'
-    ? typeof x === 'string'
-      ? enc.encode(x)
+// a Dec from a number's text or from text, exactly at its scale
+const scalarOf = (k: Kind, x: unknown, scale: number): Value | null =>
+  k === 'd'
+    ? x instanceof Num || typeof x === 'string'
+      ? parse(x instanceof Num ? x.source : x, scale)
       : null
-    : k === 'b'
-      ? typeof x === 'boolean'
-        ? x
+    : k === 't'
+      ? typeof x === 'string'
+        ? enc.encode(x)
         : null
-      : k === 'f'
-        ? finiteOf(x)
-        : x instanceof Num
-          ? whole(x.source)
-          : typeof x === 'number' && Number.isSafeInteger(x)
-            ? BigInt(x)
-            : null;
+      : k === 'b'
+        ? typeof x === 'boolean'
+          ? x
+          : null
+        : k === 'f'
+          ? finiteOf(x)
+          : x instanceof Num
+            ? whole(x.source)
+            : typeof x === 'number' && Number.isSafeInteger(x)
+              ? BigInt(x)
+              : null;
 // "[2]: reason", or "[2][0]: reason" when the element was itself a list
 const at = (i: number, why: string): string => (why.startsWith('[') ? `[${i}]${why}` : `[${i}]: ${why}`);
 
@@ -133,8 +156,8 @@ function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
     case 'list':
       return Array.isArray(x) ? listAs(prog, meets, sh.of, x) : { why: 'expected an array' };
     case 'scalar': {
-      const v = scalarOf(sh.kind, x);
-      if (v === null) return { why: `expected ${KIND[sh.kind]}` };
+      const v = scalarOf(sh.kind, x, sh.scale);
+      if (v === null) return { why: notOf(sh) };
       if (typeof x === 'string' && !wellFormed(x)) return { why: 'text with a lone surrogate' };
       return meets(t, v) ? { value: v } : { why: `not a valid ${t.name}` };
     }
@@ -212,8 +235,8 @@ function fit(
     }
     const some = (v: Value): Value => (inner ? adt('Some', { value: v }) : v);
     if (sh.k === 'scalar') {
-      const value = scalarOf(sh.kind, x);
-      if (value === null) return { depth, why: `${fl.name}: expected ${KIND[sh.kind]}` };
+      const value = scalarOf(sh.kind, x, sh.scale);
+      if (value === null) return { depth, why: `${fl.name}: ${notOf(sh)}` };
       if (typeof x === 'string' && !wellFormed(x)) return { depth, why: `${fl.name}: text with a lone surrogate` };
       f[fl.name] = some(value);
       refined.push({ name: fl.name, type, value });
@@ -282,6 +305,8 @@ export function writeJson(prog: Program, out: Buf, v: Value, writeText: (out: Bu
     if (x instanceof Uint8Array) return writeText(out, x);
     // the shortest digits that read back as it, as the host's float_text
     if (typeof x === 'number') return text(String(x));
+    // a Dec as text with its scale's digits, exact for any reader
+    if (isDec(x)) return text(`"${decText(x)}"`);
     if (!isAdt(x)) throw new Unsupported(`write_json of ${x === undefined ? 'nothing' : `a ${x.k}`}`);
     const made = prog.ctors.get(x.c),
       decl = made?.decl,

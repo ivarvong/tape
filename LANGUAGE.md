@@ -31,7 +31,8 @@ refused (P08). A number with a point is an exact decimal, a Dec whose scale is t
 `1e-3f`, `6.02E23f`, at most 20 significant digits and no larger than the largest Float (L06); an exponent with
 no `f` is refused (L06). Text literals are in double quotes, on one line, with the escapes
 `\" \\ \/ \n \r \t \b \f`. `\(e)` in a literal is a hole: `"Hello, \(name) #\(n)"` is the text with the value
-of each expression in its place, a View as it is, an Int in decimal, and a Float in the shortest digits that read
+of each expression in its place, a View as it is, an Int in decimal, a Dec with exactly its scale's digits after
+the point (`12.30`, `-0.05`), and a Float in the shortest digits that read
 back as it (`0.1`, `5`, `1e+21`, as JavaScript's `String` writes a number). A hole holds one expression with no text
 literal in it (L05); a value of any other type is refused (C19). Appended to a Buf, the text is written straight
 into it. A newline ends a declaration or a step, except inside `( )` and `[ ]`, and
@@ -266,6 +267,13 @@ used, and the row type's fields against the columns (`*` means the row type's fi
 to a query as a number, which SQLite keeps as REAL, and a REAL column reads into a Float field (a cell that is
 not a finite number stops the request). In JSON a Float is a number: decoded from one that is finite (text, and
 `1e400`, are refused: `r: expected a number`), and written in the shortest digits that read back as it.
+
+A Dec is given to a query as its count, an INTEGER (12.30 is 1230), and an INTEGER column reads into a Dec field
+as a count at the field's scale; so the SQL sees counts, and `CHECK (amount > 0)` and `SUM(amount)` work on them.
+A count beyond ±2^53 stops the request rather than reach the database rounded. In JSON a Dec is written as text,
+`"12.30"`, exact for any reader, and decoded from a number or text that is exactly a Dec of the field's scale
+(`12.3` and `"12.300"` for a `Dec[2]`, but not `12.345`: `amount: not a Dec[2]`). `parse_dec(text, scale: 2)` reads
+one from text the same way, as an `Option`.
 
 **A call is a commit point.** Writes made before a `call` or `ask` are durable when it is sent. The run may end
 there (the object is reset, the reply is lost), so whatever must happen afterwards needs a timer set before the
@@ -661,6 +669,7 @@ what went before.
 | When | Change |
 |---|---|
 | 23 November 2026 | `Dec[s]`: an exact number with s digits after the point (0 to 18), an Int count of 10^-s. `12.30` is a `Dec[2]` (a point and no `f`, which was L06); `+ -` of one scale, `*` adding the scales, comparisons exact across scales, overflow a trap; `rescale` up and `round` down, the one way each; `mul` and `div` rounded once from an exact 128-bit intermediate (compiler/math/dec.ts), with std's `Rounding` (`HalfEven`, `HalfUp`, `Down`, `Up`, `Floor`, `Ceiling`); `dec(n, scale:)`, `to_int`, `float(d)` and `to_dec(x, scale:, rounding:)` the only conversions; `abs`, `min`, `max` |
+| 23 November 2026 | a Dec at the edges: a hole and `write_dec` write its digits; `parse_dec(text, scale:)`; JSON in from a number or text, exact at the field's scale (`amount: not a Dec[2]` otherwise), out as text; SQL as its count, an INTEGER, within ±2^53. apps/tickets and apps/trace write cents and basis points as Decs (`"$\(0.01 * cents)"`) instead of by hand |
 | 23 November 2026 | `write_json` writes what `decode` reads (feedback 20261123T030026.990Z-e454772fe5c9: a 5-constructor result was 30 lines of hand JSON): an `Option` field (`None` has no key), a type with several constructors (`{"Sets": {…}}`, which decode now reads back as that constructor), a `List` on its own and `Int`, `Bool`, `View`; `decode(json:, as: List[T])` reads an array. C09 no longer refuses an `Option` field, several constructors or a list on its own |
 | 23 November 2026 | a Float in JSON (a finite number in, the shortest digits out, in records and lists) and in SQL (bound as a number, kept REAL by SQLite; a REAL column reads into a Float field) |
 | 23 November 2026 | `sin`, `cos`, `atan2`, `exp`, `log`, `pow` on Float: musl's libm ported to Wasm (compiler/math), only what a program calls goes into its module; never the host's `Math`, whose results differ between engines |
@@ -682,7 +691,7 @@ what went before.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
 - Who is calling. A program is handed the request; identity is its own business.
 - JSON for bytes and maps.
-- A Dec in text, in JSON and in SQL.
+- A Dec beyond ±2^53 units in the database; a Dec flag; functions generic over a Dec's scale.
 
 ## 13. What went
 

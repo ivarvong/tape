@@ -28,6 +28,8 @@ const FLIP: Readonly<Record<string, string>> = { '>=': '<=', '<=': '>=', '>': '<
 const JSON_TYPE: Readonly<Record<string, string>> = {
   Int: 'integer',
   Float: 'number',
+  // a Dec is written as text, "12.30", and read from a number or text
+  Dec: 'string',
   Bool: 'boolean',
   View: 'string',
 };
