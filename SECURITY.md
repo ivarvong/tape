@@ -20,6 +20,5 @@ Please include what you found, how to reproduce it (a program, a request, a comm
 
 These are listed in [`STATUS.md`](STATUS.md#known-limitations); there is no need to report them again:
 
-- A woken run that fails on a storage error removes its timer.
 - A published page is served from the API's origin as `text/html` or `image/svg+xml`, with no
   `Content-Security-Policy` and no `X-Content-Type-Options: nosniff`.

@@ -289,13 +289,23 @@ export class Name extends DurableObject {
   }
   // The alarm: the data runs every timer that is due (the latest version's `woken`), and the next one is armed.
   // A run cut short (this object reset meanwhile) left its timer in place, and the alarm is retried, so each timer
-  // is run at least once; a run that traps is recorded here and not retried.
+  // is run at least once; a run that fails on storage keeps its timer, set for later (host/run.ts WAKE_RETRY); a
+  // run that traps is recorded here and not retried.
   override async alarm(): Promise<void> {
     const [self] = this.#sql.exec('SELECT account, name FROM _tape_self').toArray();
     if (!self || !this.#alive()) return;
     const account = str(self.account),
       name = str(self.name);
-    const { ran, next } = await this.data(account, name).wakeDue();
+    const data = this.data(account, name);
+    // a jepsen-* account: the plan, if one is set, picks a fault for each due timer's run (only storage_error)
+    const faulty: number[] = [];
+    if (FAULTY.test(account)) {
+      const now = Date.now(),
+        faults = this.ctx.exports.Name.getByName(`${account}/~faults`);
+      for (const w of await data.wakesSet())
+        if (w.due <= now && (await faults.fault(`wake>${name}#${w.key}`))?.kind === 'storage_error') faulty.push(w.key);
+    }
+    const { ran, next } = await data.wakeDue(faulty);
     for (const r of ran)
       this.#sql.exec(
         'INSERT INTO _tape_woken VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)',

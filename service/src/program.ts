@@ -848,21 +848,29 @@ export class Program extends DurableObject<Env> {
    * writes, marked partial until the last, so a woken run cut short while it waited on a call (its object reset)
    * still has the log of what it committed: the timers it set name it as their parent, and its trace is not cut
    * off above them. */
-  async #wakeOne(app: App, version: number, key: number): Promise<WokenRun | null> {
+  // faulty (jepsen-* only, drawn by the alarm): the run's first commit fails, as a storage error would
+  async #wakeOne(app: App, version: number, key: number, faulty = false): Promise<WokenRun | null> {
     const began = Date.now(),
       bytes = enc.encode(JSON.stringify({ key }));
     const [row] = this.ctx.storage.sql.exec('SELECT due FROM _wakes WHERE key = ?1', key).toArray();
     const woke: Woke = { key, due: typeof row?.due === 'number' ? row.due : null };
     const log = this.#logger(version, bytes, { woke });
+    let fault = faulty;
     const transaction: Transaction = f =>
       this.ctx.storage.transactionSync(() => {
         const r = f(),
           { out, pending } = stretchOf(r);
+        if (fault) {
+          fault = false;
+          throw new StorageFault('jepsen: injected storage error at commit; the transaction was rolled back');
+        }
         if (Boolean(out) || Boolean(pending)) log.keep(app.effects, Boolean(pending));
         return r;
       });
     try {
-      const w = await app.wake(key, { transaction });
+      // a storage failure keeps the timer, set for later; anything else (a trap) removes it
+      const transient = (e: unknown): boolean => e instanceof StorageFault || TRANSIENT.test(messageOf(e));
+      const w = await app.wake(key, { transaction, transient });
       if (!w) return null;
       log.keep(w.effects, false);
       return { key, version, status: w.status, due: woke.due, id: log.id(), began, took: Date.now() - began };
@@ -870,13 +878,13 @@ export class Program extends DurableObject<Env> {
       return { key, version, status: 'failed', error: messageOf(e), began, took: Date.now() - began };
     }
   }
-  async wakeDue(): Promise<{ ran: WokenRun[]; next: number | null }> {
+  async wakeDue(faulty: readonly number[] = []): Promise<{ ran: WokenRun[]; next: number | null }> {
     const version = this.env.PLAN.latest,
       ran: WokenRun[] = [];
     if (this.nextWake() === null) return { ran, next: null };
     const app = this.app(version);
     for (const key of app.due()) {
-      const one = await this.#wakeOne(app, version, key);
+      const one = await this.#wakeOne(app, version, key, faulty.includes(key));
       if (one) ran.push(one);
     }
     return { ran, next: this.nextWake() };

@@ -771,9 +771,9 @@ earliest timer becomes the name's Durable Object alarm; the alarm runs every due
 version, logged like a request and traced as a child span of the run that set it, so the two are one trace. A
 timer's row is removed in the same transaction as its run's last writes: a run cut short (the object reset while it
 waited on a call) is woken again, and each run carries on from the data. A run that traps is recorded and not
-retried. So is, today, a run that fails on a storage error such as `SQLITE_BUSY`: its timer is removed as if the
-run had trapped, and the work is not done. That is a known bug ([`STATUS.md`](../STATUS.md#known-limitations));
-until it is fixed, "at least once" holds only for runs cut short at a call. Other programs cannot call `woken`, and no tool policy grants `Timer`.
+retried: it would trap again. A run that fails on a storage error such as `SQLITE_BUSY` keeps its timer, set for
+later by a wait that doubles with each such failure in a row (1 s, 2 s, … up to 15 minutes), so it too runs at least
+once. Other programs cannot call `woken`, and no tool policy grants `Timer`.
 
 Retrying is a library, not a feature: `std/retry.tape` is plain Tape on top of `wake`.
 

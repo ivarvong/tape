@@ -770,6 +770,49 @@ fn count(found: Option[Count]) -> Buf {
       }
     });
 
+    it("a timer whose run fails on storage is kept and run later, not lost as a trap's is", async () => {
+      // before: any failure but a cut removed the timer, so a transient storage error lost the work for good
+      const a = 'jepsen-r-wakestorage';
+      const source = `schema "CREATE TABLE IF NOT EXISTS hits(id INTEGER PRIMARY KEY, n INTEGER NOT NULL)"
+type Hit { Hit(n: Int) }
+export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Hit, View] {
+  let Wake(key) = message
+  do sql_exec(
+    query: "INSERT INTO hits(id, n) VALUES (:key, 1) ON CONFLICT(id) DO UPDATE SET n = n + 1",
+    key,
+    repeat: True
+  )
+  Ok(value: Hit(n: key))
+}
+fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
+  do wake(after: 0, key: 1)
+  respond(status: 202)
+}
+`;
+      const up = await call(`/${a}/ticker`, { method: 'POST', body: source });
+      expect([up.status, up.ok ? '' : await up.text()]).toEqual([201, '']);
+      await faults(a, { storage_error: 1 });
+      expect((await call(`/${a}/ticker/v/1/`, { method: 'POST' })).status).toBe(202);
+      let w: unknown = null;
+      for (let i = 0; i < 50 && list(at(w, 'runs')).length === 0; i++) {
+        await pause(100);
+        w = await got(`/${a}/ticker/wakes`);
+      }
+      await faults(a, null);
+      expect(list(at(w, 'runs')).map(r => [at(r, 'key'), at(r, 'status')])).toEqual([[1, 'failed']]);
+      expect(list(at(w, 'set')).map(s => at(s, 'key'))).toEqual([1]);
+      // tried again after the first wait (1 s), with no fault: it runs once and its timer goes
+      for (let i = 0; i < 60 && list(at(w, 'set')).length > 0; i++) {
+        await pause(100);
+        w = await got(`/${a}/ticker/wakes`);
+      }
+      expect([at(w, 'set'), list(at(w, 'runs')).map(r => at(r, 'status'))]).toEqual([[], ['ok', 'failed']]);
+      expect(list(at(await got(`/_faults/${a}`), 'faults')).map(f => [at(f, 'site'), at(f, 'kind')])).toContainEqual([
+        'wake>ticker#1',
+        'storage_error',
+      ]);
+    });
+
     it('two retries that both hear a refusal give the seats back once', async () => {
       // before: both voided the sale and both added the seats back (floor 3 -> 4 after selling none)
       const a = 'jepsen-r-doublefree';

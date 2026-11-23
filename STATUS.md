@@ -20,6 +20,7 @@ Numbers on this page were produced by the command named beside them on the tree 
 | The rules refuse the bugs they were written for. | `apps/tickets/plants.ts`: of 52 planted bugs, 43 refused by the compiler, 8 caught by the scenarios, 1 missed. `experiments/c78/timed-mutants.ts`: 7 of 7 in `examples/timed`. Each rule has a program it refuses and one it accepts (`test/rules-retries.ts`, `test/machines.ts`, `test/timers-way-out.ts`, `test/timers-keys.ts`). | per rule |
 | Programs keep their invariants under lost, dropped and cut calls, timers and time. | `proof/sim-all.ts`: `tape sim` on every program with a `handle`, alone and in the groups deployed together: 37 runs, 36 clean and `examples/trap.tape`, which traps on purpose; 29 of them check invariants (61 declared in 30 files). `proof/sim-invariants.ts`: of 34 bugs planted one against each invariant, 29 caught by it, 3 refused by the compiler first, 2 not caught. `proof/sim-plants.ts`: of tickets' 49 planted bugs that type-check, 40 found from the programs alone in 500 guided runs, 5 of them refused by no rule; 4 missed by both the rules and the simulator. | sampled, guided |
 | The simulator's host is the service's. | The same `host.ts` source in both. `service/test/sim-fidelity.test.ts`: 117 requests to `apps/tickets` answered identically by the simulator's host and by the service in workerd. | one transcript, requests one at a time |
+| A timer runs at least once: a run cut short or failing on storage is tried again; only a trap removes it. | `test/timers-transient.ts`: a run whose commit fails on `SQLITE_BUSY` keeps its timer, moved later by a wait that doubles to a 15-minute cap, and runs once when storage recovers; a trap removes it (the host before: the timer gone after one `SQLITE_BUSY`). `service/test/service.test.ts`: a jepsen-* plan's `storage_error` at the new `wake` hop fails a woken run, and the alarm runs it again after the wait. | per test |
 | A simulator run can be had again. | `test/sim-core.ts`, `test/sim-auto.ts`: a script and seed replay to the same log, random draws included, however long the machine takes between two choices. | per test |
 | JSON in is what was sent; anything else is refused. | `test/json.ts`: 300 generated nested values come back as `JSON.stringify` writes them; the same with one thing wrong inside are refused. | sampled |
 | Two programs that disagree about a message do not talk. | Fingerprints over the whole message: `test/json.ts` (a field two records down), `test/calls.ts`. | per test |
@@ -47,34 +48,30 @@ The files under `proof/results/` are written by these runs and are not read back
 
 Bugs that are reproduced and not fixed, and gaps in the checks that can hide one.
 
-1. **A woken run that fails on a storage error loses its timer.** A run cut short at a call keeps its timer and is
-   woken again. Any other failure, including a transient one such as `SQLITE_BUSY`, removes the timer as a trap
-   does, and the work is never done. Reproduced on this tree. The fault harness injects storage errors on requests
-   and calls, not on timers.
-2. **The simulation proofs pass when the simulator crashes on a program.** `proof/sim-all.ts` treats an exception
+1. **The simulation proofs pass when the simulator crashes on a program.** `proof/sim-all.ts` treats an exception
    from building a program's model as "no handle", `proof/sim-invariants.ts` counts it as refused by the compiler,
    and `proof/interp-effects.ts` drops the group. Each would exit 0, and the counts above would drop by one or two,
    within the floors.
-3. **Changing a flag while a request waits on a call makes its replay differ.** The request reads the new value
+2. **Changing a flag while a request waits on a call makes its replay differ.** The request reads the new value
    after the call, while its log holds the flags it started with, so replaying the log gives another answer
    (reproduced: the live answer used the new value, the replay the old one). Only tests and tools call
    `setFlags` today.
-4. **The log-replay row of `proof/verify.ts` compares three builds with each other, not with the answer the request
+3. **The log-replay row of `proof/verify.ts` compares three builds with each other, not with the answer the request
    originally got.**
-5. **The Git capability is not exercised by the gate.** `test/git.ts` needs a local build of
+4. **The Git capability is not exercised by the gate.** `test/git.ts` needs a local build of
    [ply](https://github.com/ivarvong/ply) and reports ok when it is absent, as it is in CI. `examples/bump.tape`
    (the Git capability) is also the largest part of what the interpreter does not follow.
-6. **`test/typed.ts` looks for `// @ts-nocheck` only on a file's first line.** `proof/untyped.txt` is empty, and no
+5. **`test/typed.ts` looks for `// @ts-nocheck` only on a file's first line.** `proof/untyped.txt` is empty, and no
    tracked file opts out of the type checker today, but a second-line comment would pass the test.
-7. **A row whose machine column holds an undeclared state traps** at a match on it with a bare `unreachable`, not a
+6. **A row whose machine column holds an undeclared state traps** at a match on it with a bare `unreachable`, not a
    message that names the state. The triggers keep such rows out unless the data is changed past them.
-8. **C80 (`final`) is imprecise.** It follows a value a bounded number of steps and refuses two programs the tests
+7. **C80 (`final`) is imprecise.** It follows a value a bounded number of steps and refuses two programs the tests
    hold up as correct, because a call counts as reading the clock when anything in the called function does.
-9. **Published pages share the API's origin.** A public route can answer `text/html` or `image/svg+xml` from the
+8. **Published pages share the API's origin.** A public route can answer `text/html` or `image/svg+xml` from the
     same origin as the API, with no `Content-Security-Policy` and no `X-Content-Type-Options: nosniff`. The API's
     credentials are bearer tokens, not cookies, so a page cannot use them, but pages of different accounts are not
     isolated from each other.
-10. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
+9. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
     it (`:name`).**
 
 The language's own limits are in [`LANGUAGE.md` section 11](LANGUAGE.md#11-not-defined-yet). In short: no floats;

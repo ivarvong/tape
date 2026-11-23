@@ -211,7 +211,7 @@ state needs no `_` arm.
 | `sql_move(row: T, query: "UPDATE … WHERE … RETURNING *")` | `Sql` | a compare-and-set: `Moved(value)`, `Raced(now)` when another run moved the row first, `NoRow` |
 | `call(to:, method:, send:, reply:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError]`. A repeat of a `once` key gets the first run's reply and runs nothing: its stored reply, or, sent while the first run waits on a call, that run's reply when it comes (`Unreachable` if it does not come within the budget: send it again) |
 | `ask(to:, method:, send:, reply:, within:)` | `Remote` | a read: the same, with no key |
-| `wake(after: ms, key: n)` | `Timer` | asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again; a run that fails on a storage error is not retried, a known bug ([`STATUS.md`](STATUS.md#known-limitations)) |
+| `wake(after: ms, key: n)` | `Timer` | asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again, and so does a run that fails on a storage error, after a wait that doubles each time (1 s up to 15 min); a run that traps is not retried |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
 | `rollback(out)` | | answers `out` and undoes this request's writes since its last call; the effect log marks each write and each timer it undid `undone` (as it does for a trap), and so does the trace |

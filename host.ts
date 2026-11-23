@@ -124,10 +124,14 @@ function ownTables(sql: Sql, module: WebAssembly.Module): void {
     if (sql.exec("SELECT 1 FROM pragma_table_info('_calls') WHERE name = 'message'").toArray().length === 0)
       sql.exec('ALTER TABLE _calls ADD COLUMN message TEXT');
   }
-  if (methods.some(m => m.name === 'woken'))
+  if (methods.some(m => m.name === 'woken')) {
     sql.exec(
-      'CREATE TABLE IF NOT EXISTS _wakes(key INTEGER PRIMARY KEY, due INTEGER NOT NULL, trace TEXT, span TEXT NOT NULL)',
+      'CREATE TABLE IF NOT EXISTS _wakes(key INTEGER PRIMARY KEY, due INTEGER NOT NULL, trace TEXT, span TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0)',
     );
+    // an object made before failed runs were retried: add the count of storage failures in a row (0 for its rows)
+    if (sql.exec("SELECT 1 FROM pragma_table_info('_wakes') WHERE name = 'tries'").toArray().length === 0)
+      sql.exec('ALTER TABLE _wakes ADD COLUMN tries INTEGER NOT NULL DEFAULT 0');
+  }
 }
 
 /** The module's schema statements and migrations run on the database, with its machines' triggers put back after. */

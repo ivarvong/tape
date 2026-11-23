@@ -71,6 +71,6 @@ node service/jepsen/seams-run.ts --base $BASE --token-file <path> --prefix jepse
 
 - The checks reach the service over HTTP only: its internal tables are seen through traces and answers.
 - Whether the Wasm builds are served from Workers Cache cannot be seen from outside.
-- No check here sends two overlapping requests with one once key (`proof/schedule.ts` does, on the host), and no
-  fault run injects a storage error into a timer's run ([`STATUS.md`](../STATUS.md#known-limitations), limitation 1).
+- No check here sends two overlapping requests with one once key (`proof/schedule.ts` does, on the host). A plan's
+  `storage_error` also reaches timers' runs (the `wake` hop, `service/src/faults.ts`).
 - Production runs are made by hand. Nothing runs them on each deploy.

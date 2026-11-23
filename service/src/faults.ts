@@ -20,6 +20,7 @@
 //   storage_error         (KV router -> shard) the shard's transaction fails as it commits, after every statement
 //                         ran: SQLite rolls it back, and the shard answers 500 {"applied": false}
 //                         (a call between programs: the callee's transaction fails at commit, and the call is refused)
+//                         (a timer: the first commit of its woken run fails; the timer is kept and tried again later)
 //   reset_callee_opened   the callee's object is reset after it opened its record of the call, before the run
 //                         (a call from a router only: a call between programs opens no record before its run)
 //   reset_callee_ran      the callee ran and committed, then its object is reset before it recorded the run (a
@@ -36,6 +37,7 @@
 //            lost, drop, slow_reply, trace_store_error, and lookup_error (KV)
 //   call     a program calling another: overload, delay, reset_callee_before, storage_error, reset_callee_ran,
 //            reset_callee_after, lost, drop, slow_reply, race, reset_caller, reset_caller_first
+//   wake     a timer's woken run (site wake>name#key, drawn by the alarm): storage_error
 // A kind that has no meaning at a hop is not injected there; it is logged as ignored.
 //
 // A plan may instead name the faults, one per position: { points: [{ hop, n, kind }] } gives the n-th call (from 0)
@@ -59,7 +61,7 @@ export const KINDS = [
   'lookup_error',
 ] as const;
 export type Kind = (typeof KINDS)[number];
-export type Hop = 'router' | 'call';
+export type Hop = 'router' | 'call' | 'wake';
 /** The fault one call draws: its kind, and the wait that kind takes. */
 export type Fault = { kind: Kind; ms: number };
 /** A plan: probabilities per kind under a seed, or the faults named one per position. */
@@ -99,8 +101,12 @@ export const HOP_KINDS: Readonly<Record<Hop, readonly Kind[]>> = {
     'reset_caller',
     'reset_caller_first',
   ],
+  wake: ['storage_error'],
 };
-export const hopOf = (site: string): Hop => (/^(kv|router)>/.test(site) ? 'router' : 'call');
+export const hopOf = (site: string): Hop => {
+  if (site.startsWith('wake>')) return 'wake';
+  return /^(kv|router)>/.test(site) ? 'router' : 'call';
+};
 
 // xmur3 then mulberry32: a few uniform numbers from a string
 const seeded = (text: string): (() => number) => {

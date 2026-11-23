@@ -314,7 +314,7 @@ function wake(L: Linked, key: number, after: number): number {
     const e = { wake: key, after: ms, due: Date.now() + ms };
     if (L.live)
       sqlOf(L).exec(
-        'INSERT INTO _wakes(key, due, trace, span) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key) DO UPDATE SET due = excluded.due, trace = excluded.trace, span = excluded.span',
+        'INSERT INTO _wakes(key, due, trace, span) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key) DO UPDATE SET due = excluded.due, trace = excluded.trace, span = excluded.span, tries = 0',
         key,
         e.due,
         L.span?.trace ?? null,
@@ -781,18 +781,33 @@ function invariants(L: Linked, module: WebAssembly.Module, settled: boolean): Br
 export type Woken = { key: number; status: Status; body: Uint8Array; effects: Effect[] };
 const isCut = (err: unknown): boolean => typeof err === 'object' && err !== null && 'cut' in err && Boolean(err.cut);
 
+// The shapes of a storage failure (not the program's doing), as SQLite and the Durable Object runtime report them:
+// the same pattern as the service's (service/src/program.ts TRANSIENT; test/timers-transient.ts holds them equal).
+export const TRANSIENT =
+  /SQLITE_(BUSY|LOCKED|IOERR|FULL|NOMEM|CANTOPEN|PROTOCOL)|Network connection lost|Durable Object (?:storage|reset)|internal error/i;
+const transientError = (err: unknown): boolean =>
+  TRANSIENT.test(typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : String(err));
+/** How long a timer whose run failed on storage waits before it is tried again: `first` ms, doubling, at most `most`. */
+export const WAKE_RETRY = { first: 1000, most: 15 * 60 * 1000 };
+
 // Run `woken` for one due key, as a child span of the run that set it. Its row goes in the same transaction as
 // the run's last writes, so a run cut short (the object reset while it waited on a call) is woken again: at
-// least once, and each run continues from the data, like any request. A run that traps or rolls back is not
-// retried by the timer; its row is removed and the failure is in its log. Null when the key is not due.
+// least once, and each run continues from the data, like any request. A run that fails on storage (`transient`,
+// by default TRANSIENT on its message) keeps its timer too, set for later: WAKE_RETRY's wait, doubling with each
+// such failure in a row. A run that traps or rolls back is not retried by the timer: it would fail the same way;
+// its row is removed and the failure is in its log. Null when the key is not due.
 async function wakeDue(
   L: Linked,
   key: number,
-  { transaction = direct, now = Date.now() }: { transaction?: Transaction; now?: number } = {},
+  {
+    transaction = direct,
+    now = Date.now(),
+    transient = transientError,
+  }: { transaction?: Transaction; now?: number; transient?: (err: unknown) => boolean } = {},
 ): Promise<Woken | null> {
   const m = L.M.find(x => x.name === 'woken') ?? fail('this program exports no woken');
   const sql = sqlOf(L);
-  const [row] = sql.exec('SELECT due, trace, span FROM _wakes WHERE key = ?1', key).toArray();
+  const [row] = sql.exec('SELECT due, trace, span, tries FROM _wakes WHERE key = ?1', key).toArray();
   const due = Number(row?.['due']);
   if (!row || due > now) return null;
   const span = cellText(row['span']);
@@ -808,7 +823,18 @@ async function wakeDue(
     return { key, ...answerOf(ran.out), effects: ran.effects };
   } catch (err) {
     // a run cut short keeps its timer: it is woken again
-    if (!isCut(err)) transaction(gone);
+    if (isCut(err)) throw err;
+    if (transient(err)) {
+      const tries = Number(row['tries'] ?? 0),
+        wait = Math.min(WAKE_RETRY.first * 2 ** Math.min(tries, 30), WAKE_RETRY.most);
+      try {
+        transaction(() =>
+          sql.exec('UPDATE _wakes SET due = ?1, tries = tries + 1 WHERE key = ?2 AND span = ?3', now + wait, key, span),
+        );
+      } catch {
+        // storage is still failing: the timer stays as it was, due, and is tried when the host next runs due timers
+      }
+    } else transaction(gone);
     throw err;
   }
 }
@@ -909,7 +935,10 @@ export function link(module: WebAssembly.Module, options: LinkOptions = {}) {
     declared: (): Declared[] => declaredIn(module),
     due: (now = Date.now()): number[] => dueKeys(L, now),
     next: (): number | null => nextDue(L),
-    wake: (key: number, o?: { transaction?: Transaction; now?: number }): Promise<Woken | null> => wakeDue(L, key, o),
+    wake: (
+      key: number,
+      o?: { transaction?: Transaction; now?: number; transient?: (err: unknown) => boolean },
+    ): Promise<Woken | null> => wakeDue(L, key, o),
   };
 }
 export type App = ReturnType<typeof link>;
