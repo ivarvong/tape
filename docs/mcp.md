@@ -217,8 +217,15 @@ browsers, so a web page cannot use its visitors as clients.
 One line per call (feedback too) to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
 requests and their statuses, the steps used, the compile, run and total times, a hash of the client's address, the
-user agent, and whether it was rate limited. Not the program's source, the requests' bodies or the responses. We
-use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
+user agent, and whether it was rate limited. Not the program's source, the requests' bodies or headers, or the
+responses. We use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
+
+A program deployed on the service (not one sent to `run`, which keeps nothing) records each request it serves in
+its effect log, with these request headers, the ones the program can read with `header_of`: `accept`,
+`accept-language`, `content-type`, `if-match`, `if-none-match`, `if-modified-since`, `idempotency-key`, and any
+`x-` header except `x-forwarded-*` and `x-real-ip`; each value cut at 1 KB, 32 at most
+([`service/src/web.ts`](../service/src/web.ts), `PASSED`). Never `cookie`, `authorization`, the client's address
+or the headers Cloudflare adds.
 
 The address is never logged. Its hash is SHA-256 of the address, the UTC day and a secret salt, cut to 16 hex
 digits: without the salt it cannot be reversed by trying every address, and one client's calls are linked for one

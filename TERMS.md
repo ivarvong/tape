@@ -19,6 +19,15 @@ timings, step counts, a hash of your IP address salted with a secret and the day
 log your program's source, your requests' bodies or the responses. We use this to improve Tape and the service.
 What each call logs is listed in [`docs/mcp.md`](docs/mcp.md#what-is-logged).
 
+A program deployed on the service is different: recording every request it serves is what the service does (a run
+is replayed and traced from its effect log). Its effect log keeps each request's method, target and body, and these
+request headers, which the program can also read: `accept`, `accept-language`, `content-type`, `if-match`,
+`if-none-match`, `if-modified-since`, `idempotency-key`, and any `x-` header except `x-forwarded-*` and
+`x-real-ip`; each value cut at 1 KB, 32 headers at most. Never `cookie`, `authorization`, the client's address or
+the headers Cloudflare adds. That log is the program's own data, readable by its account's operator (and through the
+signed trace links the operator hands out), and is kept as the program's retention says; it is not the call metadata above. Compile and run calls keep nothing of the
+programs and requests they are sent.
+
 Logs are kept for 7 days, the retention of Workers Logs (Workers Observability) on this account's Workers Paid plan,
 and then deleted by Cloudflare. Nothing copies them elsewhere (no Logpush job, no tail consumer).
 
