@@ -1,26 +1,26 @@
 {
   "bench/money.tape": {
-    "bytes": 31475,
-    "functions": 122
+    "bytes": 31397,
+    "functions": 121
   },
   "bench/suite/crud.tape": {
-    "bytes": 31228,
+    "bytes": 31362,
     "functions": 116
   },
   "bench/suite/ledger.tape": {
-    "bytes": 31458,
+    "bytes": 31577,
     "functions": 117
   },
   "bench/suite/webhook.tape": {
-    "bytes": 31695,
+    "bytes": 31822,
     "functions": 116
   },
   "examples/bump.tape": {
-    "bytes": 33938,
+    "bytes": 33943,
     "functions": 119
   },
   "examples/cart.tape": {
-    "bytes": 27338,
+    "bytes": 27461,
     "functions": 112
   },
   "examples/counter.tape": {
@@ -32,7 +32,7 @@
     "functions": 38
   },
   "examples/fulfillment.tape": {
-    "bytes": 58669,
+    "bytes": 58679,
     "functions": 150
   },
   "examples/git.tape": {
@@ -52,11 +52,11 @@
     "functions": 78
   },
   "examples/ledger.tape": {
-    "bytes": 28578,
+    "bytes": 28591,
     "functions": 98
   },
   "examples/orders.tape": {
-    "bytes": 32001,
+    "bytes": 32006,
     "functions": 109
   },
   "examples/payments.tape": {
@@ -72,7 +72,7 @@
     "functions": 99
   },
   "examples/shortener.tape": {
-    "bytes": 27079,
+    "bytes": 27089,
     "functions": 97
   },
   "examples/stats.tape": {
@@ -84,7 +84,7 @@
     "functions": 90
   },
   "examples/tickets.tape": {
-    "bytes": 43887,
+    "bytes": 43874,
     "functions": 127
   },
   "examples/todo-decode.tape": {
@@ -96,7 +96,7 @@
     "functions": 79
   },
   "examples/todo.tape": {
-    "bytes": 38274,
+    "bytes": 38259,
     "functions": 139
   },
   "examples/trap.tape": {
