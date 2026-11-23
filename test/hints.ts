@@ -541,4 +541,18 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   same('…which compiles', said(SLUG.replace('every_byte(self, fn', 'every_byte(v: self, keep: fn')), 'compiled');
 }
 
+// ---- a subquery in FROM with no name. `… FROM (SELECT … GROUP BY region) ORDER BY total` (2 runs on the 2026-11-23f
+// bench, twice each) was C67 "a subquery in FROM needs an alias" with the generic fix "one SELECT … without WITH …".
+// The fix now writes the statement back with `AS t`, and that statement compiles.
+{
+  const inner = 'SELECT region, SUM(amount) AS total FROM sales GROUP BY region';
+  const prog = (query: string): string =>
+    `migration 1 "sales" {\n  CREATE TABLE sales(id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL)\n}\n\ntype Top { Top(region: View, total: Int) }\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let rows = sql_all(row: Top, query: "${query}")\n  respond_as(status: 200, content: Json) |> write_rows(rows)\n}\n`;
+  const s = said(prog(`SELECT region, total FROM (${inner}) ORDER BY total DESC`));
+  const fixed = `SELECT region, total FROM (${inner}) AS t ORDER BY total DESC`;
+  same('FROM (SELECT …) with no alias: C67', code(s), 'C67:8');
+  same('…whose fix is the statement with AS t', hint(s).includes(`\`${fixed}\``), true);
+  same('…which compiles', said(prog(fixed)), 'compiled');
+}
+
 finish();

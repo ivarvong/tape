@@ -342,12 +342,17 @@ function fromClause(c: Cursor): TableRef[] {
 function tableRef(c: Cursor, join: Join | null): TableRef {
   const s = c.peek().s,
     ref = tableOrSubquery(c),
+    end = c.last().e,
     alias = c.alias(true);
   if (c.isKw('INDEXED') || (c.isKw('NOT') && c.isKw('INDEXED', 1))) c.refuse('INDEXED BY');
   const on = c.eatKw('ON') ? expr(c) : null,
     using = !on && c.eatKw('USING') ? c.parenList(column) : null;
   if ((on || using) && (join === null || join === ',')) c.fail('ON or USING belongs to a JOIN', c.last());
-  if (ref.sub && !alias) c.fail('a subquery in FROM needs an alias', c.last());
+  if (ref.sub && !alias) {
+    // the statement written back with the alias, on one line: `FROM (SELECT …) AS t`
+    const aliased = `${c.src.slice(0, end)} AS t${c.src.slice(end)}`.replaceAll(/\s+/g, ' ').trim();
+    c.fail('a subquery in FROM needs an alias', c.last(), `Name it with AS: \`${aliased}\`.`);
+  }
   return { k: 'tref', ...c.span(s), ...ref, alias, join, on, using };
 }
 function tableOrSubquery(c: Cursor): { sub: Select; name: null } | { sub: null; name: string } {

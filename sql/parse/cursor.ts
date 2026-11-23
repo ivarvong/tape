@@ -36,9 +36,9 @@ export class Cursor {
   private near(t: SqlToken): string {
     return t.t === 'eof' ? 'the end of the statement' : `"${this.src.slice(t.s, t.e)}"`;
   }
-  /** not SQL */
-  fail(msg: string, t: SqlToken = this.peek()): never {
-    throw new SqlError('syntax', `${msg} at ${this.near(t)}`, t.s);
+  /** not SQL, with the fix when the statement can be written back corrected */
+  fail(msg: string, t: SqlToken = this.peek(), fix?: string): never {
+    throw new SqlError('syntax', `${msg} at ${this.near(t)}`, t.s, fix);
   }
   /** SQL that SQLite takes and tape does not */
   refuse(msg: string, t: SqlToken = this.peek()): never {
