@@ -265,7 +265,9 @@ What to notice:
 
 - **Routes** are one `match request(raw)`. `"/items/" ++ decimal(Id(id))` takes the path apart, parses the number
   and checks its range in one pattern; a path that does not fit falls through to the next arm, so the 405 and 400
-  arms come after the ones that serve.
+  arms come after the ones that serve. A refinement that fails in a route is a path that does not fit: it falls
+  through, to a 404 unless an arm below answers it. For a 400 that says why, take the segment as text
+  (`"/check/" ++ key`) and match it against the type in the handler (`Key(k) -> …`, `_ -> 400`).
 - **The query** is `Request(query)`: the raw text after `?`. `form_field(body: q, name: "limit")` reads one
   parameter; `number` says absent (the default) apart from present but wrong (a 400 that names it).
 - **Validation** is the types: `decode(json: body, as: NewItem)` checks every refined field (`Qty`, `Tag`, each

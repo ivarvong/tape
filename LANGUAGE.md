@@ -220,8 +220,10 @@ fn dots(n: Int) -> Int {
 // dots(3) is 3
 ```
 
-Capabilities are ambient by name: inside a function with a parameter `db: Sql`, `sql_first(…)` uses it without
-naming it, and a function that calls one that needs `db` must declare `db` too (C72).
+Capabilities are ambient by name. An entry point (`handle`, an exported function) declares each one it uses,
+itself or through what it calls (C72 names the call path when it does not); every other function uses it by that
+name without declaring or passing it: `sql_first(…)` in a helper uses handle's `db: Sql`, and `now()` its
+`clock: Clock`. A built-in that needs one no entry point declares is C72 at the call.
 
 ## 5. Patterns
 
@@ -480,7 +482,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made; a create meant to make a new row on each call (no client key) says so with `repeat: True` | C55 |
 | Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
 | Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves; the write may be in a function every call of which comes after the claim), or `repeat: True` on the call when every attempt should count | C54 |
-| Pass a value to a query | `:name` in the query, and an argument of that name | C11, C13, C32 |
+| Pass a value to a query | `:name` in the query, and an argument of that name. A Bool is bound as 1 or 0 and read back from an INTEGER column (`done INTEGER NOT NULL DEFAULT 0`, `WHERE done = :done`); an Int is INTEGER, a View TEXT, a Float REAL | C11, C13, C32 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
 | Command another program | `call` with `within:` and a `once:` key that names the row (its primary key: `ForOrder(order: id)`, even when the message carries the id too), a key the client sent, or the message itself | C39, C41, C64, C65, C71 |
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
