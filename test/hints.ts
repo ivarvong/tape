@@ -90,4 +90,30 @@ fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
   }
 }
 
+// ---- a program's function named like a built-in takes its place in the program's files. A helper
+// `push(stack, item)` made every call of the built-in push(buf, byte) a C11 at the call, naming neither the
+// definition nor the built-in: the diagnostic now says both, and the rename it asks for compiles.
+{
+  const SHADOW = `fn handle(raw: View) -> Buf {
+  respond(status: 200) |> push(byte: 65)
+}
+
+fn push(stack: Int, item: Int) -> Int {
+  stack + item
+}
+`;
+  const s = said(SHADOW);
+  same('the built-in call is refused where it is', code(s), 'C11:2');
+  same(
+    '…and the fix names the definition and the built-in it takes the place of',
+    [hint(s).includes('t.tape:5'), hint(s).includes('the built-in push(buf, byte)')],
+    [true, true],
+  );
+  same(
+    'with the program’s function renamed, it compiles',
+    said(SHADOW.replace('fn push(', 'fn push_item(')),
+    'compiled',
+  );
+}
+
 finish();

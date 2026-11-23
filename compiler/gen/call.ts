@@ -393,6 +393,24 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
   // a program's own function of a built-in's name is called as `file.name`; its messages say the name written
   const own = `${stemOf(c.f.file)}.`;
   const written = e.name.startsWith(own) ? e.name.slice(own.length) : e.name;
+  // a call meant for the built-in that the program's own function of that name has taken the place of: say so at
+  // the call, with the definition, which the call's own arguments do not lead to
+  const builtIn = named.file.startsWith('std/') ? undefined : INTRINSICS.get(written);
+  const theirs = builtIn
+    ? e.args.find(a => a.label !== null && !named.params.some(pm => pm.name === a.label) && builtIn.includes(a.label))
+    : undefined;
+  if (builtIn && theirs)
+    fail(
+      theirs,
+      'C11',
+      `function ${written} has no parameter ${theirs.label}`,
+      `This is the program's own ${written} (${named.file}:${named.line}), which takes (${named.params
+        .filter(pm => !pm.implicit)
+        .map(pm => pm.name)
+        .join(
+          ', ',
+        )}) and takes the place of the built-in ${written}(${builtIn.join(', ')}) in the program's files. Give the program's function another name (\`${written}_item\`) to call the built-in.`,
+    );
   const args = B.orderArgs(
     `function ${written}`,
     named.params.map(x => x.name),
