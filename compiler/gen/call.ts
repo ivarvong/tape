@@ -4,7 +4,7 @@
 // values and calls the real one.
 import { eachExpr } from '../ast.ts';
 import type { At, Call, Expr, FnDecl, Interface, TypeAst } from '../ast.ts';
-import { I32, fail, loadOp, sleb, storeOp, uleb, utf8 } from '../common.ts';
+import { I32, fail, loadOp, sleb, stemOf, storeOp, uleb, utf8 } from '../common.ts';
 import { ROW_CALLS } from '../rows.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
@@ -389,8 +389,11 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
       : `Neither the program nor std has a function \`${e.name}\`; docs/std.md lists std's.`;
   };
   const named = B.find(e.name, c.f.file, e) ?? fail(e, 'C22', `unknown function ${e.name}`, suggestion());
+  // a program's own function of a built-in's name is called as `file.name`; its messages say the name written
+  const own = `${stemOf(c.f.file)}.`;
+  const written = e.name.startsWith(own) ? e.name.slice(own.length) : e.name;
   const args = B.orderArgs(
-    `function ${e.name}`,
+    `function ${written}`,
     named.params.map(x => x.name),
     e.args,
     e,

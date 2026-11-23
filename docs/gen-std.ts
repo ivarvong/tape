@@ -137,6 +137,28 @@ const BUILT_INS: BuiltIn[] = [
       ['sqrt', 'The square root, correctly rounded; below 0 it traps (trap 8, float not finite).'],
     ] as const
   ).map(([name, doc]): BuiltIn => ({ name, sig: `${name}(x: Float) -> Float`, doc })),
+  ...(
+    [
+      ['sin', 'x', 'The sine, x in radians.'],
+      ['cos', 'x', 'The cosine, x in radians.'],
+      ['exp', 'x', 'e to the x; beyond about 709.78 it traps (trap 8, float not finite).'],
+      ['log', 'x', 'The natural logarithm; of 0 or less it traps (trap 8).'],
+    ] as const
+  ).map(([name, p, doc]): BuiltIn => ({
+    name,
+    sig: `${name}(${p}: Float) -> Float`,
+    doc: `${doc} musl's, in Wasm: the same bits everywhere, within 1 ulp.`,
+  })),
+  {
+    name: 'atan2',
+    sig: 'atan2(y: Float, x: Float) -> Float',
+    doc: "The angle of the point (x, y), from -pi to pi; `atan2(y: t, x: 1f)` is the arctangent of t. musl's, in Wasm: within 1.5 ulp.",
+  },
+  {
+    name: 'pow',
+    sig: 'pow(x: Float, y: Float) -> Float',
+    doc: "x to the y. A negative x takes only an integer y, and a result beyond the largest Float traps (trap 8). musl's, in Wasm: within 1 ulp.",
+  },
   {
     name: 'abs',
     sig: 'abs(x: Int) -> Int, abs(x: Float) -> Float',

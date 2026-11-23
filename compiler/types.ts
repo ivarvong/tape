@@ -68,6 +68,13 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     abs: ['x'],
     min: ['a', 'b'],
     max: ['a', 'b'],
+    // the math library (compiler/math)
+    sin: ['x'],
+    cos: ['x'],
+    atan2: ['y', 'x'],
+    exp: ['x'],
+    log: ['x'],
+    pow: ['x', 'y'],
   }),
 );
 /** A type as the compiler holds it: a name applied to types. */

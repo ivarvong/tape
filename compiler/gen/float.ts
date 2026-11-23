@@ -7,7 +7,10 @@ import { F64, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
 import { BOOL, FLOAT, INT, INTRINSICS } from '../types.ts';
 import type { Type } from '../types.ts';
 import { fresh, get, need, set, trapIf } from './fn.ts';
-import type { Ctx } from './fn.ts';
+import type { Build, Ctx } from './fn.ts';
+import type { Compiled } from './assemble.ts';
+import { PUBLIC, defOf } from '../math/library.ts';
+import { assembleBody } from '../math/wasm.ts';
 
 type Bin = Extract<Expr, { k: 'bin' }>;
 const F64_ABS = 0x99,
@@ -67,6 +70,35 @@ export function emitFloatBin(c: Ctx, e: Bin): Type {
   return FLOAT;
 }
 
+// ---- the math library (compiler/math): sin, cos, atan2, exp, log and pow, as Wasm functions of the module
+
+/** The index of a function of the math library in the module; naming it puts it among those to compile. */
+function mathIndex(B: Build, n: string): number {
+  const name = `math.${n}`;
+  if (!B.fns.has(name)) {
+    const at = { line: 0, file: 'math' };
+    const zero: Expr = { k: 'float', v: 0, ...at };
+    B.fns.set(name, {
+      name,
+      params: [],
+      retAst: { name: 'Float', args: [], ...at },
+      body: { k: 'block', lets: [], result: zero, ...at },
+      exported: false,
+      tparams: [],
+      math: n,
+      ...at,
+    });
+  }
+  return B.fnIndex(name);
+}
+export function compileMath(B: Build, n: string): Compiled {
+  const def = defOf(n);
+  const link = { index: (m: string) => mathIndex(B, m), data: B.constData, scratch: B.room };
+  return { sig: B.sig(def.params, def.results), body: assembleBody(def, link) };
+}
+// what can come out NaN or infinite: exp and pow overflow, log of 0 or less, pow of a negative to a fraction
+const CHECKED = new Set(['exp', 'log', 'pow']);
+
 /** The arguments of an intrinsic, in the order of its parameters. */
 const argsOf = (c: Ctx, e: Call): Arg[] => c.B.orderArgs(`function ${e.name}`, INTRINSICS.get(e.name) ?? [], e.args, e);
 /** One argument on the stack, as the type wanted. */
@@ -105,6 +137,15 @@ function emitOrder(c: Ctx, e: Call): Type {
 export function emitFloatIntrinsic(c: Ctx, e: Call): Type | null {
   const n = e.name;
   if (n === 'min' || n === 'max') return emitOrder(c, e);
+  if (Object.hasOwn(PUBLIC, n)) {
+    const params = PUBLIC[n] ?? [];
+    argsOf(c, e).forEach((a, k) => {
+      emitArg(c, a, FLOAT, params[k] ?? '');
+    });
+    c.code.push(0x10, ...uleb(mathIndex(c.B, n)));
+    if (CHECKED.has(n)) finite(c);
+    return FLOAT;
+  }
   const [a] = argsOf(c, e);
   if (n === 'float') {
     emitArg(c, a, INT, 'n');

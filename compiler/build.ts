@@ -170,6 +170,8 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
     fnIndex: (n: string) => mod.fnIndex(tables, n),
     freeList: (size: number) => mod.freeList(tables, size),
     literal: (bytes: readonly number[]) => mod.literal(tables, bytes),
+    constData: (bytes: readonly number[]) => mod.constData(tables, bytes),
+    room: (size: number) => mod.room(tables, size),
     queryId: (q: Omit<QueryEntry, 'run'>) => mod.queryId(tables, q),
     reads: (f: FnDecl, i: number) => opts.reuse && ownedParams.get(f.base ?? f.name)?.[i] === false,
     rowOf: (t: Type, at: Place) => layout.rowOf(L, t, at),

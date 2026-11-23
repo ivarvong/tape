@@ -389,6 +389,25 @@ export function literal(t: Tables, bytes: readonly number[]): [number, number] {
   return [at, bytes.length];
 }
 
+/** Constant data of the math library, at an address that is a multiple of 8; the same bytes are kept once. */
+export function constData(t: Tables, bytes: readonly number[]): number {
+  const k = `table:${bytes.join(',')}`;
+  const had = t.dataAt.get(k);
+  if (had !== undefined) return had;
+  while (t.data.length % 8) t.data.push(0);
+  const at = t.dataBase + t.data.length;
+  t.dataAt.set(k, at);
+  t.data.push(...bytes);
+  return at;
+}
+/** Room of its own a function of the math library writes in, at an address that is a multiple of 8. */
+export function room(t: Tables, size: number): number {
+  while (t.data.length % 8) t.data.push(0);
+  const at = t.dataBase + t.data.length;
+  t.data.push(...Array.from({ length: size }, () => 0));
+  return at;
+}
+
 /** The number of a query in the module's list. The same query is kept once. */
 export function queryId(t: Tables, q0: Omit<QueryEntry, 'run'>): number {
   const q = { ...q0, run: integerParams(q0.sql, q0.params) };

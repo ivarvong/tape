@@ -4,6 +4,7 @@
 import { unreachable } from '../compiler/ast.ts';
 import { TRAP } from '../compiler/common.ts';
 import { Trap } from './host.ts';
+import { standalone } from '../compiler/math/library.ts';
 
 /** A Float result, or the stop for one that is not finite. */
 export const finite = (x: number): number => {
@@ -25,6 +26,27 @@ export function floatArithmetic(op: Op, l: number, r: number): number {
       return unreachable(op, 'operator');
   }
 }
+
+/** The public functions of the math library, from the module of its own (compiler/math/library.ts standalone). */
+export type Math64 = Record<string, (...xs: number[]) => number>;
+let made: Math64 | null = null;
+export function math64(): Math64 {
+  if (made) return made;
+  const out: Math64 = {};
+  // compiled from bytes where that is allowed (Node, browsers); a Worker refuses it, and so has no math here
+  const mod: unknown = Reflect.construct(WebAssembly.Module, [standalone()]);
+  if (!(mod instanceof WebAssembly.Module)) throw new TypeError('the math library did not compile');
+  for (const [n, f] of Object.entries(new WebAssembly.Instance(mod).exports))
+    if (typeof f === 'function') out[n] = (...xs: number[]) => Number(f(...xs));
+  made = out;
+  return out;
+}
+export function mathFn(name: string): (...xs: number[]) => number {
+  return math64()[name] ?? stop(`no math function ${name}`);
+}
+const stop = (why: string): never => {
+  throw new Error(why);
+};
 
 const TWO_63 = 2 ** 63;
 /** trunc(x): the Int toward zero, or the stop (integer overflow) when it is outside the Ints. */

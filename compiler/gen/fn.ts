@@ -46,6 +46,8 @@ export type Build = Imports & {
   freeList: (size: number) => number;
   isLinear: (t: Type) => boolean;
   literal: (bytes: readonly number[]) => [number, number];
+  constData: (bytes: readonly number[]) => number;
+  room: (size: number) => number;
   nearest: (n: string, pool: Iterable<string>) => string | null;
   opts: Options;
   orderArgs: (

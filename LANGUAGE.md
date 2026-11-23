@@ -94,7 +94,11 @@ traps (trap 8, float not finite), so every Float a program holds is finite. Unar
 compare values, and `-0f == 0f`. There is no `%` and no bitwise operator (C19), and an Int and a Float do not mix
 (C14): `float(n)` is the Float nearest an Int, and `trunc(x)` the Int toward zero, trapping (integer overflow)
 outside the Ints. `floor(x)`, `ceil(x)`, `abs(x)` and `sqrt(x)` are exactly as IEEE 754 defines them (`sqrt` of a
-negative traps); `abs`, `min(a, b)` and `max(a, b)` take two Ints or two Floats. A Float is matched with a guard,
+negative traps); `abs`, `min(a, b)` and `max(a, b)` take two Ints or two Floats. `sin(x)`, `cos(x)`,
+`atan2(y:, x:)`, `exp(x)`, `log(x)` and `pow(x:, y:)` are musl's (fdlibm's, and Arm's), compiled into the module as
+Wasm, so a result is the same bits in every engine and in a replay: within 1 ulp of the true value (atan2, 1.5 ulp),
+and a trap where it would be infinite or not a number (`log(0f)`, `exp(1000f)`, `pow(x: -8f, y: 0.5f)`). A
+Float is matched with a guard,
 `x if x == 0f ->`, never a literal pattern (C19).
 
 Operators, tightest first: unary `-`; `* / %`; `+ - ++`; `<< >>`; `&`; `^`; `|` and `|>`; the comparisons, which
@@ -615,6 +619,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | `sin`, `cos`, `atan2`, `exp`, `log`, `pow` on Float: musl's libm ported to Wasm (compiler/math), only what a program calls goes into its module; never the host's `Math`, whose results differ between engines |
 | 23 November 2026 | `Float`: a finite 64-bit IEEE 754 number for measurements. Literals end in `f` (`1.5f`; `1.5` is L06, kept for an exact decimal); `+ - * /` and comparisons; trap 8 (float not finite) where IEEE would give NaN or an infinity; `float(n)` and `trunc(x)` the only conversions; `floor`, `ceil`, `abs`, `sqrt`; `abs`, `min`, `max` built in for Int and Float (std's `min` and `max` of Ints, and `apps/trace`'s own, are gone); a hole writes the shortest digits, as JavaScript's `String` does (env.float_text) |
 | 23 November 2026 | std `digits(v)` is gone: `decimal` reads an id (no sign, no leading zero), `parse_int` a number as people write one (a sign, leading zeros) |
 | 23 November 2026 | `respond_as(status, content: Csv)` answers `text/csv` (the sales task, 3 of 3 Haiku runs) |

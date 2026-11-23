@@ -216,6 +216,8 @@ export type FnDecl = At & {
   /** set by the build on the entry function of a function value: the function it enters, and how many of its
    *  parameters were captured */
   trampoline?: { g: FnDecl; k: number };
+  /** set by the build on a function of the math library (compiler/math): its name there */
+  math?: string;
 };
 export type Migration = At & { n: number; name: string; contract: boolean; statements: string[] };
 export type Flag = At & { name: string; type: string; default: bigint | boolean };

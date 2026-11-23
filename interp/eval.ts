@@ -15,7 +15,7 @@ import { TRAP } from '../compiler/common.ts';
 import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
 import { Unsupported } from './json.ts';
-import { finite, floatArithmetic, truncToInt } from './float.ts';
+import { finite, floatArithmetic, mathFn, truncToInt } from './float.ts';
 import {
   type Env,
   type Fn,
@@ -232,6 +232,12 @@ const INTRINSIC = {
   abs: ['x'],
   min: ['a', 'b'],
   max: ['a', 'b'],
+  sin: ['x'],
+  cos: ['x'],
+  atan2: ['y', 'x'],
+  exp: ['x'],
+  log: ['x'],
+  pow: ['x', 'y'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -297,6 +303,16 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
         q = asInt(y);
       return (name === 'min' ? q < p : q > p) ? q : p;
     }
+    // the compiled module's own functions (compiler/math), run in a module of their own: not an independent check,
+    // so test/float-math.ts holds them to musl and to an oracle
+    case 'sin':
+    case 'cos':
+    case 'exp':
+    case 'log':
+      return finite(mathFn(name)(asFloat(a[0])));
+    case 'atan2':
+    case 'pow':
+      return finite(mathFn(name)(asFloat(a[0]), asFloat(a[1])));
     default:
       return unreachable(name, 'intrinsic');
   }

@@ -8,6 +8,7 @@ import { TRAP, fail, sleb, uleb, vec } from './common.ts';
 import type { Compiled } from './gen/assemble.ts';
 import { compileEntry } from './gen/call.ts';
 import { emit } from './gen/expr.ts';
+import { compileMath } from './gen/float.ts';
 import { close, declare, ev, need, open, site, trapIf } from './gen/fn.ts';
 import type { Build, Ctx } from './gen/fn.ts';
 import type { Type } from './types.ts';
@@ -58,8 +59,9 @@ function localRuns(locals: readonly number[]): number[] {
 }
 
 function compileFn(B: Build, f: FnDecl): Compiled {
-  const { trampoline } = f;
+  const { trampoline, math } = f;
   if (trampoline) return compileEntry(B, { ...f, trampoline });
+  if (math !== undefined) return compileMath(B, math);
   const params = f.params.flatMap(pm =>
     B.slotsOf(
       pm.type ??
