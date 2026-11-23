@@ -304,7 +304,7 @@ function refused(e: CompileError, input: Uint8Array, p: Parsed): string[] {
 
 function tapeFiles(dir: string): string[] {
   return readdirSync(dir).flatMap(n => {
-    if (n === 'node_modules' || n === '.git') return [];
+    if (n === 'node_modules' || n.startsWith('.')) return []; // .git, and .claude's agent worktrees: other branches' files
     const p = join(dir, n);
     return statSync(p).isDirectory() ? tapeFiles(p) : n.endsWith('.tape') ? [p] : [];
   });
