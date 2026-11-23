@@ -474,7 +474,7 @@ fn f(n: Int) -> Int {
   );
   T(
     'C14 a record where a Buf is wanted: write it into one',
-    /^A Buf is an answer's bytes being written/.test(
+    (
       fix(
         `type Outcome {
   Outcome(status: Int)
@@ -485,8 +485,8 @@ fn handle(raw: View) -> Buf {
 }
 `,
         ['handle'],
-      ).split(' | ')[1] ?? '',
-    ),
+      ).split(' | ')[1] ?? ''
+    ).startsWith("A Buf is an answer's bytes being written"),
     true,
   );
 }
@@ -652,7 +652,7 @@ fn f(p: P) -> Int {
   const app = served(P);
   const it = interpret([...std, { name: 't.tape', text: P }]);
   const r = rng(7);
-  const pick = <X>(xs: readonly X[]): X => xs[Math.floor(r() * xs.length)] ?? (xs[0] as X);
+  const pick = (xs: readonly string[]): string => xs[Math.floor(r() * xs.length)] ?? '';
   const texts = [
     '',
     '-',
@@ -712,15 +712,15 @@ fn f(p: P) -> Int {
           compile([...std, { name: 't.tape', text: src }], { exports: ['f'] }).wasm ?? new Uint8Array(),
         ),
       );
-      const it = interpret([...std, { name: 't.tape', text: src }]);
+      const ip = interpret([...std, { name: 't.tape', text: src }]);
       return Array.from({ length: 256 }, (_, b) => b).filter(b => {
-        const ch = String.fromCharCode(b);
+        const ch = String.fromCodePoint(b);
         const want = [/[0-9]/, /[a-zA-Z]/, /[a-zA-Z0-9]/, /[ \t\n\r]/, /[a-z]/, /[A-Z]/].reduce(
           (m, re, i) => m + (b < 128 && re.test(ch) ? 1 << i : 0),
           0,
         );
         call(ex, 'reset');
-        return call(ex, 'f', BigInt(b)) !== BigInt(want) || it.call('f', [BigInt(b)]) !== BigInt(want);
+        return call(ex, 'f', BigInt(b)) !== BigInt(want) || ip.call('f', [BigInt(b)]) !== BigInt(want);
       });
     })(),
     [],

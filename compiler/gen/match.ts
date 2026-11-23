@@ -278,14 +278,14 @@ export function emitMatch(c: Ctx, e: Match, expected: Type | null, tail: boolean
   const failed: Fact[] = [];
   for (const a of e.arms) {
     c.consumed = new Set(before);
-    withFacts(c, failed, () => {
-      const got =
-        type === null ? typing(e, () => emitArm(c, e, a, subject, null, tail)) : emitArm(c, e, a, subject, type, tail);
-      if (type === null) {
-        type = c.B.strip(got);
-        c.code.splice(opened + 1, 1, ...blockType(c, c.B.slotsOf(type)));
-      }
-    });
+    const known = type;
+    const got = withFacts(c, failed, () =>
+      known === null ? typing(e, () => emitArm(c, e, a, subject, null, tail)) : emitArm(c, e, a, subject, known, tail),
+    );
+    if (type === null) {
+      type = c.B.strip(got);
+      c.code.splice(opened + 1, 1, ...blockType(c, c.B.slotsOf(type)));
+    }
     if (!('pat' in a) && a.cond) failed.push(...proved(c, a.cond, false));
     const sig = handedOver(c.consumed);
     if (after !== null && after.sig !== sig)
