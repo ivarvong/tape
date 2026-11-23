@@ -7,17 +7,21 @@
 //
 //   node bench/usability/run.ts                          every task once, 4 at a time, against prod
 //   node bench/usability/run.ts --tasks todo,ledger --n 3 --parallel 2 --model opus --budget-usd 8 --timeout-min 45
+//   node bench/usability/run.ts --n 3 --model sonnet,haiku   the models one after another, each in <out>/<model>/
 //   node bench/usability/run.ts --regrade <results dir>  grade the saved solutions again (after a release, say)
 //
 // Results go to bench/usability/results/<date>-<prod tape-version>/ (or --out): per job a directory with the
 // transcript, the solution and metrics.json (all ignored by git), then results.json and summary.md (tracked).
 // Needs the `claude` CLI logged in, and Node 25.
+// Two runs at once from one machine (two models side by side, say) pass prod's per-address rate limit: sessions then
+// start with the tape server not connected and test nothing. So --model takes a list, run one after another, and a
+// session whose tape server did not connect is stopped and started again after a minute (--connect-retries, 3).
 import '../../node25.ts';
 import { execSync, spawn } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { analyse } from './transcript.ts';
+import { dirname, join, resolve } from 'node:path';
+import { analyse, connected } from './transcript.ts';
 import type { Metrics } from './transcript.ts';
 import { grade, TASKS } from './grade.ts';
 import { MCP_URL } from './lib.ts';
@@ -48,6 +52,8 @@ export type JobResult = Metrics & {
   id: string;
   exit: number | null;
   timedOut: boolean;
+  /** sessions started again because the tape server did not connect (prod's per-address rate limit, say) */
+  connectRetries: number;
   solution: string[];
   solutionFrom: 'solution/' | 'last compiled call' | 'last call' | 'none';
   grade: Awaited<ReturnType<typeof grade>>;
@@ -109,9 +115,21 @@ Work until the program passes your own tests of the whole spec, or until you con
 (then do the rest, report why with feedback, and say so). End with a short summary: what works, what does not, and
 what was hardest.`;
 
-const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResult> => {
-  const dir = join(outDir, job.id);
-  mkdirSync(dir, { recursive: true });
+/** How many times a job whose tape server did not connect is started again, and how long it waits first: prod's
+ * rate limit is per address and per minute, so a wait of a minute and more lets it pass. */
+const CONNECT_RETRIES = Number(opt('connect-retries', '3'));
+const CONNECT_WAIT_MS = 65_000;
+const pause = async (ms: number): Promise<void> => {
+  await new Promise<void>(done => {
+    setTimeout(done, ms);
+  });
+};
+
+type Session = { work: string; lines: string[]; exit: number | null; timedOut: boolean; wallMs: number };
+
+/** One agent on one task, in a fresh working directory. A session whose init says the tape server did not connect
+ * (or connected with no tools) is stopped there: it could not test anything, and it is started again. */
+const session = async (job: Job, info: RunInfo, dir: string): Promise<Session> => {
   // The agent's working directory is outside the repository, so no CLAUDE.md of the repository's is found and the file
   // tools (confined to it by --restricted) cannot reach the source.
   const work = mkdtempSync(join(tmpdir(), `tape-usability-${job.task}-`));
@@ -152,6 +170,7 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
   const t0 = Date.now();
   const lines: string[] = [];
   let timedOut = false;
+  let seenInit = false;
   const exit = await new Promise<number | null>(done => {
     const child = spawn('claude', argv, { cwd: work, stdio: ['ignore', 'pipe', 'pipe'] });
     let buf = '';
@@ -161,7 +180,14 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
       while (nl >= 0) {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
-        if (line.trim() !== '') lines.push(`{"t":${Date.now() - t0},"m":${line}}`);
+        if (line.trim() !== '') {
+          const wrapped = `{"t":${Date.now() - t0},"m":${line}}`;
+          lines.push(wrapped);
+          if (!seenInit && line.includes('"subtype":"init"')) {
+            seenInit = true;
+            if (!connected([wrapped])) child.kill('SIGTERM');
+          }
+        }
         nl = buf.indexOf('\n');
       }
     });
@@ -180,9 +206,28 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
       done(code);
     });
   });
+  return { work, lines, exit, timedOut, wallMs: Date.now() - t0 };
+};
+
+const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResult> => {
+  const dir = join(outDir, job.id);
+  mkdirSync(dir, { recursive: true });
+  let s = await session(job, info, dir);
+  let connectRetries = 0;
+  while (!connected(s.lines) && connectRetries < CONNECT_RETRIES) {
+    connectRetries++;
+    // the session that did not connect is kept beside the one that counts, for the record
+    writeFileSync(join(dir, `unconnected-${connectRetries}.jsonl`), `${s.lines.join('\n')}\n`);
+    console.log(
+      `${job.id}: the tape server did not connect (${connectRetries} of ${CONNECT_RETRIES}); again in ${CONNECT_WAIT_MS / 1000} s`,
+    );
+    await pause(CONNECT_WAIT_MS);
+    s = await session(job, info, dir);
+  }
+  const { work, lines, exit, timedOut } = s;
   const transcript = join(dir, 'transcript.jsonl');
   writeFileSync(transcript, `${lines.join('\n')}\n`);
-  const metrics = analyse(lines, Date.now() - t0);
+  const metrics = analyse(lines, s.wallMs);
   metrics.transcript = transcript;
 
   // The program graded: what the agent saved in solution/, else the last program it sent that compiled.
@@ -212,6 +257,7 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
     id: job.id,
     exit,
     timedOut,
+    connectRetries,
     solution: files.map(f => f.name),
     solutionFrom,
     grade: graded,
@@ -264,31 +310,37 @@ if (args[0] === '--regrade') {
 } else {
   const tasks = opt('tasks', TASKS.join(',')).split(',');
   for (const t of tasks) if (!TASKS.some(x => x === t)) throw new Error(`no task ${t}: ${TASKS.join(', ')}`);
-  const v = await prodVersions();
+  const models = opt('model', 'sonnet').split(',');
   const date = new Date().toISOString().slice(0, 10);
-  const info: RunInfo = {
-    runId: `${date}-${v.tape}`,
-    date: new Date().toISOString(),
-    tapeVersion: v.tape,
-    tapeMcpVersion: v.mcp,
-    benchSha: gitSha(),
-    model: opt('model', 'sonnet'),
-    n: Number(opt('n', '1')),
-    parallel: Number(opt('parallel', '4')),
-    budgetUsd: Number(opt('budget-usd', '6')),
-    timeoutMin: Number(opt('timeout-min', '45')),
-    mcpUrl: MCP_URL,
-  };
-  const outDir = opt('out', join(here, 'results', info.runId));
-  mkdirSync(outDir, { recursive: true });
-  const jobs: Job[] = tasks.flatMap(task =>
-    Array.from({ length: info.n }, (_, rep) => ({ task, rep, id: info.n > 1 ? `${task}-${rep + 1}` : task })),
-  );
-  console.log(
-    `run ${info.runId}: ${jobs.length} jobs, ${info.parallel} at a time, model ${info.model}, tape ${v.tape}`,
-  );
-  const results = await pool(jobs, info.parallel, j => runJob(j, info, outDir));
-  writeFileSync(join(outDir, 'results.json'), JSON.stringify({ info, jobs: results }, null, 2));
-  writeSummary(outDir, info, results);
-  console.log(`wrote ${join(outDir, 'summary.md')}`);
+  // resolved: the agent's cwd is a temporary directory, so a relative path would not find mcp.json
+  const base = resolve(opt('out', ''));
+  for (const model of models) {
+    const v = await prodVersions();
+    const info: RunInfo = {
+      runId: `${date}-${v.tape}`,
+      date: new Date().toISOString(),
+      tapeVersion: v.tape,
+      tapeMcpVersion: v.mcp,
+      benchSha: gitSha(),
+      model,
+      n: Number(opt('n', '1')),
+      parallel: Number(opt('parallel', '4')),
+      budgetUsd: Number(opt('budget-usd', '6')),
+      timeoutMin: Number(opt('timeout-min', '45')),
+      mcpUrl: MCP_URL,
+    };
+    const top = opt('out', '') === '' ? join(here, 'results', info.runId) : base;
+    const outDir = models.length > 1 ? join(top, model) : top;
+    mkdirSync(outDir, { recursive: true });
+    const jobs: Job[] = tasks.flatMap(task =>
+      Array.from({ length: info.n }, (_, rep) => ({ task, rep, id: info.n > 1 ? `${task}-${rep + 1}` : task })),
+    );
+    console.log(
+      `run ${info.runId}: ${jobs.length} jobs, ${info.parallel} at a time, model ${info.model}, tape ${v.tape}`,
+    );
+    const results = await pool(jobs, info.parallel, j => runJob(j, info, outDir));
+    writeFileSync(join(outDir, 'results.json'), JSON.stringify({ info, jobs: results }, null, 2));
+    writeSummary(outDir, info, results);
+    console.log(`wrote ${join(outDir, 'summary.md')}`);
+  }
 }
