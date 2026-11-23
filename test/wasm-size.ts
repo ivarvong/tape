@@ -26,7 +26,7 @@ const programs = [
   'bench/money.tape',
 ].toSorted();
 
-/** Functions in a module: its function section's count (a valid module from this compiler, read by hand). */
+/** Functions in a module: its function section's count (a module from this compiler, read by hand). */
 function functionsOf(wasm: Uint8Array): number {
   const leb = (at: number): [number, number] => {
     let v = 0,
@@ -50,10 +50,15 @@ function functionsOf(wasm: Uint8Array): number {
 }
 
 const now: Record<string, Size> = {};
+// the compiler does not validate what it makes: a call of a host function it did not import is a module WebAssembly
+// refuses (test/imports.ts)
+const invalid: string[] = [];
 for (const p of programs) {
   const r = compile([...std, { name: p.slice(p.lastIndexOf('/') + 1), text: readFileSync(root + p, 'utf8') }]);
   if (r.wasm) now[p] = { bytes: r.wasm.length, functions: functionsOf(r.wasm) };
+  if (r.wasm && !WebAssembly.validate(r.wasm)) invalid.push(p);
 }
+same('every program is a module WebAssembly validates', invalid, []);
 
 if (process.argv.includes('--write')) {
   writeFileSync(RECORD, `${JSON.stringify(now, null, 2)}\n`);
