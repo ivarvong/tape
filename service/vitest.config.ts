@@ -13,6 +13,7 @@ const miniflare = {
     DUMP_REPEAT: process.env.DUMP_REPEAT ?? '1',
     U3: process.env.U3 ?? '',
     PARITY_SEEDS: process.env.PARITY_SEEDS ?? '',
+    SEAMS_SLICES: process.env.SEAMS_SLICES ?? '6',
   },
   durableObjects: { NAMES: { className: 'Name', useSQLite: true } },
   // tape-mcp stands in as an echo of the request it is given (test/mcp-route.test.ts)

@@ -1,7 +1,9 @@
 // plants.ts: bugs planted in tickets.tape, one at a time, and what catches each: the compiler (its codes), or the
 // scenarios and their invariants (the checks that fail). A plant that nothing catches is reported as missed.
 // node apps/tickets/plants.ts  (writes results/plants.json)
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { sources, compiled } from './world.ts';
 import { mutants } from '../../experiments/c78/mutants.ts';
@@ -179,7 +181,8 @@ function caught(p: Plant, n: number): Caught {
     console.log(`comp  ${p.name}: ${codes.join(', ')} — ${first.message.slice(0, 140)}`);
     return { plant: p.name, caught: 'compiler', codes, first: `${first.code}:${first.line} ${first.message}` };
   }
-  const file = `/tmp/plant-${n}.tape`;
+  // a directory of its own: two gates (two checkouts) at once wrote and ran each other's /tmp/plant-<n>.tape
+  const file = join(mkdtempSync(join(tmpdir(), 'tickets-plant-')), `plant-${n}.tape`);
   writeFileSync(file, text);
   const failed = scenarios(file).flatMap(r => (r.ok ? [] : [r.name]));
   const more = failed.length > 3 ? ` (+${failed.length - 3})` : '';

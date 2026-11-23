@@ -32,6 +32,7 @@ declare namespace Cloudflare {
     DUMP_REPEAT: string;
     U3: string;
     PARITY_SEEDS: string;
+    SEAMS_SLICES: string;
     // which copy of the machine plant this is (verify/plant/machine.ts)
     MACHINE_PLANT?: string;
     // the Name namespace by another binding, for runInDurableObject (vitest.config.ts)

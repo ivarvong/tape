@@ -27,9 +27,12 @@ node proof/all.ts --only sim # the parts whose name contains a word
 
 `proof/all.ts` runs every check below, prints one table, and exits 0 only when every part passed. A part passes when
 it exits 0, prints no line starting with `FAIL`, and prints the result recorded for it (how many planted bugs are
-caught, and by what). On a 16-core laptop on 22 November 2026, the full gate's 61 parts took 583 s in all, of
-which the service suite was 211 s; `--quick` leaves out the service suite, three simulations and the apps'
-planted bugs, and takes about two and a half minutes.
+caught, and by what). The parts run side by side (`--jobs <n>`, default the machine's cores): the cheap ones
+(format, types, lint, the fix texts, the definition) first, all at once, so a formatting or type error ends the run
+in seconds; then the rest, longest first. The first failure stops the run (`--keep-going` runs everything). On a
+16-core laptop on 22 November 2026, the full gate's 71 parts took 834 s of part time in 120 s wall (they took
+631 s one after another); the longest parts are `proof/sim-plants.ts` and the service suite, about 100 s each under
+that load. `--quick` leaves out the service suite, three simulations and the apps' planted bugs.
 
 | Part | What it checks |
 |---|---|

@@ -135,11 +135,14 @@ export type WorkflowSeams = {
   hops?: readonly Hop[];
   onCase?: OnCase;
   positions?: Readonly<Record<string, number>> | null;
+  /** [i, n]: run only the cases whose index is i modulo n (a slice of the run, for one account; the slices of a
+   * run, each on its own account, run side by side and together are every case). */
+  slice?: readonly [index: number, of: number];
 };
 export async function workflowSeams(
   send: Sender,
   sources: wf.Sources,
-  { hops = ['router', 'call'], onCase = () => {}, positions = null }: WorkflowSeams = {},
+  { hops = ['router', 'call'], onCase = () => {}, positions = null, slice = [0, 1] }: WorkflowSeams = {},
 ): Promise<{
   counts: Readonly<Record<string, unknown>>;
   cases: Case[];
@@ -192,8 +195,11 @@ export async function workflowSeams(
       .filter(k => k !== 'lookup_error')
       .flatMap(kind => Array.from({ length: countOf(hop) }, (_, n): Case => ({ hop, kind, n }))),
   );
+  const [index, of] = slice,
+    mine = (ci: number): boolean => ci % of === index;
   let logged = faultsOf((await send('GET', '/~faults')).body).length;
   for (const [ci, c] of cases.entries()) {
+    if (!mine(ci)) continue;
     await send('PUT', '/~faults', { seed: 0, points: [{ hop: c.hop, n: c.n, kind: c.kind }], router: true });
     await script(`s${ci}-`, ci);
     const faults = faultsOf((await send('GET', '/~faults')).body);
@@ -211,7 +217,7 @@ export async function workflowSeams(
     const ci = typeof a.op === 'number' ? caseOfOp.get(a.op) : undefined;
     blame(cases[typeof ci === 'number' ? ci : -1], a.type);
   }
-  return { counts, cases, history, final, traces, result, tr };
+  return { counts, cases: cases.filter((_, ci) => mine(ci)), history, final, traces, result, tr };
 }
 
 // What each seam got: { "<hop>/<kind>": { positions, fired } }

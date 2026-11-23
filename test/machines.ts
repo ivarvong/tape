@@ -470,7 +470,11 @@ T(
 
 // ---- 4. the ported programs: a retry racing the first request finds the row moved, and answers with it
 {
-  const r = built(read('examples/tickets.tape')),
+  // the purchase's charge has a 50 ms budget, and the gate is released 40 ms in: on a loaded machine (the gate runs
+  // its parts side by side) the sleeps overran it and the purchase answered 504. The race is the same with room.
+  const tickets = read('examples/tickets.tape');
+  T('tickets: the purchase charges within 50 ms', tickets.includes('amount, within: 50)'), true);
+  const r = built(tickets.replace('amount, within: 50)', 'amount, within: 5000)')),
     sql = nodeSql();
   let release = (): void => {};
   const gate = new Promise<void>(res => {

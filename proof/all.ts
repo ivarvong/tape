@@ -1,20 +1,31 @@
-// proof/all.ts: every check in the repository, one after another, and one table at the end.
-//   node proof/all.ts            everything (about twenty minutes on two cores)
+// proof/all.ts: every check in the repository, run side by side, and one table at the end.
+//   node proof/all.ts            everything (a few minutes on sixteen cores; the parts' own times add to about ten)
 //   node proof/all.ts --quick    without the service and mcp suites, the all-programs simulation and the planted bugs
 //                                (the apps' planted bugs too)
 //   node proof/all.ts --only sim a part whose name contains the word
+//   --jobs <n>                   how many parts run at once (default: the machine's cores; --jobs 1 is one at a time)
+//   --keep-going                 run every part even after one failed (the default stops at the first failure)
 // Exit 0 only when every row passed. A row passes when its command exits 0 and, where a number is recorded below
 // (how many planted bugs are caught, and by what), the number is the one recorded: a check that quietly got weaker
 // fails here as surely as one that broke.
-import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+// Order: the cheap parts (format, types, lint, the fix texts and the definition) run first, all at once, and a
+// failure among them ends the run before anything slow starts; then the rest, longest first (by the times the last
+// run recorded in proof/results/all-times.json), --jobs at a time. No two parts share mutable state: each writes
+// its own proof/results/<name>.json, plants are made in fresh temporary directories, the two workerd suites keep
+// their state under their own directories, and no part listens on a fixed port.
+import { spawn } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { stripVTControlCharacters } from 'node:util';
 
 const root = new URL('..', import.meta.url).pathname,
   node = process.execPath;
 const quick = process.argv.includes('--quick'),
   at = process.argv.indexOf('--only'),
-  only = at < 0 ? null : process.argv[at + 1];
+  only = at < 0 ? null : process.argv[at + 1],
+  jobsAt = process.argv.indexOf('--jobs'),
+  jobs = Math.max(1, Number(jobsAt < 0 ? availableParallelism() : process.argv[jobsAt + 1]) || 1),
+  keepGoing = process.argv.includes('--keep-going');
 const tapes = (dir: string) =>
   readdirSync(root + dir)
     .filter(f => f.endsWith('.tape'))
@@ -211,40 +222,38 @@ function noteOf(
   if (status !== 0) return `exit ${status ?? signal}: ${(failed[0] ?? last).slice(0, 140)}`;
   return said ? (failed[0] ?? '').slice(0, 140) : `the recorded result is not in the output: ${last.slice(0, 120)}`;
 }
-function runPart([name, cmd, expect, cwd]: Part): Row {
-  const [program, ...args] = cmd ?? [];
-  if (program === undefined) return { name, ok: false, s: 0, note: 'not run' };
-  const began = Date.now();
-  const r = spawnSync(program, args, {
-    cwd: root + (cwd ?? ''),
-    encoding: 'utf8',
-    maxBuffer: 1 << 28,
-    timeout: 30 * 60 * 1000,
-    // Node 25 warns that node:sqlite is experimental; the warning is not a part's result, so it is left out
-    env: {
-      ...process.env,
-      NO_COLOR: '1',
-      FORCE_COLOR: '0',
-      NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --disable-warning=ExperimentalWarning`.trim(),
-    },
-  });
-  // colour codes are stripped before a recorded result is looked for: on a CI runner the service suite prints
-  // its summary in colour, and the first run there failed for that alone
-  const out = stripVTControlCharacters(`${r.stdout}${r.stderr}`);
-  const said = expect === undefined || (typeof expect === 'function' ? expect(out) : expect.test(out));
-  const failed = out.match(/^FAIL .*$/gm) ?? [];
-  const ok = r.status === 0 && said && failed.length === 0;
-  const row = {
-    name,
-    ok,
-    s: Math.round((Date.now() - began) / 1000),
-    note: ok ? '' : noteOf(r.status, r.signal, said, failed, out),
-  };
+/** The cheap parts: they run first, together, and a failure among them stops the run within seconds. */
+const cheap = (name: string): boolean =>
+  /^(format|types|lint):/.test(name) || name === 'test/fix-texts.ts' || name === 'test/definition.ts';
+const TIMES = `${root}proof/results/all-times.json`;
+/** How long each part took the last time it passed (seconds), for longest-first; a part not seen yet goes first. */
+const times: Record<string, number> = (() => {
+  try {
+    const v: unknown = JSON.parse(readFileSync(TIMES, 'utf8'));
+    return typeof v === 'object' && v !== null
+      ? Object.fromEntries(Object.entries(v).filter((e): e is [string, number] => typeof e[1] === 'number'))
+      : {};
+  } catch {
+    return {};
+  }
+})();
+type Child = ReturnType<typeof spawn>;
+const children = new Set<Child>();
+let stopping = false;
+function kill(child: Child): void {
+  if (child.pid === undefined) return;
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {
+    // gone already
+  }
+}
+function report(row: Row, out: string): Row {
   console.log(
-    `${ok ? 'ok  ' : 'FAIL'} ${String(row.s).padStart(4)} s  ${name}${ok ? '' : `\n            ${row.note}`}`,
+    `${row.ok ? 'ok  ' : 'FAIL'} ${String(row.s).padStart(4)} s  ${row.name}${row.ok ? '' : `\n            ${row.note}`}`,
   );
   // a failed part's last lines, so the log of a run somewhere else (CI) says why without a second run
-  if (!ok)
+  if (out !== '')
     console.log(
       out
         .trim()
@@ -255,10 +264,91 @@ function runPart([name, cmd, expect, cwd]: Part): Row {
     );
   return row;
 }
-const rows = parts.map(runPart);
-const bad = rows.filter(r => !r.ok);
+function runPart([name, cmd, expect, cwd]: Part): Promise<Row> {
+  const [program, ...args] = cmd ?? [];
+  if (program === undefined) return Promise.resolve(report({ name, ok: false, s: 0, note: 'not run' }, ''));
+  const began = Date.now();
+  return new Promise(done => {
+    const child = spawn(program, args, {
+      cwd: root + (cwd ?? ''),
+      // its own process group, so a stopped run takes the part's children (vitest's workerd) with it
+      detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      // Node 25 warns that node:sqlite is experimental; the warning is not a part's result, so it is left out
+      env: {
+        ...process.env,
+        NO_COLOR: '1',
+        FORCE_COLOR: '0',
+        NODE_OPTIONS: `${process.env['NODE_OPTIONS'] ?? ''} --disable-warning=ExperimentalWarning`.trim(),
+      },
+    });
+    children.add(child);
+    const chunks: Buffer[] = [];
+    child.stdout?.on('data', (b: Buffer) => {
+      chunks.push(b);
+    });
+    child.stderr?.on('data', (b: Buffer) => {
+      chunks.push(b);
+    });
+    const timer = setTimeout(() => kill(child), 30 * 60 * 1000);
+    child.on('close', (status: number | null, signal: string | null) => {
+      clearTimeout(timer);
+      children.delete(child);
+      // colour codes are stripped before a recorded result is looked for: on a CI runner the service suite prints
+      // its summary in colour, and the first run there failed for that alone
+      const out = stripVTControlCharacters(Buffer.concat(chunks).toString('utf8'));
+      const said = expect === undefined || (typeof expect === 'function' ? expect(out) : expect.test(out));
+      const failed = out.match(/^FAIL .*$/gm) ?? [];
+      const ok = status === 0 && said && failed.length === 0;
+      if (ok) times[name] = (Date.now() - began) / 1000;
+      const stopped = !ok && stopping && signal !== null;
+      const note = ok ? '' : stopped ? 'stopped: another part failed' : noteOf(status, signal, said, failed, out);
+      done(report({ name, ok, s: Math.round((Date.now() - began) / 1000), note }, ok || stopped ? '' : out));
+    });
+  });
+}
+/** Runs the parts, `width` at a time, in the order given; after a failure (without --keep-going) it starts no more
+ * and stops the ones running. The rows come back in the parts' order. */
+async function pool(list: readonly Part[], width: number): Promise<Row[]> {
+  const rows: Row[] = [];
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    for (let i = next++; i < list.length; i = next++) {
+      const part = list[i];
+      if (part === undefined) return;
+      if (stopping) {
+        rows[i] = { name: part[0], ok: false, s: 0, note: 'not run: another part failed' };
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- a lane runs its parts one after another
+      const row = await runPart(part);
+      rows[i] = row;
+      if (!row.ok && !keepGoing && !stopping) {
+        stopping = true;
+        for (const c of children) kill(c);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(width, list.length) }, lane));
+  return rows;
+}
+const wallStart = Date.now();
+const first = parts.filter(p => cheap(p[0])),
+  rest = parts.filter(p => !cheap(p[0])).toSorted((a, b) => (times[b[0]] ?? 1e9) - (times[a[0]] ?? 1e9));
 console.log(
-  `\n${rows.length} parts, ${rows.length - bad.length} passed, ${bad.length} failed, ${rows.reduce((n, r) => n + r.s, 0)} s${quick ? ' (quick: the service and mcp suites, sim-all, sim-plants and the --plants runs of the apps were not run)' : ''}`,
+  `${parts.length} parts, ${jobs} at a time: ${first.length} cheap ones first, then ${rest.length}, longest first`,
 );
-for (const r of bad) console.log(`  FAILED: ${r.name}`);
+const rows = [...(await pool(first, Math.max(jobs, first.length))), ...(await pool(rest, jobs))];
+try {
+  mkdirSync(`${root}proof/results`, { recursive: true });
+  writeFileSync(TIMES, `${JSON.stringify(times, null, 1)}\n`);
+} catch {
+  // the times only order the next run
+}
+const bad = rows.filter(r => !r.ok);
+const why = (r: Row): string => (/^(not run|stopped)/.test(r.note) ? ` (${r.note})` : '');
+console.log(
+  `\n${rows.length} parts, ${rows.length - bad.length} passed, ${bad.length} failed, ${rows.reduce((n, r) => n + r.s, 0)} s of parts in ${Math.round((Date.now() - wallStart) / 1000)} s wall (--jobs ${jobs})${quick ? ' (quick: the service and mcp suites, sim-all, sim-plants and the --plants runs of the apps were not run)' : ''}`,
+);
+for (const r of bad) console.log(`  FAILED: ${r.name}${why(r)}`);
 process.exit(bad.length > 0 ? 1 : 0);
