@@ -3,7 +3,7 @@
 import type { CtorPat, Pattern } from '../ast.ts';
 import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
 import { refinedPattern, shadowedHint } from '../shadow.ts';
-import { BOOL, INT, T, VIEW, key } from '../types.ts';
+import { BOOL, INT, RETIRED, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { declare, fresh, get, loadField, mark, need, ptrSlots, set, store, trapIf } from './fn.ts';
 import type { Ctx } from './fn.ts';
@@ -188,7 +188,7 @@ function matchFn(c: Ctx, pt: Of<'fn'>, type: Type, ls: readonly number[]): void 
       pt,
       'C22',
       `unknown function ${pt.name}`,
-      'A lowercase name with parentheses in a pattern is a function that returns Option[…].',
+      RETIRED.get(pt.name) ?? 'A lowercase name with parentheses in a pattern is a function that returns Option[…].',
     );
   const [param] = g.params;
   const { ret } = g;

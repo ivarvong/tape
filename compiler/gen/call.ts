@@ -6,7 +6,7 @@ import { eachExpr } from '../ast.ts';
 import type { At, Call, Expr, FnDecl, Interface, TypeAst } from '../ast.ts';
 import { I32, fail, loadOp, sleb, stemOf, storeOp, uleb, utf8 } from '../common.ts';
 import { ROW_CALLS } from '../rows.ts';
-import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, T, VIEW, decType, key } from '../types.ts';
+import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, RETIRED, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { fresh, get, mark, need, set } from './fn.ts';
 import type { Binding, Build, CExpr, Ctx, Stored } from './fn.ts';
@@ -384,6 +384,8 @@ export function emitCall(c: Ctx, e: Call, expected: Type | null, tail: boolean):
     const value = dot > 0 ? e.name.slice(0, dot) : null;
     if (value !== null && c.env.has(value))
       return `\`${value}\` is a value, not a capability bound to an interface, and Tape has no methods: pass it to a function, \`${e.name.slice(dot + 1)}(…)\` with it as an argument.`;
+    const gone = RETIRED.get(e.name);
+    if (gone) return gone;
     const n = B.nearest(e.name, [...B.fns.keys(), ...INTRINSICS.keys()]);
     return n
       ? `Did you mean \`${n}\`?`

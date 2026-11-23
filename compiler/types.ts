@@ -33,6 +33,24 @@ export function forgetAddedCapabilities(): void {
   }
 }
 /** Each built-in: its parameters by name, or null for one whose arguments the compiler reads by label itself. */
+/**
+ * std and built-in functions that went (LANGUAGE.md section 13), with what does their job now: a program written
+ * against them is told so, not only that the name is unknown.
+ */
+export const RETIRED: ReadonlyMap<string, string> = new Map([
+  [
+    'digits',
+    'std `digits` went on 23 November 2026: `decimal(n)` reads an id (no sign, no leading zero), `parse_int(text: …)` a number as people write one (a sign, leading zeros).',
+  ],
+  [
+    'write_each',
+    'std `write_each` went on 23 November 2026: a Buf is handed from item to item as any accumulator is, `fold(list, from: out, by: fn(out: Buf, item: T) -> Buf { … })`.',
+  ],
+  [
+    'write_json_list',
+    'std `write_json_list` went on 23 November 2026: `write_json(value: list)` writes a List, its items as write_json writes each one.',
+  ],
+]);
 export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map<string, readonly string[] | null>(
   Object.entries({
     len: ['v'],

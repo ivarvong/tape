@@ -366,4 +366,36 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// ---- a std function that went is named as gone, with what does its job now. A program written before 23
+// November (an ephemeris with `digits(n)` in its routes, a renderer with `write_each`) was told "unknown function
+// digits: a lowercase name with parentheses in a pattern is a function that returns Option", or "did you mean
+// write_esc?". Each replacement the fix names compiles.
+{
+  const ROUTE =
+    'fn handle(raw: View) -> Buf {\n  match request(raw).path {\n    "/n/" ++ @F(n) -> respond(status: 200) |> write_int(value: n)\n    _ -> respond(status: 404)\n  }\n}\n';
+  const s1 = said(ROUTE.replace('@F', 'digits'));
+  same(
+    'digits in a pattern: C22 that says it went',
+    [code(s1), hint(s1).startsWith('std `digits` went')],
+    ['C22:3', true],
+  );
+  same('…and `decimal(n)`, which it names, compiles', said(ROUTE.replace('@F', 'decimal')), 'compiled');
+  const BY = 'by: fn(out: Buf, item: Int) -> Buf { out |> write_int(value: item) }';
+  const s2 = said(
+    `fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_each(list: Cons(head: 1, tail: Nil), ${BY})\n}\n`,
+  );
+  same(
+    'write_each in a call: C22 that says it went',
+    [code(s2), hint(s2).startsWith('std `write_each` went')],
+    ['C22:2', true],
+  );
+  same(
+    '…and the fold it names compiles',
+    said(
+      `fn handle(raw: View) -> Buf {\n  fold(list: Cons(head: 1, tail: Nil), from: respond(status: 200), ${BY})\n}\n`,
+    ),
+    'compiled',
+  );
+}
+
 finish();
