@@ -98,8 +98,8 @@ export type EffectOut =
   | { kind: 'now'; now: number }
   | { kind: 'random'; random: number }
   | { kind: 'wake'; key: number; after_ms: number; due: number; undone?: true };
-export type TraceMode = 'lines' | 'full' | 'none';
-export type EffectsMode = 'compact' | 'full';
+export type TraceMode = (typeof TRACE_MODES)[number];
+export type EffectsMode = (typeof EFFECTS_MODES)[number];
 export type RunResultOne = {
   request: string;
   /** on the run's own clock (a request with at_ms): when it ran, in ms from the run's start */
@@ -150,6 +150,76 @@ const isFields = (v: unknown): v is Fields => typeof v === 'object' && v !== nul
 const FILE_NAME = /^[A-Za-z0-9_][A-Za-z0-9_-]{0,62}\.tape$/;
 const REQUEST_LINE = /^[A-Z]{1,16} \/\S*$/;
 
+// ---- what each tool takes: one definition, published as its inputSchema (serve.ts, listing) and the fields the tool
+// reads (filesOf, requestsOf, modeOf and the unknown-argument check take their keys and words from it), so the two
+// cannot drift (mcp/test.ts, schema: a strict client checks arguments against the schema before it sends them)
+
+/** A JSON Schema object with its properties, as the tools' schemas are. */
+type ObjectSchema = { type: 'object'; properties: Record<string, unknown> };
+/** The fields an object schema names: all a tool takes there. */
+export const fieldsOfSchema = (s: ObjectSchema): string[] => Object.keys(s.properties);
+
+const FILE_SCHEMA = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', pattern: FILE_NAME.source, description: 'hello.tape' },
+    text: { type: 'string', description: 'The Tape source.' },
+  },
+  required: ['name', 'text'],
+  additionalProperties: false,
+} as const;
+export const FILES_SCHEMA = {
+  type: 'array',
+  description: `The program's files (at most ${LIMITS.files}, ${LIMITS.sourceBytes} bytes together). Leave it out to use examples/hello.tape.`,
+  minItems: 1,
+  maxItems: LIMITS.files,
+  items: FILE_SCHEMA,
+} as const;
+const TIMED_REQUEST_SCHEMA = {
+  type: 'object',
+  properties: {
+    request: { type: 'string' },
+    at_ms: { type: 'integer', minimum: 0, maximum: LIMITS.atMs },
+  },
+  required: ['request'],
+  additionalProperties: false,
+} as const;
+export const REQUESTS_SCHEMA = {
+  type: 'array',
+  minItems: 1,
+  maxItems: LIMITS.requests,
+  items: { anyOf: [{ type: 'string' }, TIMED_REQUEST_SCHEMA] },
+  description:
+    'Requests, run in order: "GET /hello/ada", "POST /path\\n<body>", or {"request": "GET /x", "at_ms": 61000} on the run\'s own clock (ms from its start, never going back).',
+} as const;
+export const TRACE_MODES = ['lines', 'full', 'none'] as const;
+export const EFFECTS_MODES = ['compact', 'full'] as const;
+export const COMPILE_INPUT = {
+  type: 'object',
+  properties: { files: FILES_SCHEMA },
+  additionalProperties: false,
+} as const;
+export const RUN_INPUT = {
+  type: 'object',
+  properties: {
+    files: FILES_SCHEMA,
+    requests: REQUESTS_SCHEMA,
+    trace: {
+      type: 'string',
+      enum: TRACE_MODES,
+      description:
+        'lines (the default): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none.',
+    },
+    effects: {
+      type: 'string',
+      enum: EFFECTS_MODES,
+      description: `compact (the default): a query's rows only when it returned at most ${LIMITS.compactRows}; full: all.`,
+    },
+  },
+  required: ['requests'],
+  additionalProperties: false,
+} as const;
+
 /** Arguments with keys that are not the tool's: refused, so a misspelt `file` is not silently ignored. */
 export const unknownKeys = (args: Fields, known: readonly string[]): Refusal | null => {
   const extra = Object.keys(args).filter(k => !known.includes(k));
@@ -176,7 +246,7 @@ export function filesOf(args: Fields, deps: Deps): Source[] | Refusal {
   for (const [i, f] of files.entries()) {
     if (!isFields(f) || typeof f['name'] !== 'string' || typeof f['text'] !== 'string')
       return refused(400, 'bad_files', `files[${i}] is not {name: string, text: string}`);
-    const extra = Object.keys(f).filter(k => k !== 'name' && k !== 'text');
+    const extra = Object.keys(f).filter(k => !fieldsOfSchema(FILE_SCHEMA).includes(k));
     if (extra.length > 0)
       return refused(400, 'bad_files', `files[${i}] has ${extra.join(', ')}; a file is {name, text}`);
     const name = f['name'];
@@ -212,7 +282,7 @@ export function requestsOf(args: Fields): RunRequest[] | Refusal {
     let r: unknown = item,
       at: number | null = null;
     if (isFields(item)) {
-      const extra = Object.keys(item).filter(k => k !== 'request' && k !== 'at_ms');
+      const extra = Object.keys(item).filter(k => !fieldsOfSchema(TIMED_REQUEST_SCHEMA).includes(k));
       if (extra.length > 0)
         return refused(
           400,
@@ -304,7 +374,7 @@ const usageOf = (c: Compiled, requests = 0): Usage => ({
 /** compile: what the compiler says of the program. */
 export function compileTool(args: unknown, deps: Deps): { result: CompileResult | Refusal; usage: Usage | null } {
   if (!isFields(args)) return { result: refused(400, 'bad_arguments', 'the arguments are a JSON object'), usage: null };
-  const c = compiled(args, deps, ['files']);
+  const c = compiled(args, deps, fieldsOfSchema(COMPILE_INPUT));
   if (isRefusal(c)) return { result: c, usage: null };
   const ok = c.built !== null;
   return {
@@ -562,13 +632,13 @@ export async function runTool(
   deps: Deps,
 ): Promise<{ result: RunResult | Refusal; usage: Usage | null }> {
   if (!isFields(args)) return { result: refused(400, 'bad_arguments', 'the arguments are a JSON object'), usage: null };
-  const c = compiled(args, deps, ['files', 'requests', 'trace', 'effects']);
+  const c = compiled(args, deps, fieldsOfSchema(RUN_INPUT));
   if (isRefusal(c)) return { result: c, usage: null };
   const requests = requestsOf(args);
   if (isRefusal(requests)) return { result: requests, usage: null };
-  const trace = modeOf<TraceMode>(args, 'trace', ['lines', 'full', 'none'], 'lines');
+  const trace = modeOf<TraceMode>(args, 'trace', TRACE_MODES, 'lines');
   if (isRefusal(trace)) return { result: trace, usage: null };
-  const effects = modeOf<EffectsMode>(args, 'effects', ['compact', 'full'], 'compact');
+  const effects = modeOf<EffectsMode>(args, 'effects', EFFECTS_MODES, 'compact');
   if (isRefusal(effects)) return { result: effects, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;

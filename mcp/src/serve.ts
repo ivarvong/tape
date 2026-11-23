@@ -11,9 +11,9 @@
 // origin needs a preflight, which gets no CORS headers, so the browser never sends it.
 import { fieldsOf, serveMcp } from '../../service/src/mcp.ts';
 import type { Fields, McpServer } from '../../service/src/mcp.ts';
-import { LIMITS, TRACE_LINES, compileTool, isRefusal, refused, runTool } from './tools.ts';
+import { COMPILE_INPUT, LIMITS, RUN_INPUT, TRACE_LINES, compileTool, isRefusal, refused, runTool } from './tools.ts';
 import type { Deps, Refusal, Usage } from './tools.ts';
-import { FEEDBACK, KINDS, feedbackTool } from './feedback.ts';
+import { FEEDBACK, FEEDBACK_INPUT, feedbackTool } from './feedback.ts';
 import type { CallMeta, Store } from './feedback.ts';
 
 export const VERSION = '0.1.0';
@@ -114,21 +114,6 @@ async function drain(body: ReadableStream): Promise<void> {
 
 // ---- the tools as MCP lists them
 
-const FILES_SCHEMA = {
-  type: 'array',
-  description: `The program's files (at most ${LIMITS.files}, ${LIMITS.sourceBytes} bytes together). Leave it out to use examples/hello.tape.`,
-  minItems: 1,
-  maxItems: LIMITS.files,
-  items: {
-    type: 'object',
-    properties: {
-      name: { type: 'string', pattern: '^[A-Za-z0-9_][A-Za-z0-9_-]{0,62}\\.tape$', description: 'hello.tape' },
-      text: { type: 'string', description: 'The Tape source.' },
-    },
-    required: ['name', 'text'],
-    additionalProperties: false,
-  },
-};
 const DIAGNOSTICS_SCHEMA = {
   type: 'array',
   items: {
@@ -180,7 +165,7 @@ ${CHEAT_SHEET}
 ${hello}
 
 ${limits}`,
-      inputSchema: { type: 'object', properties: { files: FILES_SCHEMA }, additionalProperties: false },
+      inputSchema: COMPILE_INPUT,
       outputSchema: {
         type: 'object',
         properties: {
@@ -208,46 +193,7 @@ To check it works: run with requests ["GET /hello/ada", "GET /hello/ada"] and no
 ${hello}
 
 ${limits}`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          files: FILES_SCHEMA,
-          requests: {
-            type: 'array',
-            minItems: 1,
-            maxItems: LIMITS.requests,
-            items: {
-              anyOf: [
-                { type: 'string' },
-                {
-                  type: 'object',
-                  properties: {
-                    request: { type: 'string' },
-                    at_ms: { type: 'integer', minimum: 0, maximum: LIMITS.atMs },
-                  },
-                  required: ['request'],
-                  additionalProperties: false,
-                },
-              ],
-            },
-            description:
-              'Requests, run in order: "GET /hello/ada", "POST /path\\n<body>", or {"request": "GET /x", "at_ms": 61000} on the run\'s own clock (ms from its start, never going back).',
-          },
-          trace: {
-            type: 'string',
-            enum: ['lines', 'full', 'none'],
-            description:
-              'lines (the default): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none.',
-          },
-          effects: {
-            type: 'string',
-            enum: ['compact', 'full'],
-            description: `compact (the default): a query's rows only when it returned at most ${LIMITS.compactRows}; full: all.`,
-          },
-        },
-        required: ['requests'],
-        additionalProperties: false,
-      },
+      inputSchema: RUN_INPUT,
       outputSchema: {
         type: 'object',
         properties: {
@@ -267,29 +213,7 @@ ${limits}`,
       description: `Report anything surprising, wrong, confusing or missing about Tape (https://github.com/ivarvong/tape): the language, the compiler and its diagnostics, or these tools. A wrong answer, a rule that gets in the way, an error that did not help, a feature you reached for: all are worth a report, and so is what worked. Say what you did, what you expected and what happened, and send the minimal program that shows it in \`files\` (and the \`requests\` that show it, as run takes them): the smaller the program, the sooner it is fixed. Returns {ok: true, id}.
 
 What is stored: the fields you send, the time, the tape-mcp version, a daily salted hash of your address (never the address), your user agent and, when you send a program, what the compiler says of it now. Reports are read by the maintainers to improve Tape and are kept until we delete them. Do not send secrets or personal data. Limits: text, expected and actual ${FEEDBACK.textBytes / 1024} KB each; files as compile takes them (${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB); ${LIMITS.requests} requests; ${FEEDBACK.perMinute} reports a minute. https://github.com/ivarvong/tape/blob/main/TERMS.md`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          text: {
-            type: 'string',
-            minLength: 1,
-            maxLength: FEEDBACK.textBytes,
-            description: 'What you found, in a few sentences: what you did, and why it surprised you.',
-          },
-          kind: { type: 'string', enum: [...KINDS], description: 'What sort of report it is.' },
-          files: { ...FILES_SCHEMA, description: 'The minimal program that shows it, if there is one.' },
-          requests: {
-            type: 'array',
-            maxItems: LIMITS.requests,
-            items: { type: 'string' },
-            description: 'The requests that show it, as run takes them: "GET /hello/ada".',
-          },
-          expected: { type: 'string', maxLength: FEEDBACK.textBytes, description: 'What you expected.' },
-          actual: { type: 'string', maxLength: FEEDBACK.textBytes, description: 'What happened instead.' },
-        },
-        required: ['text'],
-        additionalProperties: false,
-      },
+      inputSchema: FEEDBACK_INPUT,
       outputSchema: {
         type: 'object',
         properties: { ok: { type: 'boolean' }, id: { type: 'string' }, ...refusalFields },

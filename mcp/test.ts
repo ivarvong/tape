@@ -19,6 +19,7 @@ import { nodeSql } from '../apps/playground/src/sqlite.ts';
 import type * as RunnerM from './src/runner.ts';
 import type * as ToolsM from './src/tools.ts';
 import type * as ServeM from './src/serve.ts';
+import type * as FeedbackM from './src/feedback.ts';
 import type { SqlJsInit } from './src/runner.ts';
 
 const HERE = new URL('./', import.meta.url).pathname;
@@ -29,12 +30,15 @@ const UNDONE_TAPE = readFileSync(`${HERE}test/undone.tape`, 'utf8');
 const CLOCK_TAPE = readFileSync(`${HERE}test/clock.tape`, 'utf8');
 const README = readFileSync(`${ROOT}README.md`, 'utf8');
 
-type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM };
+type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM; feedback: typeof FeedbackM };
 type Plant = { test: string; what: string; file: string; from: string; to: string };
 const SRC = ['runner.ts', 'tools.ts', 'feedback.ts', 'serve.ts', 'host.ts', 'sqlite.ts'];
 
 const isMods = (m: Record<string, unknown>): m is Mods =>
-  typeof m['runner'] === 'object' && typeof m['tools'] === 'object' && typeof m['serve'] === 'object';
+  typeof m['runner'] === 'object' &&
+  typeof m['tools'] === 'object' &&
+  typeof m['serve'] === 'object' &&
+  typeof m['feedback'] === 'object';
 /** src/, or a copy of it with one plant in it: its imports of the repository made absolute, its own left relative. */
 async function modules(plant: Plant | null): Promise<Mods> {
   let dir = `${HERE}src/`;
@@ -53,7 +57,12 @@ async function modules(plant: Plant | null): Promise<Mods> {
     }
   }
   const at = (f: string): Promise<unknown> => import(pathToFileURL(dir + f).href);
-  const m = { runner: await at('runner.ts'), tools: await at('tools.ts'), serve: await at('serve.ts') };
+  const m = {
+    runner: await at('runner.ts'),
+    tools: await at('tools.ts'),
+    serve: await at('serve.ts'),
+    feedback: await at('feedback.ts'),
+  };
   if (!isMods(m)) throw new Error('src/ does not export what this test uses');
   return m;
 }
@@ -209,6 +218,86 @@ async function workbenchOtlp(name: string, text: string, requests: readonly stri
   const out: unknown[] = [];
   for (const r of requests) out.push((await w.send(name, r)).otlp);
   return out;
+}
+
+// ---- a tool's published inputSchema against what the tool takes
+
+/**
+ * Whether v is valid under a JSON Schema, for the keywords tools/list uses (a client that checks arguments before
+ * it sends them checks these). Written here, apart from the server, so it is not the code under test.
+ */
+function valid(schema: unknown, v: unknown): boolean {
+  const s = F(schema);
+  if (Array.isArray(s['anyOf'])) return s['anyOf'].some(x => valid(x, v));
+  if (Array.isArray(s['enum']) && !s['enum'].includes(v)) return false;
+  const t = s['type'];
+  if (t === 'string') {
+    if (typeof v !== 'string') return false;
+    if (typeof s['pattern'] === 'string' && !new RegExp(s['pattern'], 'u').test(v)) return false;
+    if (typeof s['minLength'] === 'number' && v.length < s['minLength']) return false;
+    if (typeof s['maxLength'] === 'number' && v.length > s['maxLength']) return false;
+  }
+  if (t === 'integer') {
+    if (typeof v !== 'number' || !Number.isInteger(v)) return false;
+    if (typeof s['minimum'] === 'number' && v < s['minimum']) return false;
+    if (typeof s['maximum'] === 'number' && v > s['maximum']) return false;
+  }
+  if (t === 'array') {
+    if (!Array.isArray(v)) return false;
+    if (typeof s['minItems'] === 'number' && v.length < s['minItems']) return false;
+    if (typeof s['maxItems'] === 'number' && v.length > s['maxItems']) return false;
+    if (s['items'] !== undefined && !v.every(x => valid(s['items'], x))) return false;
+  }
+  if (t === 'object') {
+    if (!isFields(v)) return false;
+    const props = F(s['properties']);
+    if (L(s['required']).some(k => typeof k === 'string' && !(k in v))) return false;
+    for (const [k, x] of Object.entries(v)) {
+      if (k in props) {
+        if (!valid(props[k], x)) return false;
+      } else if (s['additionalProperties'] === false) return false;
+    }
+  }
+  return true;
+}
+/** Every field a schema names, as a path ("requests[].at_ms"), through arrays and anyOf. */
+function schemaPaths(schema: unknown, at = ''): string[] {
+  const s = F(schema);
+  const branches = Array.isArray(s['anyOf']) ? s['anyOf'] : [];
+  return [
+    ...branches.flatMap(b => schemaPaths(b, at)),
+    ...(s['items'] === undefined ? [] : schemaPaths(s['items'], `${at}[]`)),
+    ...Object.entries(F(s['properties'])).flatMap(([k, x]) => {
+      const p = at === '' ? k : `${at}.${k}`;
+      return [p, ...schemaPaths(x, p)];
+    }),
+  ];
+}
+/** Every field a value has, as schemaPaths names them. */
+function valuePaths(v: unknown, at = ''): string[] {
+  if (Array.isArray(v)) return v.flatMap(x => valuePaths(x, `${at}[]`));
+  if (!isFields(v)) return [];
+  return Object.entries(v).flatMap(([k, x]) => {
+    const p = at === '' ? k : `${at}.${k}`;
+    return [p, ...valuePaths(x, p)];
+  });
+}
+/** v with each object in it watched: every field the code reads of one is added to `read`, as a path. */
+function watched(v: unknown, read: Set<string>, at = ''): unknown {
+  if (Array.isArray(v)) return v.map(x => watched(x, read, `${at}[]`));
+  if (!isFields(v)) return v;
+  const inner = Object.fromEntries(
+    Object.entries(v).map(([k, x]) => [k, watched(x, read, at === '' ? k : `${at}.${k}`)]),
+  );
+  return new Proxy(inner, {
+    get(target, key, receiver): unknown {
+      // a field read, set or not (what JSON.stringify and await look for on any object is not one)
+      if (typeof key === 'string' && !(key in Object.prototype) && key !== 'toJSON' && key !== 'then')
+        read.add(at === '' ? key : `${at}.${key}`);
+      const got: unknown = Reflect.get(target, key, receiver);
+      return got;
+    },
+  });
 }
 
 type Test = { name: string; run: (m: Mods) => Promise<string[]> };
@@ -487,6 +576,85 @@ const tests: Test[] = [
       const req = F(F(run?.['inputSchema'])['properties'])['requests'];
       if (F(req)['maxItems'] !== 50 || JSON.stringify(F(run?.['inputSchema'])['required']) !== '["requests"]')
         out.push(`run: requests ${JSON.stringify(req)}`);
+      return out;
+    },
+  },
+  {
+    name: 'schema',
+    // what tools/list says each tool takes is what it takes: every field the schema names is one the tool reads and
+    // accepts, every field the tool reads is one the schema names, and a field it does not name is refused by both
+    // (a strict client checks arguments against the schema before it sends them; report 7a0d85acf5d0, 2026-11-23)
+    run: async m => {
+      const out: string[] = [];
+      const listed = new Map(
+        L(F(F((await rpc(m, 'tools/list', {})).body)['result'])['tools'])
+          .map(F)
+          .map(t => [String(t['name']), F(t['inputSchema'])]),
+      );
+      const files = [{ name: 'hello.tape', text: HELLO }];
+      const requests = ['GET /hello/ada', { request: 'GET /hello/ada', at_ms: 0 }];
+      const store: FeedbackM.Store = { put: () => Promise.resolve(), limiter: null };
+      const meta: FeedbackM.CallMeta = {
+        ip_hash: 'test',
+        user_agent: 'mcp-test/1',
+        mcp_protocol_version: null,
+        tape_mcp_version: null,
+        smoke: true,
+      };
+      const deps = depsOf(m);
+      const call = async (name: string, args: unknown): Promise<unknown> =>
+        name === 'compile'
+          ? m.tools.compileTool(args, deps).result
+          : name === 'run'
+            ? (await m.tools.runTool(args, deps)).result
+            : (await m.feedback.feedbackTool(args, deps, meta, store)).result;
+      // each tool's arguments with every field set, and each word of each enum used
+      const samples: Record<string, Fields[]> = {
+        compile: [{ files }],
+        run: [
+          { files, requests, trace: 'lines', effects: 'compact' },
+          { requests, trace: 'full', effects: 'full' },
+          { requests, trace: 'none' },
+        ],
+        feedback: ['bug', 'confusing', 'missing', 'idea', 'praise'].map(kind => ({
+          text: 'x',
+          kind,
+          files,
+          requests,
+          expected: 'y',
+          actual: 'z',
+        })),
+      };
+      for (const [name, args] of Object.entries(samples)) {
+        const schema = listed.get(name);
+        if (!schema) {
+          out.push(`${name}: not listed`);
+          continue;
+        }
+        const named = new Set(schemaPaths(schema)),
+          given = new Set(args.flatMap(a => valuePaths(a))),
+          read = new Set<string>();
+        for (const p of named) if (!given.has(p)) out.push(`${name}: the test sets no ${p}, which the schema names`);
+        for (const a of args) {
+          if (!valid(schema, a)) out.push(`${name}: the schema refuses ${JSON.stringify(a).slice(0, 160)}`);
+          const r = await call(name, watched(a, read));
+          if (m.tools.isRefusal(r)) out.push(`${name}: refused ${JSON.stringify(a).slice(0, 160)}: ${r.reason}`);
+        }
+        for (const p of read) if (!named.has(p)) out.push(`${name}: reads ${p}, which its schema does not name`);
+        for (const p of named) if (!read.has(p)) out.push(`${name}: its schema names ${p}, which it never reads`);
+        // a field neither names, at the top, in a file and in a request: both refuse it
+        const base = args[0] ?? {};
+        const odd: Fields[] = [
+          { ...base, nope: 1 },
+          { ...base, files: [{ ...files[0], nope: 1 }] },
+          ...('requests' in base ? [{ ...base, requests: [{ request: 'GET /', nope: 1 }] }] : []),
+        ];
+        for (const a of odd) {
+          if (valid(schema, a)) out.push(`${name}: the schema takes ${JSON.stringify(a).slice(0, 120)}`);
+          if (!m.tools.isRefusal(await call(name, a)))
+            out.push(`${name}: the tool takes ${JSON.stringify(a).slice(0, 120)}`);
+        }
+      }
       return out;
     },
   },
@@ -1276,6 +1444,27 @@ const PLANTS: Plant[] = [
     file: 'serve.ts',
     from: 'decimal(v)',
     to: 'parse_number(v)',
+  },
+  {
+    test: 'schema',
+    what: "run's schema lists requests as text only (as a client saw it, report 7a0d85acf5d0)",
+    file: 'tools.ts',
+    from: "items: { anyOf: [{ type: 'string' }, TIMED_REQUEST_SCHEMA] },",
+    to: "items: { type: 'string' },",
+  },
+  {
+    test: 'schema',
+    what: "feedback's schema lists requests as text only, while it takes run's (as it did until 2026-11-23)",
+    file: 'feedback.ts',
+    from: "requests: { ...REQUESTS_SCHEMA, description: 'The requests that show it, as run takes them.' },",
+    to: "requests: { type: 'array', items: { type: 'string' } },",
+  },
+  {
+    test: 'schema',
+    what: 'run ignores effects, which its schema names',
+    file: 'tools.ts',
+    from: "const effects = modeOf<EffectsMode>(args, 'effects', EFFECTS_MODES, 'compact');",
+    to: "const effects: EffectsMode | Refusal = 'compact';",
   },
   {
     test: 'compile',

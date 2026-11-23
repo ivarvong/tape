@@ -7,7 +7,16 @@
 // the log has it, never the address), the user agent and the MCP protocol version header, and, when a program is
 // sent, what the compiler says of it now, so a report says which version it reproduced on.
 import { compile } from '../../compiler.ts';
-import { filesOf, isRefusal, refused, requestsOf, unknownKeys } from './tools.ts';
+import {
+  FILES_SCHEMA,
+  REQUESTS_SCHEMA,
+  fieldsOfSchema,
+  filesOf,
+  isRefusal,
+  refused,
+  requestsOf,
+  unknownKeys,
+} from './tools.ts';
 import type { Deps, Refusal, Usage } from './tools.ts';
 
 export const FEEDBACK = {
@@ -17,7 +26,26 @@ export const FEEDBACK = {
   perMinute: 5,
 } as const;
 export const KINDS = ['bug', 'confusing', 'missing', 'idea', 'praise'] as const;
-const ARGS = ['text', 'kind', 'files', 'requests', 'expected', 'actual'] as const;
+/** What feedback takes: its inputSchema (serve.ts, listing), and the fields it reads (as tools.ts's RUN_INPUT). */
+export const FEEDBACK_INPUT = {
+  type: 'object',
+  properties: {
+    text: {
+      type: 'string',
+      minLength: 1,
+      maxLength: FEEDBACK.textBytes,
+      description: 'What you found, in a few sentences: what you did, and why it surprised you.',
+    },
+    kind: { type: 'string', enum: KINDS, description: 'What sort of report it is.' },
+    files: { ...FILES_SCHEMA, description: 'The minimal program that shows it, if there is one.' },
+    requests: { ...REQUESTS_SCHEMA, description: 'The requests that show it, as run takes them.' },
+    expected: { type: 'string', maxLength: FEEDBACK.textBytes, description: 'What you expected.' },
+    actual: { type: 'string', maxLength: FEEDBACK.textBytes, description: 'What happened instead.' },
+  },
+  required: ['text'],
+  additionalProperties: false,
+} as const;
+const ARGS = fieldsOfSchema(FEEDBACK_INPUT);
 
 /** Where reports go, and how often a client may send one: from the Worker's bindings (index.ts). */
 export type Store = {

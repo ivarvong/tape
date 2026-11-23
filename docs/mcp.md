@@ -272,6 +272,6 @@ retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-v
 (cd service && npm ci) && (cd mcp && npm ci)
 printf 'IP_SALT=dev-salt\nTOKEN=dev-token\n' > service/.dev.vars   # your own copy's secrets (.dev.vars is not tracked)
 (cd service && npm run site && npx cf dev)   # the tape Worker; then POST to /mcp at the address it prints
-node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 44 bugs, each caught
+node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 47 bugs, each caught
 (cd mcp && npx vitest run)  # mcp/src in workerd, with the real Loader and rate limiter
 ```
