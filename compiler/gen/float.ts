@@ -48,6 +48,35 @@ export function finite(c: Ctx): void {
   c.code.push(...get(x));
 }
 
+// The test after an operation can wait for the operation its result goes into. NaN and the infinities go on
+// through + - * and the left side of /: a result made of one is NaN or infinite too, so the test on it says the
+// same. An operand is let off its test only when nothing between it and that operation can stop the run another
+// way or reach the world: the operation's other side is quiet (Floats, the math library, nothing else), or there is
+// no other side left to compute. The right side of / is tested, as x / inf is 0. The run stops with trap 8 either
+// way, so this is not a change of meaning: the interpreter tests every operation.
+const DEFERRED = new WeakSet<Expr>();
+const PROPAGATE = new Set(['+', '-', '*', '/']);
+const QUIET_CALLS = new Set(['sin', 'cos', 'atan2', 'exp', 'log', 'pow', 'sqrt', 'abs', 'min', 'max', 'floor', 'ceil']);
+function quiet(e: Expr): boolean {
+  switch (e.k) {
+    case 'float':
+    case 'var':
+      return true;
+    case 'neg':
+      return quiet(e.e);
+    case 'bin':
+      return PROPAGATE.has(e.op) && quiet(e.l) && quiet(e.r);
+    case 'call':
+      return QUIET_CALLS.has(e.name) && e.args.every(a => quiet(a.value));
+    default:
+      return false;
+  }
+}
+/** Before the left side of `a op b` is emitted: may its test wait for this operation's? */
+export function deferLeft(e: Bin): void {
+  if (PROPAGATE.has(e.op) && quiet(e.r)) DEFERRED.add(e.l);
+}
+
 /** `a op b` with a Float on the stack as a: the other side, then the operation. */
 export function emitFloatBin(c: Ctx, e: Bin): Type {
   const { op } = e;
@@ -63,10 +92,11 @@ export function emitFloatBin(c: Ctx, e: Bin): Type {
         ? 'A Float has + - * / and comparisons. For a remainder, `x - y * float(floor(x / y))`.'
         : 'A Float has + - * / and comparisons; bitwise operators and ++ are for Int and text.',
     );
+  if (op === '+' || op === '-' || op === '*') DEFERRED.add(e.r);
   need(c, c.emit(e.r, FLOAT, false), FLOAT, e, `the right side of ${op}`);
   c.code.push(opcode);
   if (compare !== undefined) return BOOL;
-  finite(c);
+  if (!DEFERRED.has(e)) finite(c);
   return FLOAT;
 }
 

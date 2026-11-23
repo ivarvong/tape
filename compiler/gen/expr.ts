@@ -24,7 +24,7 @@ import type { Binding, CExpr, Ctx } from './fn.ts';
 import { closure, emitCall, emitLambda, fnValue } from './call.ts';
 import { emitMatch, letPattern } from './match.ts';
 import { emitInterp } from './text.ts';
-import { emitFloatBin } from './float.ts';
+import { deferLeft, emitFloatBin } from './float.ts';
 import { rangeOf } from './range.ts';
 
 type Of<K extends Expr['k']> = Extract<Expr, { k: K }>;
@@ -377,6 +377,7 @@ const BITWISE: Readonly<Record<string, number>> = { '&': 0x83, '|': 0x84, '^': 0
 function emitBin(c: Ctx, e: Of<'bin'>): Type {
   const { op } = e;
   if (op === 'and' || op === 'or') return emitLogic(c, e, op);
+  deferLeft(e);
   const lt = c.B.strip(c.emit(e.l, null, false));
   if (op === '++') return emitConcat(c, e, lt);
   if (op === '==' || op === '!=') return emitEquals(c, e, lt);

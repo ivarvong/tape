@@ -503,7 +503,47 @@ same(
   [],
 );
 
-// ---- 7. what the compiler refuses
+// ---- 7. a test that waits: a NaN or an infinity goes on through + - * and the left of /, so the test of an
+// operand waits for its operation's when nothing between could stop the run another way; never across a call that
+// could, never on the right of /
+const waits = `fn zero(n: Int) -> Int {
+  n / 0
+}
+
+fn stops(x: Float, n: Int) -> Float {
+  x * 1e308f * 10f + float(zero(n))
+}
+
+fn quiet(x: Float) -> Float {
+  x * 1e308f * 10f + sin(x) * 2f - 1f
+}
+
+fn divisor(x: Float) -> Float {
+  1f / (x * 1e308f * 10f)
+}
+
+fn left(x: Float) -> Bool {
+  x * 1e308f * 10f < 0f
+}
+`;
+same(
+  'a waiting test still stops at the first operation that is not finite: before a call that divides by 0, on the right of /, before a comparison',
+  wrong(
+    waits,
+    [
+      { fn: 'stops', args: [1, 1n] },
+      { fn: 'stops', args: [1e-300, 1n] },
+      { fn: 'quiet', args: [1] },
+      { fn: 'quiet', args: [1e-300] },
+      { fn: 'divisor', args: [1] },
+      { fn: 'left', args: [-1] },
+    ],
+    [FLOAT, 'trap 4', FLOAT, 1e-300 * 1e308 * 10 + Math.sin(1e-300) * 2 - 1, FLOAT, FLOAT],
+  ),
+  [],
+);
+
+// ---- 8. what the compiler refuses
 const refused = (program: string): string[] => problems(program, { exports: ['f'] }).map(p => p.code);
 const fnOf = (body: string, params = 'x: Float, n: Int'): string => `fn f(${params}) -> Float {\n  ${body}\n}\n`;
 same(
