@@ -73,7 +73,15 @@ export class Sha256 {
           (rot(s1, 17) ^ rot(s1, 19) ^ (s1 >>> 10))) |
         0;
     }
-    let [a = 0, b = 0, c = 0, e4 = 0, e = 0, f = 0, g = 0, h = 0] = H;
+    // read one by one: destructuring the typed array made an iterator a block (5 MB of 23 in a prod heap profile)
+    let a = at(H, 0),
+      b = at(H, 1),
+      c = at(H, 2),
+      e4 = at(H, 3),
+      e = at(H, 4),
+      f = at(H, 5),
+      g = at(H, 6),
+      h = at(H, 7);
     for (let i = 0; i < 64; i++) {
       const t1 = (h + (rot(e, 6) ^ rot(e, 11) ^ rot(e, 25)) + ((e & f) ^ (~e & g)) + at(K, i) + at(w, i)) | 0,
         t2 = ((rot(a, 2) ^ rot(a, 13) ^ rot(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) | 0;

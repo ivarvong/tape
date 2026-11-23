@@ -1,7 +1,7 @@
 // obs/profile.ts: a CPU (or heap) profile of one exact version of the tape Worker in prod, under load this script
 // drives, then where the time went.
 //   node scripts/obs/profile.ts <full version uuid> [--type cpu|heap] [--ms 10000] [--load hello|hello-lines|hello50|
-//        fulfillment|kv|compile-hello|compile-kv] [--rps 0.7] [--runs 1]
+//        fulfillment|kv|compile-hello|compile-kv] [--rps 0.7] [--runs 1] [--unique]
 //   node scripts/obs/profile.ts --read <file.pb> [...]     the summary of profiles taken already (summed)
 // Underneath: `cf workers versions profile <uuid> --worker-id tape --profile-type cpu|heap --duration-ms N` (raw pprof
 // on stdout). The capture needs an isolate executing when it lands ("No recent executions" otherwise), so the load
@@ -103,7 +103,25 @@ if (!load || (type !== 'cpu' && type !== 'heap')) {
   console.error(`--type cpu|heap; --load one of ${Object.keys(LOADS).join(', ')}`);
   process.exit(2);
 }
-const body = JSON.stringify(load.body());
+// --unique: each request's program differs (a comment with a counter on its first line), so the hosted compile
+// cache misses and the profile sees compiles; without it a load repeats one program, mostly answered from the cache
+const unique = args.includes('--unique');
+let sent = 0;
+const bodyOf = (): string => {
+  const b = load.body();
+  if (!unique || typeof b !== 'object' || b === null) return JSON.stringify(b);
+  const files: unknown = Reflect.get(b, 'files');
+  const list = Array.isArray(files) && files.length > 0 ? files : [file('examples/hello.tape')];
+  const text = (f: unknown, k: string): string => {
+    const v: unknown = typeof f === 'object' && f !== null ? Reflect.get(f, k) : undefined;
+    return typeof v === 'string' ? v : '';
+  };
+  const [first, ...rest] = list.map((f: unknown) => ({ name: text(f, 'name'), text: text(f, 'text') }));
+  if (!first) return JSON.stringify(b);
+  return JSON.stringify({ ...b, files: [{ ...first, text: `// ${stampOf()} ${sent++}\n${first.text}` }, ...rest] });
+};
+const started = Date.now();
+const stampOf = (): string => started.toString(36);
 const dir = `${SERVICE_DIR}profiles/`;
 mkdirSync(dir, { recursive: true });
 
@@ -124,7 +142,7 @@ for (let run = 1; run <= runs; run++) {
           'user-agent': `tape-obs-profile/${loadName}`,
           'x-tape-synthetic': 'profile',
         },
-        body,
+        body: bodyOf(),
       });
       await r.arrayBuffer();
       log.push(`${r.status} ${r.headers.get('tape-worker-version') ?? '-'} ${(performance.now() - t).toFixed(0)}ms`);
