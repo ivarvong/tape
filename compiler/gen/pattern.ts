@@ -2,7 +2,7 @@
 // does not match, and binds the pattern's names on the way.
 import type { CtorPat, Pattern } from '../ast.ts';
 import { I32, I64, TRAP, fail, sleb, uleb } from '../common.ts';
-import { shadowedHint } from '../shadow.ts';
+import { refinedPattern, shadowedHint } from '../shadow.ts';
 import { BOOL, INT, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { declare, fresh, get, loadField, mark, need, ptrSlots, set, store, trapIf } from './fn.ts';
@@ -15,7 +15,8 @@ type Taken = { adt: Adt; vi: number; subs: { fl: Field; pat: Pattern }[] };
 type Of<K extends Pattern['k']> = Extract<Pattern, { k: K }>;
 
 export const isBool = (pt: Pattern): boolean => pt.k === 'ctor' && (pt.name === 'True' || pt.name === 'False');
-export const isRefine = (c: Ctx, pt: Pattern): boolean => pt.k === 'ctor' && !!c.B.types.get(pt.name)?.refine;
+export const isRefine = (c: Ctx, pt: Pattern): boolean =>
+  pt.k === 'ctor' && refinedPattern(c.B.prog, pt.name, c.f.file) !== undefined;
 
 function wrongType(c: Ctx, pt: CtorPat, owner: string, type: Type): never {
   const sh =

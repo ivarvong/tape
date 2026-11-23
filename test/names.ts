@@ -148,6 +148,26 @@ T(
   ).errors.map(e => e.code),
   ['C45'],
 );
+// a program's refined type named as one of std's constructors (Content's Text): std's match on Content keeps its
+// Text, and the program's Text(…) pattern is its refinement (examples/tools/notes.tape has `type Text`; until
+// 2026-11-23, std/http.tape:225 was C14 in such a program as soon as it called respond_as)
+const RT = `type Text = View where len(self) <= 5
+fn handle(raw: View) -> Buf {
+  match raw {
+    Text(t) -> respond_as(status: 200, content: Json) |> append(view: t)
+    _ -> respond(status: 413)
+  }
+}
+`;
+T("a program's refined Text beside std's Content.Text", codes(RT), []);
+// and std's match tries its own Text arm on the way to Csv ("text/csv", 8 bytes), compiled and in the interpreter
+const RT2 = `type Text = View where len(self) <= 5
+fn f() -> Int {
+  len(content_type(content: Csv))
+}
+`;
+T("std's Text arm, beside a program's refined Text", run(RT2, 'f'), 8);
+T("std's Text arm, beside a program's refined Text (interp)", Number(interp(RT2, 'f')), 8);
 
 // ---- 2. row-derived column lists
 const B = `schema "CREATE TABLE orders (id INTEGER PRIMARY KEY, state TEXT NOT NULL, total INTEGER NOT NULL, note TEXT)"

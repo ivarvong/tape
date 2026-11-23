@@ -1,6 +1,16 @@
 // compiler/shadow.ts: which definition a name means when a program and std both have one.
 
-import { type Expr, type Program, type TypeAst, eachExpr, eachPattern, eachType, patternsIn, typesIn } from './ast.ts';
+import {
+  type Expr,
+  type Program,
+  type TypeAst,
+  type TypeDecl,
+  eachExpr,
+  eachPattern,
+  eachType,
+  patternsIn,
+  typesIn,
+} from './ast.ts';
 import { stemOf } from './common.ts';
 import { INTRINSICS, type Type } from './types.ts';
 
@@ -81,6 +91,16 @@ export const clashHint = (what: string, name: string, file: string | undefined):
     : isStd(file ?? '')
       ? `std defines it for its own use, and so may a program only in a file of its own: choose another name for this ${what}.`
       : `${file} defines this ${what} too; ${what === 'type' ? 'type' : 'constructor'} names are unique across a program's files.`;
+/**
+ * The refined type a pattern `Name(…)` in `file` checks, or undefined when it is a constructor. In std's code a
+ * program's refined type does not take the name from std's own constructor: std/http.tape's match on Content keeps
+ * its Text beside a program's `type Text = View where …` (examples/tools/notes.tape).
+ */
+export function refinedPattern(prog: Program, name: string, file: string): TypeDecl | undefined {
+  const t = prog.types.get(name);
+  if (!t?.refine) return undefined;
+  return isStd(file) && !isStd(t.file) && prog.ctors.has(name) ? undefined : t;
+}
 /** The std name a program's definition may have moved: the compiler's own uses of std's Step, Next and End. */
 export const stdName = (prog: Program, kind: Kind, name: string): string => prog.renamed?.[kind].get(name) ?? name;
 /** C76: a mismatch between the program's own type and the std one it shadows (`std.Step`): the hint names the clash. */

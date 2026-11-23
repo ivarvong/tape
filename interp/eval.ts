@@ -12,6 +12,7 @@ import {
   unreachable,
 } from '../compiler/ast.ts';
 import { TRAP } from '../compiler/common.ts';
+import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
 import { Unsupported } from './json.ts';
 import {
@@ -382,7 +383,7 @@ function matchText(
 }
 function matchCtor(it: Interp, p: OfPat<'ctor'>, v: Value, env: Env, file: string): boolean {
   if (p.name === 'True' || p.name === 'False') return v === (p.name === 'True');
-  const refined = it.prog.types.get(p.name)?.refine;
+  const refined = refinedPattern(it.prog, p.name, file)?.refine;
   if (refined) return selfIs(it, refined.pred, v, file) && p.subs.every(s => match(it, s.pat, v, env, file));
   const of = asAdt(v);
   if (of.c !== p.name) return false;
