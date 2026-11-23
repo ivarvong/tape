@@ -250,14 +250,22 @@ function byPosition(what: string, names: readonly string[], args: readonly Arg[]
   return shown.includes(null) ? '' : `write \`${fn}(${shown.join(', ')})\``;
 }
 
-/** The call with the one argument that names no parameter given the one parameter no argument names, or ''. */
+/**
+ * The call with the one argument that names no parameter given the one parameter no argument names, or ''. A piped
+ * call is written as it stands after the pipe: `|> write_lines(lines: priced, places)`.
+ */
 function renamed(what: string, names: readonly string[], args: readonly Arg[], wrong: Arg): string {
   const fn = callee(what);
   const free = names.filter(n => !args.some(a => a.label === n));
   const [only] = free;
-  if (fn === undefined || free.length !== 1 || only === undefined || args.some(a => a.piped)) return '';
-  const shown = args.map(a => (a === wrong ? shownArg(only, a) : a.label === null ? null : shownArg(a.label, a)));
-  return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `write \`${fn}(${shown.join(', ')})\``;
+  if (fn === undefined || free.length !== 1 || only === undefined) return '';
+  const piped = args.some(a => a.piped);
+  const shown = args
+    .filter(a => !a.piped)
+    .map(a => (a === wrong ? shownArg(only, a) : a.label === null ? null : shownArg(a.label, a)));
+  return shown.includes(null) || shown.some(t => t?.includes('…'))
+    ? ''
+    : `write \`${piped ? '|> ' : ''}${fn}(${shown.join(', ')})\``;
 }
 
 /**

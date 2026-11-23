@@ -591,4 +591,19 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   );
 }
 
+// ---- a piped call with a bare argument that is no parameter's name. `|> write_lines(priced, places)` (2026-11-23h,
+// write_lines(out, lines, places)) was C11 with "write the parameter name, then the value": the fix wrote no call
+// when the call was piped. It now writes the call as it stands after the pipe, and that call compiles.
+{
+  const prog = (call: string): string =>
+    `fn write_lines(out: Buf, lines: Int, places: Int) -> Buf {\n  out |> write_int(value: lines + places)\n}\n\nfn handle(raw: View) -> Buf {\n  let priced = 2\n  let places = 3\n  respond(status: 200)\n    |> ${call}\n}\n`;
+  const s = said(prog('write_lines(priced, places)'));
+  same(
+    'a piped call: C11 whose fix writes the call after the pipe',
+    [code(s), hint(s).includes('write `|> write_lines(lines: priced, places)`')],
+    ['C11:9', true],
+  );
+  same('…which compiles', said(prog('write_lines(lines: priced, places)')), 'compiled');
+}
+
 finish();
