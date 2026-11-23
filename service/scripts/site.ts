@@ -16,6 +16,15 @@ export const ROBOTS = 'User-agent: *\nAllow: /$\nAllow: /playground/\nAllow: /a/
 export async function site(out: string): Promise<string> {
   const version = tapeVersion();
   write(await build(), out);
+  // each page names its commit in its bytes too: Workers Cache answered a version's /playground/ from the entry the
+  // version before filled, whole, its tape-version header with it, when the page's bytes had not changed (09bdf336,
+  // 2026-11-23); with the commit in them they change with every commit
+  for (const page of ['index.html', 'playground/index.html']) {
+    const path = resolve(out, page),
+      html = readFileSync(path, 'utf8');
+    if (!html.includes('<head>')) throw new Error(`${page} has no <head>`);
+    writeFileSync(path, html.replace('<head>', `<head>\n<meta name="tape-version" content="${version}">`));
+  }
   writeFileSync(resolve(out, 'robots.txt'), ROBOTS);
   // every file says which commit it is; the files under a/ are not pages to index. A path's rule is given once (a
   // second rule for the same path replaces the first), so the a/ line goes into build.ts's own rule for a/*; the
