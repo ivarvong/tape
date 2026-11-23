@@ -34,10 +34,10 @@ export function handle(bytes: Uint8Array): Uint8Array {
   } catch {
     return refused('not JSON');
   }
-  if (typeof cart !== 'object' || cart === null || Array.isArray(cart)) return refused('not an object');
+  if (typeof cart !== 'object' || cart === null || Array.isArray(cart)) return refused('expected an object');
   const { lines, rate }: Record<string, unknown> = { ...cart };
   const r = units(rate, 5);
-  if (r === null) return refused('rate: not a Dec[5]');
+  if (r === null) return refused('rate: expected a number with at most 5 decimals');
   if (!Array.isArray(lines)) return refused('lines: expected an array');
   let subtotal = 0;
   const items: unknown[] = lines;
@@ -45,8 +45,8 @@ export function handle(bytes: Uint8Array): Uint8Array {
     const fields: Record<string, unknown> = typeof line === 'object' && line !== null ? { ...line } : {};
     const { price, qty } = fields;
     const p = units(price, 2);
-    if (p === null) return refused(`lines[${i}].price: not a Dec[2]`);
-    if (typeof qty !== 'number' || !Number.isInteger(qty)) return refused(`lines[${i}].qty: expected a whole number`);
+    if (p === null) return refused(`lines[${i}].price: expected a number with at most 2 decimals`);
+    if (typeof qty !== 'number' || !Number.isInteger(qty)) return refused(`lines[${i}].qty: expected an integer`);
     subtotal += p * qty;
   }
   // cents times a rate in units of 10^-5, back to cents: exact while the product is within 2^53

@@ -11,17 +11,18 @@ const refuse = (why: string): never => {
   throw new Refused(why);
 };
 const asText = (x: unknown): string => (typeof x === 'string' ? x : refuse('expected text'));
-const asWhole = (x: unknown): number => (typeof x === 'number' ? x : refuse('expected a whole number'));
+const asWhole = (x: unknown): number => (typeof x === 'number' ? x : refuse('expected an integer'));
 const FIELDS = ['key', 'from', 'to', 'amount'] as const;
 function transfer(v: unknown, i: number): Transfer {
-  const at = `transfers[${i}]: `;
-  if (!isObject(v)) return refuse(`${at}not an object`);
+  const at = `transfers[${i}]`;
+  if (!isObject(v)) return refuse(`${at}: ${v === null ? 'null' : 'expected an object'}`);
   for (const k of FIELDS) {
-    if (!Object.hasOwn(v, k)) refuse(`${at}missing key ${JSON.stringify(k)}`);
+    if (!Object.hasOwn(v, k)) refuse(`${at}.${k}: missing`);
     const x = v[k];
+    if (x === null) refuse(`${at}.${k}: null`);
     if (k === 'amount' ? !Number.isSafeInteger(x) : typeof x !== 'string')
-      refuse(`${at}${k}: expected ${k === 'amount' ? 'a whole number' : 'text'}`);
-    if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
+      refuse(`${at}.${k}: expected ${k === 'amount' ? 'an integer' : 'text'}`);
+    if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}.${k}: expected text without lone surrogates`);
   }
   // the loop above refused any other kind; these checks only tell the type checker so
   const t: Transfer = {
@@ -30,8 +31,8 @@ function transfer(v: unknown, i: number): Transfer {
     to: asText(v['to']),
     amount: asWhole(v['amount']),
   };
-  if (bytes(t.key) < 1 || bytes(t.key) > 64) refuse(`${at}key: not a valid Key`);
-  if (t.amount < 1 || t.amount > 1_000_000) refuse(`${at}amount: not a valid Amount`);
+  if (bytes(t.key) < 1 || bytes(t.key) > 64) refuse(`${at}.key: expected 1 to 64 bytes`);
+  if (t.amount < 1 || t.amount > 1_000_000) refuse(`${at}.amount: expected 1 to 1000000`);
   return t;
 }
 function decode(body: string): Transfer[] {
@@ -42,8 +43,9 @@ function decode(body: string): Transfer[] {
   } catch {
     refuse('not JSON');
   }
-  if (!isObject(v)) return refuse('not an object');
-  if (!Object.hasOwn(v, 'transfers')) refuse('missing key "transfers"');
+  if (!isObject(v)) return refuse('expected an object');
+  if (!Object.hasOwn(v, 'transfers')) refuse('transfers: missing');
+  if (v['transfers'] === null) refuse('transfers: null');
   if (!Array.isArray(v['transfers'])) refuse('transfers: expected an array');
   const transfers = v['transfers'];
   return (Array.isArray(transfers) ? transfers : refuse('transfers: expected an array')).map(transfer);

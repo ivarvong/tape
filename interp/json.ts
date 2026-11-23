@@ -4,6 +4,7 @@
 // compiled build words it.
 import type { Program, TypeAst, TypeDecl, Variant } from '../compiler/ast.ts';
 import { unreachable } from '../compiler/ast.ts';
+import { decExpected, ruleOf } from '../compiler/rule.ts';
 import { type Adt, type Buf, type Value, adt, isDec } from './value.ts';
 import { dec, parse, text as decText } from './dec.ts';
 
@@ -17,7 +18,7 @@ type Kind = 't' | 'i' | 'f' | 'b' | 'd';
 const KIND: Readonly<Record<Kind, string>> = {
   t: 'text',
   b: 'true or false',
-  i: 'a whole number',
+  i: 'an integer',
   f: 'a number',
   d: 'a Dec',
 };
@@ -112,7 +113,8 @@ type Meets = (t: TypeAst, v: Value) => boolean;
 type Got = { value: Value } | { why: string };
 /** Why a value is not one of a scalar shape. */
 const notOf = (sh: { kind: Kind; scale: number }): string =>
-  sh.kind === 'd' ? `not a Dec[${sh.scale}]` : `expected ${KIND[sh.kind]}`;
+  `expected ${sh.kind === 'd' ? decExpected(sh.scale) : KIND[sh.kind]}`;
+const SURROGATE = 'expected text without lone surrogates';
 /** What a type is in JSON: a scalar, a list of something, or a record. */
 type Shape = { k: 'scalar'; kind: Kind; scale: number } | { k: 'list'; of: TypeAst } | { k: 'record' };
 const shapeOf = (prog: Program, t: TypeAst): Shape => {
@@ -144,12 +146,19 @@ const scalarOf = (k: Kind, x: unknown, scale: number): Value | null =>
             : typeof x === 'number' && Number.isSafeInteger(x)
               ? BigInt(x)
               : null;
-// "[2]: reason", or "[2][0]: reason" when the element was itself a list
-const at = (i: number, why: string): string => (why.startsWith('[') ? `[${i}]${why}` : `[${i}]: ${why}`);
+// a reason from inside `path` with the path before it, as std/json.tape's json_join: `items` and
+// `[2].price: missing` are `items[2].price: missing`
+const join = (path: string, why: string): string =>
+  why === 'missing' || why === 'null' || why.startsWith('expected ')
+    ? `${path}: ${why}`
+    : why.startsWith('[')
+      ? `${path}${why}`
+      : `${path}.${why}`;
 
 /** A JSON value as type t, below the top: a record from an object, a list from an array, a scalar. */
 function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
   const sh = shapeOf(prog, t);
+  if (x === null) return { why: 'null' };
   switch (sh.k) {
     case 'record':
       return recordAs(prog, meets, t.name, x);
@@ -158,8 +167,8 @@ function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
     case 'scalar': {
       const v = scalarOf(sh.kind, x, sh.scale);
       if (v === null) return { why: notOf(sh) };
-      if (typeof x === 'string' && !wellFormed(x)) return { why: 'text with a lone surrogate' };
-      return meets(t, v) ? { value: v } : { why: `not a valid ${t.name}` };
+      if (typeof x === 'string' && !wellFormed(x)) return { why: SURROGATE };
+      return meets(t, v) ? { value: v } : { why: `expected ${ruleOf(prog, t.name)}` };
     }
     default:
       return unreachable(sh, 'shape');
@@ -170,7 +179,7 @@ function listAs(prog: Program, meets: Meets, of: TypeAst, xs: readonly unknown[]
   const items: Value[] = [];
   for (const [i, x] of xs.entries()) {
     const got = valueAs(prog, meets, of, x);
-    if ('why' in got) return { why: at(i, got.why) };
+    if ('why' in got) return { why: join(`[${i}]`, got.why) };
     items.push(got.value);
   }
   return { value: items.reduceRight((tail: Value, head) => adt('Cons', { head, tail }), adt('Nil')) };
@@ -185,7 +194,7 @@ function listAs(prog: Program, meets: Meets, of: TypeAst, xs: readonly unknown[]
  * that got furthest.
  */
 function recordAs(prog: Program, meets: Meets, name: string, x: unknown): Got {
-  if (!isObject(x)) return { why: 'not an object' };
+  if (!isObject(x)) return { why: 'expected an object' };
   const variants = recordOf(prog, name, 'decode').decl.variants,
     keys = Object.keys(x),
     [only = ''] = keys,
@@ -228,16 +237,18 @@ function fit(
       type = inner ?? fl.type,
       sh = shapeOf(prog, type),
       x = object[fl.name];
-    if (!Object.hasOwn(object, fl.name)) {
-      if (!inner) return { depth, why: `missing key ${JSON.stringify(fl.name)}` };
+    // an Option field may be absent or null
+    if (!Object.hasOwn(object, fl.name) || (inner && x === null)) {
+      if (!inner) return { depth, why: `${fl.name}: missing` };
       f[fl.name] = adt('None');
       continue;
     }
+    if (x === null) return { depth, why: `${fl.name}: null` };
     const some = (v: Value): Value => (inner ? adt('Some', { value: v }) : v);
     if (sh.k === 'scalar') {
       const value = scalarOf(sh.kind, x, sh.scale);
       if (value === null) return { depth, why: `${fl.name}: ${notOf(sh)}` };
-      if (typeof x === 'string' && !wellFormed(x)) return { depth, why: `${fl.name}: text with a lone surrogate` };
+      if (typeof x === 'string' && !wellFormed(x)) return { depth, why: `${fl.name}: ${SURROGATE}` };
       f[fl.name] = some(value);
       refined.push({ name: fl.name, type, value });
       continue;
@@ -246,13 +257,13 @@ function fit(
       return { depth, why: `${fl.name}: expected ${sh.k === 'list' ? 'an array' : 'an object'}` };
     later.push(() => {
       const got = valueAs(prog, meets, type, x);
-      if ('why' in got) return `${fl.name}${sh.k === 'list' ? '' : ': '}${got.why}`;
+      if ('why' in got) return join(fl.name, got.why);
       f[fl.name] = some(got.value);
       return null;
     });
   }
   const bad = refined.find(r => !meets(r.type, r.value));
-  if (bad) return { why: `${bad.name}: not a valid ${bad.type.name}` };
+  if (bad) return { why: `${bad.name}: expected ${ruleOf(prog, bad.type.name)}` };
   for (const step of later) {
     const why = step();
     if (why !== null) return { why };
@@ -283,7 +294,7 @@ export function decode(prog: Program, bytes: Uint8Array, t: TypeAst, meets: Meet
     t.name === 'List' && of
       ? Array.isArray(parsed)
         ? listAs(prog, meets, of, parsed)
-        : { why: 'not an array' }
+        : { why: 'expected an array' }
       : recordAs(prog, meets, t.name, parsed);
   return 'why' in got ? err(got.why) : adt('Ok', { value: got.value });
 }

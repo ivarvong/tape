@@ -78,7 +78,11 @@ const signed = (message: string): { body: string; signature: string } => {
     (await buy('floor', 2, 'ann-4242')).out,
     '409\n{"error":"not enough seats left in that section"}',
   );
-  T('tickets: over the flag', (await buy('balcony', 9, 'ann-4242')).out, '400\n{"error":"qty: not a valid Qty"}');
+  T(
+    'tickets: over the flag',
+    (await buy('balcony', 9, 'ann-4242')).out,
+    '400\n{"error":"qty: expected 1 to flags.max_per_order"}',
+  );
   app.setFlags({ max_per_order: 10 });
   T(
     'tickets: the flag raised, the card is the limit',
@@ -382,7 +386,7 @@ type Note`,
   T(
     'webhook: valid signature, wrong shape',
     (await hook('{"id":"x"}')).out,
-    '400\n{"error":"id: expected a whole number"}',
+    '400\n{"error":"id: expected an integer"}',
   );
   T('webhook: no signature', text(await app.run(enc.encode('POST /hook\n{}'))), '401\n{"error":"missing signature"}');
 }

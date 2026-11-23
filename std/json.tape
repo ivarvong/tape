@@ -431,8 +431,8 @@ fn write_bool(out: Buf, value: Bool) -> Buf {
 // read. What it accepts and what it says are JSON.parse's and the host's before it, with one difference: a number
 // is read exactly from its text. An Int field takes a JSON number whose value is a whole number within
 // ±(2^53 - 1) (9007199254740991): 1e3 is 1000 and 2.0 is 2, but 1.0000000000000000001 and 1e-400 are not whole
-// numbers (JSON.parse rounds them to 1 and 0). Outside that range decode answers Err("<field>: expected a whole
-// number") and never rounds. Exact large-integer JSON, the whole 64-bit range, is planned for 0.3; until then
+// numbers (JSON.parse rounds them to 1 and 0). Outside that range decode answers Err("<field>: expected an
+// integer") and never rounds. Exact large-integer JSON, the whole 64-bit range, is planned for 0.3; until then
 // such a value is sent as text.
 
 // Internal: a JSON value. A string is its decoded bytes; `whole` is False when it holds a lone surrogate (an
@@ -740,21 +740,22 @@ fn json_bad(v: View) -> View {
 }
 
 // Internal: the object v holds (whitespace around it allowed), or why decode refuses it: "empty", "not JSON" or
-// "not an object". The decoders compiler/wire.ts writes start here.
+// "expected an object". The decoders compiler/wire.ts writes start here.
 fn json_object(v: View) -> Result[Json_Tree, View] {
   match json_tree(v) {
     Some(value: Json_Obj(members)) -> Ok(value: Json_Obj(members))
     None -> Err(error: json_bad(v))
-    _ -> Err(error: "not an object")
+    _ -> Err(error: "expected an object")
   }
 }
 
-// Internal: the array v holds, or why decode refuses it: "empty", "not JSON" or "not an array" (decode as List[T]).
+// Internal: the array v holds, or why decode refuses it: "empty", "not JSON" or "expected an array" (decode as
+// List[T]).
 fn json_array(v: View) -> Result[Json_Tree, View] {
   match json_tree(v) {
     Some(value: Json_Arr(items)) -> Ok(value: Json_Arr(items))
     None -> Err(error: json_bad(v))
-    _ -> Err(error: "not an array")
+    _ -> Err(error: "expected an array")
   }
 }
 
@@ -776,11 +777,27 @@ fn json_all_key(list: List[Json_Member], key: View) -> Bool {
   }
 }
 
+// Internal: is the value null?
+fn json_is_null(item: Json_Tree) -> Bool {
+  match item {
+    Json_Null -> True
+    _ -> False
+  }
+}
+
 // Internal: is the value an object?
 fn json_is_object(item: Json_Tree) -> Bool {
   match item {
     Json_Obj -> True
     _ -> False
+  }
+}
+
+// Internal: a member's value, None when it is absent or null: what an Option field holds.
+fn json_present(found: Option[Json_Tree]) -> Option[Json_Tree] {
+  match found {
+    Some(value: Json_Null) -> None
+    _ -> found
   }
 }
 
@@ -817,8 +834,9 @@ fn json_get_from(
   }
 }
 
-// Internal: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an
-// object, 4 an array; a Float is json_check_float's); `depth` is how many fields fit before it.
+// Internal: whether a field is there with a value of its kind (0 text, 1 true or false, 2 an integer, 3 an object,
+// 4 an array; a Float is json_check_float's); `depth` is how many fields fit before it. An optional field may be
+// absent or null. The reason is `<name>: missing`, `<name>: null` or `<name>: expected <kind>`.
 fn json_check(
   found: Option[Json_Tree],
   kind: Int,
@@ -828,9 +846,11 @@ fn json_check(
 ) -> Json_Fit {
   match found {
     None if optional -> Json_Hit
-    None -> Json_Miss(depth, why: "missing key \"" ++ name ++ "\"")
+    None -> Json_Miss(depth, why: name ++ ": missing")
+    Some(value: Json_Null) if optional -> Json_Hit
+    Some(value: Json_Null) -> Json_Miss(depth, why: name ++ ": null")
     Some(value: Json_Str(whole)) if kind == 0
-      and not whole -> Json_Miss(depth, why: name ++ ": text with a lone surrogate")
+      and not whole -> Json_Miss(depth, why: name ++ ": expected text without lone surrogates")
     Some(value: Json_Str) if kind == 0 -> Json_Hit
     Some(value: Json_Bool) if kind == 1 -> Json_Hit
     Some(value: Json_Num(text)) if kind == 2 and is_some(found: json_int(text)) -> Json_Hit
@@ -853,6 +873,7 @@ fn is_some(found: Option[Int]) -> Bool {
 fn json_check_float(found: Option[Json_Tree], name: View, optional: Bool, depth: Int) -> Json_Fit {
   match found {
     Some(value: Json_Num(text)) if is_float(found: parse_float(text)) -> Json_Hit
+    Some(value: Json_Null) -> json_check(found, kind: 0, name, optional, depth)
     Some -> Json_Miss(depth, why: name ++ ": expected a number")
     None -> json_check(found, kind: 0, name, optional, depth)
   }
@@ -871,7 +892,7 @@ fn json_kind(kind: Int) -> View {
   match kind {
     0 -> "text"
     1 -> "true or false"
-    2 -> "a whole number"
+    2 -> "an integer"
     3 -> "an object"
     _ -> "an array"
   }
@@ -1053,7 +1074,8 @@ fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool] {
 }
 
 // Internal: json_check of a Dec[scale] field: a number, or text holding one, that is exactly a Dec[scale]
-// (json_count). Anything else, null too, is `<name>: not a Dec[2]`.
+// (json_count). Absent or null is json_check's; anything else is `<name>: expected a number with at most 2
+// decimals`.
 fn json_check_dec(
   found: Option[Json_Tree],
   scale: Int,
@@ -1063,9 +1085,19 @@ fn json_check_dec(
 ) -> Json_Fit {
   match found {
     None -> json_check(found, kind: 0, name, optional, depth)
+    Some(value: Json_Null) -> json_check(found, kind: 0, name, optional, depth)
     Some(value: Json_Num(text)) if is_some(found: json_count(text, scale)) -> Json_Hit
     Some(value: Json_Str(text)) if is_some(found: json_count(text, scale)) -> Json_Hit
-    _ -> Json_Miss(depth, why: name ++ ": not a Dec[" ++ decimal_text(value: scale) ++ "]")
+    _ -> Json_Miss(depth, why: name ++ ": expected " ++ json_dec_kind(scale))
+  }
+}
+
+// Internal: what a Dec[scale] is called in a reason (compiler/wire.ts says the same of a list's element).
+fn json_dec_kind(scale: Int) -> View {
+  match scale {
+    0 -> "an integer"
+    1 -> "a number with at most 1 decimal"
+    _ -> "a number with at most " ++ decimal_text(value: scale) ++ " decimals"
   }
 }
 
@@ -1228,15 +1260,20 @@ fn json_each_next[T](
 ) -> Result[List[T], View] {
   match decoded {
     Ok(value) -> json_each_from(items: rest, by, at: at + 1, acc: Cons(head: value, tail: acc))
-    Err(error) -> Err(error: json_at(at, error))
+    Err(error) -> Err(error: json_join(path: "[" ++ decimal_text(value: at) ++ "]", error))
   }
 }
 
-// Internal: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
-fn json_at(at: Int, error: View) -> View {
+// Internal: a reason from inside `path` (a field's name, or `[2]`), with the path before it: `items` and
+// `[2].price: missing` are `items[2].price: missing`; `price` and `expected an integer` are `price: expected an
+// integer`. A reason with no path of its own is one of the three problems: missing, null, expected ….
+fn json_join(path: View, error: View) -> View {
   match error {
-    "[" ++ rest -> "[" ++ decimal_text(value: at) ++ "]" ++ error
-    _ -> "[" ++ decimal_text(value: at) ++ "]: " ++ error
+    "missing" -> path ++ ": " ++ error
+    "null" -> path ++ ": " ++ error
+    "expected " ++ rest -> path ++ ": " ++ error
+    "[" ++ rest -> path ++ error
+    _ -> path ++ "." ++ error
   }
 }
 

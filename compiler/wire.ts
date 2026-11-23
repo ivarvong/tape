@@ -14,6 +14,7 @@
 // (shadow.ts CORE), so a program's own max, push or List does not take their place.
 import { asType, partsOf } from './ast.ts';
 import type { Expr, Program, TypeAst, Variant } from './ast.ts';
+import { decExpected, ruleOf } from './rule.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
 export type WireKind =
@@ -35,7 +36,6 @@ export type Wire = {
   decodable: Set<string>;
 };
 // the kind of a field when it is there
-const present = (k: WireKind): WireKind => (k.k === 'opt' ? k.of : k);
 // the variable generated code holds a field in: a field may be named by a reserved word (`type`), a variable not
 const vr = (field: string): string => `w_${field}`;
 const stop = (what: string): never => {
@@ -183,7 +183,7 @@ export function wireSource(prog: Program): Wire {
     }
     return name;
   };
-  // what json_check is told a kind is: 0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array
+  // what json_check is told a kind is: 0 text, 1 true or false, 2 an integer, 3 an object, 4 an array
   const code = (k: WireKind): number =>
     k.k === 's'
       ? k.base === 'View'
@@ -232,19 +232,22 @@ export function wireSource(prog: Program): Wire {
   // a Dec's value from the text of the number or string found (json_check_dec has checked it)
   const decOf = (k: Extract<WireKind, { k: 's' }>, found: string): string =>
     `parse_dec(text: json.json_number_text(found: ${found}), scale: ${k.scale ?? 0})`;
+  // what decode's 400 says a value must be, after "expected ", as a Tape text literal's inside
+  const said = (s: string): string => s.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  const rule = (t: TypeAst): string => said(ruleOf(prog, t.name));
   // a scalar element's value, its refinement checked
   function itemValue(k: Extract<WireKind, { k: 's' }>): string {
     const m = mangle(k.t);
     return once(`json_value_${m}`, () => {
       if (k.base === 'Dec') {
         const value = refined(k.t)
-          ? `  let ${k.t.name}(y) = x else -> Err(error: "not a valid ${k.t.name}")\n  Ok(value: y)\n`
+          ? `  let ${k.t.name}(y) = x else -> Err(error: "expected ${rule(k.t)}")\n  Ok(value: y)\n`
           : `  Ok(value: x)\n`;
-        return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  let Some(value: x) = ${decOf(k, 'Some(value: item)')} else -> Err(error: "not a Dec[${k.scale ?? 0}]")\n${value}}\n`;
+        return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  let Some(value: x) = ${decOf(k, 'Some(value: item)')} else -> Err(error: "expected ${decExpected(k.scale ?? 0)}")\n${value}}\n`;
       }
       const got = scalarOf(k.base, 'Some(value: item)');
       const body = refined(k.t)
-        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "not a valid ${k.t.name}")\n  Ok(value: x)\n`
+        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "expected ${rule(k.t)}")\n  Ok(value: x)\n`
         : `  Ok(value: ${got})\n`;
       return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n${body}}\n`;
     });
@@ -254,7 +257,7 @@ export function wireSource(prog: Program): Wire {
     const m = mangle(k.t);
     return once(`json_item_${m}`, () => {
       if (k.k === 'rec')
-        return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match {\n    json.json_is_object(item) -> json_as_${k.name}(obj: item)\n    else -> Err(error: "not an object")\n  }\n}\n`;
+        return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match {\n    json.json_is_object(item) -> json_as_${k.name}(obj: item)\n    json.json_is_null(item) -> Err(error: "null")\n    else -> Err(error: "expected an object")\n  }\n}\n`;
       const read =
         k.k === 'list'
           ? `${each(k.of)}(arr: item)`
@@ -282,10 +285,10 @@ export function wireSource(prog: Program): Wire {
     const inner = k.of;
     const m = mangle(inner.t);
     if (inner.k === 'rec')
-      return `${once(`json_maybe_rec_${m}`, () => `fn json_maybe_rec_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value) -> json.json_some(decoded: json_as_${inner.name}(obj: value))\n    None -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
+      return `${once(`json_maybe_rec_${m}`, () => `fn json_maybe_rec_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match json.json_present(found) {\n    Some(value) -> json.json_some(decoded: json_as_${inner.name}(obj: value))\n    None -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
     if (inner.k === 'list') {
       const every = each(inner.of);
-      return `${once(`json_maybe_list_${m}`, () => `fn json_maybe_list_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value) -> json.json_some(decoded: ${every}(arr: value))\n    None -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
+      return `${once(`json_maybe_list_${m}`, () => `fn json_maybe_list_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match json.json_present(found) {\n    Some(value) -> json.json_some(decoded: ${every}(arr: value))\n    None -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
     }
     return stop('an Option of a scalar is read, not decoded');
   };
@@ -351,7 +354,7 @@ export function wireSource(prog: Program): Wire {
         const k = kAt(j);
         if (k.k === 's' && k.base === 'Dec')
           lines.push(
-            `  let Some(value: w_${f.name}) = ${decOf(k, get(f.name))} else -> Err(error: "${f.name}: not a Dec[${k.scale ?? 0}]")\n`,
+            `  let Some(value: w_${f.name}) = ${decOf(k, get(f.name))} else -> Err(error: "${f.name}: expected ${decExpected(k.scale ?? 0)}")\n`,
           );
         else if (k.k === 's') lines.push(`  let w_${f.name} = ${scalarOf(k.base, get(f.name))}\n`);
         else if (k.k === 'opt' && k.of.k === 's' && k.of.base === 'Dec')
@@ -365,11 +368,11 @@ export function wireSource(prog: Program): Wire {
         const k = kAt(j);
         if (k.k === 's' && refined(k.t))
           lines.push(
-            `  let ${k.t.name}(r_${f.name}) = w_${f.name} else -> Err(error: "${f.name}: not a valid ${k.t.name}")\n`,
+            `  let ${k.t.name}(r_${f.name}) = w_${f.name} else -> Err(error: "${f.name}: expected ${rule(k.t)}")\n`,
           );
         else if (k.k === 'opt' && k.of.k === 's' && refined(k.of.t))
           lines.push(
-            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base === 'Dec' ? `Dec[${k.of.scale ?? 0}]` : k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: not a valid ${k.of.t.name}")\n`,
+            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base === 'Dec' ? `Dec[${k.of.scale ?? 0}]` : k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: expected ${rule(k.of.t)}")\n`,
           );
         else return;
         as.set(f.name, `r_${f.name}`);
@@ -377,9 +380,8 @@ export function wireSource(prog: Program): Wire {
       v.fields.forEach((f, j) => {
         const k = kAt(j);
         if (!deep(k)) return;
-        const sep = present(k).k === 'list' ? '' : ': ';
         lines.push(
-          `  let Ok(value: d_${f.name}) = ${deepOf(k, get(f.name))} else {\n    Err(error) -> Err(error: "${f.name}${sep}" ++ error)\n  }\n`,
+          `  let Ok(value: d_${f.name}) = ${deepOf(k, get(f.name))} else {\n    Err(error) -> Err(error: json.json_join(path: "${f.name}", error))\n  }\n`,
         );
         as.set(f.name, `d_${f.name}`);
       });

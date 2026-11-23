@@ -528,7 +528,7 @@ Appends a value as JSON, exactly the form `decode` reads back: a record as an ob
 decode(json: View, as: T) -> Result[T, View]
 ```
 
-Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: List[Item]`). Of a type with several constructors it takes the one the object's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A key no field names is left unread: clients send more than a service reads. A missing key, a wrong kind or a refinement that fails is `Err` with the path to it (`tiers[1]: price: not a valid Money`). An `Option` field may be absent; `null` is refused. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
+Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: List[Item]`). Of a type with several constructors it takes the one the object's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A key no field names is left unread: clients send more than a service reads. A missing key, a null, a wrong kind or a refinement that fails is `Err` with the path to it: `items[2].price: missing`, `key: null`, `qty: expected an integer`, `key: expected 1 to 64 bytes` (LANGUAGE.md section 6). An `Option` field that is absent or `null` is `None`. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
 
 ### builtin next
 
@@ -1328,15 +1328,17 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn tree_unicode(v: View, at: Int, unit: Option[Int]) -> Json_Code`: `at` is the position after \uXXXX.
 - `fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code`: a high surrogate at the escape before `at`: with the low one after it, one code point; alone, lone.
 - `fn json_bad(v: View) -> View`: "empty" or "not JSON", as decode says of bytes that are not JSON.
-- `fn json_object(v: View) -> Result[Json_Tree, View]`: the object v holds (whitespace around it allowed), or why decode refuses it: "empty", "not JSON" or "not an object". The decoders compiler/wire.ts writes start here.
-- `fn json_array(v: View) -> Result[Json_Tree, View]`: the array v holds, or why decode refuses it: "empty", "not JSON" or "not an array" (decode as List[T]).
+- `fn json_object(v: View) -> Result[Json_Tree, View]`: the object v holds (whitespace around it allowed), or why decode refuses it: "empty", "not JSON" or "expected an object". The decoders compiler/wire.ts writes start here.
+- `fn json_array(v: View) -> Result[Json_Tree, View]`: the array v holds, or why decode refuses it: "empty", "not JSON" or "expected an array" (decode as List[T]).
 - `fn json_tag(obj: Json_Tree) -> View`: the key of an object whose one key it is (`{"Sets": {…}}`, as write_json writes a type with several constructors), or "" when it has none or more than one.
 - `fn json_all_key(list: List[Json_Member], key: View) -> Bool`: is every member named `key`?
+- `fn json_is_null(item: Json_Tree) -> Bool`: is the value null?
 - `fn json_is_object(item: Json_Tree) -> Bool`: is the value an object?
+- `fn json_present(found: Option[Json_Tree]) -> Option[Json_Tree]`: a member's value, None when it is absent or null: what an Option field holds.
 - `fn json_value_of(found: Option[Json_Tree]) -> Json_Tree`: the value of a member that json_check found (null when there is none).
 - `fn json_get(obj: Json_Tree, key: View) -> Option[Json_Tree]`: the value of the last member of the object `obj` named `key` (JSON.parse keeps the last).
 - `fn json_get_from(list: List[Json_Member], key: View, found: Option[Json_Tree]) -> Option[Json_Tree]`: the loop of json_get.
-- `fn json_check(found: Option[Json_Tree], kind: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array; a Float is json_check_float's); `depth` is how many fields fit before it.
+- `fn json_check(found: Option[Json_Tree], kind: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: whether a field is there with a value of its kind (0 text, 1 true or false, 2 an integer, 3 an object, 4 an array; a Float is json_check_float's); `depth` is how many fields fit before it. An optional field may be absent or null. The reason is `<name>: missing`, `<name>: null` or `<name>: expected <kind>`.
 - `fn is_some(found: Option[Int]) -> Bool`: is there a value?
 - `fn json_check_float(found: Option[Json_Tree], name: View, optional: Bool, depth: Int) -> Json_Fit`: json_check of a Float field: a finite number (parse_float). Apart from json_check so that only a program with a Float in its JSON reads one (and imports the host's float_of).
 - `fn is_float(found: Option[Float]) -> Bool`: is there a Float?
@@ -1363,7 +1365,8 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn json_write_float(out: Buf, value: Float) -> Buf`: a Float appended, as write_json writes one (write_float, here so a writer names only std's functions).
 - `fn json_maybe_text(found: Option[Json_Tree]) -> Option[View]`: an optional text field (json_check found it absent or text).
 - `fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool]`: an optional true or false.
-- `fn json_check_dec(found: Option[Json_Tree], scale: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: json_check of a Dec[scale] field: a number, or text holding one, that is exactly a Dec[scale] (json_count). Anything else, null too, is `<name>: not a Dec[2]`.
+- `fn json_check_dec(found: Option[Json_Tree], scale: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: json_check of a Dec[scale] field: a number, or text holding one, that is exactly a Dec[scale] (json_count). Absent or null is json_check's; anything else is `<name>: expected a number with at most 2 decimals`.
+- `fn json_dec_kind(scale: Int) -> View`: what a Dec[scale] is called in a reason (compiler/wire.ts says the same of a list's element).
 - `fn json_number_text(found: Option[Json_Tree]) -> View`: the text of a number, or of a string ("" for anything else): what a Dec field is read from.
 - `fn json_count(text: View, scale: Int) -> Option[Int]`: the count of a Dec[scale] that `text` is, exactly: JSON's number syntax, the whole text, with no more digits after the point than the scale but zeros (`12.300` is 1230 at scale 2, `12.345` is None), and a count within the Ints. parse_dec and decode read a Dec with it.
 
@@ -1391,7 +1394,7 @@ None
 - `fn json_each[T](arr: Json_Tree, by: Fn[Json_Tree, Result[T, View]]) -> Result[List[T], View]`: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
 - `fn json_each_from[T](items: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: the loop of json_each.
 - `fn json_each_next[T](decoded: Result[T, View], rest: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: json_each, after one element.
-- `fn json_at(at: Int, error: View) -> View`: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
+- `fn json_join(path: View, error: View) -> View`: a reason from inside `path` (a field's name, or `[2]`), with the path before it: `items` and `[2].price: missing` are `items[2].price: missing`; `price` and `expected an integer` are `price: expected an integer`. A reason with no path of its own is one of the three problems: missing, null, expected ….
 - `fn json_plain(error: View) -> View`: An element that is not an object is read as if it were {"value": …}: its reason without that key.
 - `fn trailing_zeros(text: View, from: Int, to: Int) -> Int`: how many 0 digits end text[from..to].
 - `fn back_past_zeros(text: View, from: Int, at: Int) -> Int`: the loop of trailing_zeros: where the 0 digits that end text[from..at] begin.

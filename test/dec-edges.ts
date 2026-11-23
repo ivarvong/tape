@@ -169,23 +169,28 @@ same(
   cases
     .slice(0, -1)
     .map(c => [want(c, true), want(c, false)])
-    .concat([['400 amount: not a Dec[2]', '400 amount: not a Dec[2]']]),
+    .concat([
+      [
+        '400 amount: expected a number with at most 2 decimals',
+        '400 amount: expected a number with at most 2 decimals',
+      ],
+    ]),
 );
 const refused: [string, string][] = [
-  ['{"id": 1, "amount": "12.345"}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": 12.345}', 'amount: not a Dec[2]'],
+  ['{"id": 1, "amount": "12.345"}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": 12.345}', 'amount: expected a number with at most 2 decimals'],
   ['{"id": 1, "amount": "12"}', ''],
-  ['{"id": 1, "amount": " 12"}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": "+12"}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": "012"}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": "12."}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": ".5"}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": true}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": null}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": "92233720368547758.08"}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": 1e999999999999}', 'amount: not a Dec[2]'],
-  ['{"id": 1, "amount": "-1.00"}', 'amount: not a valid Amount'],
-  ['{"id": 1, "amount": "1.00", "fee": "0.0001"}', 'fee: not a Dec[3]'],
+  ['{"id": 1, "amount": " 12"}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": "+12"}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": "012"}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": "12."}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": ".5"}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": true}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": null}', 'amount: null'],
+  ['{"id": 1, "amount": "92233720368547758.08"}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": 1e999999999999}', 'amount: expected a number with at most 2 decimals'],
+  ['{"id": 1, "amount": "-1.00"}', 'amount: expected more than 0.00'],
+  ['{"id": 1, "amount": "1.00", "fee": "0.0001"}', 'fee: expected a number with at most 3 decimals'],
 ];
 same(
   'refused, with the field: more digits than the scale, text that is not JSON’s number syntax, not a number, beyond the counts; a refinement',
@@ -197,7 +202,7 @@ same(
 same(
   'a list item that is not exactly a Dec[2] is refused with its index',
   compiled('PUT /p\n{"id": 1, "amount": 1, "parts": [1, 2.001]}'),
-  '400 parts[1]: not a Dec[2]',
+  '400 parts[1]: expected a number with at most 2 decimals',
 );
 same(
   'beyond ±2^53 units the database is not given the count: the request stops, nothing is rounded',

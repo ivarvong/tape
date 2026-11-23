@@ -27,8 +27,8 @@ export function handle(bytes: Uint8Array): Uint8Array {
   if (!record(cart)) return REFUSED;
   const { customer, coupon } = cart;
   if (typeof customer !== 'string' || !Array.isArray(cart.lines)) return REFUSED;
-  // a coupon is a string or is not there: null is not a coupon
-  if (coupon !== undefined && typeof coupon !== 'string') return REFUSED;
+  // a coupon is a string, or is not there; null is no coupon (decode reads null for an Option as None)
+  if (coupon !== undefined && coupon !== null && typeof coupon !== 'string') return REFUSED;
   const lines: Line[] = [];
   for (const v of cart.lines) {
     const l = line(v);

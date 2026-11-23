@@ -136,31 +136,31 @@ if (b.wasm !== null) {
     [
       'a refined field two levels down',
       { ...good, tiers: [good.tiers[0], { name: 'x', price: 1, qty: 0 }] },
-      'tiers[1]: qty: not a valid Qty',
+      'tiers[1].qty: expected 1 to 9',
     ],
-    ['a key missing in an element', { ...good, tiers: [{ name: 'x', qty: 1 }] }, 'tiers[0]: missing key "price"'],
+    ['a key missing in an element', { ...good, tiers: [{ name: 'x', qty: 1 }] }, 'tiers[0].price: missing'],
     ['a record that is not an object', { ...good, venue: 'NYC' }, 'venue: expected an object'],
     [
       'a lone surrogate inside a record',
       { ...good, venue: { city: '\uD800', indoor: true } },
-      'venue: city: text with a lone surrogate',
+      'venue.city: expected text without lone surrogates',
     ],
     ['a wrong value in a list of text', { ...good, tags: ['a', 5] }, 'tags[1]: expected text'],
     ['a list that is not an array', { ...good, tiers: {} }, 'tiers: expected an array'],
-    ['an element that is not an object', { ...good, tiers: [7] }, 'tiers[0]: not an object'],
-    ['a list inside a list', { ...good, grid: [[1], [2, 'x']] }, 'grid[1][1]: expected a whole number'],
-    ['an optional record that is wrong', { ...good, backup: { city: 1, indoor: true } }, 'backup: city: expected text'],
+    ['an element that is not an object', { ...good, tiers: [7] }, 'tiers[0]: expected an object'],
+    ['a list inside a list', { ...good, grid: [[1], [2, 'x']] }, 'grid[1][1]: expected an integer'],
+    ['an optional record that is wrong', { ...good, backup: { city: 1, indoor: true } }, 'backup.city: expected text'],
     [
       'an optional list that is wrong',
       { ...good, extra: [{ name: 'x', price: 1, qty: 99 }] },
-      'extra[0]: qty: not a valid Qty',
+      'extra[0].qty: expected 1 to 9',
     ],
     [
       'a nested record missing',
       Object.fromEntries(Object.entries(good).filter(([k]) => k !== 'venue')),
-      'missing key "venue"',
+      'venue: missing',
     ],
-    ['null where a record goes', { ...good, venue: null }, 'venue: expected an object'],
+    ['null where a record goes', { ...good, venue: null }, 'venue: null'],
   ];
   const [s3, t3] = post({ ...good, sent_at: 1, venue: { ...good.venue, roof: 1 } });
   ok(
@@ -454,7 +454,7 @@ if (fb.wasm !== null && sb.wasm !== null && other.wasm !== null) {
     ok(
       'a wrong tier refuses the whole request, and says where',
       s3 === 400 &&
-        t3 === '{"error":"tiers[1]: price: not a valid Money"}' &&
+        t3 === '{"error":"tiers[1].price: expected 0 to 10000000"}' &&
         sql.exec("SELECT count(*) AS n FROM events WHERE client = 'e4'").toArray()[0]?.n === 0,
       t3,
     );

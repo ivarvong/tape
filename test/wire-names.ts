@@ -94,12 +94,12 @@ if (built.wasm) {
   same(
     'and says why not, with the path',
     say('order {"id":7,"ok":true,"items":[],"grid":[[1],[2,"3"]],"to":{"sku":"b","qty":0,"tags":[]}}'),
-    'error: grid[1][1]: expected a whole number',
+    'error: grid[1][1]: expected an integer',
   );
   same(
     'a refinement in a list element',
     say('order {"id":7,"ok":true,"items":[{"sku":"","qty":2,"tags":[]}],"grid":[],"to":{"sku":"b","qty":0,"tags":[]}}'),
-    'error: items[0]: sku: not a valid Name',
+    'error: items[0].sku: expected 1 to 8 bytes',
   );
   same(
     'Option fields of each kind',
@@ -107,6 +107,6 @@ if (built.wasm) {
     '5bo{"sku":"z","qty":1,"tags":[]}',
   );
   same('of two constructors, the one that names the most keys', say('shape {"r":1,"w":2,"h":3}'), 'rect 6');
-  same('and the reason when none fits: the one that got furthest', say('shape {"w":2}'), 'error: missing key "h"');
+  same('and the reason when none fits: the one that got furthest', say('shape {"w":2}'), 'error: h: missing');
 }
 finish();

@@ -258,7 +258,7 @@ These are alpha limits and may change.
 | a run call | 20 s of wall time; the Dynamic Worker running the program has 10 s of CPU and no network |
 | a request body | 499,712 bytes (488 KB) |
 | calls | 60 a minute per client address (its daily salted hash, below), per Cloudflare location |
-| a JSON integer a program decodes | within ±(2^53 - 1) = ±9007199254740991; past that `decode` refuses it, `<field>: expected a whole number`, rather than round it (a number is read exactly from its text). Exact large integers are planned; send them as text until then |
+| a JSON integer a program decodes | within ±(2^53 - 1) = ±9007199254740991; past that `decode` refuses it, `<field>: expected an integer`, rather than round it (a number is read exactly from its text). Exact large integers are planned; send them as text until then |
 
 Every refusal is JSON, `{"ok": false, "error": "<code>", "reason": "<what to change>"}`, with an HTTP status: over
 MCP it is a tool result with `isError: true` and the same JSON. The codes: `bad_arguments`, `unknown_argument`,

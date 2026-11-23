@@ -1,5 +1,6 @@
 // compiler/gen/decode.ts: JSON and rows read into values. JSON is decoded by Tape source written for each type
 // (compiler/wire.ts); the rows of a query are read from the block the host wrote.
+import { ruleOf } from '../rule.ts';
 import { asType } from '../ast.ts';
 import type { Call } from '../ast.ts';
 import { mangled } from '../wire.ts';
@@ -151,7 +152,7 @@ function checkRefined(c: Ctx, fl: Read, mine: number[], ok: number, why: Why): v
   c.code.push(0x45);
   open(c, 0x04);
   if (why) {
-    const [wa, wn] = c.B.literal(utf8(`${fl.name}: not a valid ${fl.type.name}`));
+    const [wa, wn] = c.B.literal(utf8(`${fl.name}: expected ${ruleOf(c.B.prog, fl.type.name)}`));
     c.code.push(...get(ok));
     open(c, 0x04);
     c.code.push(...i32(wa), ...set(why[0]), ...i32(wn), ...set(why[1]));

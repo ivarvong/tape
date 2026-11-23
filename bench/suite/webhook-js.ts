@@ -11,17 +11,18 @@ const refuse = (why: string): never => {
   throw new Refused(why);
 };
 const asText = (x: unknown): string => (typeof x === 'string' ? x : refuse('expected text'));
-const asWhole = (x: unknown): number => (typeof x === 'number' ? x : refuse('expected a whole number'));
+const asWhole = (x: unknown): number => (typeof x === 'number' ? x : refuse('expected an integer'));
 const FIELDS = ['id', 'kind', 'account', 'amount', 'note'] as const;
 function event(v: unknown, i: number): Event {
-  const at = `events[${i}]: `;
-  if (!isObject(v)) return refuse(`${at}not an object`);
+  const at = `events[${i}]`;
+  if (!isObject(v)) return refuse(`${at}: ${v === null ? 'null' : 'expected an object'}`);
   for (const k of FIELDS) {
-    if (!Object.hasOwn(v, k)) refuse(`${at}missing key ${JSON.stringify(k)}`);
+    if (!Object.hasOwn(v, k)) refuse(`${at}.${k}: missing`);
     const x = v[k];
+    if (x === null) refuse(`${at}.${k}: null`);
     if (k === 'amount' ? !Number.isSafeInteger(x) : typeof x !== 'string')
-      refuse(`${at}${k}: expected ${k === 'amount' ? 'a whole number' : 'text'}`);
-    if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
+      refuse(`${at}.${k}: expected ${k === 'amount' ? 'an integer' : 'text'}`);
+    if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}.${k}: expected text without lone surrogates`);
   }
   // the loop above refused any other kind; these checks only tell the type checker so
   const e: Event = {
@@ -31,9 +32,9 @@ function event(v: unknown, i: number): Event {
     amount: asWhole(v['amount']),
     note: asText(v['note']),
   };
-  if (bytes(e.id) < 1 || bytes(e.id) > 64) refuse(`${at}id: not a valid Id`);
-  if (bytes(e.account) < 1 || bytes(e.account) > 64) refuse(`${at}account: not a valid Account`);
-  if (e.amount < 0 || e.amount > 100_000_000) refuse(`${at}amount: not a valid Amount`);
+  if (bytes(e.id) < 1 || bytes(e.id) > 64) refuse(`${at}.id: expected 1 to 64 bytes`);
+  if (bytes(e.account) < 1 || bytes(e.account) > 64) refuse(`${at}.account: expected 1 to 64 bytes`);
+  if (e.amount < 0 || e.amount > 100_000_000) refuse(`${at}.amount: expected 0 to 100000000`);
   return e;
 }
 function decode(body: string): { source: string; events: Event[] } {
@@ -44,13 +45,15 @@ function decode(body: string): { source: string; events: Event[] } {
   } catch {
     refuse('not JSON');
   }
-  if (!isObject(v)) return refuse('not an object');
-  if (!Object.hasOwn(v, 'source')) refuse('missing key "source"');
+  if (!isObject(v)) return refuse('expected an object');
+  if (!Object.hasOwn(v, 'source')) refuse('source: missing');
   const source = v['source'];
+  if (source === null) refuse('source: null');
   if (typeof source !== 'string') return refuse('source: expected text');
-  if (!source.isWellFormed()) refuse('source: text with a lone surrogate');
-  if (!Object.hasOwn(v, 'events')) refuse('missing key "events"');
+  if (!source.isWellFormed()) refuse('source: expected text without lone surrogates');
+  if (!Object.hasOwn(v, 'events')) refuse('events: missing');
   const events = v['events'];
+  if (events === null) refuse('events: null');
   if (!Array.isArray(events)) return refuse('events: expected an array');
   return { source, events: events.map(event) };
 }

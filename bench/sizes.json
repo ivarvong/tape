@@ -1,30 +1,30 @@
 {
   "bench/money.tape": {
-    "bytes": 29088,
-    "functions": 118
+    "bytes": 29687,
+    "functions": 120
   },
   "bench/suite/crud.tape": {
-    "bytes": 29152,
-    "functions": 113
-  },
-  "bench/suite/ledger.tape": {
-    "bytes": 29478,
+    "bytes": 29540,
     "functions": 114
   },
+  "bench/suite/ledger.tape": {
+    "bytes": 29829,
+    "functions": 115
+  },
   "bench/suite/webhook.tape": {
-    "bytes": 29701,
-    "functions": 113
+    "bytes": 30066,
+    "functions": 114
   },
   "examples/bump.tape": {
-    "bytes": 32255,
+    "bytes": 32332,
     "functions": 117
   },
   "examples/cart.tape": {
-    "bytes": 25281,
-    "functions": 109
+    "bytes": 25668,
+    "functions": 110
   },
   "examples/counter.tape": {
-    "bytes": 5957,
+    "bytes": 5945,
     "functions": 19
   },
   "examples/csv.tape": {
@@ -32,7 +32,7 @@
     "functions": 38
   },
   "examples/fulfillment.tape": {
-    "bytes": 56885,
+    "bytes": 56915,
     "functions": 148
   },
   "examples/git.tape": {
@@ -40,27 +40,27 @@
     "functions": 26
   },
   "examples/hello.tape": {
-    "bytes": 4602,
+    "bytes": 4598,
     "functions": 18
   },
   "examples/inventory.tape": {
-    "bytes": 27384,
+    "bytes": 27502,
     "functions": 106
   },
   "examples/kv.tape": {
-    "bytes": 29627,
+    "bytes": 29579,
     "functions": 78
   },
   "examples/ledger.tape": {
-    "bytes": 27046,
+    "bytes": 27118,
     "functions": 96
   },
   "examples/orders.tape": {
-    "bytes": 30406,
+    "bytes": 30491,
     "functions": 107
   },
   "examples/payments.tape": {
-    "bytes": 27003,
+    "bytes": 27121,
     "functions": 106
   },
   "examples/ratelimit.tape": {
@@ -68,11 +68,11 @@
     "functions": 18
   },
   "examples/shipping.tape": {
-    "bytes": 25471,
+    "bytes": 25581,
     "functions": 97
   },
   "examples/shortener.tape": {
-    "bytes": 25517,
+    "bytes": 25619,
     "functions": 95
   },
   "examples/stats.tape": {
@@ -80,23 +80,23 @@
     "functions": 35
   },
   "examples/stock.tape": {
-    "bytes": 22607,
+    "bytes": 22712,
     "functions": 88
   },
   "examples/tickets.tape": {
-    "bytes": 41805,
+    "bytes": 41892,
     "functions": 124
   },
   "examples/todo-decode.tape": {
-    "bytes": 29953,
+    "bytes": 30035,
     "functions": 110
   },
   "examples/todo-handparsed.tape": {
-    "bytes": 20831,
+    "bytes": 20819,
     "functions": 79
   },
   "examples/todo.tape": {
-    "bytes": 36448,
+    "bytes": 36549,
     "functions": 137
   },
   "examples/trap.tape": {
@@ -104,7 +104,7 @@
     "functions": 4
   },
   "examples/webhook.tape": {
-    "bytes": 25276,
+    "bytes": 25370,
     "functions": 104
   },
   "examples/words.tape": {

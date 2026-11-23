@@ -165,7 +165,7 @@ const kindName = (k: Kind): string =>
     : k.k === 'bool'
       ? 'true or false'
       : k.k === 'int'
-        ? 'a whole number'
+        ? 'an integer'
         : k.k === 'float'
           ? 'a number'
           : k.k === 'rec'
@@ -175,7 +175,9 @@ const kindName = (k: Kind): string =>
               : kindName(k.of);
 function check(x: unknown, there: boolean, kind: Kind, name: string, depth: number): Fit {
   const k = kind.k === 'opt' ? kind.of : kind;
-  if (!there) return kind.k === 'opt' ? { ok: true } : { ok: false, depth, why: `missing key ${JSON.stringify(name)}` };
+  // an Option may be absent or null; anything else absent is missing, and null is null
+  if (!there || x === null)
+    return kind.k === 'opt' ? { ok: true } : { ok: false, depth, why: `${name}: ${there ? 'null' : 'missing'}` };
   const right =
     k.k === 'text'
       ? typeof x === 'string'
@@ -190,10 +192,21 @@ function check(x: unknown, there: boolean, kind: Kind, name: string, depth: numb
               : Array.isArray(x);
   if (!right) return { ok: false, depth, why: `${name}: expected ${kindName(k)}` };
   if (typeof x === 'string' && !x.isWellFormed())
-    return { ok: false, depth, why: `${name}: text with a lone surrogate` };
+    return { ok: false, depth, why: `${name}: expected text without lone surrogates` };
   return { ok: true };
 }
 type R = { ok: true; v: unknown } | { ok: false; why: string };
+// what a refined kind must be, as the 400 says it: "1 to 8 bytes", "-100 to 100"
+const rule = (k: Kind): string =>
+  k.k === 'text' ? `${k.min ?? 0} to ${k.max ?? 0} bytes` : 'min' in k ? `${k.min ?? 0} to ${k.max ?? 0}` : '';
+// a reason from inside `path`: "missing", "null" and "expected …" take a colon; a deeper path a dot, or nothing
+// before an index
+const join = (path: string, why: string): string =>
+  /^(missing|null|expected )/.test(why) && !/^(missing|null)[^ ]/.test(why)
+    ? `${path}: ${why}`
+    : why.startsWith('[')
+      ? path + why
+      : `${path}.${why}`;
 const fails = (k: Kind, v: unknown): boolean =>
   ('refined' in k && k.refined !== undefined && k.k === 'text' && typeof v === 'string'
     ? enc.encode(v).length < (k.min ?? 0) || enc.encode(v).length > (k.max ?? 1e9)
@@ -235,39 +248,39 @@ function asRecord(type: string, o: Record<string, unknown>): R {
   for (const [name, kind] of c.fields) {
     const k = kind.k === 'opt' ? kind.of : kind;
     if (k.k === 'rec' || k.k === 'list') continue;
-    const v = Object.hasOwn(o, name) ? scalar(k, o[name]) : undefined;
-    if (v !== undefined && fails(k, v))
-      return { ok: false, why: `${name}: not a valid ${'refined' in k ? k.refined : ''}` };
+    const v = Object.hasOwn(o, name) && o[name] !== null ? scalar(k, o[name]) : undefined;
+    if (v !== undefined && fails(k, v)) return { ok: false, why: `${name}: expected ${rule(k)}` };
     values[name] = v;
   }
   for (const [name, kind] of c.fields) {
     const k = kind.k === 'opt' ? kind.of : kind;
     if (k.k !== 'rec' && k.k !== 'list') continue;
-    if (!Object.hasOwn(o, name)) continue;
+    if (!Object.hasOwn(o, name) || o[name] === null) continue;
     const got = deepOf(k, o[name]);
-    if (!got.ok) return { ok: false, why: `${name}${k.k === 'list' ? '' : ': '}${got.why}` };
+    if (!got.ok) return { ok: false, why: join(name, got.why) };
     values[name] = got.v;
   }
   return { ok: true, v: { c: c.name, values } };
 }
 function deepOf(k: Kind, x: unknown): R {
-  if (k.k === 'rec') return isObject(x) ? asRecord(k.name, x) : { ok: false, why: 'not an object' };
-  if (k.k !== 'list' || !Array.isArray(x)) return { ok: false, why: 'not an array' };
+  if (k.k === 'rec') return isObject(x) ? asRecord(k.name, x) : { ok: false, why: 'expected an object' };
+  if (k.k !== 'list' || !Array.isArray(x)) return { ok: false, why: 'expected an array' };
   const out: unknown[] = [];
   for (const [i, el] of x.entries()) {
     const got = item(k.of, el);
-    if (!got.ok) return { ok: false, why: got.why.startsWith('[') ? `[${i}]${got.why}` : `[${i}]: ${got.why}` };
+    if (!got.ok) return { ok: false, why: join(`[${i}]`, got.why) };
     out.push(got.v);
   }
   return { ok: true, v: out };
 }
 function item(k: Kind, el: unknown): R {
-  if (k.k === 'rec') return isObject(el) ? asRecord(k.name, el) : { ok: false, why: 'not an object' };
+  if (k.k === 'rec')
+    return isObject(el) ? asRecord(k.name, el) : { ok: false, why: el === null ? 'null' : 'expected an object' };
   const fit = check(el, true, k, 'value', 0);
   if (!fit.ok) return { ok: false, why: fit.why.replace(/^value(: )?/, '') };
   if (k.k === 'list') return deepOf(k, el);
   const v = scalar(k, el);
-  return fails(k, v) ? { ok: false, why: `not a valid ${'refined' in k ? k.refined : ''}` } : { ok: true, v };
+  return fails(k, v) ? { ok: false, why: `expected ${rule(k)}` } : { ok: true, v };
 }
 // the answer the program writes
 type Rec = { c: string; values: Record<string, unknown> };
@@ -336,7 +349,7 @@ function reference(type: string, bytes: Uint8Array): string {
   } catch {
     // RangeError: too deep for the reviver
   }
-  if (!isObject(v)) return 'error: not an object';
+  if (!isObject(v)) return 'error: expected an object';
   const got = asRecord(type, v);
   return got.ok ? answer(type, got.v) : `error: ${got.why}`;
 }

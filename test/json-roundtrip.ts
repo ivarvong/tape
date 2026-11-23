@@ -318,11 +318,11 @@ fn numbers(d: Result[List[Int], View]) -> Buf {
       ['the tag says which constructor, whatever the keys inside', 'f{"AlwaysUp":{"ms":1,"rounds":1}}', 'up'],
       ['untagged, the constructor whose fields are there, as before', 'f{"ms":3,"rounds":1}', 'sets 3'],
       ['a tag whose value is not an object', 'f{"Sets":5}', 'Sets: expected an object'],
-      ['a field wrong inside a tag', 'f{"Sets":{"ms":"x","rounds":1}}', 'ms: expected a whole number'],
+      ['a field wrong inside a tag', 'f{"Sets":{"ms":"x","rounds":1}}', 'ms: expected an integer'],
       ['a list of numbers', 'n[1,2,3]', '3'],
       ['an empty list', 'n[]', '0'],
-      ['not an array', 'n{"value":[1]}', 'not an array'],
-      ['an element that is wrong', 'n[1,"2"]', '[1]: expected a whole number'],
+      ['not an array', 'n{"value":[1]}', 'expected an array'],
+      ['an element that is wrong', 'n[1,"2"]', '[1]: expected an integer'],
       ['not JSON', 'n[1,', 'not JSON'],
     ];
     for (const [what, input, want] of CASES) {

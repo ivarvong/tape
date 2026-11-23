@@ -245,10 +245,10 @@ fn handle(raw: View) -> Buf {
   const go = (s: string) => text(app.handle(bytes(s)));
   T('decode ok', go('{"title":"milk"}'), 'milk');
   T('decode: not JSON', go('{"title":'), 'no: not JSON');
-  T('decode: missing key', go('{"done":true}'), 'no: missing key "title"');
+  T('decode: missing key', go('{"done":true}'), 'no: title: missing');
   T('decode: wrong kind', go('{"title":5}'), 'no: title: expected text');
   T('decode: a key the type does not name is left unread', go('{"title":"a","x":1}'), 'a');
-  T('decode: refinement', go('{"title":"too long"}'), 'no: title: not a valid Title');
+  T('decode: refinement', go('{"title":"too long"}'), 'no: title: expected 1 to 5 bytes');
   T('decode: empty', go(''), 'no: empty');
 }
 

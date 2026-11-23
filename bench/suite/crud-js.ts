@@ -1,6 +1,7 @@
 // bench/suite/crud-js.ts: the JS twin of crud.tape, written as one would write it by hand, and its inputs.
-// Decoding refuses what decode refuses, with the same reason: for each object, every field's kind in order, a
-// missing key (a key no field names is left unread); then, in order, each field's condition, or each element of a list.
+// Decoding refuses what decode refuses, with the same reason (LANGUAGE.md section 6): for each object, every field's
+// kind in order, missing or null (a key no field names is left unread); then, in order, each field's condition, or
+// each element of a list.
 import type { NodeSql } from '../../nodesql.ts';
 import { dec, enc, rng } from './rand.ts';
 import type { Workload } from './common.ts';
@@ -12,32 +13,37 @@ class Refused extends Error {}
 const refuse = (why: string): never => {
   throw new Refused(why);
 };
-/** The host's checks on one object: kinds in field order, then a missing key; other keys are left unread. */
-function shape(v: unknown, fields: Record<string, 't' | 'i' | 'a'>, at = ''): Record<string, unknown> {
-  if (!isObject(v)) return refuse(`${at}not an object`);
+/** A reason at `path` ('' for the body itself): `items[0].qty: missing`. */
+const at = (path: string, why: string): string => (path === '' ? why : `${path}: ${why}`);
+const inside = (path: string, k: string): string => (path === '' ? k : `${path}.${k}`);
+/** The host's checks on one object: kinds in field order (missing, null, a wrong kind); other keys are left unread. */
+function shape(v: unknown, fields: Record<string, 't' | 'i' | 'a'>, path = ''): Record<string, unknown> {
+  if (!isObject(v)) return refuse(at(path, v === null && path !== '' ? 'null' : 'expected an object'));
   for (const [k, kind] of Object.entries(fields)) {
-    if (!Object.hasOwn(v, k)) refuse(`${at}missing key ${JSON.stringify(k)}`);
+    const p = inside(path, k);
+    if (!Object.hasOwn(v, k)) refuse(`${p}: missing`);
     const x = v[k];
-    if (kind === 't' && typeof x !== 'string') refuse(`${at}${k}: expected text`);
-    if (kind === 'i' && !Number.isSafeInteger(x)) refuse(`${at}${k}: expected a whole number`);
-    if (kind === 'a' && !Array.isArray(x)) refuse(`${at}${k}: expected an array`);
-    if (typeof x === 'string' && !x.isWellFormed()) refuse(`${at}${k}: text with a lone surrogate`);
+    if (x === null) refuse(`${p}: null`);
+    if (kind === 't' && typeof x !== 'string') refuse(`${p}: expected text`);
+    if (kind === 'i' && !Number.isSafeInteger(x)) refuse(`${p}: expected an integer`);
+    if (kind === 'a' && !Array.isArray(x)) refuse(`${p}: expected an array`);
+    if (typeof x === 'string' && !x.isWellFormed()) refuse(`${p}: expected text without lone surrogates`);
   }
   return v;
 }
 const textIn = (v: string, lo: number, hi: number): boolean => bytes(v) >= lo && bytes(v) <= hi;
 // after shape() these hold; the checks only tell the type checker so (they never refuse)
 const asText = (x: unknown): string => (typeof x === 'string' ? x : refuse('expected text'));
-const asWhole = (x: unknown): number => (typeof x === 'number' ? x : refuse('expected a whole number'));
+const asWhole = (x: unknown): number => (typeof x === 'number' ? x : refuse('expected an integer'));
 const asList = (x: unknown): unknown[] => (Array.isArray(x) ? x : refuse('expected an array'));
 function item(v: unknown, i: number): NewItem {
-  const at = `items[${i}]: `;
-  const o = shape(v, { key: 't', name: 't', qty: 'i', cents: 'i' }, at);
+  const path = `items[${i}]`;
+  const o = shape(v, { key: 't', name: 't', qty: 'i', cents: 'i' }, path);
   const [key, name, qty, cents] = [asText(o['key']), asText(o['name']), asWhole(o['qty']), asWhole(o['cents'])];
-  if (!textIn(key, 1, 64)) refuse(`${at}key: not a valid Key`);
-  if (!textIn(name, 1, 200)) refuse(`${at}name: not a valid Name`);
-  if (qty < 0 || qty > 1_000_000) refuse(`${at}qty: not a valid Qty`);
-  if (cents < 0 || cents > 100_000_000) refuse(`${at}cents: not a valid Cents`);
+  if (!textIn(key, 1, 64)) refuse(`${path}.key: expected 1 to 64 bytes`);
+  if (!textIn(name, 1, 200)) refuse(`${path}.name: expected 1 to 200 bytes`);
+  if (qty < 0 || qty > 1_000_000) refuse(`${path}.qty: expected 0 to 1000000`);
+  if (cents < 0 || cents > 100_000_000) refuse(`${path}.cents: expected 0 to 100000000`);
   return { key, name, qty, cents };
 }
 function decode(body: string): { batch: string; items: NewItem[] } {
@@ -50,7 +56,7 @@ function decode(body: string): { batch: string; items: NewItem[] } {
   }
   const o = shape(v, { batch: 't', items: 'a' });
   const batch = asText(o['batch']);
-  if (!textIn(batch, 1, 64)) refuse('batch: not a valid Key');
+  if (!textIn(batch, 1, 64)) refuse('batch: expected 1 to 64 bytes');
   return { batch, items: asList(o['items']).map(item) };
 }
 

@@ -127,13 +127,13 @@ fn handle(raw: View) -> Buf {
 `;
   const cases: [string, string][] = [
     ['POST /note\n{"text":"hi","from":"app","v":2}', '200\nhi'],
-    ['POST /note\n{"text":"hi","at":null}', '400\nat: expected a whole number'],
-    ['POST /note\n{"from":"app"}', '400\nmissing key "text"'],
+    ['POST /note\n{"text":"hi","at":null}', '200\nhi'],
+    ['POST /note\n{"from":"app"}', '400\ntext: missing'],
     ['POST /ev\n{"id":1,"amount":2}', '200\npaid 1 2'],
     ['POST /ev\n{"id":1,"amount":2,"currency":"usd"}', '200\npaid 1 2'],
     ['POST /ev\n{"id":1}', '200\nrefunded 1'],
     ['POST /ev\n{"id":1,"reason":"dup"}', '200\nrefunded 1'],
-    ['POST /ev\n{"id":1,"amount":"2"}', '400\namount: expected a whole number'],
+    ['POST /ev\n{"id":1,"amount":"2"}', '400\namount: expected an integer'],
   ];
   const r = compile([...std, { name: 't.tape', text: EV }]);
   const app = r.wasm ? instantiate(new WebAssembly.Module(r.wasm), { sql: nodeSql(), log: false }) : null;

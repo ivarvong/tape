@@ -299,8 +299,27 @@ A Dec is given to a query as its count, an INTEGER (12.30 is 1230), and an INTEG
 as a count at the field's scale; so the SQL sees counts, and `CHECK (amount > 0)` and `SUM(amount)` work on them.
 A count beyond ±2^53 stops the request rather than reach the database rounded. In JSON a Dec is written as text,
 `"12.30"`, exact for any reader, and decoded from a number or text that is exactly a Dec of the field's scale
-(`12.3` and `"12.300"` for a `Dec[2]`, but not `12.345`: `amount: not a Dec[2]`). `parse_dec(text: …, scale: 2)` reads
-one from text the same way, as an `Option`.
+(`12.3` and `"12.300"` for a `Dec[2]`, but not `12.345`: `amount: expected a number with at most 2 decimals`).
+`parse_dec(text: …, scale: 2)` reads one from text the same way, as an `Option`.
+
+**Why decode refuses.** `decode`'s `Err` is one line, the same from every host, made to be sent back as a 400
+as it is: `<path>: <problem>`. The path names the value from the top, a field by its name and an element by its
+index: `key`, `venue.city`, `items[2].price`, `grid[1][0]`. The problem is one of three:
+
+| Problem | When |
+|---|---|
+| `missing` | the key is absent and the field is not an `Option` |
+| `null` | the value is `null` and the field is not an `Option` (an `Option` field that is `null` or absent is `None`) |
+| `expected <what>` | the value is of another kind, or fails the refinement |
+
+`<what>` is `text`, `true or false`, `an integer`, `a number`, `a number with at most 2 decimals` (a `Dec[2]`),
+`an object`, `an array`, `text without lone surrogates`, or the refinement's condition: `len(self) >= 1 and
+len(self) <= 64` is `1 to 64 bytes`, `self >= 1 and self <= 9` is `1 to 9`, `self > 0.00` is `more than 0.00`,
+`self <= flags.max_per_order` is `at most flags.max_per_order`; a condition that is not such bounds is the type and
+the condition, `a Slug: every_byte(v: self, keep: is_lower)`. Of the body as a whole the reasons are `empty`,
+`not JSON`, and `expected an object` (or `expected an array` for `as: List[T]`). The first problem is the reason:
+each field's kind is checked in order, then each refinement, then what is inside its records and lists. So `{"key": "", "items": [{"sku": "a", "price": "1.505"}]}` as an order is
+`key: expected 1 to 64 bytes`, and with a right key, `items[0].price: expected a number with at most 2 decimals`.
 
 **A call is a commit point.** Writes made before a `call` or `ask` are durable when it is sent. The run may end
 there (the object is reset, the reply is lost), so whatever must happen afterwards needs a timer set before the
@@ -472,7 +491,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 
 | Job | The form | Otherwise |
 |---|---|---|
-| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); `null` for an `Option` field is refused: it is there or it is not. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected a whole number")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
+| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); an `Option` field that is absent or `null` is `None`. Its `Err` is `<path>: missing`, `null` or `expected <what>` (section 6), ready to send as a 400. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected an integer")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
 | Write JSON | `write_json(value: …)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows: …)` for the rows of a query | C09 |
 | Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list: …, sep: …)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
@@ -702,6 +721,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | decode's reasons, breaking: one path, `items[2].price`, where it was `items[2]: price`; `missing` where it was `missing key "price"`; `null` its own reason, and `null` for an `Option` field is `None` (it was refused); `expected an integer` for `expected a whole number`, `expected a number with at most 2 decimals` for `not a Dec[2]`, and a refinement's condition (`expected 1 to 64 bytes`) for `not a valid Key`; the format is in section 6 |
 | 23 November 2026 | a query takes an `Option` of an Int, Dec, Float, Bool or View, bound as NULL for `None` (sql_exec, sql_first, sql_all, sql_move); the checker reads it as a value that may be NULL: C69 into a NOT NULL column, and C69 when it is compared with `=` (or `!=`, `<`, …) and nothing in the statement asks `IS NULL`, `IS`, `coalesce` or `ifnull` of it |
 | 23 November 2026 | std `compare(a, b)`: -1, 0 or 1, byte by byte. `Map`'s `get` and `put` compare the keys once at each node, where they asked `before` twice; the same maps and answers in fewer steps (words.tape on 2 MB: 28,710,918 steps, now 21,149,058) |
 | 23 November 2026 | std `range(from:, to:)` (design memo of feedback 20261123T030026.990Z-e454772fe5c9, item 4): `fold` over it is a counting loop that makes no list (compiler/fuse.ts, in the build and the interpreter alike: n + 1 steps and no memory, where the list made first takes 2n + 2 steps and 24 bytes a number). No loop construct |
@@ -734,6 +754,7 @@ what went before.
 
 | When | What | Now |
 |---|---|---|
+| 23 November 2026 | decode's reasons `items[2]: price: not a Dec[2]`, `missing key "qty"`, `not a valid Key`, and `null` for an `Option` field refused | `items[2].price: expected a number with at most 2 decimals`, `qty: missing`, `key: expected 1 to 64 bytes` (section 6); `null` for an `Option` is `None` |
 | 23 November 2026 | a value that may be absent passed to a query with a flag beside it (`WHERE (:all = 1 OR region = :only)`, `all: True, only: ""`): a query's values were never `Option` (C14) | an `Option` argument, NULL for `None`: `WHERE (:region IS NULL OR region = :region)` |
 | 23 November 2026 | C65 on a key made only of what its message carries: it refused right keys (a row's id the message also carried, found in a pattern, a field, a parameter, an Option, a path: every such refusal in three bench rounds was a right key), and its way out, the message itself as the key, had the defect it refused | gone; C65 keeps only a key that is the same every time, and C71 that a command built from a row names it |
 | 23 November 2026 | a long condition or sum wrapped onto a line starting with `and`, `+`, … (P02), and an arm's value on the line after its `->` (P02) | a line that starts with a binary operator carries the expression on, as `|>` does, and an arm's or step's value may start on the line after `->` |
