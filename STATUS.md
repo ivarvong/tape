@@ -14,7 +14,7 @@ Numbers on this page were produced by the command named beside them on the tree 
 | A compiled program computes what the source means. | `proof/verify.ts`: a reference interpreter (`interp.ts`) against three builds, on generated programs and the examples. The interpreter is a second evaluator, not a second front end: it uses the compiler's parser and the passes `parseProgram` runs after it (shadowing, pipes, ambient capabilities, `*` columns), and `movePlan` and `tablesOf` from the rules. A bug there is shared by both sides. | sampled |
 | `Int` arithmetic is exact or traps; it never wraps. | `test/ints.ts`: every operator on 21×21 edge values, 0! to 25!, negative literals and the wrapping intrinsics, and 4,000 random expressions at 4 inputs each (16,000 runs, about a fifth of them traps), each run under three builds and the interpreter and compared with BigInt arithmetic, trap code for trap code. The bounds a condition proves for an index (`compiler/gen/range.ts`, which drops the test from `at + 1`) are held by cases where a wrong bound would let an overflow through; each of five planted mistakes in it was seen caught. | sampled |
 | An effect is asked for as the source says, in order. | `proof/interp-effects.ts`: the interpreter, given each simulated run's log as its host, must ask for the same statements, calls, timers and draws in the same order and answer the same bytes. 1,823 of 1,896 distinct runs agree over 4,250 effects; none differ; 73 are not followed (below). Four planted differences are each seen. | sampled |
-| A keyed call that is lost, repeated or delayed takes effect once, when its sends do not overlap. | `proof/schedule.ts`: every mix of four outcomes at each call of a small scenario, 484 schedules, none wrong with keys, 381 wrong without. `service/jepsen` in the real service. Two sends of one key that overlap are not explored, and can run twice (known limitation 1). | exhaustive within its bound; sampled |
+| A keyed call that is lost, repeated, delayed or sent again while it runs takes effect once. | `proof/schedule.ts`: every mix of four outcomes at each call of a small scenario, 484 schedules, none wrong with keys, 381 wrong without; and two overlapping sends of one key to a method that calls, with every outcome of its call and a storage error at every commit, 73 schedules, none wrong (the host before claims: 9 of 40 wrong). `test/calls.ts`: the second send waits for the first run's reply, runs the key when that run fails, and answers `unreachable` when it outlasts its budget. `service/jepsen` in the real service, with sequential retries. | exhaustive within its bound; sampled |
 | A request answered once and sent again changes nothing in the end. | `tape sim`: in each run one request answered 200, 201 or 204 is sent again straight after its answer, in a second copy of the run; the rows after settling must match. One request per run, so a rare one can be missed. | sampled |
 | Memory released is never read, and reuse changes no result. | `proof/verify.ts` builds with reuse off and with released memory quarantined; `test/memory.ts` on random aliasing scripts. | sampled |
 | The rules refuse the bugs they were written for. | `apps/tickets/plants.ts`: of 52 planted bugs, 43 refused by the compiler, 8 caught by the scenarios, 1 missed. `experiments/c78/timed-mutants.ts`: 7 of 7 in `examples/timed`. Each rule has a program it refuses and one it accepts (`test/rules-retries.ts`, `test/machines.ts`, `test/timers-way-out.ts`, `test/timers-keys.ts`). | per rule |
@@ -47,42 +47,34 @@ The files under `proof/results/` are written by these runs and are not read back
 
 Bugs that are reproduced and not fixed, and gaps in the checks that can hide one.
 
-1. **Two overlapping sends of one `once` key can both run.** The host checks for a stored reply before it runs an
-   exported method and stores the reply only when the run ends. A Durable Object interleaves requests while one
-   awaits a call, so a second send of the key that arrives while the first run waits on its own call runs the
-   method again; both runs' writes before that call are committed, and the second then fails storing its reply.
-   The service answers that failure `rejected`, so the caller may compensate for work done twice. Reproduced on
-   this tree with a method that inserts a row and then calls out: two rows, one `ok` reply, one failure. This
-   contradicts "at most once per `once` key" for methods that make calls; methods that make no call are not
-   interleaved. No check sends two overlapping retries of one key.
-2. **A woken run that fails on a storage error loses its timer.** A run cut short at a call keeps its timer and is
+1. **A woken run that fails on a storage error loses its timer.** A run cut short at a call keeps its timer and is
    woken again. Any other failure, including a transient one such as `SQLITE_BUSY`, removes the timer as a trap
    does, and the work is never done. Reproduced on this tree. The fault harness injects storage errors on requests
    and calls, not on timers.
-3. **The simulation proofs pass when the simulator crashes on a program.** `proof/sim-all.ts` treats an exception
+2. **The simulation proofs pass when the simulator crashes on a program.** `proof/sim-all.ts` treats an exception
    from building a program's model as "no handle", `proof/sim-invariants.ts` counts it as refused by the compiler,
    and `proof/interp-effects.ts` drops the group. Each would exit 0, and the counts above would drop by one or two,
    within the floors.
-4. **Changing a flag while a request waits on a call makes its replay differ.** The request reads the new value
+3. **Changing a flag while a request waits on a call makes its replay differ.** The request reads the new value
    after the call, while its log holds the flags it started with, so replaying the log gives another answer
    (reproduced: the live answer used the new value, the replay the old one). Only tests and tools call
    `setFlags` today.
-5. **The log-replay row of `proof/verify.ts` compares three builds with each other, not with the answer the request
+4. **The log-replay row of `proof/verify.ts` compares three builds with each other, not with the answer the request
    originally got.**
-6. **The Git capability is not exercised by the gate.** `test/git.ts` needs a local build of
+5. **The Git capability is not exercised by the gate.** `test/git.ts` needs a local build of
    [ply](https://github.com/ivarvong/ply) and reports ok when it is absent, as it is in CI. `examples/bump.tape`
    (the Git capability) is also the largest part of what the interpreter does not follow.
-7. **`test/typed.ts` looks for `// @ts-nocheck` only on a file's first line.** `proof/untyped.txt` is empty, and no
+6. **`test/typed.ts` looks for `// @ts-nocheck` only on a file's first line.** `proof/untyped.txt` is empty, and no
    tracked file opts out of the type checker today, but a second-line comment would pass the test.
-8. **A row whose machine column holds an undeclared state traps** at a match on it with a bare `unreachable`, not a
+7. **A row whose machine column holds an undeclared state traps** at a match on it with a bare `unreachable`, not a
    message that names the state. The triggers keep such rows out unless the data is changed past them.
-9. **C80 (`final`) is imprecise.** It follows a value a bounded number of steps and refuses two programs the tests
+8. **C80 (`final`) is imprecise.** It follows a value a bounded number of steps and refuses two programs the tests
    hold up as correct, because a call counts as reading the clock when anything in the called function does.
-10. **Published pages share the API's origin.** A public route can answer `text/html` or `image/svg+xml` from the
+9. **Published pages share the API's origin.** A public route can answer `text/html` or `image/svg+xml` from the
     same origin as the API, with no `Content-Security-Policy` and no `X-Content-Type-Options: nosniff`. The API's
     credentials are bearer tokens, not cookies, so a page cannot use them, but pages of different accounts are not
     isolated from each other.
-11. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
+10. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
     it (`:name`).**
 
 The language's own limits are in [`LANGUAGE.md` section 11](LANGUAGE.md#11-not-defined-yet). In short: no floats;
@@ -109,7 +101,7 @@ rebuilt by `map` and `reverse`, captured variables and `Buf` growth are not reus
   the other side.
 - **Timers, faults and concurrency in the real service.** The transcript check covers requests one at a time. The
   service's fault runs (`service/jepsen`) are run by hand, not by the gate, and none interleaves two sends of one
-  key (limitation 1).
+  key; `proof/schedule.ts` does, on the host.
 - **How well the tests notice a broken rule.** `node proof/mutate.ts 40 1 --files rules/,sql/ --all`, run on this
   tree: of 2,240 possible small changes to `rules/` and `sql/`, 40 sampled, 24 noticed by some test and 16 not.
   The 16 are not yet sorted into holes and changes that cannot matter. The sample is small, so the true rate is

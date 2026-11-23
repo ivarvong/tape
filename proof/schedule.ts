@@ -9,7 +9,7 @@
 // explore({ keys: false }) removes the idempotency keys; the explorer must then find a violation.
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
-import { TimedOut, instantiate, replay } from '../host.ts';
+import { NO_TIMERS, TimedOut, instantiate, replay } from '../host.ts';
 import type { Effect, Service, ServiceOptions, Served } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
@@ -119,7 +119,134 @@ export async function explore({ keys = true }: { keys?: boolean } = {}): Promise
   await visit([]);
   return { schedules, calls, longest, violations };
 }
+// Overlapping sends of one key. A Durable Object interleaves requests while one awaits a call, so a retry of a key
+// can arrive while the first send's run waits on its own call. The callee here charges (counting its runs) and then
+// calls a bank. Two sends of one key start together; at each bank call the bank answers, times out or is
+// unreachable, and each commit of a run's transaction either goes through or fails with a storage error; then one
+// last send of the key with nothing failing.
+//   facts: the charge ran once, plus once for each run that failed after its first stretch committed (a run that
+//   fails part way has committed what came before its call, and the key runs again); every send answered ok or
+//   rejected got the reply stored for the key; a send that got no reply failed on storage, and nothing else; no
+//   claim is left. The host before 22 November 2026 checked for a stored reply but claimed nothing, and broke them
+//   in every schedule where both sends' first stretches commit: both ran the charge, and the second failed storing
+//   its reply (9 of its 40 schedules).
+const PAY = (() => {
+  const text = `schema "CREATE TABLE IF NOT EXISTS charges(who TEXT PRIMARY KEY, n INTEGER NOT NULL)"
+type Pay { Pay(who: View) }
+type Done { Done(n: Int) }
+type Ack { Ack(ok: Int) }
+export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, View] {
+  do sql_exec(
+    query: "INSERT INTO charges(who, n) VALUES (:who, 1) ON CONFLICT(who) DO UPDATE SET n = n + 1",
+    who: message.who
+  )
+  let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, within: 1000, once: message.who) else -> Err(
+    error: "bank"
+  )
+  Ok(value: Done(n: ok))
+}
+`;
+  const r = compile([...std, { name: 'pay', text }], { rules: false });
+  if (r.wasm === null) throw new Error(JSON.stringify(r.errors[0]));
+  return { module: new WebAssembly.Module(r.wasm), fingerprint: r.methods[0]?.fingerprint ?? '' };
+})();
+const BANK = ['answers', 'times out', 'unreachable'],
+  COMMIT = ['commits', 'storage error'];
+class Busy extends Error {}
+
+async function overlap(prefix: readonly number[]): Promise<{ taken: string[]; wrong: string[] }> {
+  const taken: string[] = [];
+  let at = 0,
+    reliable = false;
+  const choose = (of: string[]): number => {
+    if (reliable) return 0;
+    const c = prefix[at++] ?? 0;
+    taken.push(of[c] ?? '?');
+    return c;
+  };
+  const sql = nodeSql(),
+    waiting: (() => void)[] = [];
+  const bank: Service = async () => {
+    const c = choose(BANK);
+    if (!reliable)
+      await new Promise<void>(go => {
+        waiting.push(go);
+      });
+    if (c === 1) throw new TimedOut();
+    return c === 2 ? { status: 'unreachable' } : enc.encode('{"ok":1}');
+  };
+  const callee = instantiate(PAY.module, { sql, name: 'callee', services: { bank }, timers: NO_TIMERS });
+  const runs = (): number => Number(sql.exec("SELECT n FROM charges WHERE who = 'bob'").raw().toArray()[0]?.[0] ?? 0);
+  let extra = 0;
+  const transaction = <T>(f: () => T): T =>
+    sql.transaction(() => {
+      const before = runs(),
+        r = f();
+      if (choose(COMMIT) === 1) {
+        // a stretch after the first (it charged nothing and leaves a row for the key; clearing a claim leaves none):
+        // the charge made before its call stands, and the key runs again
+        if (runs() === before && sql.exec('SELECT 1 FROM _calls').toArray().length > 0) extra++;
+        throw new Busy('SQLITE_BUSY: injected at commit');
+      }
+      return r;
+    });
+  const meta = { method: 'pay', fingerprint: PAY.fingerprint, key: 'caller/pay/bob' };
+  const body = enc.encode('{"who":"bob"}');
+  const send = (): Promise<Served | Error> =>
+    callee.serve(meta, body, { transaction }).catch((e: unknown) => (e instanceof Error ? e : new Error(String(e))));
+  let settled = 0;
+  const count = (r: Served | Error): Served | Error => {
+    settled++;
+    return r;
+  };
+  const sends = [send().then(count), send().then(count)];
+  while (settled < sends.length) {
+    await new Promise(go => {
+      setImmediate(go);
+    });
+    waiting.shift()?.();
+  }
+  reliable = true;
+  const last = await send();
+  const replies = [...(await Promise.all(sends)), last],
+    wrong: string[] = [];
+  const [stored] = sql.exec('SELECT status, body FROM _calls').raw().toArray();
+  const storedText = stored ? `${cellText(stored[0])} ${cellText(stored[1])}` : 'none';
+  if (stored?.[0] === 'pending') wrong.push('a claim is left');
+  for (const r of replies)
+    if (r instanceof Error) {
+      if (!(r instanceof Busy)) wrong.push(`a send failed: ${r.message}`);
+    } else if (r.status === 'ok' || r.status === 'rejected') {
+      const got = `${r.status} ${dec.decode(r.body)}`;
+      if (got !== storedText) wrong.push(`a send got ${got}, the key's stored reply is ${storedText}`);
+    } else if (r !== last) {
+      if (r.status !== 'unreachable') wrong.push(`a send got ${r.status}`);
+    } else wrong.push(`the last send got ${r.status}`);
+  if (runs() !== 1 + extra) wrong.push(`the charge ran ${runs()} times, expected ${1 + extra}`);
+  return { taken, wrong };
+}
+export async function exploreOverlap(): Promise<{ schedules: number; violations: Violation[] }> {
+  let schedules = 0;
+  const violations: Violation[] = [];
+  const visit = async (prefix: readonly number[]): Promise<void> => {
+    const { taken, wrong } = await overlap(prefix);
+    schedules++;
+    if (wrong.length > 0) violations.push({ schedule: taken, wrong });
+    for (let i = prefix.length; i < taken.length; i++) {
+      const of = taken[i] !== undefined && COMMIT.includes(taken[i] ?? '') ? COMMIT : BANK;
+      for (let c = 1; c < of.length; c++)
+        await visit([...prefix, ...Array.from({ length: i - prefix.length }, () => 0), c]);
+    }
+  };
+  await visit([]);
+  return { schedules, violations };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
+  const o = await exploreOverlap();
+  console.log(
+    `overlapping sends of one key: ${o.schedules} schedules, ${o.violations.length} violations; first: ${JSON.stringify(o.violations[0] ?? null)}`,
+  );
   const t = Date.now(),
     a = await explore();
   console.log(
@@ -134,6 +261,8 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // program had come to require, every request was refused, no call was made, and this printed its one schedule and
   // exited 0. It now fails unless the search is the size it is known to be, clean with keys, and dirty without.
   const wrong = [
+    o.schedules < 60 ? `only ${o.schedules} schedules of overlapping sends` : '',
+    o.violations.length > 0 ? `${o.violations.length} schedules of overlapping sends violate` : '',
     a.schedules < 400 || a.calls < 2000
       ? `only ${a.schedules} schedules and ${a.calls} calls: the scenario no longer reaches its calls`
       : '',

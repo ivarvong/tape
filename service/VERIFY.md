@@ -48,7 +48,7 @@ node service/jepsen/seams-run.ts --base $BASE --token-file <path> --prefix jepse
 | 6 | The signing scheme, and expiry after seven days. |
 | 7 | The OTLP/JSON export is accepted by an OpenTelemetry Collector. |
 | 8 | Every version of a name shares its data. |
-| 9 | A retry with a once key charges once, proven by the card's balance read through a second program. Sequential retries only: see [`STATUS.md`](../STATUS.md#known-limitations), limitation 1. |
+| 9 | A retry with a once key charges once, proven by the card's balance read through a second program. Sequential retries only here; overlapping sends of one key are explored on the host (`proof/schedule.ts`). |
 | 10 | Migrations apply once, in order, with their hash recorded; an edited migration is refused with 409. |
 | 11 | Migration order, and removal without `contract` refused. |
 | 12 | The upload check runs against the data as it stands, in a transaction that is rolled back. |
@@ -71,6 +71,6 @@ node service/jepsen/seams-run.ts --base $BASE --token-file <path> --prefix jepse
 
 - The checks reach the service over HTTP only: its internal tables are seen through traces and answers.
 - Whether the Wasm builds are served from Workers Cache cannot be seen from outside.
-- No check sends two overlapping requests with one once key, and no fault run injects a storage error into a
-  timer's run ([`STATUS.md`](../STATUS.md#known-limitations), limitations 1 and 2).
+- No check here sends two overlapping requests with one once key (`proof/schedule.ts` does, on the host), and no
+  fault run injects a storage error into a timer's run ([`STATUS.md`](../STATUS.md#known-limitations), limitation 1).
 - Production runs are made by hand. Nothing runs them on each deploy.

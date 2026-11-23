@@ -13,7 +13,7 @@
 // { transaction }) checks the fingerprint (answering skew, and running nothing, when the two sides differ),
 // answers a repeated key from its `_calls` table, and otherwise runs the method and stores the reply in the same
 // transaction. `key` is set for a command (`call ... once:`): the caller's `name`, the method and the program's
-// key; the callee runs a key at most once and repeats its stored reply.
+// key; the callee runs a key at most once and repeats its stored reply (to a send while it runs, once it has one).
 //
 // The parts are in host/: the effect log (log), what is read from and written into the module's memory (memory),
 // a call out (call), a linked module and its runs (run), migrations and machine triggers (schema).

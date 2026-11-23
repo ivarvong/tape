@@ -209,7 +209,7 @@ state needs no `_` arm.
 | `sql_all(row: T, query: "…")` | `Sql` | `Rows[T]` |
 | `sql_exec(query: "…")` | `Sql` | the number of rows changed |
 | `sql_move(row: T, query: "UPDATE … WHERE … RETURNING *")` | `Sql` | a compare-and-set: `Moved(value)`, `Raced(now)` when another run moved the row first, `NoRow` |
-| `call(to:, method:, send:, reply:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError]`. A repeat of a `once` key after the first run has finished gets its stored reply and runs nothing. Two sends of one key that overlap, to a method that itself calls, can both run: a known bug ([`STATUS.md`](STATUS.md#known-limitations)) |
+| `call(to:, method:, send:, reply:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError]`. A repeat of a `once` key gets the first run's reply and runs nothing: its stored reply, or, sent while the first run waits on a call, that run's reply when it comes (`Unreachable` if it does not come within the budget: send it again) |
 | `ask(to:, method:, send:, reply:, within:)` | `Remote` | a read: the same, with no key |
 | `wake(after: ms, key: n)` | `Timer` | asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again; a run that fails on a storage error is not retried, a known bug ([`STATUS.md`](STATUS.md#known-limitations)) |
 | `now()` | `Clock` | milliseconds since 1970 |

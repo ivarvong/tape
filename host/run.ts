@@ -609,8 +609,8 @@ const answerOf = (out: Uint8Array): { status: Status; body: Uint8Array } => ({
 // message nothing runs, and the answer is skew, not rejected: the first message may have run, so the caller must
 // not take this as a refusal it can compensate for (finding M1 of the calls model; a key reused for a different
 // command is a bug in the caller, which a replay would hide). A row stored before messages were kept (message
-// NULL) is replayed.
-function storedReply(L: Linked, key: string, method: string, message: string): Served | null {
+// NULL) is replayed. A `pending` row is a claim (below), and its body names the run that holds it.
+function storedReply(L: Linked, key: string, method: string, message: string): Served | { claim: string } | null {
   const [seen] = sqlOf(L).exec('SELECT status, body, message FROM _calls WHERE key = ?1', key).raw().toArray();
   if (!seen) return null;
   const [status, body, before] = seen;
@@ -621,45 +621,146 @@ function storedReply(L: Linked, key: string, method: string, message: string): S
         `the key ${key} was used before for another ${method} message (${before.length > 200 ? `${before.slice(0, 200)}…` : before}); a key names one command, so this one (${message.length > 200 ? message.slice(0, 200) + '…' : message}) did not run (the first may have)`,
       ),
     };
+  if (cellText(status) === PENDING) return { claim: cellText(body) };
   return { status: cellText(status), body: enc.encode(cellText(body)) };
 }
 
+// A run of a keyed method claims its key: a `pending` row goes in the transaction of the run's first stretch, so it
+// is committed with the first writes, before any call the method makes. Requests to one object interleave at calls,
+// so a second send of the key can arrive while the first run waits on one; it finds the claim and waits for that
+// run's reply instead of running the method again. RUNNING holds the runs alive in this isolate, by key and claim.
+// A claim no run here holds was left by a run that ended without its reply (its object reset while it waited, or
+// clearing the claim failed): what that run committed stands, as it did before claims, and the key is run again.
+const PENDING = 'pending';
+const RUNNING = new Map<string, Promise<Served>>();
+type Claim = { key: string; claim: string; message: string };
+
 // One call from another object: check the two sides agree on the method, answer a repeated key from the stored
-// reply, otherwise run the method and store its reply in the same transaction as its writes.
+// reply or from the run that holds its claim, otherwise run the method and store its reply in the same
+// transaction as its last writes.
 async function serve(
   L: Linked,
   req: ServeRequest,
   bytes: Uint8Array,
   { transaction = direct }: { transaction?: Transaction } = {},
 ): Promise<Served> {
-  const { method, fingerprint, key = null, withinMs = Infinity, trace = null } = req;
+  const { method, fingerprint, key = null } = req;
   const m = L.M.find(x => x.name === method);
   const skew = (text: string): Served => ({ status: 'skew', body: enc.encode(text) });
   if (!m) return skew(`no method ${method} here; this build serves: ${L.M.map(x => x.name).join(', ') || 'nothing'}`);
   if (m.fingerprint !== fingerprint)
     return skew(`${method} is defined differently on the two sides (caller ${fingerprint}, callee ${m.fingerprint})`);
+  if (key === null) return runServed(L, m, req, bytes, transaction, null);
   const message = utf8.decode(bytes);
-  const stored = key === null ? null : storedReply(L, key, method, message);
-  if (stored) return stored;
-  const store = (out: Uint8Array): void => {
-    if (key === null) return;
-    const a = answerOf(out);
-    sqlOf(L).exec(
-      'INSERT INTO _calls(key, status, body, message) VALUES (?1, ?2, ?3, ?4)',
-      key,
-      a.status,
-      utf8.decode(a.body),
-      message,
-    );
+  // nothing below awaits before the run's first stretch has claimed the key
+  const stored = storedReply(L, key, method, message);
+  if (stored && 'status' in stored) return stored;
+  const held = stored ? RUNNING.get(`${key}\u0000${stored.claim}`) : undefined;
+  if (held) return waitFor(L, held, req, bytes, transaction);
+  const claim = hex(8),
+    id = `${key}\u0000${claim}`;
+  const running = runServed(L, m, req, bytes, transaction, { key, claim, message });
+  running.catch(() => {}); // a waiter that sees it fail sends the key again; the failure is its own caller's
+  RUNNING.set(id, running);
+  try {
+    return await running;
+  } finally {
+    RUNNING.delete(id);
+  }
+}
+
+// A second send of a key while its first run waits gets that run's reply, without its log (the log is the first
+// run's). When the first run fails, this send runs the key again, as a send after it would. A first run that
+// outlasts this send's budget leaves the outcome unknown: unreachable, which a caller sends again with the same key
+// and never compensates for, as for a storage failure.
+async function waitFor(
+  L: Linked,
+  held: Promise<Served>,
+  req: ServeRequest,
+  bytes: Uint8Array,
+  transaction: Transaction,
+): Promise<Served> {
+  const { key = null, withinMs = Infinity } = req;
+  const busy: Served = {
+    status: 'unreachable',
+    body: enc.encode(`the key ${key} is being run by an earlier send that has not finished; send it again`),
   };
-  const ran = await runLogged(L, new Uint8Array(bytes), {
-    transaction,
-    deadlineMs: withinMs,
-    method: m,
-    done: store,
-    trace,
+  let timer: unknown = null;
+  const late = new Promise<Served>(ok => {
+    if (Number.isFinite(withinMs))
+      timer = L.o.timers.set(() => {
+        ok(busy);
+      }, withinMs);
   });
-  return { ...answerOf(ran.out), effects: ran.effects };
+  try {
+    const first = await Promise.race([held, late]);
+    return first === busy ? busy : { status: first.status, body: first.body };
+  } catch {
+    return await serve(L, req, bytes, { transaction });
+  } finally {
+    L.o.timers.clear(timer);
+  }
+}
+
+// The method's run. With a claim, the claim goes in the first stretch's transaction (over one no run holds) and
+// the reply over it in the last. A run that ends without its reply (a failure, a rollback after a call) clears its
+// claim, so the key runs again when it is sent again; a run cut short keeps it, since its object reset.
+async function runServed(
+  L: Linked,
+  m: Method,
+  req: ServeRequest,
+  bytes: Uint8Array,
+  transaction: Transaction,
+  c: Claim | null,
+): Promise<Served> {
+  const { withinMs = Infinity, trace = null } = req;
+  const sql = sqlOf(L);
+  const put = (status: string, body: string): void => {
+    if (c)
+      sql.exec(
+        'INSERT INTO _calls(key, status, body, message) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key) DO UPDATE SET ' +
+          'status = excluded.status, body = excluded.body, message = excluded.message',
+        c.key,
+        status,
+        body,
+        c.message,
+      );
+  };
+  const store = (out: Uint8Array): void => {
+    const a = answerOf(out);
+    put(a.status, utf8.decode(a.body));
+  };
+  let first = true;
+  const claiming: Transaction = f =>
+    transaction(() => {
+      if (first && c) put(PENDING, c.claim);
+      const r = f();
+      first = false;
+      return r;
+    });
+  const mine = 'FROM _calls WHERE key = ?1 AND status = ?2 AND body = ?3';
+  const clear = (): void => {
+    try {
+      if (c && sql.exec(`SELECT 1 ${mine}`, c.key, PENDING, c.claim).toArray().length > 0)
+        transaction(() => sql.exec(`DELETE ${mine}`, c.key, PENDING, c.claim));
+    } catch {
+      // the claim stays; no run holds it, so the next send of the key runs it
+    }
+  };
+  try {
+    const ran = await runLogged(L, new Uint8Array(bytes), {
+      transaction: c ? claiming : transaction,
+      deadlineMs: withinMs,
+      method: m,
+      done: store,
+      trace,
+    });
+    clear();
+    return { ...answerOf(ran.out), effects: ran.effects };
+  } catch (err) {
+    if (!isCut(err)) clear();
+    throw err;
+  }
 }
 
 type Declared = { name: string; settled: boolean; with?: string[]; sql: string };

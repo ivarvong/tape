@@ -689,5 +689,115 @@ fn stamp(out: Buf, roll: Int) -> Buf {
     }
     T('a negative index is refused by the host', /index -1 is not a whole number from 0/.test(msg), true);
   }
+  // overlapping sends of one key, to a method that calls: a Durable Object interleaves requests at calls, so the second
+  // send arrives while the first run waits. Before claims both ran (two charges; the second failed storing its reply).
+  {
+    const pay = build(`schema "CREATE TABLE IF NOT EXISTS charges(id INTEGER PRIMARY KEY, who TEXT NOT NULL)"
+type Pay { Pay(who: View) }
+type Done { Done(n: Int) }
+type Ack { Ack(ok: Int) }
+export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, View] {
+  do sql_exec(query: "INSERT INTO charges(who) VALUES (:who)", who: message.who)
+  let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, within: 1000, once: message.who) else -> Err(
+    error: "bank"
+  )
+  Ok(value: Done(n: ok))
+}`);
+    const meta = { method: 'pay', fingerprint: pay.methods[0]?.fingerprint ?? '', key: 'caller/pay/order-1' };
+    const body = bytes('{"who":"bob"}');
+    const world = () => {
+      const sql = nodeSql(),
+        gates: (() => void)[] = [];
+      const bank: Service = () =>
+        new Promise(go => {
+          gates.push(() => {
+            go(bytes('{"ok":1}'));
+          });
+        });
+      const callee = instantiate(new WebAssembly.Module(pay.wasm), { sql, name: 'callee', services: { bank } });
+      const charges = () => Number(sql.exec('SELECT count(*) FROM charges').raw().toArray()[0]?.[0]);
+      const release = async () => {
+        await sleep(5);
+        for (const g of gates.splice(0)) g();
+      };
+      return { sql, app: callee, charges, release };
+    };
+    {
+      const w = world();
+      const tx = { transaction: <R>(f: () => R): R => w.sql.transaction(f) };
+      const a = w.app.serve(meta, body, tx),
+        b = w.app.serve(meta, body, tx);
+      await w.release();
+      const [x, y] = await Promise.all([a, b]);
+      T(
+        'two overlapping sends of one key: one charge, and both callers get the same reply',
+        [w.charges(), x.status, text(x.body), y.status, text(y.body), y.effects],
+        [1, 'ok', '{"n":1}', 'ok', '{"n":1}', undefined],
+      );
+      T('and the key holds that reply', w.sql.exec('SELECT status, body FROM _calls').raw().toArray(), [
+        ['ok', '{"n":1}'],
+      ]);
+    }
+    {
+      // the first run fails as its last stretch commits (a storage error): its first stretch, the charge, stands, as
+      // it does for any run that fails after a call; the second send then runs the key itself
+      const w = world();
+      let fail = 0;
+      const tx = {
+        transaction: <R>(f: () => R): R =>
+          w.sql.transaction(() => {
+            const r = f();
+            if (w.charges() === 1 && fail++ === 1) throw new Error('SQLITE_BUSY: injected');
+            return r;
+          }),
+      };
+      const failed = async (p: Promise<unknown>): Promise<string> => {
+        try {
+          await p;
+          return 'answered';
+        } catch (e) {
+          return messageOf(e);
+        }
+      };
+      const twice = async (): Promise<void> => {
+        await w.release();
+        await w.release();
+      };
+      const [x, y] = await Promise.all([failed(w.app.serve(meta, body, tx)), w.app.serve(meta, body, tx), twice()]);
+      T(
+        'the first run fails after its call: the waiting send runs the key and gets its reply',
+        [x, y.status, text(y.body), w.charges(), w.sql.exec('SELECT status FROM _calls').raw().toArray()],
+        ['SQLITE_BUSY: injected', 'ok', '{"n":1}', 2, [['ok']]],
+      );
+    }
+    {
+      // a claim no run holds (its object reset while it waited): the key runs again
+      const w = world();
+      w.sql.exec(
+        `INSERT INTO _calls(key, status, body, message) VALUES (?1, 'pending', 'gone', ?2)`,
+        meta.key,
+        '{"who":"bob"}',
+      );
+      const a = w.app.serve(meta, body);
+      await w.release();
+      const x = await a;
+      T('a claim left by a run that is gone is run again', [x.status, w.charges()], ['ok', 1]);
+    }
+    {
+      // the first run outlasts the second send's budget: unreachable (unknown, send again), never rejected
+      const w = world();
+      const a = w.app.serve(meta, body),
+        b = w.app.serve({ ...meta, withinMs: 1 }, body);
+      const y = await b;
+      await w.release();
+      const x = await a,
+        z = await w.app.serve(meta, body);
+      T(
+        'a send that outlasts its budget waiting on the first run answers unreachable; sent again, the stored reply',
+        [y.status, /being run by an earlier send/.test(text(y.body)), x.status, z.status, text(z.body), w.charges()],
+        ['unreachable', true, 'ok', 'ok', '{"n":1}', 1],
+      );
+    }
+  }
   finish();
 }

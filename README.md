@@ -90,7 +90,7 @@ What that shows of the design:
 - **Instrumented without code.** The effect log above is what the host wrote; the trace is computed from it. On
   the service every request has a signed trace page and OTLP/JSON spans.
 - **Built for Workers.** One arena per request, state in Durable Object SQLite, calls between programs with a time
-  budget and a key that makes a retry run once (when the sends do not overlap; see below). `service/` runs
+  budget and a key that makes a retry run once, even while the first send is still running. `service/` runs
   programs on Workers; its tests run in workerd.
 - **Errors that say what to change**, as C54 does. A tool is an exported function with a JSON Schema and a
   capability policy, served over MCP (`examples/tools/`).
@@ -174,9 +174,9 @@ A time budget is required; the `once` key makes the command safe to send again (
 first time); a callee built from a different definition of the method answers `Skew` and runs nothing; and each
 `sql_move` names the state it moves from, so two requests racing on one order cannot both move it.
 
-The `once` key is what makes a retry safe when the sends come one after another. Two sends of one key that overlap,
-to a method that itself makes a call, can both run; that is a known bug
-([`STATUS.md`](STATUS.md#known-limitations)).
+The `once` key is what makes a retry safe, whether it comes after the first send's answer or while the first send is
+still running: the callee claims the key when the method starts, and a send that finds the claim waits for that
+run's reply instead of running the method again.
 
 ## The playground
 

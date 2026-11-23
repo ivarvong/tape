@@ -644,9 +644,9 @@ A request is retried: by a client that got no answer, by a timer that fires at l
 carries the client's key (`{"key":"o-1",…}`, stored `UNIQUE`, with `ON CONFLICT … DO NOTHING`), and the same key
 again answers with what the first made. A write meant to count every attempt (a visit counter, a retry counter, a
 rate limit) says so in the call with `repeat: True`, the one opt-out. Exported methods are not
-checked: the host answers a repeated `once` key from the reply it stored. That holds for a repeat that arrives
-after the first run has stored its reply. Two sends of one key that overlap, to a method that itself makes a call,
-can both run; this is a known bug ([`STATUS.md`](../STATUS.md#known-limitations)).
+checked: the host answers a repeated `once` key from the reply it stored. A repeat that arrives while the first run waits on a
+call finds the key claimed and waits for that run's reply; when it does not come within the repeat's budget the
+answer is `Unreachable`, and sending it again is safe.
 
 The service runs the same compiler on every upload. A version uploaded before a rule existed keeps running as it was
 built; `GET /:account/:name?rules` shows, for each version, `"passes"` or the problems that would refuse it today,

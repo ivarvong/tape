@@ -103,8 +103,9 @@ deleting each of the trace checker's 53 rules in turn left every checker test pa
 
 Three hazards were recorded as latent, with no harness that reached them: gap 21 (ids reused after a lost
 insert), gap 22 (a callee that itself calls is not exactly-once under concurrent sends of one key) and gap 23
-(creations took no client key). Gap 23 was closed by rule C55. Gap 22 is still open and was reproduced on
-21 November 2026; it is the first item of [`STATUS.md`'s known limitations](../STATUS.md#known-limitations).
+(creations took no client key). Gap 23 was closed by rule C55. Gap 22 was reproduced on 21 November 2026 and
+closed on 22 November: a keyed run claims its key in its first stretch, and an overlapping send waits for its reply
+(`proof/schedule.ts`, overlapping sends).
 
 ### Found by the checks built after it (15 to 18 November 2026)
 
