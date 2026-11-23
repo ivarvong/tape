@@ -97,7 +97,7 @@ function inserted(r: Asked, q: Query, s: Extract<Write, { kind: 'insert' }>): vo
     'C55',
     q.at,
     `run twice (a retried request, a timer that fires again), this INSERT makes a second ${s.table} row: it does not insert a whole unique key of ${s.table} (${t.uniques.map(u => u.join(', ')).join('; ') || 'the table has none but its rowid'})`,
-    `Take a key from the client (a client key, an op id), keep it in a UNIQUE column, insert it, and say ON CONFLICT(that column) DO NOTHING; then read the row back by that key. If every attempt is meant to count, say so in the call: \`repeat: True\`.`,
+    `Take a key from the client (a client key, an op id), keep it in a UNIQUE column, insert it, and say ON CONFLICT(that column) DO NOTHING; then read the row back by that key. If the call is meant to make a new row on each call (no client key: two POSTs make two rows, and clients do not retry it), or every attempt is meant to count, say so in the call: \`repeat: True\`.`,
   );
 }
 

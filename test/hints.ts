@@ -337,4 +337,33 @@ fn counted(key: View, used: Int) -> Buf {
   same('…and with the argument out, as the fix says, it compiles', said(at('none')), 'compiled');
 }
 
+// ---- C55 for a create meant to make a row each time. A spec where two POSTs of one title make two rows has no
+// client key, and C55's fix offered `repeat: True` only "if every attempt is meant to count", which reads as a
+// counter: agents found the opt-out by guessing (5 reports). The fix names the case, and the call compiles with it.
+{
+  const TODO = `schema "CREATE TABLE todos(id INTEGER PRIMARY KEY, title TEXT NOT NULL)"
+
+type Todo { Todo(id: Int, title: View) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match sql_first(row: Todo, query: "INSERT INTO todos(title) VALUES (:title) RETURNING *", title: request(raw).path@R) {
+    Some(value) -> respond(status: 201) |> write_json(value)
+    None -> respond(status: 500)
+  }
+}
+`;
+  const s = said(TODO.replace('@R', ''));
+  same('C55 on an INSERT with no client key', code(s), 'C55:6');
+  same(
+    '…and its fix names a create meant to make a new row each time',
+    hint(s).includes('a new row on each call'),
+    true,
+  );
+  same(
+    '…with `repeat: True` on the call, as it says, it compiles',
+    said(TODO.replace('@R', ', repeat: True')),
+    'compiled',
+  );
+}
+
 finish();
