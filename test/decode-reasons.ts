@@ -16,10 +16,14 @@ const PROGRAM = `type Key = View where len(self) >= 1 and len(self) <= 64
 type Qty = Int where self >= 1 and self <= 9
 type Rate = Dec[2] where self > 0.00
 type Slug = View where every_byte(v: self, keep: is_lower)
+type Handle = View where char_count(v: self) >= 1 and char_count(v: self) <= 3
+type Tag = View where len(self) == 1
+type Limit = Int where self <= flags.limit
+flag limit: Int = 10
 
 type Line { Line(sku: Key, price: Dec[2], qty: Qty) }
 type Order {
-  Order(key: Key, items: List[Line], note: Option[View], slug: Slug, paid: Bool, at: Option[Int], rate: Option[Rate], grid: List[List[Int]], weight: Option[Float])
+  Order(key: Key, items: List[Line], note: Option[View], slug: Slug, paid: Bool, at: Option[Int], rate: Option[Rate], grid: List[List[Int]], weight: Option[Float], handle: Option[Handle], tag: Option[Tag], tags: Option[List[Tag]], limit: Option[Limit])
 }
 
 fn handle(raw: View) -> Buf {
@@ -53,20 +57,20 @@ const cases: readonly (readonly [string, string, string])[] = [
   ['expected an integer', body({ at: 1.5 }), '400 at: expected an integer'],
   ['expected a number', body({ weight: 'heavy' }), '400 weight: expected a number'],
   ['expected an array', body({ items: {} }), '400 items: expected an array'],
-  ['a refinement of a length', body({ key: '' }), '400 key: expected 1 to 64 bytes'],
-  ['a refinement of a Dec, lower bound open', body({ rate: '0.00' }), '400 rate: expected more than 0.00'],
-  [
-    'a condition that is not bounds',
-    body({ slug: 'AB' }),
-    '400 slug: expected a Slug: every_byte(v: self, keep: is_lower)',
-  ],
+  ['a refinement of a length', body({ key: '' }), '400 key: expected Key, 1 to 64 bytes'],
+  ['a refinement of a Dec, lower bound open', body({ rate: '0.00' }), '400 rate: expected Rate, more than 0.00'],
+  ['a condition that is not bounds', body({ slug: 'AB' }), '400 slug: not a valid Slug'],
+  ['a refinement of characters', body({ handle: 'héllo' }), '400 handle: expected Handle, 1 to 3 characters'],
+  ['a refinement of one byte', body({ tag: 'ab' }), '400 tag: expected Tag, 1 byte'],
+  ['an element of a refined type', body({ tags: ['a', 'bc'] }), '400 tags[1]: expected Tag, 1 byte'],
+  ['a bound the program names is not said', body({ limit: 99 }), '400 limit: not a valid Limit'],
   ['an element: missing', body({ items: [line({}), { sku: 'y', price: '1.00' }] }), '400 items[1].qty: missing'],
   [
     'an element: a Dec',
     body({ items: [line({ price: '1.505' })] }),
     '400 items[0].price: expected a number with at most 2 decimals',
   ],
-  ['an element: a refinement', body({ items: [line({ qty: 0 })] }), '400 items[0].qty: expected 1 to 9'],
+  ['an element: a refinement', body({ items: [line({ qty: 0 })] }), '400 items[0].qty: expected Qty, 1 to 9'],
   ['an element: null', body({ items: [null] }), '400 items[0]: null'],
   ['an element: not an object', body({ items: [5] }), '400 items[0]: expected an object'],
   ['a list inside a list', body({ grid: [[1], [2, 'x']] }), '400 grid[1][1]: expected an integer'],
@@ -79,7 +83,7 @@ same(
   [],
 );
 const app = r.wasm ? instantiate(new WebAssembly.Module(r.wasm), { sql: nodeSql(), log: false }) : null;
-const it = interpret([...std, { name: 'order.tape', text: PROGRAM }]);
+const it = interpret([...std, { name: 'order.tape', text: PROGRAM }], { flags: { limit: 10 } });
 const enc = new TextEncoder(),
   dec = new TextDecoder();
 for (const [what, json, want] of cases) {

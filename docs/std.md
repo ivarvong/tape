@@ -528,7 +528,7 @@ Appends a value as JSON, exactly the form `decode` reads back: a record as an ob
 decode(json: View, as: T) -> Result[T, View]
 ```
 
-Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: List[Item]`). Of a type with several constructors it takes the one the object's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A key no field names is left unread: clients send more than a service reads. A missing key, a null, a wrong kind or a refinement that fails is `Err` with the path to it: `items[2].price: missing`, `key: null`, `qty: expected an integer`, `key: expected 1 to 64 bytes` (LANGUAGE.md section 6). An `Option` field that is absent or `null` is `None`. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
+Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: List[Item]`). Of a type with several constructors it takes the one the object's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A key no field names is left unread: clients send more than a service reads. A missing key, a null, a wrong kind or a refinement that fails is `Err` with the path to it: `items[2].price: missing`, `key: null`, `qty: expected an integer`, `key: expected Key, 1 to 64 bytes`, `slug: not a valid Slug` (LANGUAGE.md section 6). An `Option` field that is absent or `null` is `None`. The bytes are read in the module, once (std/json.tape); a number is read exactly from its text.
 
 ### builtin next
 

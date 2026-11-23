@@ -304,22 +304,26 @@ A count beyond ±2^53 stops the request rather than reach the database rounded. 
 
 **Why decode refuses.** `decode`'s `Err` is one line, the same from every host, made to be sent back as a 400
 as it is: `<path>: <problem>`. The path names the value from the top, a field by its name and an element by its
-index: `key`, `venue.city`, `items[2].price`, `grid[1][0]`. The problem is one of three:
+index: `key`, `venue.city`, `items[2].price`, `grid[1][0]`. The problem is one of four:
 
 | Problem | When |
 |---|---|
 | `missing` | the key is absent and the field is not an `Option` |
 | `null` | the value is `null` and the field is not an `Option` (an `Option` field that is `null` or absent is `None`) |
-| `expected <what>` | the value is of another kind, or fails the refinement |
+| `expected <what>` | the value is of another kind, or fails a refinement whose bounds it can say |
+| `not a valid <Type>` | the value fails any other refinement |
 
 `<what>` is `text`, `true or false`, `an integer`, `a number`, `a number with at most 2 decimals` (a `Dec[2]`),
-`an object`, `an array`, `text without lone surrogates`, or the refinement's condition: `len(self) >= 1 and
-len(self) <= 64` is `1 to 64 bytes`, `self >= 1 and self <= 9` is `1 to 9`, `self > 0.00` is `more than 0.00`,
-`self <= flags.max_per_order` is `at most flags.max_per_order`; a condition that is not such bounds is the type and
-the condition, `a Slug: every_byte(v: self, keep: is_lower)`. Of the body as a whole the reasons are `empty`,
-`not JSON`, and `expected an object` (or `expected an array` for `as: List[T]`). The first problem is the reason:
-each field's kind is checked in order, then each refinement, then what is inside its records and lists. So `{"key": "", "items": [{"sku": "a", "price": "1.505"}]}` as an order is
-`key: expected 1 to 64 bytes`, and with a right key, `items[0].price: expected a number with at most 2 decimals`.
+`an object`, `an array`, `text without lone surrogates`, or, for a refinement, its type and its bounds: `Key =
+View where len(self) >= 1 and len(self) <= 64` is `expected Key, 1 to 64 bytes`; `char_count(v: self) <= 3` is
+`at most 3 characters`; `Qty = Int where self >= 1 and self <= 9` is `expected Qty, 1 to 9`; `self > 0.00` is
+`more than 0.00`. Only bounds on the length in bytes, in characters or on the value, each a literal, are said; any
+other condition (a call such as `every_byte`, a bound that is a flag) is `not a valid Slug`: a 400 never shows the
+program's source. Of the body as a whole the reasons are `empty`, `not JSON`, and `expected an object` (or
+`expected an array` for `as: List[T]`). The first problem is the reason: each field's kind is checked in order,
+then each refinement, then what is inside its records and lists. So `{"key": "", "items": [{"sku": "a", "price":
+"1.505"}]}` as an order is `key: expected Key, 1 to 64 bytes`, and with a right key, `items[0].price: expected a
+number with at most 2 decimals`.
 
 **A call is a commit point.** Writes made before a `call` or `ask` are durable when it is sent. The run may end
 there (the object is reset, the reply is lost), so whatever must happen afterwards needs a timer set before the

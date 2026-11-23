@@ -189,7 +189,7 @@ const refused: [string, string][] = [
   ['{"id": 1, "amount": null}', 'amount: null'],
   ['{"id": 1, "amount": "92233720368547758.08"}', 'amount: expected a number with at most 2 decimals'],
   ['{"id": 1, "amount": 1e999999999999}', 'amount: expected a number with at most 2 decimals'],
-  ['{"id": 1, "amount": "-1.00"}', 'amount: expected more than 0.00'],
+  ['{"id": 1, "amount": "-1.00"}', 'amount: expected Amount, more than 0.00'],
   ['{"id": 1, "amount": "1.00", "fee": "0.0001"}', 'fee: expected a number with at most 3 decimals'],
 ];
 same(

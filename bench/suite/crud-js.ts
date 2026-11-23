@@ -40,10 +40,10 @@ function item(v: unknown, i: number): NewItem {
   const path = `items[${i}]`;
   const o = shape(v, { key: 't', name: 't', qty: 'i', cents: 'i' }, path);
   const [key, name, qty, cents] = [asText(o['key']), asText(o['name']), asWhole(o['qty']), asWhole(o['cents'])];
-  if (!textIn(key, 1, 64)) refuse(`${path}.key: expected 1 to 64 bytes`);
-  if (!textIn(name, 1, 200)) refuse(`${path}.name: expected 1 to 200 bytes`);
-  if (qty < 0 || qty > 1_000_000) refuse(`${path}.qty: expected 0 to 1000000`);
-  if (cents < 0 || cents > 100_000_000) refuse(`${path}.cents: expected 0 to 100000000`);
+  if (!textIn(key, 1, 64)) refuse(`${path}.key: expected Key, 1 to 64 bytes`);
+  if (!textIn(name, 1, 200)) refuse(`${path}.name: expected Name, 1 to 200 bytes`);
+  if (qty < 0 || qty > 1_000_000) refuse(`${path}.qty: expected Qty, 0 to 1000000`);
+  if (cents < 0 || cents > 100_000_000) refuse(`${path}.cents: expected Cents, 0 to 100000000`);
   return { key, name, qty, cents };
 }
 function decode(body: string): { batch: string; items: NewItem[] } {
@@ -56,7 +56,7 @@ function decode(body: string): { batch: string; items: NewItem[] } {
   }
   const o = shape(v, { batch: 't', items: 'a' });
   const batch = asText(o['batch']);
-  if (!textIn(batch, 1, 64)) refuse('batch: expected 1 to 64 bytes');
+  if (!textIn(batch, 1, 64)) refuse('batch: expected Key, 1 to 64 bytes');
   return { batch, items: asList(o['items']).map(item) };
 }
 

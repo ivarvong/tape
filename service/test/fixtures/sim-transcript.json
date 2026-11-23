@@ -574,7 +574,7 @@
    "path": "/holds",
    "body": "{\"key\":\"k13\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":1,\"seconds\":3000}",
    "status": 400,
-   "answer": "{\"error\":\"seconds: expected 2 to 900\"}"
+   "answer": "{\"error\":\"seconds: expected Seconds, 2 to 900\"}"
   },
   {
    "method": "POST",

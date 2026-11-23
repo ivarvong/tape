@@ -248,7 +248,7 @@ fn handle(raw: View) -> Buf {
   T('decode: missing key', go('{"done":true}'), 'no: title: missing');
   T('decode: wrong kind', go('{"title":5}'), 'no: title: expected text');
   T('decode: a key the type does not name is left unread', go('{"title":"a","x":1}'), 'a');
-  T('decode: refinement', go('{"title":"too long"}'), 'no: title: expected 1 to 5 bytes');
+  T('decode: refinement', go('{"title":"too long"}'), 'no: title: expected Title, 1 to 5 bytes');
   T('decode: empty', go(''), 'no: empty');
 }
 

@@ -78,11 +78,7 @@ const signed = (message: string): { body: string; signature: string } => {
     (await buy('floor', 2, 'ann-4242')).out,
     '409\n{"error":"not enough seats left in that section"}',
   );
-  T(
-    'tickets: over the flag',
-    (await buy('balcony', 9, 'ann-4242')).out,
-    '400\n{"error":"qty: expected 1 to flags.max_per_order"}',
-  );
+  T('tickets: over the flag', (await buy('balcony', 9, 'ann-4242')).out, '400\n{"error":"qty: not a valid Qty"}');
   app.setFlags({ max_per_order: 10 });
   T(
     'tickets: the flag raised, the card is the limit',

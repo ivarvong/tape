@@ -31,8 +31,8 @@ function transfer(v: unknown, i: number): Transfer {
     to: asText(v['to']),
     amount: asWhole(v['amount']),
   };
-  if (bytes(t.key) < 1 || bytes(t.key) > 64) refuse(`${at}.key: expected 1 to 64 bytes`);
-  if (t.amount < 1 || t.amount > 1_000_000) refuse(`${at}.amount: expected 1 to 1000000`);
+  if (bytes(t.key) < 1 || bytes(t.key) > 64) refuse(`${at}.key: expected Key, 1 to 64 bytes`);
+  if (t.amount < 1 || t.amount > 1_000_000) refuse(`${at}.amount: expected Amount, 1 to 1000000`);
   return t;
 }
 function decode(body: string): Transfer[] {

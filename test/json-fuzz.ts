@@ -197,12 +197,15 @@ function check(x: unknown, there: boolean, kind: Kind, name: string, depth: numb
 }
 type R = { ok: true; v: unknown } | { ok: false; why: string };
 // what a refined kind must be, as the 400 says it: "1 to 8 bytes", "-100 to 100"
+// what a refined kind refused says: its type, then its bounds, "expected Name, 1 to 8 bytes"
 const rule = (k: Kind): string =>
-  k.k === 'text' ? `${k.min ?? 0} to ${k.max ?? 0} bytes` : 'min' in k ? `${k.min ?? 0} to ${k.max ?? 0}` : '';
-// a reason from inside `path`: "missing", "null" and "expected …" take a colon; a deeper path a dot, or nothing
-// before an index
+  k.k === 'text' || k.k === 'int'
+    ? `expected ${k.refined ?? ''}, ${k.min ?? 0} to ${k.max ?? 0}${k.k === 'text' ? ' bytes' : ''}`
+    : '';
+// a reason from inside `path`: "missing", "null", "expected …" and "not a valid …" take a colon; a deeper path a
+// dot, or nothing before an index
 const join = (path: string, why: string): string =>
-  /^(missing|null|expected )/.test(why) && !/^(missing|null)[^ ]/.test(why)
+  /^(missing|null|expected |not a valid )/.test(why) && !/^(missing|null)[^ ]/.test(why)
     ? `${path}: ${why}`
     : why.startsWith('[')
       ? path + why
@@ -249,7 +252,7 @@ function asRecord(type: string, o: Record<string, unknown>): R {
     const k = kind.k === 'opt' ? kind.of : kind;
     if (k.k === 'rec' || k.k === 'list') continue;
     const v = Object.hasOwn(o, name) && o[name] !== null ? scalar(k, o[name]) : undefined;
-    if (v !== undefined && fails(k, v)) return { ok: false, why: `${name}: expected ${rule(k)}` };
+    if (v !== undefined && fails(k, v)) return { ok: false, why: `${name}: ${rule(k)}` };
     values[name] = v;
   }
   for (const [name, kind] of c.fields) {
@@ -280,7 +283,7 @@ function item(k: Kind, el: unknown): R {
   if (!fit.ok) return { ok: false, why: fit.why.replace(/^value(: )?/, '') };
   if (k.k === 'list') return deepOf(k, el);
   const v = scalar(k, el);
-  return fails(k, v) ? { ok: false, why: `expected ${rule(k)}` } : { ok: true, v };
+  return fails(k, v) ? { ok: false, why: rule(k) } : { ok: true, v };
 }
 // the answer the program writes
 type Rec = { c: string; values: Record<string, unknown> };

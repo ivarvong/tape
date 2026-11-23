@@ -136,7 +136,7 @@ if (b.wasm !== null) {
     [
       'a refined field two levels down',
       { ...good, tiers: [good.tiers[0], { name: 'x', price: 1, qty: 0 }] },
-      'tiers[1].qty: expected 1 to 9',
+      'tiers[1].qty: expected Qty, 1 to 9',
     ],
     ['a key missing in an element', { ...good, tiers: [{ name: 'x', qty: 1 }] }, 'tiers[0].price: missing'],
     ['a record that is not an object', { ...good, venue: 'NYC' }, 'venue: expected an object'],
@@ -153,7 +153,7 @@ if (b.wasm !== null) {
     [
       'an optional list that is wrong',
       { ...good, extra: [{ name: 'x', price: 1, qty: 99 }] },
-      'extra[0].qty: expected 1 to 9',
+      'extra[0].qty: expected Qty, 1 to 9',
     ],
     [
       'a nested record missing',
@@ -454,7 +454,7 @@ if (fb.wasm !== null && sb.wasm !== null && other.wasm !== null) {
     ok(
       'a wrong tier refuses the whole request, and says where',
       s3 === 400 &&
-        t3 === '{"error":"tiers[1].price: expected 0 to 10000000"}' &&
+        t3 === '{"error":"tiers[1].price: expected Money, 0 to 10000000"}' &&
         sql.exec("SELECT count(*) AS n FROM events WHERE client = 'e4'").toArray()[0]?.n === 0,
       t3,
     );

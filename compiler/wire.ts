@@ -14,7 +14,7 @@
 // (shadow.ts CORE), so a program's own max, push or List does not take their place.
 import { asType, partsOf } from './ast.ts';
 import type { Expr, Program, TypeAst, Variant } from './ast.ts';
-import { decExpected, ruleOf } from './rule.ts';
+import { decExpected, refusalOf } from './rule.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
 export type WireKind =
@@ -234,20 +234,20 @@ export function wireSource(prog: Program): Wire {
     `parse_dec(text: json.json_number_text(found: ${found}), scale: ${k.scale ?? 0})`;
   // what decode's 400 says a value must be, after "expected ", as a Tape text literal's inside
   const said = (s: string): string => s.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-  const rule = (t: TypeAst): string => said(ruleOf(prog, t.name));
+  const refused = (t: TypeAst): string => said(refusalOf(prog, t.name));
   // a scalar element's value, its refinement checked
   function itemValue(k: Extract<WireKind, { k: 's' }>): string {
     const m = mangle(k.t);
     return once(`json_value_${m}`, () => {
       if (k.base === 'Dec') {
         const value = refined(k.t)
-          ? `  let ${k.t.name}(y) = x else -> Err(error: "expected ${rule(k.t)}")\n  Ok(value: y)\n`
+          ? `  let ${k.t.name}(y) = x else -> Err(error: "${refused(k.t)}")\n  Ok(value: y)\n`
           : `  Ok(value: x)\n`;
         return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  let Some(value: x) = ${decOf(k, 'Some(value: item)')} else -> Err(error: "expected ${decExpected(k.scale ?? 0)}")\n${value}}\n`;
       }
       const got = scalarOf(k.base, 'Some(value: item)');
       const body = refined(k.t)
-        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "expected ${rule(k.t)}")\n  Ok(value: x)\n`
+        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "${refused(k.t)}")\n  Ok(value: x)\n`
         : `  Ok(value: ${got})\n`;
       return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n${body}}\n`;
     });
@@ -367,12 +367,10 @@ export function wireSource(prog: Program): Wire {
       v.fields.forEach((f, j) => {
         const k = kAt(j);
         if (k.k === 's' && refined(k.t))
-          lines.push(
-            `  let ${k.t.name}(r_${f.name}) = w_${f.name} else -> Err(error: "${f.name}: expected ${rule(k.t)}")\n`,
-          );
+          lines.push(`  let ${k.t.name}(r_${f.name}) = w_${f.name} else -> Err(error: "${f.name}: ${refused(k.t)}")\n`);
         else if (k.k === 'opt' && k.of.k === 's' && refined(k.of.t))
           lines.push(
-            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base === 'Dec' ? `Dec[${k.of.scale ?? 0}]` : k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: expected ${rule(k.of.t)}")\n`,
+            `  let Some(value: r_${f.name}) = ${maybeRefined(k.of.t, k.of.base === 'Dec' ? `Dec[${k.of.scale ?? 0}]` : k.of.base)}(found: w_${f.name}) else -> Err(error: "${f.name}: ${refused(k.of.t)}")\n`,
           );
         else return;
         as.set(f.name, `r_${f.name}`);

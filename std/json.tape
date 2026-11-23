@@ -1266,12 +1266,13 @@ fn json_each_next[T](
 
 // Internal: a reason from inside `path` (a field's name, or `[2]`), with the path before it: `items` and
 // `[2].price: missing` are `items[2].price: missing`; `price` and `expected an integer` are `price: expected an
-// integer`. A reason with no path of its own is one of the three problems: missing, null, expected ….
+// integer`. A reason with no path of its own is one of the problems: missing, null, expected …, not a valid ….
 fn json_join(path: View, error: View) -> View {
   match error {
     "missing" -> path ++ ": " ++ error
     "null" -> path ++ ": " ++ error
     "expected " ++ rest -> path ++ ": " ++ error
+    "not a valid " ++ rest -> path ++ ": " ++ error
     "[" ++ rest -> path ++ error
     _ -> path ++ "." ++ error
   }

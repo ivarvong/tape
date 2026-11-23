@@ -32,9 +32,9 @@ function event(v: unknown, i: number): Event {
     amount: asWhole(v['amount']),
     note: asText(v['note']),
   };
-  if (bytes(e.id) < 1 || bytes(e.id) > 64) refuse(`${at}.id: expected 1 to 64 bytes`);
-  if (bytes(e.account) < 1 || bytes(e.account) > 64) refuse(`${at}.account: expected 1 to 64 bytes`);
-  if (e.amount < 0 || e.amount > 100_000_000) refuse(`${at}.amount: expected 0 to 100000000`);
+  if (bytes(e.id) < 1 || bytes(e.id) > 64) refuse(`${at}.id: expected Id, 1 to 64 bytes`);
+  if (bytes(e.account) < 1 || bytes(e.account) > 64) refuse(`${at}.account: expected Account, 1 to 64 bytes`);
+  if (e.amount < 0 || e.amount > 100_000_000) refuse(`${at}.amount: expected Amount, 0 to 100000000`);
   return e;
 }
 function decode(body: string): { source: string; events: Event[] } {

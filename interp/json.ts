@@ -4,7 +4,7 @@
 // compiled build words it.
 import type { Program, TypeAst, TypeDecl, Variant } from '../compiler/ast.ts';
 import { unreachable } from '../compiler/ast.ts';
-import { decExpected, ruleOf } from '../compiler/rule.ts';
+import { decExpected, refusalOf } from '../compiler/rule.ts';
 import { type Adt, type Buf, type Value, adt, isDec } from './value.ts';
 import { dec, parse, text as decText } from './dec.ts';
 
@@ -149,7 +149,7 @@ const scalarOf = (k: Kind, x: unknown, scale: number): Value | null =>
 // a reason from inside `path` with the path before it, as std/json.tape's json_join: `items` and
 // `[2].price: missing` are `items[2].price: missing`
 const join = (path: string, why: string): string =>
-  why === 'missing' || why === 'null' || why.startsWith('expected ')
+  why === 'missing' || why === 'null' || why.startsWith('expected ') || why.startsWith('not a valid ')
     ? `${path}: ${why}`
     : why.startsWith('[')
       ? `${path}${why}`
@@ -168,7 +168,7 @@ function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
       const v = scalarOf(sh.kind, x, sh.scale);
       if (v === null) return { why: notOf(sh) };
       if (typeof x === 'string' && !wellFormed(x)) return { why: SURROGATE };
-      return meets(t, v) ? { value: v } : { why: `expected ${ruleOf(prog, t.name)}` };
+      return meets(t, v) ? { value: v } : { why: refusalOf(prog, t.name) };
     }
     default:
       return unreachable(sh, 'shape');
@@ -263,7 +263,7 @@ function fit(
     });
   }
   const bad = refined.find(r => !meets(r.type, r.value));
-  if (bad) return { why: `${bad.name}: expected ${ruleOf(prog, bad.type.name)}` };
+  if (bad) return { why: `${bad.name}: ${refusalOf(prog, bad.type.name)}` };
   for (const step of later) {
     const why = step();
     if (why !== null) return { why };

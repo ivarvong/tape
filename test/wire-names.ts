@@ -99,7 +99,7 @@ if (built.wasm) {
   same(
     'a refinement in a list element',
     say('order {"id":7,"ok":true,"items":[{"sku":"","qty":2,"tags":[]}],"grid":[],"to":{"sku":"b","qty":0,"tags":[]}}'),
-    'error: items[0].sku: expected 1 to 8 bytes',
+    'error: items[0].sku: expected Name, 1 to 8 bytes',
   );
   same(
     'Option fields of each kind',

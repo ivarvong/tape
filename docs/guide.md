@@ -122,7 +122,7 @@ The answers, one a request (every one `application/json`):
 201 {"order":2,"new":true}
 400 {"error":"item: empty"}
 404 {"error":"no such item desk"}
-400 {"error":"key: expected 1 to 64 bytes"}
+400 {"error":"key: expected Key, 1 to 64 bytes"}
 200 {"item":"lamp","sold":2}
 404 {"error":"no such route"}
 ```
@@ -333,7 +333,7 @@ fn handle(raw: View) -> Buf {
 }
 ```
 
-A value that does not fit is refused with the path to what is wrong: `tiers[1].price: expected 0 to 10000000`,
+A value that does not fit is refused with the path to what is wrong: `tiers[1].price: expected Money, 0 to 10000000`,
 `grid[1][1]: expected an integer` (the format is in LANGUAGE.md section 6). Every level is read as the top one is: a missing key, a wrong kind and a
 refinement that fails are each a reason, and a key no field names is left unread. A fingerprint covers the
 whole message, so two programs that disagree about a field three records down answer `Skew` and run nothing. An

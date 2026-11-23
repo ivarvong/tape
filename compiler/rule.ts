@@ -1,8 +1,9 @@
-// compiler/rule.ts: a refinement's condition as decode's 400 says it, after "expected ". The common bounds read as a
-// client would write them: `len(self) >= 1 and len(self) <= 64` is "1 to 64 bytes", `self >= 1 and self <= 100`
-// is "1 to 100", `self > 0` "more than 0", `self <= flags.max_per_order` "at most flags.max_per_order". A condition it cannot put so is named with its type and written out:
-// "a Slug: every_byte(v: self, keep: is_lower)". The compiled decoder (compiler/wire.ts, compiler/gen/decode.ts)
-// and the reference interpreter (interp/json.ts) both say it from here, so the two give the same text.
+// compiler/rule.ts: what decode's 400 says of a value that fails its type's refinement. Only the forms a client can
+// act on are said: bounds on its length in bytes (`len(self)`) or characters (`char_count(v: self)`), and a numeric
+// range, each with literal bounds: `Key = View where len(self) >= 1 and len(self) <= 64` refused is "expected Key, 1
+// to 64 bytes", `Qty = Int where self >= 1 and self <= 9` is "expected Qty, 1 to 9". Any other condition (a call, a
+// flag, a pattern) is "not a valid Slug": the program's source is never echoed into a 400. The compiled decoder
+// (compiler/wire.ts, compiler/gen/decode.ts) and the reference interpreter (interp/json.ts) both say it from here.
 import type { Expr, Program, TypeDecl } from './ast.ts';
 
 const decText = (v: bigint, s: number): string => {
@@ -21,23 +22,15 @@ function bound(e: Expr): string | null {
   }
   return null;
 }
-/** An expression as Tape, for a condition the bounds do not cover. */
-function shown(e: Expr): string {
-  const b = bound(e);
-  if (b !== null) return b;
-  if (e.k === 'var') return e.name;
-  if (e.k === 'str') return JSON.stringify(new TextDecoder().decode(Uint8Array.from(e.bytes)));
-  if (e.k === 'field') return `${shown(e.e)}.${e.name}`;
-  if (e.k === 'bin') return `${shown(e.l)} ${e.op} ${shown(e.r)}`;
-  if (e.k === 'not') return `not ${shown(e.e)}`;
-  if (e.k === 'call')
-    return `${e.name}(${e.args.map(a => (a.label === null ? shown(a.value) : `${a.label}: ${shown(a.value)}`)).join(', ')})`;
-  return '…';
-}
 const conjuncts = (e: Expr): Expr[] => (e.k === 'bin' && e.op === 'and' ? [...conjuncts(e.l), ...conjuncts(e.r)] : [e]);
 const isSelf = (e: Expr): boolean => e.k === 'var' && e.name === 'self';
-const isLen = (e: Expr): boolean =>
-  e.k === 'call' && e.name === 'len' && e.args.length === 1 && e.args[0] !== undefined && isSelf(e.args[0].value);
+// `len(self)` or `char_count(v: self)`, however its one argument is written
+const lengthIn =
+  (name: string) =>
+  (e: Expr): boolean =>
+    e.k === 'call' && e.name === name && e.args.length === 1 && e.args[0] !== undefined && isSelf(e.args[0].value);
+const isLen = lengthIn('len'),
+  isChars = lengthIn('char_count');
 const FLIP: Readonly<Record<string, string>> = { '<': '>', '<=': '>=', '>': '<', '>=': '<=', '==': '==' };
 
 type Bounds = { lo?: string; loOpen?: boolean; hi?: string; hiOpen?: boolean; eq?: string };
@@ -45,8 +38,8 @@ type Bounds = { lo?: string; loOpen?: boolean; hi?: string; hiOpen?: boolean; eq
 function addBound(b: Bounds, e: Expr, of: (x: Expr) => boolean): boolean {
   if (e.k !== 'bin' || !(e.op in FLIP)) return false;
   const [x, k, op] = of(e.l) ? [e.l, e.r, e.op] : of(e.r) ? [e.r, e.l, FLIP[e.op] ?? ''] : [null, e.r, ''];
-  // a literal, or a value the program names (`flags.max_per_order`)
-  const v = x ? (bound(k) ?? (k.k === 'field' || k.k === 'var' ? shown(k) : null)) : null;
+  // a literal only: a bound the program names (`flags.max_per_order`) is source, not said
+  const v = x ? bound(k) : null;
   if (v === null) return false;
   if (op === '==') b.eq = v;
   else if (op === '>=' || op === '>') [b.lo, b.loOpen] = [v, op === '>'];
@@ -54,7 +47,13 @@ function addBound(b: Bounds, e: Expr, of: (x: Expr) => boolean): boolean {
   return true;
 }
 function said(b: Bounds, unit: string): string | null {
-  const u = unit === '' ? '' : ` ${unit}`;
+  const text = saidIn(b, unit === '' ? '' : ` ${unit}`);
+  // "at least 1 character", "1 byte"
+  return text !== null && unit !== '' && (text === `1 ${unit}` || text.endsWith(` 1 ${unit}`))
+    ? text.slice(0, -1)
+    : text;
+}
+function saidIn(b: Bounds, u: string): string | null {
   if (b.eq !== undefined) return `${b.eq}${u}`;
   if (b.lo !== undefined && b.hi !== undefined && !b.loOpen && !b.hiOpen) return `${b.lo} to ${b.hi}${u}`;
   const lo = b.lo === undefined ? null : `${b.loOpen ? 'more than' : 'at least'} ${b.lo}${u}`;
@@ -67,10 +66,10 @@ export const decExpected = (scale: number): string =>
   scale === 0 ? 'an integer' : `a number with at most ${scale} decimal${scale === 1 ? '' : 's'}`;
 
 /**
- * What a value of the refined type `name` must be, as decode's 400 says it after "expected ": its base's
- * condition too when the base is refined. The type's name when it has no condition.
+ * The problem decode says of a value that fails the refinement of `name` (its base's too, when the base is
+ * refined): `expected Key, 1 to 64 bytes` when every condition is a bound it can say, else `not a valid Key`.
  */
-export function ruleOf(prog: Program, name: string): string {
+export function refusalOf(prog: Program, name: string): string {
   const preds: Expr[] = [];
   const seen = new Set<string>();
   for (let n: string | undefined = name; n !== undefined && !seen.has(n);) {
@@ -80,11 +79,12 @@ export function ruleOf(prog: Program, name: string): string {
     preds.unshift(...conjuncts(r.pred));
     n = r.base.name;
   }
-  if (preds.length === 0) return `a valid ${name}`;
-  const len: Bounds = {},
-    value: Bounds = {},
-    other: Expr[] = [];
-  for (const p of preds) if (!addBound(len, p, isLen) && !addBound(value, p, isSelf)) other.push(p);
-  if (other.length > 0) return `a ${name}: ${preds.map(shown).join(' and ')}`;
-  return [said(len, 'bytes'), said(value, '')].filter(x => x !== null).join(', ');
+  const bytes: Bounds = {},
+    chars: Bounds = {},
+    value: Bounds = {};
+  const plain = preds.every(
+    p => addBound(bytes, p, isLen) || addBound(chars, p, isChars) || addBound(value, p, isSelf),
+  );
+  const parts = [said(bytes, 'bytes'), said(chars, 'characters'), said(value, '')].filter(x => x !== null);
+  return plain && parts.length > 0 ? `expected ${name}, ${parts.join(', ')}` : `not a valid ${name}`;
 }

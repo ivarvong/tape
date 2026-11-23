@@ -66,7 +66,7 @@ agent uploads a pure tool
 agent calls it: 3 at 19.99, 10% off, 8% tax
   -> total_cents 5829, with a trace link
 a message outside the schema (qty 0)
-  -> 422 "qty: expected 1 to 100"
+  -> 422 "qty: expected Qty, 1 to 100"
 the agent's token on a program route -> 401; on the policy route -> 401
 the operator grants {"sql": true}; the same upload -> 201; put -> {"key":"a","revision":1}
 MCP tools/list                       -> 200 notes_put, notes_get, price_quote
