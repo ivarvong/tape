@@ -279,7 +279,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | Document | What |
 |---|---|
 | [`LANGUAGE.md`](LANGUAGE.md) | The definition, version 0.1. `test/definition.ts` holds the compiler to it. |
-| [`docs/guide.md`](docs/guide.md) | A quickstart: a whole service in one file, worked and tested, enough for a first version; then the language one feature at a time: patterns, steps, JSON, rules, machines, invariants, timers, migrations, the simulator. |
+| [`docs/guide.md`](docs/guide.md) | A quickstart: a whole service in one file, worked and tested; then the language one feature at a time: patterns, steps, JSON, rules, machines, invariants, timers, migrations, the simulator. |
 | [`docs/std.md`](docs/std.md) | The standard library and the built-ins: every function with its signature, comment and examples, and common tasks (JSON responses, query parameters, numbers, bodies, lists). Generated from `std/`. |
 | [`STATUS.md`](STATUS.md) | Each claim and the check that fails when it breaks; known limitations; what is on trust. |
 | [`docs/mcp.md`](docs/mcp.md) | The hosted compiler and runner (live): connecting over MCP or HTTP, the two tools, limits, logging. |

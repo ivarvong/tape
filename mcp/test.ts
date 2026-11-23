@@ -347,6 +347,15 @@ const tests: Test[] = [
       if (!isFields(F(r['capabilities'])['tools'])) out.push('no tools capability');
       const said = r['instructions'];
       if (typeof said !== 'string' || !said.includes('TERMS.md')) out.push('instructions do not mention TERMS.md');
+      // the quickstart is where to start, not all there is: told it was "enough for a first version", Sonnet stopped
+      // reading LANGUAGE.md and std.md and was refused twice as often (the 2026-11-23e bench)
+      if (
+        typeof said === 'string' &&
+        (said.includes('enough') || !said.includes('LANGUAGE.md') || !said.includes('std.md'))
+      )
+        out.push(
+          'the instructions should send an agent to the quickstart, LANGUAGE.md and std.md, and call none of them enough',
+        );
       if (typeof said !== 'string' || !said.includes('a small language for durable services, compiled to WebAssembly'))
         out.push('instructions do not say what Tape is');
       const note = await rpc(m, 'notifications/initialized', {}, null);

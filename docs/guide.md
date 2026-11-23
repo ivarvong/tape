@@ -8,9 +8,9 @@ feature each.
 
 ## Quickstart: a service in one file
 
-This section is enough to write a first version of a service; look a function up in [`std.md`](std.md) when the
-compiler names one you need, and read the rest of this guide or [`LANGUAGE.md`](../LANGUAGE.md) when something
-surprises you. The program takes orders: a POST that a client may retry, validated by its types, a count kept once
+Start here. [`LANGUAGE.md`](../LANGUAGE.md) is the definition and [`std.md`](std.md) lists every std function and
+its parameters; read them too: section 9 of LANGUAGE.md gives the form for each task, and section 8 is the reference
+for a call that must finish later (a pending state, a timer that sends it again). The program takes orders: a POST that a client may retry, validated by its types, a count kept once
 per order, and a call to another program (payments) that may answer, refuse or not answer at all. `test/guide.ts`
 compiles it with the rules on and runs the `run` call below through the hosted runner's code, so every answer
 shown is the one it gives.
