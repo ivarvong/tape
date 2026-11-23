@@ -1,14 +1,17 @@
 // compiler/sha256.ts
 // SHA-256 (FIPS 180-4) of a byte array, as hex. Here so the compiler has no dependencies and stays synchronous.
+// The round constants and the initial hash: the first 32 bits of the fractional parts of the cube roots of the first
+// 64 primes, and of the square roots of the first 8. Computed once: worked out on every call, with a sieve that made
+// an array per candidate, they were 13.8% of the hosted compiler's CPU in production (a profile of tape dddd2c92,
+// 2026-11-23: the compiler hashes each call signature and the build).
+const frac = (x: number): number => ((x - Math.floor(x)) * 4294967296) | 0;
+const PRIMES: number[] = [];
+for (let n = 2; PRIMES.length < 64; n++) if (PRIMES.every(p => n % p !== 0)) PRIMES.push(n);
+const K: readonly number[] = PRIMES.map(p => frac(Math.cbrt(p)));
+const H0: readonly number[] = PRIMES.slice(0, 8).map(p => frac(Math.sqrt(p)));
+
 export function sha256(bytes: ArrayLike<number>): string {
-  const K: number[] = [],
-    H: number[] = [],
-    frac = (x: number): number => ((x - Math.floor(x)) * 4294967296) | 0;
-  for (let n = 2; K.length < 64; n++)
-    if (![...Array.from({ length: n }).keys()].slice(2).some(d => n % d === 0)) {
-      if (H.length < 8) H.push(frac(Math.sqrt(n)));
-      K.push(frac(Math.cbrt(n)));
-    }
+  const H = [...H0];
   const len = bytes.length,
     m = new Uint8Array(((len + 72) >> 6) << 6),
     d = new DataView(m.buffer),

@@ -197,17 +197,20 @@ function word(sc: Scan): void {
   sc.toks.push({ t: KEYWORDS.has(w) ? 'kw' : /^[A-Z]/.test(w) ? 'Id' : 'id', v: w, ...here(sc) });
   sc.i = end;
 }
-// Is the `{` at the cursor the body of a migration or of an invariant? Then it is SQL, kept as written.
-function opensSql(toks: readonly Token[]): boolean {
-  const invariant = toks.findLastIndex(
-    (t, k) => t.t === 'id' && t.v === 'invariant' && toks[k + 1]?.t === 'str' && (k === 0 || toks[k - 1]?.t === 'nl'),
-  );
-  const sameLine = invariant >= 0 && invariant >= toks.length - 9 && !toks.slice(invariant).some(t => t.t === 'nl');
-  const opener = Math.max(
-    toks.findLastIndex(t => t.t === 'kw' && t.v === 'migration'),
-    sameLine ? toks.length - 1 : -1,
-  );
-  return opener >= 0 && opener >= toks.length - 4;
+// Is the `{` at the cursor the body of a migration or of an invariant? Then it is SQL, kept as written: a `migration`
+// among the last 4 tokens, or, among the last 9 and with no new line after it, `invariant "name"` that starts a line.
+// Only those tokens are read: searching all of them before every `{` was 19.8% of the hosted compiler's CPU in
+// production (profiles of tape dddd2c92, 2026-11-23). test/lex-sql.ts checks it against the search it replaced.
+export function opensSql(toks: readonly Token[]): boolean {
+  const n = toks.length;
+  for (let k = n - 1; k >= Math.max(0, n - 4); k--) if (toks[k]?.t === 'kw' && toks[k]?.v === 'migration') return true;
+  for (let k = n - 1; k >= Math.max(0, n - 9); k--) {
+    const t = toks[k];
+    if (t?.t === 'nl') return false;
+    if (t?.t === 'id' && t.v === 'invariant' && toks[k + 1]?.t === 'str' && (k === 0 || toks[k - 1]?.t === 'nl'))
+      return true;
+  }
+  return false;
 }
 // SQL from its `{` to the matching `}`, skipping quoted SQL text
 function sql(sc: Scan): void {
