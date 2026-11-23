@@ -103,6 +103,12 @@ time; C71 requires a command built from a row, bound by a match arm or a `let`, 
 checked: a row held as a field (`order.amount` of `Some(value: order)`) and the payload of an exported method's
 message; closing them would take a second mechanism, not a wider C71.
 
+Arguments by position (2026-11-23). Only a call's first argument may go without its name. Replayed on five bench
+rounds' C11 refusals, that accepts 13 of 28; letting every unnamed argument fill the unnamed parameters in order would
+accept 27. It was not taken: names are what keep two values of one type from being swapped unseen, and under it
+`f(x, a: 1)` puts x into b and `sub(b, a)` reads the opposite of its order. The refusals left get the exact call in
+their fix.
+
 ## Timers: C77 to C80
 
 Jepsen runs against the box office in production (`apps/tickets`) found two bugs that every local test and compile
