@@ -159,4 +159,82 @@ same(
   },
 );
 
+// ---- the line rules, said where they bite. An arm's value on the line after its `->`, an operator at the end of
+// a line or at the start of the next, a computed byte as a pattern and a tuple each gave the generic "expected an
+// expression" (or "expected `}`"), whose fix lists what an expression is. Each now names its rule, and the form its
+// fix shows compiles.
+{
+  const fn = (body: string): string =>
+    `fn f(a: Int, b: Int, o: Option[Int]) -> Int {\n${body}\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+  const ARM = '  match o {\n    Some(value) if value > a ->\n      value\n    _ -> 0\n  }';
+  const s1 = said(fn(ARM));
+  same(
+    'an arm value on the next line: where and why',
+    [code(s1), s1 === 'compiled' ? '' : s1.message],
+    ['P02:3', "an arm's value starts on the line of its arrow"],
+  );
+  same('…and on the line of its `->` it compiles', said(fn(ARM.replace('->\n      value', '-> value'))), 'compiled');
+  same(
+    '…and a block opened there may go on below',
+    said(fn(ARM.replace('->\n      value', '-> {\n      let v = value\n      v\n    }'))),
+    'compiled',
+  );
+  const s2 = said(fn('  a +\n    b'));
+  same(
+    'an operator at the end of a line',
+    [code(s2), s2 === 'compiled' ? '' : s2.message],
+    ['P02:2', 'an expression does not go on past the end of a line after `+`'],
+  );
+  const s3 = said(fn('  a\n    + b'));
+  same(
+    'an operator at the start of a line',
+    [code(s3), s3 === 'compiled' ? '' : s3.message],
+    ['P02:3', 'an expression does not go on to a line that starts with `+`'],
+  );
+  same(
+    'a line starting with or, in a condition arm',
+    code(said(fn('  match {\n    a > 1\n      or b > 1 -> 1\n    else -> 0\n  }'))),
+    'P02:4',
+  );
+  same(
+    'the forms the fix names compile: `let` parts, and parentheses across lines',
+    [said(fn('  let part = a\n  part + b')), said(fn('  (a +\n    b)'))],
+    ['compiled', 'compiled'],
+  );
+  same('a negative number arm is still a pattern', said(fn('  match a {\n    -1 -> 1\n    _ -> 0\n  }')), 'compiled');
+  const s4 = said(
+    'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    "*"[0] -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
+  );
+  same(
+    'a computed byte as a pattern: P01, with the byte its text is',
+    [code(s4), hint(s4).includes('`42 ->`')],
+    ['P01:3', true],
+  );
+  same(
+    '…and the number, or a guard, compiles',
+    [
+      said(
+        'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    42 -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
+      ),
+      said(
+        'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    b if b == "*"[0] -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
+      ),
+    ],
+    ['compiled', 'compiled'],
+  );
+  const s5 = said(fn('  match (a, b) {\n    _ -> 0\n  }'));
+  same(
+    'a tuple: P02 that says Tape has none',
+    [code(s5), s5 === 'compiled' ? '' : s5.message],
+    ['P02:2', 'Tape has no tuples: values in parentheses with commas are not one value'],
+  );
+  same(
+    '…and the record its fix shows compiles',
+    said(
+      `type Pair { Pair(a: Int, b: Int) }\n\n${fn('  match Pair(a, b) {\n    Pair(a: 1, b: 2) -> 1\n    _ -> 0\n  }')}`,
+    ),
+    'compiled',
+  );
+}
+
 finish();
