@@ -14,3 +14,6 @@ service/verify/results/
 *.heapprofile
 service/verify/rca/mutate-checker.txt
 service/.site/
+# the usability benchmark's runs: transcripts, solutions and metrics stay local; each run's summary.md is tracked
+bench/usability/results/*/*
+!bench/usability/results/*/summary.md
