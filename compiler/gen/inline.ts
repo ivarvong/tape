@@ -44,6 +44,23 @@ const readU = (b: Body, i: number): [number, number] => {
     if (at > b.length) throw new Unknown('leb past the end');
   }
 };
+/** readU without its pair: the value goes to `U`, the end is returned (next reads one for most instructions). */
+let U = 0;
+const readUv = (b: Body, i: number): number => {
+  let n = 0,
+    shift = 0,
+    at = i;
+  for (;;) {
+    const x = b[at++] ?? 0;
+    n += (x & 127) * 2 ** shift;
+    shift += 7;
+    if ((x & 128) === 0) {
+      U = n;
+      return at;
+    }
+    if (at > b.length) throw new Unknown('leb past the end');
+  }
+};
 const skipLeb = (b: Body, i: number): number => {
   let at = i;
   while (((b[at] ?? 0) & 128) !== 0) at++;
@@ -56,41 +73,54 @@ const memarg = (b: Body, i: number): number => {
 const VALTYPES = new Set([0x7f, 0x7e, 0x7d, 0x7c, 0x7b, 0x70, 0x6f]);
 
 type Ins = { op: number; at: number; end: number; arg: number };
+/** An instruction to fill: a loop over code reuses one (next's `into`), so reading an instruction allocates nothing. */
+const blank = (): Ins => ({ op: 0, at: 0, end: 0, arg: -1 });
+/** Copy the bytes of `b` from `from` to `to` onto `out`: in place of out.push(...b.slice(from, to)), which made two
+ * arrays an instruction (the inliner's allocation was 6-10% of a compile's; profiles of tape ff30a865, 2026-11-23). */
+export const copyTo = (out: number[], b: Body, from: number, to: number): void => {
+  for (let k = from; k < to; k++) out.push(b[k] ?? 0);
+};
 /** One instruction at `i`: its opcode (a prefixed one as 0xfc00 + sub, 0xfd00 + sub), where it ends, and its first
- * immediate when that is a local, a function, a global or a depth. */
-function next(b: Body, i: number): Ins {
+ * immediate when that is a local, a function, a global or a depth; written into `into` when given. */
+const fill = (into: Ins, op: number, at: number, end: number, arg = -1): Ins => {
+  into.op = op;
+  into.at = at;
+  into.end = end;
+  into.arg = arg;
+  return into;
+};
+function next(b: Body, i: number, into: Ins = blank()): Ins {
   const op = b[i] ?? -1;
   const at = i + 1;
-  const plain = (end: number, arg = -1): Ins => ({ op, at: i, end, arg });
   if (op === 0x02 || op === 0x03 || op === 0x04) {
     const t = b[at] ?? 0;
-    return plain(t === 0x40 || VALTYPES.has(t) ? at + 1 : skipLeb(b, at));
+    return fill(into, op, i, t === 0x40 || VALTYPES.has(t) ? at + 1 : skipLeb(b, at));
   }
   if (op === 0x0c || op === 0x0d || op === 0x10 || op === 0x12 || (op >= 0x20 && op <= 0x26) || op === 0xd2) {
-    const [n, end] = readU(b, at);
-    return plain(end, n);
+    const end = readUv(b, at);
+    return fill(into, op, i, end, U);
   }
   if (op === 0x0e) {
     let [n, p] = readU(b, at);
     for (let k = 0; k <= n; k++) p = skipLeb(b, p);
-    return plain(p);
+    return fill(into, op, i, p);
   }
-  if (op === 0x11 || op === 0x13) return plain(skipLeb(b, skipLeb(b, at)));
+  if (op === 0x11 || op === 0x13) return fill(into, op, i, skipLeb(b, skipLeb(b, at)));
   if (op === 0x1c) {
     const [n, p] = readU(b, at);
-    return plain(p + n);
+    return fill(into, op, i, p + n);
   }
-  if (op >= 0x28 && op <= 0x3e) return plain(memarg(b, at));
-  if (op === 0x3f || op === 0x40 || op === 0xd0) return plain(at + 1);
-  if (op === 0x41 || op === 0x42) return plain(skipLeb(b, at));
-  if (op === 0x43) return plain(at + 4);
-  if (op === 0x44) return plain(at + 8);
+  if (op >= 0x28 && op <= 0x3e) return fill(into, op, i, memarg(b, at));
+  if (op === 0x3f || op === 0x40 || op === 0xd0) return fill(into, op, i, at + 1);
+  if (op === 0x41 || op === 0x42) return fill(into, op, i, skipLeb(b, at));
+  if (op === 0x43) return fill(into, op, i, at + 4);
+  if (op === 0x44) return fill(into, op, i, at + 8);
   if (op === 0x00 || op === 0x01 || op === 0x05 || op === 0x0b || op === 0x0f || op === 0x1a || op === 0x1b)
-    return plain(at);
-  if ((op >= 0x45 && op <= 0xc4) || op === 0xd1) return plain(at);
+    return fill(into, op, i, at);
+  if ((op >= 0x45 && op <= 0xc4) || op === 0xd1) return fill(into, op, i, at);
   if (op === 0xfc) {
     const [sub, p] = readU(b, at);
-    const r = (end: number): Ins => ({ op: 0xfc00 + sub, at: i, end, arg: -1 });
+    const r = (end: number): Ins => fill(into, 0xfc00 + sub, i, end);
     if (sub <= 7) return r(p);
     if (sub === 8) return r(skipLeb(b, p) + 1);
     if (sub === 10) return r(p + 2);
@@ -101,7 +131,7 @@ function next(b: Body, i: number): Ins {
   }
   if (op === 0xfd) {
     const [sub, p] = readU(b, at);
-    const r = (end: number): Ins => ({ op: 0xfd00 + sub, at: i, end, arg: -1 });
+    const r = (end: number): Ins => fill(into, 0xfd00 + sub, i, end);
     if (sub <= 11 || sub === 92 || sub === 93) return r(memarg(b, p));
     if (sub === 12 || sub === 13) return r(p + 16);
     if (sub >= 21 && sub <= 34) return r(p + 1);
@@ -137,13 +167,11 @@ export function bodyOf(p: Parsed): number[] {
   return [...uleb(runs.length), ...runs.flatMap(([n, t]) => [...uleb(n), t]), ...p.code, 0x0b];
 }
 
-/** Every instruction of some code, in order. */
-export function* each(code: readonly number[]): Generator<Ins> {
-  for (let i = 0; i < code.length;) {
-    const ins = next(code, i);
-    yield ins;
-    i = ins.end;
-  }
+/** Every instruction of some code, in order, to `f`: one Ins, filled again for each (what outlives a call is copied
+ * out of it), so a pass over code allocates nothing per instruction. */
+export function walk(code: readonly number[], f: (ins: Ins) => void): void {
+  const ins = blank();
+  for (let i = 0; i < code.length; i = ins.end) f(next(code, i, ins));
 }
 
 /**
@@ -156,10 +184,14 @@ function maybeUnset(p: Parsed): Set<number> {
   const frames: Frame[] = [{ set: new Set(p.params.map((_, i) => i)), kind: 0, dirty: false }];
   const unset = new Set<number>();
   const written = (l: number): boolean => frames.some(f => f.set.has(l));
-  for (const ins of each(p.code)) {
+  let stopped = false;
+  walk(p.code, ins => {
     const { op, arg } = ins;
     const top = frames.at(-1);
-    if (!top) break;
+    if (stopped || !top) {
+      stopped = true;
+      return;
+    }
     if (op === 0x20) {
       if (!written(arg)) unset.add(arg);
     } else if (op === 0x21 || op === 0x22) top.set.add(arg);
@@ -171,7 +203,7 @@ function maybeUnset(p: Parsed): Set<number> {
       if (parent && top.kind !== 0x04 && !top.dirty) for (const l of top.set) parent.set.add(l);
     } else if (op === 0x0c || op === 0x0d || op === 0x0e || op === 0x0f || op === 0x12 || op === 0x13)
       for (const f of frames) f.dirty = true;
-  }
+  });
   return unset;
 }
 
@@ -195,29 +227,31 @@ function spliced(callee: Parsed, local: (l: number) => number, blockType: number
   for (const l of maybeUnset(callee)) out.push(...zeroOf(types[l] ?? 0x7f), 0x21, ...uleb(local(l)));
   out.push(0x02, ...blockType);
   let depth = 0;
-  for (const ins of each(callee.code)) {
+  walk(callee.code, ins => {
     const { op, arg } = ins;
     if (op >= 0x20 && op <= 0x22) {
       if (arg >= nlocal) throw new Unknown('local out of range');
       out.push(op, ...uleb(local(arg)));
-      continue;
+      return;
     }
     if (op === 0x0f) {
       out.push(0x0c, ...uleb(depth));
-      continue;
+      return;
     }
     if (op === 0x12) {
       out.push(0x10, ...uleb(arg), 0x0c, ...uleb(depth));
-      continue;
+      return;
     }
     if (op === 0x13) {
-      out.push(0x11, ...callee.code.slice(ins.at + 1, ins.end), 0x0c, ...uleb(depth));
-      continue;
+      out.push(0x11);
+      copyTo(out, callee.code, ins.at + 1, ins.end);
+      out.push(0x0c, ...uleb(depth));
+      return;
     }
     if (op === 0x02 || op === 0x03 || op === 0x04) depth++;
     else if (op === 0x0b) depth--;
-    out.push(...callee.code.slice(ins.at, ins.end));
-  }
+    copyTo(out, callee.code, ins.at, ins.end);
+  });
   out.push(0x0b, ...after);
   return out;
 }
@@ -238,12 +272,18 @@ function inlined(m: Inlining): Body[] {
   const at = (index: number): Parsed | undefined => parsed[index - first];
   const callees = parsed.map(p => {
     const out = new Set<number>();
-    for (const ins of each(p.code)) if (ins.op === 0x10 || ins.op === 0x12) out.add(ins.arg);
+    walk(p.code, ins => {
+      if (ins.op === 0x10 || ins.op === 0x12) out.add(ins.arg);
+    });
     return out;
   });
-  const counts = parsed.map(p =>
-    [...each(p.code)].some(ins => (ins.op === 0x23 || ins.op === 0x24) && ins.arg === m.cost),
-  );
+  const counts = parsed.map(p => {
+    let touches = false;
+    walk(p.code, ins => {
+      if ((ins.op === 0x23 || ins.op === 0x24) && ins.arg === m.cost) touches = true;
+    });
+    return touches;
+  });
   // a function that reaches a call of itself is never inlined
   const reachesSelf = (i: number): boolean => {
     const seen = new Set<number>();
@@ -276,11 +316,11 @@ function inlined(m: Inlining): Body[] {
     const out: number[] = [];
     const pool = new Map<number, number[]>();
     let changed = false;
-    for (const ins of each(p.code)) {
+    walk(p.code, ins => {
       const target = ins.op === 0x10 || ins.op === 0x12 ? at(ins.arg) : undefined;
       if (!target || !candidate[ins.arg - first] || !small(target) || ins.arg - first === i) {
-        out.push(...p.code.slice(ins.at, ins.end));
-        continue;
+        copyTo(out, p.code, ins.at, ins.end);
+        return;
       }
       // the callee's locals: the k-th of a type is the k-th of that type kept for inlined code, shared by every
       // body inlined here (one ends before the next begins)
@@ -295,9 +335,9 @@ function inlined(m: Inlining): Body[] {
       });
       const [only] = target.results;
       const bt = only === undefined ? [0x40] : target.results.length === 1 ? [only] : sleb(m.blockSig(target.results));
-      out.push(...spliced(target, l => map[l] ?? 0, bt, ins.op === 0x12 ? [0x0f] : []));
+      for (const x of spliced(target, l => map[l] ?? 0, bt, ins.op === 0x12 ? [0x0f] : [])) out.push(x);
       changed = true;
-    }
+    });
     if (changed) p.code = out;
   }
   // what is still reached from the roots; the rest is never called
@@ -306,7 +346,9 @@ function inlined(m: Inlining): Body[] {
   for (let n = stack.pop(); n !== undefined; n = stack.pop()) {
     if (live.has(n) || !at(n)) continue;
     live.add(n);
-    for (const ins of each(at(n)?.code ?? [])) if (ins.op === 0x10 || ins.op === 0x12) stack.push(ins.arg);
+    walk(at(n)?.code ?? [], ins => {
+      if (ins.op === 0x10 || ins.op === 0x12) stack.push(ins.arg);
+    });
   }
   return parsed.map((p, i) => (live.has(first + i) ? bodyOf(p) : [0, 0x00, 0x0b]));
 }
