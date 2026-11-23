@@ -482,7 +482,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves; the write may be in a function every call of which comes after the claim), or `repeat: True` on the call when every attempt should count | C54 |
 | Pass a value to a query | `:name` in the query, and an argument of that name | C11, C13, C32 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
-| Command another program | `call` with `within:` and a `once:` key that names the row | C39, C41, C71 |
+| Command another program | `call` with `within:` and a `once:` key that names the row and says more than the message: the row's id and the client's key, or the message itself | C39, C41, C64, C65, C71 |
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |

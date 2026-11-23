@@ -619,6 +619,7 @@ Every build runs the rules in `rules.ts` after type-checking. Each rejects a kin
 | C54 | an UPDATE or upsert reached from `handle` or `woken` whose new values depend on the row (`n = n + 1`), unless its WHERE is a compare-and-set on a column it changes, or an op-id guard |
 | C55 | an INSERT reached from `handle` or `woken` that names no whole unique key (a client key, an op id) |
 | C56 | an op-id guard that does not name the row it protects (the same op id on another key) |
+| C64, C65 | a command's `once:` key that is a number, a Bool or an Option (C64); one that is the same every time it is sent, or made only of what its message carries (C65), so two commands with the same message are one. Key it by the message itself (`once:` the same record as `send:`), or add what the message does not carry: the row's id and a key the client sent |
 | C71 | a command (`call`) built from a row whose key does not name that row (its primary key), or, after a `sql_move`, does not carry what the move wrote (the period being charged) |
 | C73 | an UPDATE that takes from a column (`n = n - e`) with no top-level floor guard in its WHERE (`n >= e`), or one too weak for the column's CHECK floor |
 | C74 | an UPDATE that sets a column some other write guards as a state (`AND state = 'paid'`) without saying which states it moves from, when no machine declares the column |

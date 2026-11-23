@@ -146,7 +146,7 @@ function checkKey(c: Ctx, once: Arg, send: Arg, kt: Type): void {
       once,
       'C65',
       `this command's key is made only of what its message carries (${[...kl].join(', ')}), so two commands with the same message are one: the second is answered with the first's reply (the ledger keyed its charge by the amount)`,
-      'Key it by something the message does not carry that names this command: the id of the row it is for, or a key the client sent. If the message itself is what names the command (an event and its id), say so by keying it by the message: `once:` the same record as `send:`.',
+      `A key of ${[...kl].join(', ')} alone says nothing the message does not. If the message itself names the command (an event and its id), key it by the message: \`once:\` the same record as \`send:\`. Otherwise add what the message does not carry and that makes this command one of its kind: a record of the row's id and a key the client sent (\`ForOrder(order: order.id, key: order.order_key)\`).`,
     );
 }
 
