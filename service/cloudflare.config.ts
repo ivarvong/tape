@@ -8,7 +8,7 @@ export default defineConfig({
     compatibilityDate: '2026-11-13',
     workersDev: true,
     previewUrls: false,
-    observability: { enabled: true },
+    observability: { enabled: true, traces: { enabled: true, headSamplingRate: 1 } },
     // Each version has its own cache (no crossVersionCache): with one shared cache, a new version answered / and
     // /playground/ from the cache the version before filled (tape-version of the old commit, seen by the pinned
     // smoke of d9e16de1, 2026-11-22), and could answer a page whose hashed files it does not have. A deploy costs a
