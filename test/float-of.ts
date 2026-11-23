@@ -2,10 +2,17 @@
 // memory, not copied out) against JavaScript's Number of the same text, compared with Object.is (so -0 and NaN
 // count): edge cases, 200,000 random decimal strings, each at a random place in memory between bytes that are not
 // part of it, one at the very end of the memory and one after memory.grow; invalid UTF-8 throws as textAt does.
-// Then parse_float in a compiled program through the host, against the same oracle.
+// Then parse_float in a compiled program through the host, against the same oracle. Then parse_float's own reading
+// of a plain decimal in the module (compiler/math/decimal.ts), which asks the host only for the rest: the compiled
+// build and the interpreter against Number(text) with Object.is, on the edge cases, every text of up to 4 characters
+// of `0-9 . - + e` and space, and 500,000 decimals made to sit on the fast path's bounds (14 to 17 digits, 21 to 23
+// after the point, mantissas within 20 of 2^53); and for each text, whether the host was asked is what the fast
+// path's rule says (m <= 2^53, at most 22 places, `-?digits(.digits)?`), so the fast path is seen taken.
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { instantiate, responseOf } from '../host.ts';
+import { interpret } from '../interp.ts';
+import { MAX_MANTISSA, MAX_PLACES, POWERS } from '../compiler/math/decimal.ts';
 import { textAt, textIn } from '../host/memory.ts';
 import type { Mem } from '../host/memory.ts';
 import { finish, ok, same, std } from './harness.ts';
@@ -24,10 +31,12 @@ const memory = new WebAssembly.Memory({ initial: 1, maximum: 4 });
 const mem: Mem = { memory, alloc: () => 0 };
 const show = (x: number): string => (Object.is(x, -0) ? '-0' : String(x));
 
+// an LCG mod 2^32 in 32-bit integer arithmetic (period 2^32); in doubles, seed * 1103515245 lost its low bits past
+// 2^53 and the sequence repeated every 10,466 draws
 let seed = 20261123;
 const rand = (n: number): number => {
-  seed = (seed * 1103515245 + 12345) % 2147483648;
-  return Math.floor((seed / 2147483648) * n);
+  seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+  return Math.floor((seed / 4294967296) * n);
 };
 /** `text` written at `at` with a digit on either side, and what float_of reads there. */
 const floatOfAt = (text: string, at: number): number => {
@@ -192,4 +201,141 @@ none(
   `parse_float in a compiled program, ${through.length} texts: the shortest digits of Number(text), or none`,
   differ,
 );
+
+// ---- the fast path: the module reads a plain decimal itself, Object.is-equal to Number(text)
+same(
+  'the powers of ten it divides by are exact: 10^k for k = 0..22',
+  POWERS.map((x, k) => BigInt(x) === 10n ** BigInt(k)),
+  POWERS.map(() => true),
+);
+/** The fast path's rule, written apart from it: is `text` one the module reads without the host? */
+const plain = (text: string): boolean => {
+  const m = /^-?(\d*)(?:\.(\d*))?$/.exec(text);
+  if (!m) return false;
+  const [, whole = '', frac = ''] = m;
+  return whole.length + frac.length > 0 && frac.length <= MAX_PLACES && BigInt(`0${whole}${frac}`) <= MAX_MANTISSA;
+};
+const readers = `fn read_float(text: View) -> Float {
+  match parse_float(text) {
+    Some(value: x) -> x
+    None -> 0.25f
+  }
+}
+
+fn is_number(text: View) -> Int {
+  match parse_float(text) {
+    Some(value: _) -> 1
+    None -> 0
+  }
+}
+`;
+const readerSources = [...std, { name: 'readers.tape', text: readers }];
+const rb = compile(readerSources, { exports: ['read_float', 'is_number'] });
+if (!rb.wasm) throw new Error(rb.errors.map(e => `${e.code} ${e.line} ${e.message}`).join('; '));
+// the module with a host that counts its float_of calls
+const linked: { memory: WebAssembly.Memory | null } = { memory: null };
+let asked = 0;
+const { exports: rx } = new WebAssembly.Instance(new WebAssembly.Module(rb.wasm), {
+  env: {
+    float_text: () => 0,
+    float_of: (ptr: number, len: number): number => {
+      asked++;
+      return Number(dec.decode(new Uint8Array(linked.memory?.buffer ?? new ArrayBuffer(0), ptr, len)));
+    },
+  },
+});
+const fn = (name: string): ((...a: number[]) => unknown) => {
+  const f = rx[name];
+  if (typeof f !== 'function') throw new TypeError(`no export ${name}`);
+  return (...a: number[]): unknown => Reflect.apply(f, null, a);
+};
+if (!(rx['memory'] instanceof WebAssembly.Memory)) throw new TypeError('no memory');
+linked.memory = rx['memory'];
+const reset = fn('reset'),
+  alloc = fn('alloc'),
+  readFloat = fn('read_float'),
+  isNumber = fn('is_number');
+const it = interpret(readerSources);
+const want = (text: string): [number, bigint] => {
+  const x = Number(text);
+  return Number.isFinite(x) ? [x, 1n] : [0.25, 0n];
+};
+type Tally = { fast: number; host: number; differ: string[]; rule: string[] };
+/** Each text through the module and the interpreter: what differs from Number(text), and the host calls. */
+function check(texts: Iterable<string>): Tally {
+  const t: Tally = { fast: 0, host: 0, differ: [], rule: [] };
+  for (const text of texts) {
+    const bytes = enc.encode(text);
+    reset();
+    const at = Number(alloc(bytes.length));
+    new Uint8Array(linked.memory?.buffer ?? new ArrayBuffer(0), at, bytes.length).set(bytes);
+    const before = asked;
+    const x = readFloat(at, bytes.length);
+    const tookHost = asked > before;
+    const has = isNumber(at, bytes.length);
+    const [wx, wh] = want(text);
+    const ix = it.call('read_float', [bytes]),
+      ih = it.call('is_number', [bytes]);
+    const shown = (v: unknown): string => (typeof v === 'number' ? show(v) : typeof v);
+    if (!(Object.is(x, wx) && Object.is(ix, wx) && has === wh && ih === wh))
+      t.differ.push(`${JSON.stringify(text)}: ${shown(x)}/${shown(ix)}, wanted ${show(wx)}`);
+    if (tookHost === plain(text)) t.rule.push(`${JSON.stringify(text)}: host ${tookHost ? 'asked' : 'not asked'}`);
+    if (tookHost) t.host++;
+    else t.fast++;
+  }
+  return t;
+}
+const tallies: string[] = [];
+function holds(what: string, texts: Iterable<string>, leastFast: number): void {
+  const t = check(texts);
+  none(`${what}: the module and the interpreter give Number(text), -0 included`, t.differ);
+  none(`${what}: the host is asked exactly when the text is not a plain decimal the module reads`, t.rule);
+  ok(
+    `${what}: ${t.fast} read in the module, ${t.host} by the host`,
+    t.fast >= leastFast,
+    t.fast >= leastFast ? '' : `fewer than ${leastFast}`,
+  );
+  tallies.push(`${what}: ${t.fast} fast, ${t.host} host`);
+}
+holds('edge cases', EDGES, 3);
+
+// every text of up to 4 characters over 0-9 . - + e and space
+const ALPHABET = '0123456789.-+e ';
+function* short(n: number): Generator<string> {
+  if (n === 0) {
+    yield '';
+    return;
+  }
+  for (const rest of short(n - 1)) for (const ch of ALPHABET) yield rest + ch;
+}
+function* upTo4(): Generator<string> {
+  for (let n = 0; n <= 4; n++) yield* short(n);
+}
+holds('every text of up to 4 of `0-9.-+e `', upTo4(), 10000);
+
+// decimals on the bounds: 14-17 significant digits (and 1-20), 21-23 places (and 0-25), mantissas near 2^53;
+// with leading and trailing zeros, `.5` and `5.` forms, and a sign
+const pick = <T>(xs: readonly T[]): T => {
+  const x = xs[rand(xs.length)];
+  if (x === undefined) throw new Error('empty');
+  return x;
+};
+const onBounds = (): string => {
+  const near = rand(8) === 0;
+  const sig = near
+    ? (MAX_MANTISSA + BigInt(rand(41) - 20)).toString()
+    : `${1 + rand(9)}${digits((rand(3) === 0 ? 1 + rand(20) : pick([14, 15, 16, 17])) - 1)}`;
+  const all = `${rand(4) === 0 ? '0'.repeat(1 + rand(3)) : ''}${sig}${rand(5) === 0 ? '0'.repeat(1 + rand(3)) : ''}`;
+  const places = rand(2) === 0 ? pick([21, 22, 23]) : rand(26);
+  const body =
+    places > all.length
+      ? `${rand(4) === 0 ? '' : '0'}.${'0'.repeat(places - all.length)}${all}`
+      : `${all.slice(0, all.length - places)}${places > 0 || rand(8) === 0 ? '.' : ''}${all.slice(all.length - places)}`;
+  return `${pick(['', '', '-', '-', '+'])}${body}`;
+};
+const bounds = Array.from({ length: 500000 }, onBounds);
+const distinct = new Set(bounds).size;
+ok(`the 500,000 decimals are ${distinct} different texts`, distinct > 400000);
+holds('500,000 decimals on the bounds', bounds, 100000);
+console.log(`fast path: ${tallies.join('; ')}`);
 finish();

@@ -14,8 +14,9 @@ import { TRIG } from './trig.ts';
 import { INVERSE } from './inverse.ts';
 import { EXPLOG } from './explog.ts';
 import { DEC } from './dec.ts';
+import { DECIMAL } from './decimal.ts';
 
-export const LIBRARY: Readonly<Record<string, Def>> = { ...TRIG, ...INVERSE, ...EXPLOG, ...DEC };
+export const LIBRARY: Readonly<Record<string, Def>> = { ...TRIG, ...INVERSE, ...EXPLOG, ...DEC, ...DECIMAL };
 /** The functions a program calls by name, with their parameters' names; the rest are their helpers. */
 export const PUBLIC: Readonly<Record<string, readonly string[]>> = {
   sin: ['x'],

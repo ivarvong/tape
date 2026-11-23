@@ -131,10 +131,12 @@ export const select = (c: E, a: E, b: E): E => {
 /** p[0] + x*(p[1] + x*(p[2] + …)): Horner's rule, as C writes it. */
 export const poly = (x: E, cs: readonly number[]): E =>
   cs.reduceRight<E | null>((acc, k) => (acc ? add(f(k), mul(x, acc)) : f(k)), null) ?? f(0);
-/** Memory at an address: a double, an i32, an i64. */
+/** Memory at an address: a double, an i32, an i64; and a byte. */
 export const loadF = (at: E, offset = 0): E => op(F64, [0x2b, 3, ...uleb(offset)], at);
 export const loadI = (at: E, offset = 0): E => op(I32, [0x28, 2, ...uleb(offset)], at);
 export const loadL = (at: E, offset = 0): E => op(I64, [0x29, 3, ...uleb(offset)], at);
+/** A byte of memory, zero-extended to an i32. */
+export const loadB = (at: E, offset = 0): E => op(I32, [0x2d, 0, ...uleb(offset)], at);
 
 // ---- a body: its locals, and statements written in order
 export class Body {
