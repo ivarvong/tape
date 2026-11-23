@@ -60,7 +60,7 @@ Every response names its request (`tape-request-id`) and carries signed links to
 ### What a program answers
 
 A program answers `STATUS LF BODY` (`respond(status)`, served as `text/plain`) or `STATUS SP TYPE LF BODY`
-(`respond_as(status, content: Html)`; `Json`, `Text`, `Css` and `Svg` too). The type is from a closed list; other
+(`respond_as(status, content: Html)`; `Json`, `Text`, `Css`, `Svg` and `Csv` too). The type is from a closed list; other
 headers follow the status line, each after a carriage return (`header(name:, value:)`: `Location`, `cache-control`),
 and the host refuses those it sets itself (content-type, set-cookie, the security headers) with a 500 that says why.
 A first line that is neither form is all body. A program reads the request headers the host passes (accept,

@@ -196,6 +196,7 @@ type Content {
   Text
   Css
   Svg
+  Csv
 }
 
 // A response with a content type: the status, then the body written by the caller. respond_as(status: 200,
@@ -224,6 +225,7 @@ fn content_type(content: Content) -> View {
     Text -> "text/plain"
     Css -> "text/css"
     Svg -> "image/svg+xml"
+    Csv -> "text/csv"
   }
 }
 

@@ -1183,6 +1183,7 @@ type Content {
   Text
   Css
   Svg
+  Csv
 }
 ```
 

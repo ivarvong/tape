@@ -177,6 +177,22 @@ fn handle(raw: View) -> Buf {
   same('isqrt of the largest Int is 3037000499', floorSqrt(MAX), 3037000499n);
 }
 
+// ---- a CSV answer is text/csv (the sales task, 3 of 3 Haiku runs: finance opens the report in a spreadsheet, and
+// the only types were Html, Json, Text, Css and Svg). The type and charset are RFC 4180's and the WHATWG's.
+{
+  const P =
+    'fn handle(raw: View) -> Buf {\n  respond_as(status: 200, content: Csv) |> append(view: "day,total\\n1,5\\n")\n}\n';
+  const r = compile([...std, { name: 't.tape', text: P }]);
+  const got = r.wasm
+    ? responseOf(instantiate(new WebAssembly.Module(r.wasm), {}).handle(new TextEncoder().encode('GET /\n')))
+    : null;
+  same(
+    'respond_as(content: Csv) is served as text/csv',
+    got ? [got.status, got.type, new TextDecoder().decode(got.body)] : r.errors.map(e => e.message),
+    [200, 'text/csv; charset=utf-8', 'day,total\n1,5\n'],
+  );
+}
+
 // ---- the effect log in the program's words (feedback 20261123T013350.931Z-e65cf778d550, ledger): two queries that
 // differ only in a placeholder's name, `WHERE id = :id` and `WHERE id = :to`, are one statement, `WHERE id = ?1`,
 // and the log named both runs with the last literal's names: `:to` for a lookup written with `:id`. The statement

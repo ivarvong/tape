@@ -56,6 +56,7 @@ export const CONTENT_TYPES = new Map([
   ['application/json', 'application/json'],
   ['text/css', 'text/css; charset=utf-8'],
   ['image/svg+xml', 'image/svg+xml'],
+  ['text/csv', 'text/csv; charset=utf-8'],
 ]);
 /** The most headers an answer may set, the longest name and value, and the longest head. */
 export const HEADER_LIMITS = { count: 32, name: 64, value: 4096, head: 16384 } as const;
