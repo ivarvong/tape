@@ -471,6 +471,9 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
     ['compiled', 'compiled'],
   );
   same('…and a key that is the same every time is still C65', code(said(field('ForOrder(order: 1)'))), 'C65:19');
+  // C71 reads a row bound by a `let` as it reads one bound by a match arm: a key of the amount does not name it
+  same('…and a key of its amount, the row bound by a let, is C71', code(said(bound('ForAmount(amount)'))), 'C71:20');
+  same('…which a key of its id passes', said(bound('ForOrder(order: id)')), 'compiled');
 }
 
 // ---- `flag` is a word with a meaning only where a top-level `flag` declaration starts, as `invariant` is: a todo

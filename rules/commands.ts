@@ -238,22 +238,32 @@ function keyed({ bad }: Reading, c: Call, row: Row, t: RuleTable, { keyNames, wr
 
 function commandKeys(r: Reading, rowTable: ReadonlyMap<string, string | null>): void {
   const { tables } = r;
-  const check = (f: FnDecl, m: Match): void => {
-    if (!m.subject) return;
-    for (const arm of m.arms) {
-      const row = rowOf(arm.pat, rowTable);
-      if (!row) continue;
-      const t = tables.get(row.table) ?? [...tables].find(([n]) => lc(n) === lc(row.table))?.[1];
-      if (!t || t.pk.length === 0) continue;
-      const naming = namingOf(r, f, m.subject, row, t);
-      eachExpr(arm.body, c => {
-        if (c.k === 'call' && c.name === 'call') keyed(r, c, row, t, naming);
-      });
-    }
+  // a row taken apart by a pattern, the subject it came from, and what runs with it bound: a match arm's body, or
+  // the rest of the block after a `let` (`let Order(id, amount) = order`)
+  const check = (f: FnDecl, subject: Expr, pat: Pattern, body: Expr): void => {
+    const row = rowOf(pat, rowTable);
+    if (!row) return;
+    const t = tables.get(row.table) ?? [...tables].find(([n]) => lc(n) === lc(row.table))?.[1];
+    if (!t || t.pk.length === 0) return;
+    const naming = namingOf(r, f, subject, row, t);
+    eachExpr(body, c => {
+      if (c.k === 'call' && c.name === 'call') keyed(r, c, row, t, naming);
+    });
   };
   for (const f of r.prog.fns.values())
-    eachExpr(f.body, m => {
-      if (m.k === 'match') check(f, m);
+    eachExpr(f.body, e => {
+      if (e.k === 'match' && e.subject) for (const arm of e.arms) check(f, e.subject, arm.pat, arm.body);
+      if (e.k === 'block')
+        e.lets.forEach((l, i) => {
+          if (l.pat)
+            check(f, l.value, l.pat, {
+              k: 'block',
+              lets: e.lets.slice(i + 1),
+              result: e.result,
+              line: e.line,
+              file: e.file,
+            });
+        });
     });
 }
 
