@@ -7,6 +7,9 @@
 //                                  or when a common task's program does not compile
 // A comment that starts `Internal:` marks a helper: it is listed in one line, after the functions meant to be called.
 import { readFileSync, writeFileSync } from 'node:fs';
+// what every sql_ call takes after its query, on a write (INSERT, UPDATE, DELETE, with RETURNING for sql_first and sql_all)
+const WRITES =
+  'On a write it also takes `repeat: True`, for a write meant to apply again on each run: a count in SQL (`n = n + 1`) or an INSERT with no unique key (C54, C55; C88 refuses it where the write is safe without it); and `no_floor: True`, for a column it takes from that has no floor (C73).';
 import { compile } from '../compiler.ts';
 import { INTRINSICS } from '../compiler/types.ts';
 import { std } from '../std.ts';
@@ -252,25 +255,25 @@ const BUILT_INS: BuiltIn[] = [
     name: 'sql_first',
     sig: 'sql_first(row: T, query: "… WHERE id = :id", id) -> Option[T]',
     needs: 'Sql',
-    doc: 'The first row the query returns, as `T` (its fields name the columns). Each `:name` in the query takes the argument of that name: `id` when a value of that name is at hand, `id: 7` otherwise.',
+    doc: `The first row the query returns, as \`T\` (its fields name the columns). Each \`:name\` in the query takes the argument of that name: \`id\` when a value of that name is at hand, \`id: 7\` otherwise. ${WRITES}`,
   },
   {
     name: 'sql_all',
     sig: 'sql_all(row: T, query: "…", …) -> Rows[T]',
     needs: 'Sql',
-    doc: 'Every row, to walk with `next` or write with `write_rows`.',
+    doc: `Every row, to walk with \`next\` or write with \`write_rows\`. ${WRITES}`,
   },
   {
     name: 'sql_exec',
     sig: 'sql_exec(query: "…", …) -> Int',
     needs: 'Sql',
-    doc: 'Runs a write; the number of rows it changed. `repeat: True` says a write is meant to apply again each time it runs (C54); `no_floor: True` that a column it takes from has no floor (C73).',
+    doc: `Runs a write; the number of rows it changed. ${WRITES}`,
   },
   {
     name: 'sql_move',
     sig: 'sql_move(row: T, query: "UPDATE … WHERE … RETURNING *", …) -> Move[T]',
     needs: 'Sql',
-    doc: 'A compare-and-set: `Moved(value)`, `Raced(now)` when the row was not in the state the WHERE names, `NoRow`.',
+    doc: `A compare-and-set: \`Moved(value)\`, \`Raced(now)\` when the row was not in the state the WHERE names, \`NoRow\`. ${WRITES}`,
   },
   {
     name: 'call',
