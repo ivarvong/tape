@@ -1,7 +1,8 @@
-// compiler/lex.ts lexed, the per-process cache of lexed files: the same tokens lex gives (the oracle: lex itself,
-// uncached) for every program here; the same array when asked again; frozen all the way down, so a change throws;
-// held within LEXED_CHARS, the least recently used file first out; and a compile from the cache makes the same
-// module as the first compile, which filled it.
+// compiler/lex.ts lexed, the per-process cache of the standard library's lexed files: the same tokens lex gives (the
+// oracle: lex itself, uncached) for every program here; for a std file the same array when asked again, frozen all
+// the way down, so a change throws; any other file lexed afresh each time (a program's own files are not kept); held
+// within LEXED_CHARS, the least recently used file first out; and a compile from the cache makes the same module as
+// the first compile, which filled it.
 import { readdirSync, readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
 import { lex, lexed, lexedHeld, LEXED_CHARS } from '../compiler/lex.ts';
@@ -21,17 +22,25 @@ same(
   files.filter(f => json(lexed(f.name, f.text)) !== json(lex(f.name, f.text))).map(f => f.name),
   [],
 );
-const first = files[0];
-if (!first) throw new Error('no files');
 /** Lexing a file twice: the same array both times? */
 const twice = (file: string, text: string): boolean => {
   const one = lexed(file, text);
   return one === lexed(file, text);
 };
-same('asked again: the same array', twice(first.name, first.text), true);
-same('another name, the same text: its own tokens', lexed('other.tape', first.text)[0]?.file, 'other.tape');
+const core = std.find(f => f.name === 'std/core.tape');
+if (!core) throw new Error('no std/core.tape');
+same('a std file asked again: the same array', twice(core.name, core.text), true);
+same('another std name, the same text: its own tokens', lexed('std/other.tape', core.text)[0]?.file, 'std/other.tape');
+same(
+  "a program's own file, and one named like std but not std's: lexed afresh each time",
+  [twice('examples/hello.tape', core.text), twice('std/sub/core.tape', core.text), twice('mystd/core.tape', core.text)],
+  [false, false, false],
+);
+const before = lexedHeld();
+lexed('hello.tape', `// ${Date.now()}\n${core.text}`);
+same('and not held', lexedHeld(), before);
 
-const toks = lexed('frozen.tape', 'fn f() -> Int { "a\\(x)b" }\n');
+const toks = lexed('std/frozen.tape', 'fn f() -> Int { "a\\(x)b" }\n');
 const interp = toks.find(t => t.t === 'interp');
 if (!interp) throw new TypeError('no interp token');
 // Reflect.set says whether a write was taken: a frozen value refuses it (and in strict code a plain write throws)
@@ -47,17 +56,14 @@ same(
 );
 same('and nothing changed', [toks[0]?.t, toks[0] && 'v' in toks[0] ? toks[0].v : null], ['kw', 'fn']);
 
-// the bound: texts of 300,000 characters each, many more than fit; the newest stays, the oldest went
-const big = (i: number): string => `// ${i}\n${'x'.repeat(300_000)}\n`;
-const oldest = lexed('big0.tape', big(0));
-for (let i = 1; i < 12; i++) lexed(`big${i}.tape`, big(i));
-const held = lexedHeld();
-same('held within LEXED_CHARS', held.chars <= LEXED_CHARS, true);
-const last = lexed('big11.tape', big(11)),
-  again = lexed('big11.tape', big(11));
-same('the newest kept', last === again, true);
-same('the oldest went: lexed again, it is new tokens', lexed('big0.tape', big(0)) === oldest, false);
-same('a text over the bound is not kept', twice('huge.tape', 'x'.repeat(LEXED_CHARS + 1)), false);
+// the bound: std files of 60,000 characters each, many more than fit; the newest stays, the oldest went
+const big = (i: number): string => `// ${i}\n${'x'.repeat(60_000)}\n`;
+const oldest = lexed('std/big.tape', big(0));
+for (let i = 1; i < 12; i++) lexed(`std/big.tape`, big(i));
+same('held within LEXED_CHARS', lexedHeld().chars <= LEXED_CHARS, true);
+same('the newest kept', twice('std/big.tape', big(11)), true);
+same('the oldest went: lexed again, it is new tokens', lexed('std/big.tape', big(0)) === oldest, false);
+same('a text over the bound is not kept', twice('std/huge.tape', 'x'.repeat(LEXED_CHARS + 1)), false);
 
 const hello = [...std, { name: 'hello.tape', text: readFileSync(`${ROOT}examples/hello.tape`, 'utf8') }];
 const a = compile(hello),

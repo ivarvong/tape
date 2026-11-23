@@ -313,21 +313,26 @@ function step(sc: Scan): void {
   else if (ch === '{' && opensSql(sc.toks)) sql(sc);
   else operator(sc);
 }
-// Files lexed already in this process, by name and text: the standard library is in every compile (81 KB, most of
-// what a small program lexes), and the hosted compiler sees one program again and again. The tokens are frozen,
-// so a pass that changed one would throw rather than change another compile's; a least recently used file goes
-// once the texts held pass LEXED_CHARS (500,000 characters: std and a few hosted programs, which are at most 64 KB;
-// std's 16,408 tokens hold 1.8 MB, 23 bytes of heap a character: the cache holds at most ~11 MB).
+// The standard library's files lexed already in this process, by name and text: std is in every compile (82,000
+// characters, most of what a small program lexes). Only std: its 16,408 tokens hold 1.8 MB (23 bytes of heap a
+// character), and a program's own files are not worth that: the hosted compiler keeps whole builds of a program
+// sent again (mcp/src/tools.ts), and caching every file lexed held ~9 MB more for 30 programs (Node, 2026-11-23).
+// The tokens are frozen, so a pass that changed one would throw rather than change another compile's; a least
+// recently used file goes once the texts held pass LEXED_CHARS (200,000 characters, ~4.5 MB: std twice over, for
+// a std being edited beside the one in use).
 const LEXED = new Map<string, readonly Token[]>();
-export const LEXED_CHARS = 500_000;
+export const LEXED_CHARS = 200_000;
+/** The files the cache keeps: the standard library's (std.ts and service/src/build.ts name them std/<name>.tape). */
+const KEPT = /^std\/[a-z]+\.tape$/;
 let lexedChars = 0;
 const frozen = (v: unknown): void => {
   if (typeof v !== 'object' || v === null || Object.isFrozen(v)) return;
   Object.freeze(v);
   for (const x of Object.values(v)) frozen(x);
 };
-/** lex, from the cache when this file with this text was lexed before. */
+/** lex, from the cache when this std file with this text was lexed before. */
 export function lexed(file: string, source: string): readonly Token[] {
+  if (!KEPT.test(file)) return lex(file, source);
   const key = `${file}\0${source}`;
   const had = LEXED.get(key);
   if (had) {
