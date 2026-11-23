@@ -8,6 +8,8 @@ import { lc } from './syntax.ts';
 import type { ColumnRead, Query, Reading, Write } from './types.ts';
 import { casOn, colsIn, dedupeGuard, writeOf } from './writes.ts';
 
+/** The rules' reading, and where to say why a write passes (for C88, which refuses `repeat: True` on one). */
+type Asked = Reading & { readonly why?: (reason: string) => void };
 /** The SET list of an UPDATE or of an upsert's DO UPDATE, with its WHERE. */
 type Rewrite = { readonly assigns: readonly Assign[]; readonly where: Expr | null };
 /** What an assignment reads: `own`, a column of the row it changes; `mine`, one the write changes. */
@@ -46,7 +48,7 @@ function readsOf(r: Reading, q: Query, s: Write, w: Rewrite): Reads {
 
 // C56: an op-id guard names the row it guards; C54: a write that depends on the row it changes is stopped the
 // second time by a compare-and-set, an op id, or a count its caller checked
-function rewritten(r: Reading, q: Query, s: Write, w: Rewrite, opTables: ReadonlySet<string>): void {
+function rewritten(r: Asked, q: Query, s: Write, w: Rewrite, opTables: ReadonlySet<string>): void {
   const { bad } = r;
   const t = r.tables.get(s.table);
   const cs = conjunctsOf(w.where) ?? [];
@@ -60,9 +62,19 @@ function rewritten(r: Reading, q: Query, s: Write, w: Rewrite, opTables: Readonl
     );
   const reads = readsOf(r, q, s, w);
   const dependent = w.assigns.filter(x => !settles(x, reads) && colsIn(x.expr, reads.a).some(reads.mine));
-  if (dependent.length === 0 || dedupe) return;
+  if (dedupe)
+    return r.why?.('its WHERE guards it by an op id (NOT EXISTS …), so a second run finds the op and writes nothing');
+  if (dependent.length === 0)
+    return r.why?.(
+      'every column it sets is given a value, none computed from the row it changes, so a second run writes the same values',
+    );
   const names = [lc(s.table), lc(s.alias)].filter(Boolean);
-  if (w.assigns.some(x => casOn(cs, lc(x.col), w.assigns, names)) || witnessed(cs, q, r.calls)) return;
+  if (w.assigns.some(x => casOn(cs, lc(x.col), w.assigns, names)))
+    return r.why?.('its WHERE is a compare-and-set on a column it changes, so a second run matches no row');
+  if (witnessed(cs, q, r.calls))
+    return r.why?.(
+      'it runs only after an op-id claim (an INSERT … ON CONFLICT DO NOTHING the request must pass first) or a count checked before it, so a second run of the request stops before it',
+    );
   bad(
     'C54',
     q.at,
@@ -72,11 +84,15 @@ function rewritten(r: Reading, q: Query, s: Write, w: Rewrite, opTables: Readonl
 }
 
 // C55: an INSERT gives a whole unique key, so a second run meets the first one's row
-function inserted(r: Reading, q: Query, s: Extract<Write, { kind: 'insert' }>): void {
+function inserted(r: Asked, q: Query, s: Extract<Write, { kind: 'insert' }>): void {
   const t = r.tables.get(s.table);
   if (!t) return;
   const cols = new Set((s.cols ?? t.cols).map(lc));
-  if (t.uniques.some(u => u.length > 0 && u.every(c => cols.has(lc(c))))) return;
+  const unique = t.uniques.find(u => u.length > 0 && u.every(c => cols.has(lc(c))));
+  if (unique)
+    return r.why?.(
+      `it inserts a whole unique key of ${s.table} (${unique.join(', ')}), so a second run meets the first one's row`,
+    );
   r.bad(
     'C55',
     q.at,
@@ -101,12 +117,18 @@ export function replayRules(r: Reading): void {
     }
     // `repeat: True` is only for a write these rules would refuse: C88 where they have nothing to say
     const found: string[] = [];
+    let reason = checked.has(q.fn.name)
+      ? 'it is not a write'
+      : 'no request or timer reaches it (only what handle and woken run is run again)';
     if (checked.has(q.fn.name))
       replayOf(
         {
           ...r,
           bad: code => {
             found.push(code);
+          },
+          why: said => {
+            reason = said;
           },
         },
         q,
@@ -116,12 +138,12 @@ export function replayRules(r: Reading): void {
       r.bad(
         'C88',
         q.at,
-        'this call says `repeat: True`, and a second run of its statement changes nothing more',
-        'Take the argument out: it is only for a write that the retry rules (C54, C55) would refuse.',
+        `this call says \`repeat: True\`, and a second run of its statement changes nothing more: ${reason}`,
+        'Take the argument out: it is only for a write the retry rules (C54, C55) would refuse, one that computes a column from the row it changes (`n = n + 1`) or inserts a row with no unique key, with nothing to stop a second run.',
       );
   }
 }
-function replayOf(r: Reading, q: Query, opTables: ReadonlySet<string>): void {
+function replayOf(r: Asked, q: Query, opTables: ReadonlySet<string>): void {
   const s = writeOf(q.ast);
   if (s?.kind === 'update') rewritten(r, q, s, { assigns: s.assigns, where: s.where }, opTables);
   else if (s?.kind === 'insert' && s.upsert) rewritten(r, q, s, { assigns: s.upsert, where: s.upsertWhere }, opTables);

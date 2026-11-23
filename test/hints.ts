@@ -288,4 +288,53 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// ---- C88 says why the write it refuses `repeat: True` on is safe already. It said only "a second run of its
+// statement changes nothing more", which reads as false for `balance = balance - :amount` (safe because it runs
+// after the transfer's claim) and gave no rule to learn. Each reason is checked on the shape the bench's agents
+// wrote, and each program compiles with the argument taken out, as the fix says.
+{
+  const PROG = `migration 1 "t" {
+  CREATE TABLE a(id TEXT PRIMARY KEY NOT NULL, balance INTEGER NOT NULL CHECK (balance >= 0));
+  CREATE TABLE tr(id TEXT PRIMARY KEY NOT NULL);
+  CREATE TABLE k(key TEXT PRIMARY KEY NOT NULL, used INTEGER NOT NULL)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(path: "/t/" ++ id) -> moved(id)
+    Request(path: "/k/" ++ key) -> counted(key, used: len(key))
+    _ -> respond(status: 404)
+  }
+}
+
+fn moved(id: View) -> Buf {
+  let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> respond(status: 200)
+  let 1 = sql_exec(query: "UPDATE a SET balance = balance - 5 WHERE id = :id AND balance >= 5", id@DEBIT) else -> rollback(out: respond(status: 409))
+  respond(status: 201)
+}
+
+fn counted(key: View, used: Int) -> Buf {
+  do sql_exec(query: "UPDATE k SET used = :used WHERE key = :key", key, used@SET)
+  do sql_exec(query: "INSERT INTO k(key, used) VALUES (:key, 0) ON CONFLICT(key) DO NOTHING", key@INSERT)
+  respond(status: 200)
+}
+`;
+  const at = (mark: string): string =>
+    ['@DEBIT', '@SET', '@INSERT'].reduce((t, m) => t.replace(m, m === mark ? ', repeat: True' : ''), PROG);
+  const cases: readonly (readonly [string, number, string])[] = [
+    ['@DEBIT', 17, 'it runs only after an op-id claim'],
+    ['@SET', 22, 'every column it sets is given a value, none computed from the row it changes'],
+    ['@INSERT', 23, 'it inserts a whole unique key of k (key)'],
+  ];
+  for (const [mark, line, why] of cases) {
+    const s = said(at(mark));
+    same(
+      `C88 says why the write is safe (${why.split(',')[0]})`,
+      [code(s), s === 'compiled' ? '' : s.message.includes(`changes nothing more: ${why}`)],
+      [`C88:${line}`, true],
+    );
+  }
+  same('…and with the argument out, as the fix says, it compiles', said(at('none')), 'compiled');
+}
+
 finish();

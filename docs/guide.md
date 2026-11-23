@@ -643,8 +643,10 @@ column with no floor says so in the call with `no_floor: True`. A write that may
 
 A request is retried: by a client that got no answer, by a timer that fires at least once. So a POST that creates
 carries the client's key (`{"key":"o-1",…}`, stored `UNIQUE`, with `ON CONFLICT … DO NOTHING`), and the same key
-again answers with what the first made. A write meant to count every attempt (a visit counter, a retry counter, a
-rate limit) says so in the call with `repeat: True`, the one opt-out. Exported methods are not
+again answers with what the first made. A write meant to count every attempt in SQL (a visit counter or a rate limit's
+`used = used + 1`), or an INSERT meant to make a new row each time (no client key, a create clients never retry),
+says so in the call with `repeat: True`, the one opt-out. A write that sets its columns to values computed in Tape
+(`used = :used`, from a row the request read) needs none: a retried request reads again, and C88 refuses it. Exported methods are not
 checked: the host answers a repeated `once` key from the reply it stored. A repeat that arrives while the first run waits on a
 call finds the key claimed and waits for that run's reply; when it does not come within the repeat's budget the
 answer is `Unreachable`, and sending it again is safe.
