@@ -98,6 +98,29 @@ for (let k = 0; k < 6000; k++) {
 }
 same('6,000 parameter blocks read as the fatal TextDecoder reads them', agree, 6000);
 
+// an Option (an upper-case kind): the i32 at 8 is 1 for Some and 0 for None, which is NULL, whatever the value
+// cells hold (compiler/gen/sql.ts bindParams)
+{
+  const kinds = 'TITIF';
+  const ptr = m.alloc(16 * kinds.length);
+  const d = new DataView(m.memory.buffer);
+  const at = m.alloc(5);
+  new Uint8Array(m.memory.buffer, at, 5).set(new TextEncoder().encode('north'));
+  d.setUint32(ptr, at, true);
+  d.setUint32(ptr + 4, 5, true);
+  d.setInt32(ptr + 8, 1, true);
+  d.setBigInt64(ptr + 16, 42n, true);
+  d.setInt32(ptr + 24, 1, true);
+  d.setUint32(ptr + 32, at, true); // a None's value cells are left as they were: not read
+  d.setUint32(ptr + 36, 5, true);
+  d.setInt32(ptr + 40, 0, true);
+  d.setBigInt64(ptr + 48, 7n, true);
+  d.setInt32(ptr + 56, 0, true);
+  d.setFloat64(ptr + 64, 2.5, true);
+  d.setInt32(ptr + 72, 1, true);
+  same('Options: Some is its value, None is NULL', read(m, kinds, ptr), ['north', 42, null, null, 2.5]);
+}
+
 // integers: exact within ±2^53, refused outside
 {
   const mm = memOf();

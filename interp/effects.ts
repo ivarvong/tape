@@ -66,18 +66,24 @@ const json = (it: Interp, v: Value, file: string): Uint8Array =>
   Uint8Array.from(jsonInto(it, { k: 'buf', buf: [] }, v, file).buf);
 
 // ---- SQL
+const isAdt = (x: Value): x is Adt => typeof x === 'object' && !(x instanceof Uint8Array) && x.k === 'adt';
+// an Option is NULL for None, its value for Some
 const sqlParam = (x: Value): SqlParam =>
-  x instanceof Uint8Array
-    ? utf8.decode(x)
-    : typeof x === 'boolean'
-      ? x
-        ? 1
-        : 0
-      : typeof x === 'number'
-        ? x
-        : isDec(x)
-          ? exact(x.m, 'sql')
-          : exact(asInt(x), 'sql');
+  isAdt(x) && x.c === 'None'
+    ? null
+    : isAdt(x) && x.c === 'Some'
+      ? sqlParam(x.f['value'] ?? stop('sql: Some without a value'))
+      : x instanceof Uint8Array
+        ? utf8.decode(x)
+        : typeof x === 'boolean'
+          ? x
+            ? 1
+            : 0
+          : typeof x === 'number'
+            ? x
+            : isDec(x)
+              ? exact(x.m, 'sql')
+              : exact(asInt(x), 'sql');
 // p1, p2, … in order
 const sqlParams = (s: Site): SqlParam[] => {
   const out: SqlParam[] = [];

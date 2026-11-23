@@ -117,11 +117,17 @@ export function readParams(m: Mem, q: Query, ptr: number): SqlParam[] {
   const out: SqlParam[] = [];
   for (let k = 0; k < kinds.length; k++) {
     const o = ptr + 16 * k;
-    if (kinds[k] === 't') {
+    const kind = kinds[k] ?? '';
+    // an Option (upper case): the i32 at 8 is 1 for Some, 0 for None, which is NULL
+    if (kind <= 'Z' && d.getInt32(o + 8, true) === 0) {
+      out.push(null);
+      continue;
+    }
+    if (kind === 't' || kind === 'T') {
       out.push(textParam(u, d.getUint32(o, true), d.getUint32(o + 4, true)));
       continue;
     }
-    if (kinds[k] === 'f') {
+    if (kind === 'f' || kind === 'F') {
       out.push(d.getFloat64(o, true));
       continue;
     }

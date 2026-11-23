@@ -11,7 +11,7 @@ export class Trap extends Error {
 /** The longest a timer may be set for: 30 days. */
 export const MAX_WAKE_MS = 30 * 24 * 3600 * 1000;
 
-export type SqlParam = number | string;
+export type SqlParam = number | string | null;
 export type CallStatus = 'ok' | 'timeout' | 'unreachable' | 'rejected' | 'skew';
 export type CallRequest = { to: string; method: string; send: Uint8Array; within: number; once?: string };
 /** Each effect is asked of the host when the program reaches it, in order. */

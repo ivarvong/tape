@@ -45,13 +45,14 @@ export function analyze(ast: Statement, schema: Schema, opts: AnalyzeOptions = {
 }
 
 /**
- * The text to run for a query whose ?n parameters have tape kinds `kinds` ('i' Int, 'b' Bool, 't' Text). The
+ * The text to run for a query whose ?n parameters have tape kinds `kinds` ('i' Int, 'b' Bool, 't' Text; upper case
+ * for an Option of one, which may be NULL, and CAST(NULL AS INTEGER) is NULL). The
  * Durable Object SQL API (and node:sqlite) bind every JavaScript number as REAL: ?1 bound to 5 is 5.0, so
  * 'k' || ?1 is 'k5.0', ?1 / 2 is 2.5, and a column with no INTEGER affinity stores 5.0 (measured in workerd and
  * node:sqlite). Neither API binds a BigInt as an integer (workerd: "Cannot convert a BigInt value to a number").
  * So each Int or Bool parameter is read as CAST(?n AS INTEGER), exact for every tape Int (|n| <= 2^53).
  */
 export function integerParams(sql: string, kinds: string): string {
-  const whole = tokenize(sql).filter(t => t.t === 'param' && (kinds[t.v - 1] === 'i' || kinds[t.v - 1] === 'b'));
+  const whole = tokenize(sql).filter(t => t.t === 'param' && 'iIbB'.includes(kinds[t.v - 1] ?? 'x'));
   return whole.reduceRight((out, t) => `${out.slice(0, t.s)}CAST(?${t.v} AS INTEGER)${out.slice(t.e)}`, sql);
 }

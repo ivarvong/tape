@@ -61,7 +61,7 @@ function hostOf(effects: readonly Effect[], queries: Queries): Host & { left: ()
     pos++;
     return e;
   };
-  const statement = (text: string, p: readonly (number | string)[]) =>
+  const statement = (text: string, p: readonly (number | string | null)[]) =>
     take(`${text} ${JSON.stringify(p)}`, isSql, e => queries[e.q]?.sql === text && same(e.p, p));
   const called = (req: CallRequest) =>
     take(

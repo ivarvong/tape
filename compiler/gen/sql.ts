@@ -6,11 +6,13 @@ import { sqlModel, tablesOf } from '../../rules/model.ts';
 import { movePlan } from '../../rules/move.ts';
 import { inNames } from '../sqltext.ts';
 import { TAPE_T, analyze } from '../../sql/analyze.ts';
+import type { Expr as SqlExpr, Param, Statement } from '../../sql/ast.ts';
 import { tryParse } from '../../sql/parse.ts';
+import { walkSql } from '../../sql/tree.ts';
 import { INT, T, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { decodeRow } from './decode.ts';
-import { buildVariant, close, fresh, get, open, set } from './fn.ts';
+import { buildVariant, close, fresh, get, inLocals, open, set } from './fn.ts';
 import type { Ctx, Place } from './fn.ts';
 import type { Adt, FlatField } from './layout.ts';
 
@@ -45,7 +47,10 @@ function checkColumn(qa: Arg, c: Column, f: FlatField, i: number, kinds: string,
       `column ${i + 1} of the query is \`${c.name}\`, and field ${i + 1} of the row type is \`${f.name}\``,
       `Name the column with AS ${f.name}, or reorder the fields.`,
     );
-  const t = c.t === 'any' && c.param !== undefined && c.param !== 0 ? (TAPE_T[kinds[c.param - 1] ?? ''] ?? 'any') : c.t;
+  const t =
+    c.t === 'any' && c.param !== undefined && c.param !== 0
+      ? (TAPE_T[(kinds[c.param - 1] ?? '').toLowerCase()] ?? 'any')
+      : c.t;
   if (t !== want)
     stop(
       qa,
@@ -91,6 +96,18 @@ function check(
   const a = analyze(tree.ast, model.schema, { src: q, params: kinds });
   const [first] = a.errors;
   if (first) stop(qa, codeOf(first.kind), `${via}: ${first.message}`, KIND_HINT[first.kind] ?? OTHER_HINT);
+  const missed = nullCompared(tree.ast, q, kinds);
+  if (missed) {
+    const { n, op, other } = missed;
+    const is = op === '=' ? 'IS' : op === '!=' ? 'IS NOT' : null,
+      p = `?${n}`; // shown in the program's name, :region
+    stop(
+      qa,
+      'C69',
+      `${via}: ${p} is an Option, so it may be NULL, and \`${other} ${op} NULL\` is never true: with None this takes no row`,
+      `Say what None means: \`(${p} IS NULL OR ${other} ${op} ${p})\` for no filter${is ? `, or \`${other} ${is} ${p}\` for the rows whose ${other} is NULL` : ''}.`,
+    );
+  }
   if (!row) return;
   const res = a.result;
   if (!res) {
@@ -117,6 +134,35 @@ function check(
 }
 
 /** Thrown to leave a query once its problem is written down. */
+const COMPARED = new Set(['=', '!=', '<', '<=', '>', '>=']);
+/**
+ * An Option parameter (an upper-case kind) compared with = or another comparison, where nothing in the statement
+ * asks whether it is NULL (`IS NULL`, `IS`, coalesce or ifnull): the comparison with NULL is never true, so None
+ * takes no row, which is seldom what a program that passes an Option means. The first such, with what it is
+ * compared with, as SQL.
+ */
+function nullCompared(ast: Statement, q: string, kinds: string): { n: number; op: string; other: string } | null {
+  const optional = (x: SqlExpr): x is Param => x.k === 'param' && (kinds[x.n - 1] ?? 'x') <= 'Z';
+  const asked = new Set<number>();
+  const compared: { n: number; op: string; other: string }[] = [];
+  walkSql(ast, node => {
+    if (!('k' in node)) return;
+    if (node.k === 'isnull' && optional(node.x)) asked.add(node.x.n);
+    if (node.k === 'fn' && ['coalesce', 'ifnull'].includes(node.name.toLowerCase()))
+      for (const a of node.args) if (optional(a)) asked.add(a.n);
+    if (node.k !== 'bin') return;
+    for (const [x, y] of [
+      [node.l, node.r],
+      [node.r, node.l],
+    ] as const) {
+      if (!optional(x)) continue;
+      if (node.op === 'IS' || node.op === 'IS NOT') asked.add(x.n);
+      else if (COMPARED.has(node.op)) compared.push({ n: x.n, op: node.op, other: q.slice(y.s, y.e) });
+    }
+  });
+  return compared.find(x => !asked.has(x.n)) ?? null;
+}
+
 class Recorded extends Error {}
 
 /** Checks a query; what is wrong is recorded for the build to report with the rules' problems, in source order. */
@@ -252,7 +298,24 @@ function rowTypeOf(c: Ctx, e: Call, ra: Arg | undefined): Type {
   return rowT;
 }
 
-/** Writes the parameters into a new block; gives the block's local (-1 with none) and each one's kind. */
+/** The kind letter of a value a query takes: i Int or Dec, f Float, b Bool, t View; '' for any other type. */
+const kindOf = (t: Type): string =>
+  t.name === 'Int' || t.name === 'Dec'
+    ? 'i'
+    : t.name === 'Float'
+      ? 'f'
+      : t.name === 'Bool'
+        ? 'b'
+        : t.name === 'View'
+          ? 't'
+          : '';
+
+/**
+ * Writes the parameters into a new block; gives the block's local (-1 with none) and each one's kind. A cell is 16
+ * bytes: an Int, Dec (its count, an INTEGER: 12.30 is 1230 in the database), Bool or Float at 0, a View's pointer
+ * and length at 0 and 4. An Option's kind is the upper-case letter of its value's, and its cell has an i32 at 8,
+ * 1 for Some and 0 for None, which the host binds as NULL (host/memory.ts readParams).
+ */
 function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: string } {
   const { n } = query;
   if (n === 0) return { block: -1, kinds: '' };
@@ -269,23 +332,35 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
         `${e.name} is missing argument ${name}`,
         `The query uses :${name}: pass \`${name}\` or \`${name}: value\`.`,
       );
-    c.code.push(...get(block));
-    const t = c.B.strip(c.emit(a.value, null, false));
-    // a Dec is bound as its count, an INTEGER: 12.30 is 1230 in the database
-    if (t.name === 'Int' || t.name === 'Dec') c.code.push(0x37, 0, ...uleb(16 * i));
-    else if (t.name === 'Float') c.code.push(0x39, 0, ...uleb(16 * i));
-    else if (t.name === 'Bool') c.code.push(0xad, 0x37, 0, ...uleb(16 * i));
-    else if (t.name === 'View') {
-      const len = fresh(c, I32);
-      c.code.push(...set(len), 0x36, 0, ...uleb(16 * i), ...get(block), ...get(len), 0x36, 0, ...uleb(16 * i + 4));
-    } else
+    const { type, locals } = inLocals(c, a.value);
+    const t = c.B.strip(type);
+    const inner = t.name === 'Option' && t.args[0] ? c.B.strip(t.args[0]) : null;
+    const k = kindOf(inner ?? t);
+    if (k === '')
       fail(
         a,
         'C14',
-        `argument ${a.as ?? a.label} should be Int, Dec, Float, Bool or View but is ${key(t)}`,
-        'A query takes numbers, Bools and text. Pass a field of the record instead: `id: order.id`.',
+        `argument ${a.as ?? a.label} should be Int, Dec, Float, Bool or View, or an Option of one, but is ${key(t)}`,
+        'A query takes numbers, Bools and text, and an Option of one for a value that may be NULL. Pass a field of the record instead: `id: order.id`.',
       );
-    kinds += t.name === 'Int' || t.name === 'Dec' ? 'i' : t.name === 'Float' ? 'f' : t.name === 'Bool' ? 'b' : 't';
+    let value = locals;
+    if (inner) {
+      // the tag in slot 0; the value in the slots of Some's one field
+      const adt = c.B.adtOf(t, a);
+      const some = variantOf(adt, 'Some');
+      const v = adt.boxed ? undefined : adt.variants[some];
+      const flat = v?.flat ?? [];
+      value = flat.map(s => locals[s] ?? 0);
+      c.code.push(...get(block), ...get(locals[0] ?? 0), ...i32(some), 0x46, 0x36, 2, ...uleb(16 * i + 8));
+    }
+    const at = 16 * i;
+    const [v0 = 0, v1 = 0] = value;
+    if (k === 'i') c.code.push(...get(block), ...get(v0), 0x37, 0, ...uleb(at));
+    else if (k === 'f') c.code.push(...get(block), ...get(v0), 0x39, 0, ...uleb(at));
+    else if (k === 'b') c.code.push(...get(block), ...get(v0), 0xad, 0x37, 0, ...uleb(at));
+    else
+      c.code.push(...get(block), ...get(v0), 0x36, 0, ...uleb(at), ...get(block), ...get(v1), 0x36, 0, ...uleb(at + 4));
+    kinds += inner ? k.toUpperCase() : k;
   }
   return { block, kinds };
 }

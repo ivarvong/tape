@@ -8,7 +8,7 @@ import {
   type Check,
   type Ctx,
   type Stack,
-  TAPE_T,
+  paramTy,
   TY,
   UNKNOWN,
   colType,
@@ -33,7 +33,7 @@ export function ty(k: Check, e: Expr, stack: Stack, ctx: Ctx = {}): Ty {
     case 'lit':
       return TY(e.type, e.v === null);
     case 'param':
-      return TY(TAPE_T[k.kinds?.[e.n - 1] ?? ''] ?? 'any', false, { param: e.n });
+      return paramTy(k, e.n);
     case 'col':
       return column(k, e, stack, ctx);
     case 'collate':

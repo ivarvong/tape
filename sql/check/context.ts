@@ -29,6 +29,11 @@ export type AnalyzeOptions = { src?: string; params?: string | null };
 
 /** The SQL kind of each tape kind a parameter can have: Int, Bool, text. */
 export const TAPE_T: Readonly<Record<string, TyName>> = { i: 'int', f: 'real', b: 'int', t: 'text' };
+/** ?n as its tape kind gives it: an Option's (upper case) may be NULL */
+export const paramTy = (k: { readonly kinds: string | null }, n: number): Ty => {
+  const kind = k.kinds?.[n - 1] ?? '';
+  return TY(TAPE_T[kind.toLowerCase()] ?? 'any', kind !== '' && kind <= 'Z', { param: n });
+};
 export const AFF_T: Readonly<Record<Affinity, TyName>> = {
   int: 'int',
   text: 'text',
