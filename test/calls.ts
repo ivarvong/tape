@@ -3,7 +3,7 @@ import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
 import { instantiate, isCall, isHead, replay, spans, traceOf } from '../host.ts';
-import type { Effect, Head, Service, ServiceOptions } from '../host.ts';
+import type { Effect, Head, Service, ServiceOptions, Timers } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 import type { Built, Options } from '../compiler.ts';
@@ -19,6 +19,66 @@ const pure = (program: string, fn: string, args: bigint[]): number => {
 };
 const text = (b: Uint8Array | undefined): string => new TextDecoder().decode(b),
   bytes = (s: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(s);
+
+/** Timers fired by hand: a call's budget runs out when the test says so, never because the machine was slow. */
+const handTimers = () => {
+  const armed = new Map<number, { f: () => void; ms: number }>();
+  let next = 0;
+  const timers: Timers = {
+    set: (f, ms) => {
+      armed.set(next, { f, ms });
+      return next++;
+    },
+    clear: id => {
+      if (typeof id === 'number') armed.delete(id);
+    },
+  };
+  return {
+    timers,
+    /** the budgets of the timers set and not yet cleared or fired */
+    armed: (): number[] => [...armed.values()].map(t => t.ms),
+    fire: (): void => {
+      const due = [...armed.values()];
+      armed.clear();
+      for (const t of due) t.f();
+    },
+  };
+};
+/** A promise the test settles, and whether it has. */
+const deferred = () => {
+  let settle = (): void => {},
+    settled = false;
+  const promise = new Promise<void>(ok => {
+    settle = ok;
+  });
+  return {
+    promise,
+    resolve: (): void => {
+      settled = true;
+      settle();
+    },
+    done: (): boolean => settled,
+  };
+};
+/** Whether p has settled yet, asked at any time. */
+const settled = (p: Promise<unknown>): (() => boolean) => {
+  let done = false;
+  const mark = (): void => {
+    done = true;
+  };
+  p.then(mark, mark);
+  return () => done;
+};
+/** Waits, a turn of the event loop at a time, until f holds (a bounded number of turns, not a time). */
+const until = async (f: () => boolean, what = 'the condition'): Promise<void> => {
+  for (let i = 0; !f(); i++) {
+    if (i > 10_000) throw new Error(`${what} did not come about`);
+    // oxlint-disable-next-line no-await-in-loop -- waiting is the point
+    await new Promise<void>(go => {
+      setImmediate(go);
+    });
+  }
+};
 
 const callAt = (effects: readonly Effect[], i: number) => {
   const e = effects[i];
@@ -236,14 +296,19 @@ const post = (item: string, key: string) =>
     stockApp = instantiate(stockModule, { sql: stockSql });
   const left = (item: string) =>
     stockSql.exec('SELECT remaining FROM stock WHERE item = ?1', item).raw().toArray()[0]?.[0];
-  let delay = 0,
+  // The call's budget is kept by hand timers (handTimers): it runs out when the test fires it, never because the
+  // machine was slow, and a held reply (hold) comes when the test lets it. So no outcome here depends on CPU speed.
+  let hold: Promise<void> | null = null,
     seen: ServiceOptions[] = [];
-  const stock: Service = async (b, meta) => {
+  const answers: Promise<unknown>[] = [];
+  const stock: Service = (b, meta) => {
     seen.push(meta);
-    if (delay > 0) await sleep(delay);
-    return stockApp.serve(meta, b);
+    const answer = (hold ?? Promise.resolve()).then(() => stockApp.serve(meta, b));
+    answers.push(answer);
+    return answer;
   };
-  const app = instantiate(module, { sql: nodeSql(), services: { stock }, name: 'orders-1' });
+  const clock = handTimers();
+  const app = instantiate(module, { sql: nodeSql(), services: { stock }, name: 'orders-1', timers: clock.timers });
   app.setFlags({ stock_budget_ms: 50 }); // the default is 2000; these tests want to see the budget run out
   T(
     'the two modules agree on the fingerprint',
@@ -298,24 +363,33 @@ const post = (item: string, key: string) =>
   );
   T("call rejected with the callee's reason", text(await app.run(post('unicorn', 'b'))), '409\n{"error":"none left"}');
 
-  // a timeout on a command: the outcome is unknown, and sending it again with the same key is safe
-  delay = 120;
-  const t0 = Date.now(),
-    slow = await app.runLogged(post('lamp', 'c')),
-    took = Date.now() - t0;
+  // a timeout on a command: the outcome is unknown, and sending it again with the same key is safe. The reply is held
+  // and the budget's timer fired by hand, so the run must answer at the budget, with the reply still on its way.
+  const reply = deferred();
+  hold = reply.promise;
+  const asked = answers.length,
+    slowRun = app.runLogged(post('lamp', 'c')),
+    answered = settled(slowRun);
+  await until(() => answers.length > asked, 'the call to stock');
+  T('the call waits on one timer, of its budget', clock.armed(), [50]);
+  clock.fire();
+  // the run answers once its budget's timer fires, with the reply still held (a host that waited for the reply would
+  // never answer here)
+  await until(answered, 'the answer at the budget');
+  const slow = await slowRun;
   T('call timeout', text(slow.out), '504\n{"error":"stock did not answer in time; the order stays pending"}');
-  T('timeout returned at the budget, not at the reply', took >= 45 && took < 110, true);
+  T('timeout returned at the budget, not at the reply', [reply.done(), clock.armed()], [false, []]);
   T(
-    'replay timeout takes no time',
+    'replay timeout takes no time: it answers at once, with no timer to wait on',
     (() => {
-      const t = Date.now();
-      const out = text(replay(module, post('lamp', 'c'), slow.effects));
-      return [out.slice(0, 3), Date.now() - t < 20];
+      const out = replay(module, post('lamp', 'c'), slow.effects);
+      return [out instanceof Uint8Array ? text(out).slice(0, 3) : 'not at once', clock.armed()];
     })(),
-    ['504', true],
+    ['504', []],
   );
-  await sleep(150);
-  delay = 0;
+  reply.resolve();
+  hold = null;
+  await answers.at(-1);
   T('the callee did reserve it', left('lamp'), 0);
   T(
     'retry with the same key is answered from the stored reply',
@@ -407,9 +481,13 @@ const post = (item: string, key: string) =>
   );
 
   // budgets, deadlines, transactions
+  // a budget longer than the deadline: the call gets what is left of the deadline (a long deadline, so that some is
+  // left however slow the machine), not its budget
   seen = [];
-  await app.run(post('desk', 'f'), { deadlineMs: 20 });
-  T('the request deadline caps the call budget', (seen[0]?.withinMs ?? Infinity) <= 20, true);
+  app.setFlags({ stock_budget_ms: 3_600_000 });
+  await app.run(post('desk', 'f'), { deadlineMs: 600_000 });
+  app.setFlags({ stock_budget_ms: 50 });
+  T('the request deadline caps the call budget', [seen.length, (seen[0]?.withinMs ?? Infinity) <= 600_000], [1, true]);
   T(
     'no time left: no call is made',
     [text(await app.run(post('desk', 'g'), { deadlineMs: 0 })).slice(0, 3), seen.length],
@@ -481,15 +559,20 @@ console.log(`orders.tape: ${orders.wasm.length} bytes, stock.tape: ${stockBuild.
       logs.push(log);
     };
   const stockApp = instantiate(stockModule, { sql: nodeSql(), name: 'stock', sink });
-  let delay = 0;
+  // hand timers and a held reply, as in the calls above: the timeout below is the test's doing, not the machine's
+  let hold: Promise<void> | null = null;
+  const answers: Promise<unknown>[] = [],
+    clock = handTimers();
   const app = instantiate(module, {
     sql: nodeSql(),
     name: 'orders',
     sink,
+    timers: clock.timers,
     services: {
-      stock: async (b, meta) => {
-        if (delay > 0) await sleep(delay);
-        return stockApp.serve(meta, b);
+      stock: (b, meta) => {
+        const answer = (hold ?? Promise.resolve()).then(() => stockApp.serve(meta, b));
+        answers.push(answer);
+        return answer;
       },
     },
   });
@@ -535,14 +618,20 @@ console.log(`orders.tape: ${orders.wasm.length} bytes, stock.tape: ${stockBuild.
   );
   // a timeout: the caller's span ends with the call timed out; the callee's span arrives later, same trace
   logs.length = 0;
-  delay = 100;
-  await app.run(post('lamp', 't2'));
+  const reply = deferred();
+  hold = reply.promise;
+  const asked = answers.length,
+    t2 = app.run(post('lamp', 't2'));
+  await until(() => answers.length > asked, 'the call to stock');
+  clock.fire();
+  await t2;
   T(
     'timeout: the caller span is done before the callee span exists',
     [logs.length, headOf(logs[0])?.name, callAt(logs[0] ?? [], (logs[0]?.length ?? 0) - 1)?.status],
     [1, 'orders', 'timeout'],
   );
-  await sleep(130);
+  reply.resolve();
+  await answers.at(-1);
   const [late] = spans(logs);
   T(
     'the late callee span joins the same trace',
@@ -562,9 +651,11 @@ fn stamp(out: Buf, roll: Int) -> Buf {
 }`;
   const m = new WebAssembly.Module(build(SRC).wasm),
     app = instantiate(m, {});
-  const out = text(app.handle(bytes(''))),
+  const before = Date.now(),
+    out = text(app.handle(bytes(''))),
+    after = Date.now(),
     [t = 0, roll = 0] = out.split(' ').map(Number);
-  T('now and random', [Math.abs(t - Date.now()) < 1000, roll >= 1 && roll <= 6], [true, true]);
+  T('now and random', [before <= t && t <= after, roll >= 1 && roll <= 6], [true, true]);
   T(
     'log has both',
     app.effects.slice(1).map(e => Object.keys(e)[0]),

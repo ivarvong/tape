@@ -40,6 +40,20 @@ const call = async (name: string, args: unknown): Promise<{ out: Fields; isError
   return { out: F(r['structuredContent']), isError: r['isError'] === true };
 };
 const results = (out: Fields): Fields[] => L(out['results']).map(F);
+/** A burst sent to a real rate limiter, from an address of its own, until one burst lands in one window. The
+ * binding's windows are the wall clock's (a minute, aligned to it), so a burst that straddles a boundary is counted
+ * in two windows and passes more than the limit; a loaded machine, slow to send it, makes that likelier. Each try
+ * uses a new address (a key of its own), and one that crossed a boundary is sent again. */
+const inOneWindow = async <T>(burst: (ip: string) => Promise<T>, base: number): Promise<T> => {
+  const windowNow = (): number => Math.floor(Date.now() / 60_000);
+  for (let i = 0; i < 4; i++) {
+    const began = windowNow();
+    // oxlint-disable-next-line no-await-in-loop -- one try at a time, each told by its own window
+    const out = await burst(`198.51.100.${base + i}`);
+    if (windowNow() === began) return out;
+  }
+  throw new Error('four bursts in a row crossed a minute boundary');
+};
 
 describe('tape-mcp in workerd', () => {
   it('cannot compile Wasm itself, which is why programs run in a Dynamic Worker', async () => {
@@ -221,19 +235,23 @@ describe('tape-mcp in workerd', () => {
     const http = await post('/v1/feedback', { text: 'as JSON' });
     expect([http.status, http.json['ok']]).toEqual([200, true]);
     // its own limiter: TIGHT allows two a minute
-    const req = (): Request =>
+    const req = (ip: string): Request =>
       new Request('https://tape-mcp/v1/feedback', {
         method: 'POST',
-        headers: { ...headers, 'cf-connecting-ip': '198.51.100.99' },
+        headers: { ...headers, 'cf-connecting-ip': ip },
         body: '{"text":"x"}',
       });
     if (!env.TIGHT) throw new Error('vitest.config.ts gives no TIGHT limiter');
     const tight = { ...env, FEEDBACK_RATE: env.TIGHT };
-    const codes: unknown[] = [];
-    for (let i = 0; i < 3; i++) {
-      const res = await worker.fetch(req(), tight, createExecutionContext());
-      codes.push(res.status === 200 ? 200 : F(await res.json())['error']);
-    }
+    const codes = await inOneWindow(async ip => {
+      const got: unknown[] = [];
+      for (let i = 0; i < 3; i++) {
+        // oxlint-disable-next-line no-await-in-loop -- in order: the third is the one past the limit
+        const res = await worker.fetch(req(ip), tight, createExecutionContext());
+        got.push(res.status === 200 ? 200 : F(await res.json())['error']);
+      }
+      return got;
+    }, 100);
     expect(codes).toEqual([200, 200, 'feedback_rate_limited']);
   });
 
@@ -262,7 +280,12 @@ describe('tape-mcp in workerd', () => {
   });
 
   it('refuses everything when the kill switch is on or IP_SALT is missing, and over the real rate limit', async () => {
-    const req = (): Request => new Request('https://tape-mcp/v1/compile', { method: 'POST', headers, body: '{}' });
+    const req = (ip = headers['cf-connecting-ip']): Request =>
+      new Request('https://tape-mcp/v1/compile', {
+        method: 'POST',
+        headers: { ...headers, 'cf-connecting-ip': ip },
+        body: '{}',
+      });
     const off = await worker.fetch(req(), { ...env, KILL_SWITCH: 'on' }, createExecutionContext());
     expect([off.status, F(await off.json())['error']]).toEqual([503, 'disabled']);
     const { IP_SALT: _salt, ...unsalted } = env;
@@ -270,9 +293,14 @@ describe('tape-mcp in workerd', () => {
     expect([bare.status, F(await bare.json())['error']]).toEqual([503, 'misconfigured']);
     const tight = env.TIGHT;
     if (!tight) throw new Error('vitest.config.ts gives no TIGHT limiter');
-    const statuses: number[] = [];
-    for (let i = 0; i < 4; i++)
-      statuses.push((await worker.fetch(req(), { ...env, RATE: tight }, createExecutionContext())).status);
+    const statuses = await inOneWindow(async ip => {
+      const got: number[] = [];
+      for (let i = 0; i < 4; i++) {
+        // oxlint-disable-next-line no-await-in-loop -- in order: the third and fourth are past the limit
+        got.push((await worker.fetch(req(ip), { ...env, RATE: tight }, createExecutionContext())).status);
+      }
+      return got;
+    }, 200);
     expect(statuses).toEqual([200, 200, 429, 429]);
   });
 });

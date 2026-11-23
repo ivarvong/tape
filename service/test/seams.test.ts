@@ -10,7 +10,7 @@ import fulfillment from '../../examples/fulfillment.tape?raw';
 import { kvSeams, workflowSeams, coverage } from '../jepsen/seams.ts';
 import type { Anomaly } from '../jepsen/traces.ts';
 import type { Case } from '../jepsen/seams.ts';
-import { send } from './help.ts';
+import { roomy, send } from './help.ts';
 import { sender } from './jepsen-run.ts';
 import { env } from 'cloudflare:workers';
 
@@ -50,7 +50,9 @@ describe.concurrent('seams: every fault kind at every position, one per run', ()
       Array.from({ length: of }, (_, i) =>
         workflowSeams(
           sender(of === 1 ? 'jepsen-seamwf' : `jepsen-seamwf${i}`),
-          { tickets, payments, inventory, shipping, fulfillment },
+          // roomy: the base run's buy answers in its budget however loaded the machine, so every slice counts the same
+          // positions; the buy's timeouts come from the faults injected at it (race, drop, lost), not from the load
+          { tickets: roomy(tickets), payments, inventory, shipping, fulfillment },
           { slice: [i, of] },
         ),
       ),

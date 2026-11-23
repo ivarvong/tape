@@ -3,16 +3,19 @@ import { describe, expect, it } from 'vitest';
 import { env } from 'cloudflare:workers';
 import { runInDurableObject } from 'cloudflare:test';
 import hello from '../../examples/hello.tape?raw';
-import tickets from '../../examples/tickets.tape?raw';
+import example from '../../examples/tickets.tape?raw';
 import payments from '../../examples/payments.tape?raw';
 import inventory from '../../examples/inventory.tape?raw';
 import shipping from '../../examples/shipping.tape?raw';
 import fulfillment from '../../examples/fulfillment.tape?raw';
 import { docOf } from '../jepsen/traces.ts';
 import type { Attr, RawEvent, RawResource, RawSpan } from '../jepsen/traces.ts';
-import { anyone, at, call, fields, got, json, list, num, pause, text } from './help.ts';
+import { anyone, at, call, fields, got, json, list, num, pause, roomy, text } from './help.ts';
 import type { Fields } from '../jepsen/json.ts';
 import type { Init } from './help.ts';
+
+// the box office with room in its first charge's budget (help.ts roomy): no outcome below is the machine's speed
+const tickets = roomy(example);
 
 const upload = (name: string, source: string): Promise<unknown> =>
   got(`/ivar/${name}`, { method: 'POST', body: source });
@@ -122,12 +125,12 @@ describe('tape service', () => {
     const declined = await buy('{"key":"b4","section":"balcony","qty":2,"card":"bob-0001"}');
     expect([declined.status, at(await json(declined), 'error')]).toEqual([402, 'card declined: not enough funds']);
     const trace = await (await opened(declined.headers.get('tape-trace-url'))).text();
-    expect(trace).toContain('call payments.charge within 50 ms → rejected');
+    expect(trace).toContain('call payments.charge within 2000 ms → rejected');
   });
 
   it('retries a timed-out charge with the same key: payments answers from its stored reply, and both sides show it', async () => {
     await upload('payments', payments);
-    await upload('retry', tickets.replace('within: 50', 'within: 1')); // the first attempt cannot answer in 1 ms
+    await upload('retry', example.replace('within: 50', 'within: 1')); // the first attempt cannot answer in 1 ms
     const first = await call('/ivar/retry/v/1/buy', {
       method: 'POST',
       body: '{"key":"b5","section":"balcony","qty":2,"card":"bob-0001"}',

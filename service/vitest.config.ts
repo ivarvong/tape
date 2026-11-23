@@ -28,8 +28,9 @@ const miniflare = {
     TIGHT: { namespace_id: '7102', simple: { limit: 2, period: 60 } },
   } as const,
 };
-// Files run one at a time: some tests give a call a 50 ms budget, which a cold Durable Object meets only when another
-// test file is not loading the machine at the same time.
+// Files run one at a time: the Jepsen runs keep the box office's 50 ms first charge (a timeout there is one more
+// outcome they check), and the faults' waits are tens of ms; another file loading the machine moves both. Tests that
+// need that charge answered run it with room (test/help.ts roomy), so their outcomes do not depend on the load.
 export default defineConfig({
   plugins: [erased(), bytes(), cloudflareTest({ main: './src/index.ts', miniflare })],
   test: { fileParallelism: false },

@@ -62,6 +62,16 @@ export const pause = (ms: number): Promise<void> =>
   new Promise(resolve => {
     setTimeout(resolve, ms);
   });
+/** examples/tickets.tape with its first charge's budget, 50 ms, made 2000 ms (the budget its retries already have).
+ * An idle machine answers that call in a few ms; one at load 40 can take longer than 50 (a cold object, a starved
+ * core), and the buy then answers 504 for the machine's sake: a test that wanted 201, or the 503 of an unreachable
+ * callee, fails, and a seams base run counts a retry's call that the others do not. A test whose subject is that
+ * budget makes the timeout itself (within: 1) or injects it (src/faults.ts). */
+export const roomy = (tickets: string): string => {
+  const first = 'charge(id, section, qty, card, amount, within: 50)';
+  if (!tickets.includes(first)) throw new Error(`examples/tickets.tape no longer has ${first}`);
+  return tickets.replace(first, 'charge(id, section, qty, card, amount, within: 2000)');
+};
 /** Matchers for a value of a kind, whatever it is. */
 export const anyString: unknown = expect.any(String);
 export const anyNumber: unknown = expect.any(Number);
