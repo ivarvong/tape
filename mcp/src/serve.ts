@@ -92,6 +92,26 @@ async function capped(request: Request): Promise<string | null> {
   return new TextDecoder().decode(all);
 }
 
+/** Read a body to its end and drop it (up to 2 × MAX_BODY, then cancel): the request is finished before the answer. */
+async function drain(body: ReadableStream): Promise<void> {
+  const reader = body.getReader();
+  let n = 0;
+  try {
+    for (;;) {
+      const chunk = await reader.read();
+      if (chunk.done) return;
+      const value: unknown = chunk.value;
+      n += value instanceof Uint8Array ? value.length : 1;
+      if (n > 2 * MAX_BODY) {
+        await reader.cancel();
+        return;
+      }
+    }
+  } catch {
+    // the client went away: nothing more to read
+  }
+}
+
 // ---- the tools as MCP lists them
 
 const FILES_SCHEMA = {
@@ -370,10 +390,8 @@ export async function serve(request: Request, deps: Deps, gate: Gate): Promise<R
   const res = secured(await route(request, url, deps, gate, seen, meta));
   // a call refused before its body was read still finishes with the body: reached through the tape Worker's service
   // binding, a body left unread is logged there as an error after the answer is sent
-  if (request.body && !request.bodyUsed)
-    await request.body.cancel().catch(() => {
-      // nothing more to read, or the client went away: either way it is done
-    });
+  // Drain it rather than cancel it: a cancel can still race the binding's pump, a body read to its end cannot.
+  if (request.body && !request.bodyUsed && !request.body.locked) await drain(request.body);
   meta.status = res.status;
   meta.total_ms = Date.now() - t0;
   gate.log(logLine(seen, meta));
