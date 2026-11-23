@@ -29,6 +29,7 @@ const HELLO = readFileSync(`${ROOT}examples/hello.tape`, 'utf8');
 const LIMITS_TAPE = readFileSync(`${HERE}test/limits.tape`, 'utf8');
 const UNDONE_TAPE = readFileSync(`${HERE}test/undone.tape`, 'utf8');
 const CLOCK_TAPE = readFileSync(`${HERE}test/clock.tape`, 'utf8');
+const REMOTE_TAPE = readFileSync(`${HERE}test/remote.tape`, 'utf8');
 const README = readFileSync(`${ROOT}README.md`, 'utf8');
 
 type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM; feedback: typeof FeedbackM };
@@ -88,12 +89,13 @@ type Deps = ToolsM.Deps;
 const depsOf = (m: Mods, over: Partial<Deps> = {}): Deps => ({
   std,
   hello: { name: 'hello.tape', text: HELLO },
-  run: async (program, requests) => {
+  run: async (program, requests, remotes) => {
     await m.runner.startSqlite(init, sqlite3);
     return m.runner.runAll(
       new WebAssembly.Module(program.wasm),
       requests,
       program.traced ? new WebAssembly.Module(program.traced) : null,
+      remotes,
     );
   },
   examples: (wasm, fns) => Promise.resolve(callExamples(new WebAssembly.Module(wasm), fns)),
@@ -270,11 +272,19 @@ function schemaPaths(schema: unknown, at = ''): string[] {
   return [
     ...branches.flatMap(b => schemaPaths(b, at)),
     ...(s['items'] === undefined ? [] : schemaPaths(s['items'], `${at}[]`)),
+    // a map (`remotes`: a Remote's name, then a method's): each key the caller chooses is `*`
+    ...(isFields(s['additionalProperties']) ? [`${at}.*`, ...schemaPaths(s['additionalProperties'], `${at}.*`)] : []),
     ...Object.entries(F(s['properties'])).flatMap(([k, x]) => {
       const p = at === '' ? k : `${at}.${k}`;
       return [p, ...schemaPaths(x, p)];
     }),
   ];
+}
+/** A path with each key of a map (a schema path ending in `.*`) written `*`, as schemaPaths names it. */
+function asNamed(path: string, named: ReadonlySet<string>): string {
+  const parts = path.split('.');
+  for (let i = 1; i < parts.length; i++) if (named.has(`${parts.slice(0, i).join('.')}.*`)) parts[i] = '*';
+  return parts.join('.');
 }
 /** Every field a value has, as schemaPaths names them. */
 function valuePaths(v: unknown, at = ''): string[] {
@@ -627,7 +637,7 @@ const tests: Test[] = [
         run: [
           { files, requests, trace: 'lines', effects: 'compact' },
           { requests, trace: 'full', effects: 'full' },
-          { requests, trace: 'none' },
+          { requests, trace: 'none', remotes: { payments: { charge: [{ payment: 1 }, 'timeout'] } } },
         ],
         feedback: ['bug', 'confusing', 'missing', 'idea', 'praise'].map(kind => ({
           text: 'x',
@@ -645,7 +655,7 @@ const tests: Test[] = [
           continue;
         }
         const named = new Set(schemaPaths(schema)),
-          given = new Set(args.flatMap(a => valuePaths(a))),
+          given = new Set(args.flatMap(a => valuePaths(a)).map(p => asNamed(p, new Set(schemaPaths(schema))))),
           read = new Set<string>();
         for (const p of named) if (!given.has(p)) out.push(`${name}: the test sets no ${p}, which the schema names`);
         for (const a of args) {
@@ -653,8 +663,9 @@ const tests: Test[] = [
           const r = await call(name, watched(a, read));
           if (m.tools.isRefusal(r)) out.push(`${name}: refused ${JSON.stringify(a).slice(0, 160)}: ${r.reason}`);
         }
-        for (const p of read) if (!named.has(p)) out.push(`${name}: reads ${p}, which its schema does not name`);
-        for (const p of named) if (!read.has(p)) out.push(`${name}: its schema names ${p}, which it never reads`);
+        const readNamed = new Set([...read].map(p => asNamed(p, named)));
+        for (const p of readNamed) if (!named.has(p)) out.push(`${name}: reads ${p}, which its schema does not name`);
+        for (const p of named) if (!readNamed.has(p)) out.push(`${name}: its schema names ${p}, which it never reads`);
         // a field neither names, at the top, in a file and in a request: both refuse it
         const base = args[0] ?? {};
         const odd: Fields[] = [
@@ -862,6 +873,59 @@ const tests: Test[] = [
           out.push(`request ${i + 1}: rows ${JSON.stringify(sql?.['rows'])}`);
         const steps = x['steps'];
         if (typeof steps !== 'number' || steps <= 0) out.push(`request ${i + 1}: steps ${String(x['steps'])}`);
+      }
+      return out;
+    },
+  },
+  {
+    name: 'remotes',
+    // run's scripted answers for a call to another program: each answer in order (an Ok value as JSON, a refusal,
+    // "timeout", "unreachable"), Unreachable once they run out, a repeated once key answered as its first send was,
+    // each in the effect log, and each request replayed from that log alone. The statuses and bodies wanted are what
+    // test/remote.tape says each outcome answers, given the script, not what the runner does
+    run: async m => {
+      const out: string[] = [];
+      const files = [{ name: 'remote.tape', text: REMOTE_TAPE }];
+      const remotes = {
+        payments: {
+          charge: [{ payment: 7 }, { error: 'Rejected', reason: 'card declined' }, 'timeout', 'unreachable'],
+        },
+      };
+      const requests = ['POST /pay/1', 'POST /pay/2', 'POST /pay/3', 'POST /pay/4', 'POST /pay/1', 'POST /pay/5'];
+      const { out: r, isError } = await tool(m, 'run', { files, requests, remotes });
+      const rs = RESULTS(r);
+      const got = rs.map(x => `${String(x['status'])} ${String(x['body'])}`);
+      const want = ['201 7', '402 card declined', '504 ', '503 ', '201 7', '503 '];
+      if (isError || JSON.stringify(got) !== JSON.stringify(want)) out.push(`answers: ${JSON.stringify(got)}`);
+      const calls = rs.map(x =>
+        F(
+          L(x['effects'])
+            .map(F)
+            .find(e => e['kind'] === 'call'),
+        ),
+      );
+      const statuses = calls.map(c => c['status']);
+      if (
+        JSON.stringify(statuses) !== JSON.stringify(['ok', 'rejected', 'timeout', 'unreachable', 'ok', 'unreachable'])
+      )
+        out.push(`the effect log's calls: ${JSON.stringify(statuses)}`);
+      if (JSON.stringify(calls[0]?.['reply']) !== '{"payment":7}' || calls[1]?.['reply'] !== 'card declined')
+        out.push(`replies: ${JSON.stringify(calls[0]?.['reply'])} ${JSON.stringify(calls[1]?.['reply'])}`);
+      if (!rs.every(x => x['replayed'] === true))
+        out.push(`replayed: ${JSON.stringify(rs.map(x => x['replay_error'] ?? x['replayed']))}`);
+      // with no remotes, every call is Unreachable, as before
+      const none = RESULTS((await tool(m, 'run', { files, requests: ['POST /pay/1'] })).out)[0];
+      if (none?.['status'] !== 503) out.push(`without remotes: ${String(none?.['status'])}`);
+      // a script that is not one is refused, saying why
+      for (const bad of [
+        { payments: [1] },
+        { payments: { charge: 'x' } },
+        { payments: { charge: [{ error: 'Nope' }] } },
+        { payments: { charge: ['soon'] } },
+      ]) {
+        const b = await tool(m, 'run', { files, requests: ['POST /pay/1'], remotes: bad });
+        if (!b.isError || b.out['error'] !== 'bad_remotes')
+          out.push(`remotes ${JSON.stringify(bad)}: ${JSON.stringify(b.out).slice(0, 200)}`);
       }
       return out;
     },
@@ -1520,8 +1584,8 @@ const PLANTS: Plant[] = [
     test: 'list',
     what: "run's description leaves out the cheat sheet",
     file: 'serve.ts',
-    from: 'Calls to other programs answer Unreachable.\n\n${CHEAT_SHEET}',
-    to: 'Calls to other programs answer Unreachable.',
+    from: 'Calls to other programs answer Unreachable, or as \\`remotes\\` says.\n\n${CHEAT_SHEET}',
+    to: 'Calls to other programs answer Unreachable, or as \\`remotes\\` says.',
   },
   {
     test: 'list',

@@ -17,7 +17,7 @@ import type { Entry, Joined, JoinedCall, RunHead } from '../../service/src/recor
 import { finish, prepare } from '../../doctest.ts';
 import type { Called } from '../../host/examples.ts';
 import { NAME, TRACE_STEPS, UNREACHABLE } from './runner.ts';
-import type { Ran, RanAll, RunRequest } from './runner.ts';
+import type { Ran, RanAll, RunRequest, Scripts } from './runner.ts';
 
 export const LIMITS = {
   /** every file's text together, in UTF-8 bytes */
@@ -62,7 +62,7 @@ export type Deps = {
   std: readonly Source[];
   /** examples/hello.tape, the program used when no files are given */
   hello: Source;
-  run: (program: Program, requests: readonly RunRequest[]) => Promise<RanAll>;
+  run: (program: Program, requests: readonly RunRequest[], remotes: Scripts) => Promise<RanAll>;
   /** call a doc examples build's functions (doctest.ts), where Wasm can be instantiated: host/examples.ts */
   examples: (wasm: Uint8Array, fns: readonly string[]) => Promise<Called[]>;
   /** the wall-clock guard on a run call (LIMITS.wallMs; a test shortens it) */
@@ -196,6 +196,12 @@ export const REQUESTS_SCHEMA = {
   description:
     'Requests, run in order: "GET /hello/ada", "POST /path\\n<body>", or {"request": "GET /x", "at_ms": 61000} on the run\'s own clock (ms from its start, never going back).',
 } as const;
+export const REMOTES_SCHEMA = {
+  type: 'object',
+  description:
+    'Answers for calls to other programs, which otherwise answer Unreachable: {"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout", "unreachable"]}}, by the Remote parameter\'s name and the method. Each call takes the next answer for its method: the reply\'s value as JSON, a refusal, no answer in time, or none; once they run out, Unreachable. A repeated `once` key gets the answer its first send got.',
+  additionalProperties: { type: 'object', additionalProperties: { type: 'array', items: {} } },
+} as const;
 export const TRACE_MODES = ['lines', 'full', 'none'] as const;
 export const EFFECTS_MODES = ['compact', 'full'] as const;
 export const COMPILE_INPUT = {
@@ -215,6 +221,7 @@ export const RUN_INPUT = {
       description:
         'lines (the default for one request): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none (the default for more than one request: ask for lines to see them).',
     },
+    remotes: REMOTES_SCHEMA,
     effects: {
       type: 'string',
       enum: EFFECTS_MODES,
@@ -236,6 +243,41 @@ export const unknownKeys = (args: Fields, known: readonly string[]): Refusal | n
         `unknown argument ${extra.map(k => JSON.stringify(k)).join(', ')}: this tool takes ${known.join(' and ')}`,
       );
 };
+
+/** run's `remotes`, or why not: by Remote, by method, a list of answers (runner.ts Scripts). */
+export function remotesOf(args: Fields): Scripts | Refusal {
+  const given = args['remotes'];
+  if (given === undefined || given === null) return {};
+  const bad = (why: string): Refusal =>
+    refused(
+      400,
+      'bad_remotes',
+      `${why}; \`remotes\` is {"<Remote>": {"<method>": [answers]}}, an answer the reply's value, {"error": "Rejected", "reason": "…"}, "timeout" or "unreachable"`,
+    );
+  if (!isFields(given)) return bad('`remotes` is not an object');
+  let answers = 0;
+  const out: Record<string, Record<string, unknown[]>> = {};
+  for (const [to, methods] of Object.entries(given)) {
+    if (!isFields(methods)) return bad(`remotes.${to} is not an object of methods`);
+    const mine: Record<string, unknown[]> = {};
+    out[to] = mine;
+    for (const [method, list] of Object.entries(methods)) {
+      if (!Array.isArray(list)) return bad(`remotes.${to}.${method} is not a list`);
+      const listed: unknown[] = list;
+      mine[method] = listed;
+      answers += list.length;
+      for (const [i, a] of list.entries()) {
+        const at = `remotes.${to}.${method}[${i}]`;
+        if (typeof a === 'string' && a !== 'timeout' && a !== 'unreachable')
+          return bad(`${at} is ${JSON.stringify(a.slice(0, 40))}: a text answer is "timeout" or "unreachable"`);
+        if (isFields(a) && 'error' in a && (a['error'] !== 'Rejected' || typeof a['reason'] !== 'string'))
+          return bad(`${at} has "error" but is not {"error": "Rejected", "reason": "…"}`);
+      }
+    }
+  }
+  if (answers > LIMITS.requests * 4) return bad(`${answers} answers; a run takes at most ${LIMITS.requests * 4}`);
+  return out;
+}
 
 /** The program's files, as the compiler takes them, or why not. No files: examples/hello.tape. */
 export function filesOf(args: Fields, deps: Deps): Source[] | Refusal {
@@ -656,6 +698,8 @@ export async function runTool(
   if (isRefusal(trace)) return { result: trace, usage: null };
   const effects = modeOf<EffectsMode>(args, 'effects', EFFECTS_MODES, 'compact');
   if (isRefusal(effects)) return { result: effects, usage: null };
+  const remotes = remotesOf(args);
+  if (isRefusal(remotes)) return { result: remotes, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
   if (!built) return { result: { ok: false, diagnostics: c.diagnostics, results: [] }, usage };
@@ -666,7 +710,7 @@ export async function runTool(
   const t0 = Date.now();
   let all: RanAll | 'timeout';
   try {
-    all = await within(deps.run(program, requests), deps.wallMs ?? LIMITS.wallMs);
+    all = await within(deps.run(program, requests, remotes), deps.wallMs ?? LIMITS.wallMs);
   } catch (e) {
     usage.run_ms = Date.now() - t0;
     return {

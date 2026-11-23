@@ -8,6 +8,7 @@ import worker from '../src/index.ts';
 import hello from '../../examples/hello.tape?raw';
 import limits from './limits.tape?raw';
 import clock from './clock.tape?raw';
+import remote from './remote.tape?raw';
 import failures from '../../testdata/doctest-failures.tape?raw';
 
 type Fields = Record<string, unknown>;
@@ -180,6 +181,21 @@ describe('tape-mcp in workerd', () => {
     // log, by the traced build
     expect(String(rs[0]?.['trace'])).toMatch(/^handle\n/);
     expect(String(rs[0]?.['trace'])).toContain('✓ clock.tape:');
+  });
+
+  it("answers calls to another program from run's remotes, in the Dynamic Worker, and replays them", async () => {
+    const { out } = await call('run', {
+      files: [{ name: 'remote.tape', text: remote }],
+      requests: ['POST /pay/1', 'POST /pay/2', 'POST /pay/3'],
+      remotes: { payments: { charge: [{ payment: 7 }, { error: 'Rejected', reason: 'card declined' }] } },
+    });
+    const rs = results(out);
+    expect(rs.map(r => [r['status'], r['body']])).toEqual([
+      [201, '7'],
+      [402, 'card declined'],
+      [503, ''],
+    ]);
+    expect(rs.map(r => r['replayed'])).toEqual([true, true, true]);
   });
 
   it("keeps Tape's budget and the body limit inside the Dynamic Worker", async () => {

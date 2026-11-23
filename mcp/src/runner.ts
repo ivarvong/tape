@@ -11,7 +11,7 @@
 // request every timer due by then runs, oldest first (`woken`, as a result of its own), so a test can step past a
 // window or a retry delay. The host reads Date.now() (host/run.ts: now, wake and the due check), so the clock is
 // Date.now itself, replaced for the length of the run; runs in one isolate are taken one at a time for that.
-import { instantiate, isEffect, replay, traceOf } from './host.ts';
+import { TimedOut, instantiate, isEffect, replay, traceOf } from './host.ts';
 import type { App, Effect, Service, ServiceReply, TraceEvent } from './host.ts';
 import { loadSqlite, nodeSql, sqliteReady } from './sqlite.ts';
 import type { InitSqlJs, NodeSql, SqlJs } from './sqlite.ts';
@@ -102,7 +102,54 @@ export const seeded = (seed: number): (() => number) => {
   };
 };
 const unreachable: Service = (): ServiceReply => ({ status: 'unreachable', body: enc.encode(UNREACHABLE) });
-const services = new Proxy({}, { get: (_t, to) => (typeof to === 'string' ? unreachable : undefined) });
+
+/**
+ * run's `remotes`: for a Remote (by its parameter's name), for a method, the answers its calls get, in order. An
+ * answer is the reply's value (its JSON), {"error": "Rejected", "reason": …}, "timeout" or "unreachable" (tools.ts
+ * remotesOf checks the shape). The host makes each call as it makes any other (host/call.ts), so each lands in the
+ * effect log with its status and reply, and a replay answers it from there.
+ */
+export type Scripts = Readonly<Record<string, Readonly<Record<string, readonly unknown[]>>>>;
+export const SCRIPTED_OUT = "run's remotes have no more answers for this method: the call answers Unreachable";
+/** One answer as the host takes a service's: the reply's bytes, or a status and its body; 'timeout' for none. */
+function replyOf(answer: unknown): ServiceReply | 'timeout' {
+  if (answer === undefined) return { status: 'unreachable', body: enc.encode(SCRIPTED_OUT) };
+  if (answer === 'timeout') return 'timeout';
+  if (answer === 'unreachable') return { status: 'unreachable', body: enc.encode(UNREACHABLE) };
+  if (typeof answer === 'object' && answer !== null && 'error' in answer)
+    return { status: 'rejected', body: enc.encode(String('reason' in answer ? answer.reason : '')) };
+  return enc.encode(JSON.stringify(answer));
+}
+/** The services of a run: the scripted ones answer in order, and a repeated `once` key as its first send was. */
+function servicesOf(scripts: Scripts): Readonly<Record<string, Service>> {
+  const used = new Map<string, number>();
+  const kept = new Map<string, ServiceReply | 'timeout'>();
+  const scripted =
+    (to: string, methods: Readonly<Record<string, readonly unknown[]>>): Service =>
+    (_bytes, o) => {
+      const held = o.key === null ? undefined : kept.get(o.key);
+      let reply = held;
+      if (reply === undefined) {
+        const at = `${to}.${o.method}`,
+          n = used.get(at) ?? 0;
+        used.set(at, n + 1);
+        reply = replyOf(Object.hasOwn(methods, o.method) ? methods[o.method]?.[n] : undefined);
+        if (o.key !== null) kept.set(o.key, reply);
+      }
+      if (reply === 'timeout') throw new TimedOut();
+      return reply;
+    };
+  return new Proxy(
+    {},
+    {
+      get: (_t, to): Service | undefined => {
+        if (typeof to !== 'string') return void 0;
+        const methods = Object.hasOwn(scripts, to) ? scripts[to] : null;
+        return methods ? scripted(to, methods) : unreachable;
+      },
+    },
+  );
+}
 const stepsOf = (exports: WebAssembly.Instance['exports']): number => {
   const g = exports['cost'];
   return g instanceof WebAssembly.Global ? Number(g.value) : 0;
@@ -139,8 +186,9 @@ export function runAll(
   module: WebAssembly.Module,
   requests: readonly (string | RunRequest)[],
   traced: WebAssembly.Module | null = null,
+  remotes: Scripts = {},
 ): Promise<RanAll> {
-  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced));
+  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced, remotes));
   queue = mine.catch(() => null);
   return mine;
 }
@@ -204,6 +252,7 @@ async function runInOrder(
   module: WebAssembly.Module,
   requests: readonly RunRequest[],
   traced: WebAssembly.Module | null,
+  remotes: Scripts,
 ): Promise<RanAll> {
   const own = requests.some(r => r.at_ms !== null);
   const realNow = Date.now,
@@ -211,7 +260,7 @@ async function runInOrder(
   let t = 0;
   if (own) Date.now = () => start + t;
   try {
-    return await runEach(module, traced, requests, own, start, (ms: number) => {
+    return await runEach(module, traced, requests, own, start, remotes, (ms: number) => {
       t = ms;
     });
   } finally {
@@ -225,13 +274,14 @@ async function runEach(
   requests: readonly RunRequest[],
   own: boolean,
   start: number,
+  remotes: Scripts,
   setClock: (ms: number) => void,
 ): Promise<RanAll> {
   const db: NodeSql = nodeSql();
   try {
     let app: ReturnType<typeof instantiate>;
     try {
-      app = instantiate(module, { sql: db, name: NAME, services, random: seeded(7) });
+      app = instantiate(module, { sql: db, name: NAME, services: servicesOf(remotes), random: seeded(7) });
     } catch (e) {
       return { ok: false, error: `the program could not be linked to a fresh database: ${messageOf(e)}` };
     }

@@ -119,7 +119,8 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
 - `effects` is the request's effect log: each SQL statement as the program wrote it (its `:name` placeholders),
   the value bound to each name, and what it did: `rows_written` for a statement that wrote, `rows_returned` and the
   `rows` themselves for one that returned rows (an INSERT, UPDATE or DELETE with `RETURNING` has both); calls to
-  other programs (`kind: "call"`, which answer Unreachable here: one program runs at a time), clock reads (`now`),
+  other programs (`kind: "call"`, with its `status` and `reply`: Unreachable here unless `remotes` answers it, as
+  below), clock reads (`now`),
   random draws and timers set (`wake`). A BLOB is `{"base64": …}`. With `effects: "compact"` (the default) a
   statement that returned more than 20 rows shows only `rows_returned`; `effects: "full"` shows every row (and no
   `rows_returned`).
@@ -136,6 +137,14 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   gives `trace: null`, and is the default when the call has more than one request (fifty line traces made answers
   of 50,000 characters and more, which clients do not show): ask for `"lines"` to see them. A full trace is most
   of an answer's size: ask for it when you need the spans themselves.
+- `remotes` answers calls to other programs, which otherwise answer Unreachable (one program runs at a time):
+  `{"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout",
+  "unreachable"]}}`, by the name of the program's `Remote` parameter and the method. Each call takes the next answer
+  for its method, across the run's requests and timers: the reply's value as JSON (`Ok`), a refusal (`Rejected`, its
+  `reason`), `"timeout"` (no answer in time: `Timeout`), `"unreachable"`; once they run out, Unreachable. A repeated
+  `once` key gets the answer its first send got, as a program that keeps its replies answers. Each call is in the
+  effect log with what it got, and the replay answers it from there, so a request replays to the same bytes.
+  [`mcp/test/remote.tape`](../mcp/test/remote.tape) answers each outcome; at most 200 answers a run.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got
   the same bytes back (or, for a trap, the same trap). `replay_error` says why when it did not.
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive

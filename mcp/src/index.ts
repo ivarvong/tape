@@ -23,7 +23,7 @@ import hostSchema from '../../host/schema.ts?erased';
 import { serve } from './serve.ts';
 import { LIMITS } from './tools.ts';
 import type { Deps, Program } from './tools.ts';
-import type { RanAll, RunRequest } from './runner.ts';
+import type { RanAll, RunRequest, Scripts } from './runner.ts';
 import type { Runner } from './loaded.ts';
 import type { Called } from '../../host/examples.ts';
 import type { Store } from './feedback.ts';
@@ -78,10 +78,10 @@ async function runnerOf(env: Env, program: Uint8Array, traced: Uint8Array) {
 
 const runIn =
   (env: Env) =>
-  async (program: Program, requests: readonly RunRequest[]): Promise<RanAll> => {
+  async (program: Program, requests: readonly RunRequest[], remotes: Scripts = {}): Promise<RanAll> => {
     const traced = program.traced ?? program.wasm;
     const runner = await runnerOf(env, program.wasm, traced);
-    return runner.run([...requests], program.traced !== undefined);
+    return runner.run([...requests], program.traced !== undefined, remotes);
   };
 /** A doc examples build (doctest.ts), its functions called in a Dynamic Worker: this Worker cannot compile Wasm. */
 const examplesIn =
