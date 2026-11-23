@@ -8,10 +8,13 @@ export class SqlError extends Error {
   readonly kind: SqlErrorKind;
   /** offset into the statement's text */
   readonly pos: number;
-  constructor(kind: SqlErrorKind, message: string, pos: number) {
+  /** what to write instead, when the error knows better than its kind's general advice */
+  readonly fix: string | undefined;
+  constructor(kind: SqlErrorKind, message: string, pos: number, fix?: string) {
     super(message);
     this.kind = kind;
     this.pos = pos;
+    this.fix = fix;
   }
 }
 

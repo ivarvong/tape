@@ -237,4 +237,33 @@ same(
   );
 }
 
+// ---- a keyword of SQL where a name goes. `SELECT src AS from` (a row type with fields from and to, as a transfer
+// has) was C67 "expected a column alias at "from"", with the fix for SQL outside the checker's subset (no WITH, no
+// triggers…). The message now says it is a keyword, the fix says to quote it, and the quoted form compiles.
+{
+  const ALIAS = `schema "CREATE TABLE tr(id INTEGER PRIMARY KEY, src TEXT NOT NULL, dst TEXT NOT NULL)"
+
+type Tr { Tr(from: View, to: View) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match sql_first(row: Tr, query: "SELECT src AS from, dst AS to FROM tr WHERE id = 1") {
+    Some(value) -> respond(status: 200) |> append(view: value.from)
+    None -> respond(status: 404)
+  }
+}
+`;
+  const s = said(ALIAS);
+  same(
+    'C67 names the keyword',
+    [code(s), s === 'compiled' ? '' : s.message],
+    ['C67:6', 'sql_first cannot take this query: expected a column alias at "from", which is a keyword of SQL'],
+  );
+  same('…and its fix shows it quoted', hint(s).includes('AS "from"'), true);
+  same(
+    'the quoted form compiles',
+    said(ALIAS.replace('AS from, dst AS to', 'AS \\"from\\", dst AS \\"to\\"')),
+    'compiled',
+  );
+}
+
 finish();

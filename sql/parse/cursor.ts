@@ -81,6 +81,14 @@ export class Cursor {
     const t = this.peek();
     const text =
       t.t === 'id' ? t.v : t.t === 'kw' && NAME_OK.has(t.v) ? t.raw : t.t === 'str' && what !== 'column' ? t.v : null;
+    // a keyword where a name goes (`AS from`): SQL takes it as a name only in double quotes
+    if (text === null && t.t === 'kw')
+      throw new SqlError(
+        'syntax',
+        `expected ${what ?? 'a name'} at ${this.near(t)}, which is a keyword of SQL`,
+        t.s,
+        `As a name, a keyword of SQL is written in double quotes: AS "${lc(t.raw)}" (a row type's field may have that name), or pick another name.`,
+      );
     if (text === null) return this.fail(`expected ${what ?? 'a name'}`);
     this.pos++;
     return text;

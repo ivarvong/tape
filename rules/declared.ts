@@ -37,7 +37,8 @@ function unreadable({ prog, model, queries, bad }: Reading): void {
         'C67',
         q.at,
         `${q.via} cannot take this query: ${q.error.message}`,
-        "Write it in the SQL the checker reads: one SELECT, INSERT, UPDATE or DELETE on the program's own tables, without WITH, triggers, schema names or window functions.",
+        q.error.fix ??
+          "Write it in the SQL the checker reads: one SELECT, INSERT, UPDATE or DELETE on the program's own tables, without WITH, triggers, schema names or window functions.",
       );
 }
 
