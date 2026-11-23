@@ -236,6 +236,20 @@ function rewrite(what: string, names: readonly string[], args: readonly Arg[]): 
   return shown.includes(null) || shown.some(t => t?.includes('…')) ? '' : `, as in \`${fn}(${shown.join(', ')})\``;
 }
 
+/**
+ * The call written out with each argument named by the parameter in its place, when there is one argument for each
+ * (`every_byte(self, fn(…) …)` is `every_byte(v: self, keep: fn(…) …)`), or ''. A long argument is shown cut.
+ */
+function byPosition(what: string, names: readonly string[], args: readonly Arg[]): string {
+  const fn = callee(what);
+  if (fn === undefined || args.length !== names.length || args.some(a => a.piped)) return '';
+  const shown = args.map((a, i) => {
+    const name = a.label !== null && !a.pun && names.includes(a.label) ? a.label : names[i];
+    return name === undefined ? null : shownArg(name, a);
+  });
+  return shown.includes(null) ? '' : `write \`${fn}(${shown.join(', ')})\``;
+}
+
 /** The call with the one argument that names no parameter given the one parameter no argument names, or ''. */
 function renamed(what: string, names: readonly string[], args: readonly Arg[], wrong: Arg): string {
   const fn = callee(what);
@@ -282,7 +296,7 @@ export function orderArgs(
         `${what} takes ${list}, so each argument is \`name: value\`${rewrite(what, written, given)}. A variable with the parameter's name can be passed bare, and so can the one argument of a function with one parameter.`,
       );
     if (!names.includes(a.label)) {
-      const fix = renamed(what, written, given, a);
+      const fix = renamed(what, written, given, a) || (a.pun ? byPosition(what, written, given) : '');
       fail(
         a,
         'C11',

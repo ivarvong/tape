@@ -529,4 +529,16 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   }
 }
 
+// ---- a call written by position, a refinement's `self` first. `every_byte(self, fn(b: Int) -> Bool { … })` (5 bench
+// runs, copying the guide's prose `every_byte(v, keep)`) was C11 "no parameter self", with the fix "write the
+// parameter name, then the value". The fix now writes the call out with each name, and that call compiles.
+{
+  const SLUG =
+    'type Slug = View where len(self) >= 1 and every_byte(self, fn(b: Int) -> Bool { is_lower(b) or b == 45 })\n\nfn handle(raw: View) -> Buf {\n  match request(raw).path {\n    "/s/" ++ Slug(s) -> respond(status: 200) |> append(view: s)\n    _ -> respond(status: 404)\n  }\n}\n';
+  const s = said(SLUG);
+  same('every_byte(self, …): C11 at the call', code(s), 'C11:1');
+  same('…and its fix writes the call with names', hint(s).includes('write `every_byte(v: self, keep: …)`'), true);
+  same('…which compiles', said(SLUG.replace('every_byte(self, fn', 'every_byte(v: self, keep: fn')), 'compiled');
+}
+
 finish();
