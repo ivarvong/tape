@@ -79,6 +79,38 @@ hello.tape:11: C54 run twice (a retried request, a timer that fires again), this
   depends on the row it changes, and nothing at the top level of its WHERE stops a second run
 ```
 
+`repeat: True` is right there because a greeting repeated is another greeting: the count is meant to grow on every
+attempt. That is the rare case. A write meant to happen once per request, such as a debit, takes no flag: the
+request claims its id first, and a second run stops at the claim (with the claim, `repeat: True` is refused, C88):
+
+```tape
+migration 1 "accounts" {
+  CREATE TABLE accounts(id TEXT PRIMARY KEY NOT NULL, balance INTEGER NOT NULL CHECK (balance >= 0));
+  CREATE TABLE debits(id TEXT PRIMARY KEY NOT NULL)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(method: "POST", path: "/debit/" ++ id) -> debited(id)
+    _ -> respond(status: 404)
+  }
+}
+
+// once per debit id: a second run finds the claim and stops there, so the debit needs no `repeat: True`
+fn debited(id: View) -> Buf {
+  let 1 = sql_exec(
+    query: "INSERT INTO debits(id) VALUES (:id) ON CONFLICT(id) DO NOTHING",
+    id
+  ) else -> respond(status: 200)
+  let 1 = sql_exec(
+    query: "UPDATE accounts SET balance = balance - 5 WHERE id = 'ada' AND balance >= 5"
+  ) else -> rollback(
+    out: respond(status: 409)
+  )
+  respond(status: 201)
+}
+```
+
 What that shows of the design:
 
 - **One way to do things.** A request is matched, an effect is a call that takes a capability (`db: Sql`), and a
