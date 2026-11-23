@@ -161,9 +161,9 @@ fn header_text(name: View, value: View) -> View {
       or not every_byte(v: name, keep: token_byte) -> "!invalid header name"
     len(value) > 4096
       or not every_byte(
-      v: value,
-      keep: value_byte
-    ) -> "!invalid header value for \(lower(text: name))"
+        v: value,
+        keep: value_byte
+      ) -> "!invalid header value for \(lower(text: name))"
     else -> "\(lower(text: name)): \(value)"
   }
 }
@@ -294,10 +294,10 @@ fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
       and at + 2 < len(raw)
       and is_hex(raw[at + 1])
       and is_hex(raw[at + 2]) -> form_bytes(
-      out: push(buf: out, byte: (hex(raw[at + 1]) << 4) | hex(raw[at + 2])),
-      raw,
-      at: at + 3
-    )
+        out: push(buf: out, byte: (hex(raw[at + 1]) << 4) | hex(raw[at + 2])),
+        raw,
+        at: at + 3
+      )
     else -> form_bytes(out: push(buf: out, byte: raw[at]), raw, at: at + 1)
   }
 }

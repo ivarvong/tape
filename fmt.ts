@@ -171,17 +171,20 @@ function space(a: Prev, b: Tok, beforeA: Prev): string {
 /** A line being laid out: how far it is indented, its text so far, the two tokens before the next, and which
  * tokens it holds (from, and up to but not including, to). */
 type Line = { indent: number; out: string; prev: Prev; before: Prev; from: number; to: number };
-/** A bracket left open, and the line it was opened on. */
-type Open = { ch: string; line: number };
+/** A bracket left open, the line it was opened on, and how far that line is indented. */
+type Open = { ch: string; line: number; indent: number };
 
-/** How far a line that starts at token k is indented: closers at its start count against it. */
+/** How far a line that starts at token k is indented: once more than the line that opened the innermost bracket
+ * still open, so a bracket opened on a carried line (`|> append(`) indents what is inside it past that line; a line
+ * that starts with closers stands where the line that opened the last of them stands, even when that line opened
+ * another bracket still open (`twice(n: match n {` … `}, m: 3)`). */
 function indentAt(toks: readonly Tok[], k: number, stack: readonly Open[]): number {
   const s = stack.slice();
-  let closed: number | null = null;
-  for (let j = k; toks[j]?.t === 'op' && CLOSER[s.at(-1)?.ch ?? ''] === toks[j]?.v; j++) closed = s.pop()?.line ?? null;
-  // a closer stands where the line that opened it stands, even when that line opened another bracket still open
-  // (`twice(n: match n {` … `}, m: 3)`)
-  return new Set(s.flatMap(o => (closed === null || o.line < closed ? [o.line] : []))).size;
+  let closed: Open | null = null;
+  for (let j = k; toks[j]?.t === 'op' && CLOSER[s.at(-1)?.ch ?? ''] === toks[j]?.v; j++) closed = s.pop() ?? null;
+  if (closed) return closed.indent;
+  const inner = s.at(-1);
+  return inner ? inner.indent + 1 : 0;
 }
 
 /** The lines of a file, each with its spacing fixed; null for a run of blank lines. */
@@ -208,7 +211,7 @@ function layOut(toks: readonly Tok[]): (Line | null)[] {
     line.out += space(line.prev, x, line.before) + x.v;
     line.to = k + 1;
     if (x.t === 'sql' || x.t === 'str') lineNo += (x.v.match(/\n/g) ?? []).length;
-    if (x.t === 'op' && Object.hasOwn(CLOSER, x.v)) stack.push({ ch: x.v, line: lineNo });
+    if (x.t === 'op' && Object.hasOwn(CLOSER, x.v)) stack.push({ ch: x.v, line: lineNo, indent: line.indent });
     else if (x.t === 'op' && (x.v === ')' || x.v === ']' || x.v === '}')) stack.pop();
     [line.before, line.prev] = [line.prev, x];
   }

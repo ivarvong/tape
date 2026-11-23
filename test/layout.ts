@@ -89,4 +89,11 @@ same(
   body('respond(status: 200)'),
 );
 
+const arg = `"aa ${'a'.repeat(80)}"`;
+same(
+  'a call broken after a `|>` has its arguments inside the `|>` line, and its closer where that line stands',
+  format(body(`buf() |> append(view: ${arg}) |> append(view: "x")`)),
+  `fn handle(raw: View) -> Buf {\n  buf()\n    |> append(\n      view: ${arg}\n    )\n    |> append(view: "x")\n}\n`,
+);
+
 finish();

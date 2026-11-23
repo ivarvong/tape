@@ -199,10 +199,10 @@ fn handle(raw: View, db: Sql, pay: Remote, clock: Clock, timer: Timer, dice: Ent
       path: "/users/" ++ buyer ++ "/tickets"
     ) -> respond_as(status: 200, content: Json)
       |> write_rows(rows: sql_all(
-      row: Ticket,
-      query: "SELECT * FROM tickets WHERE owner = :buyer ORDER BY id",
-      buyer
-    ))
+        row: Ticket,
+        query: "SELECT * FROM tickets WHERE owner = :buyer ORDER BY id",
+        buyer
+      ))
     Request(
       method: "GET",
       path: "/holds/" ++ decimal(id)
@@ -1128,8 +1128,8 @@ fn event_json(out: Buf, event: Event) -> Buf {
     |> write_json_string(text: state)
     |> append(view: ",\"tiers\":")
     |> write_rows(
-    rows: sql_all(row: Tier, query: "SELECT * FROM tiers WHERE event = :id ORDER BY id", id)
-  )
+      rows: sql_all(row: Tier, query: "SELECT * FROM tiers WHERE event = :id ORDER BY id", id)
+    )
     |> append(view: "}")
 }
 
@@ -1193,8 +1193,8 @@ fn form_post(form: View, query: View, body: View) -> Buf {
       body: freeze(buf: buf() |> append(view: "{\"from\":") |> write_json_string(
         text: text_of(field: form_field(body, name: "from"))
       ) |> append(view: ",\"to\":") |> write_json_string(
-          text: text_of(field: form_field(body, name: "to"))
-        ) |> append(view: "}"))
+        text: text_of(field: form_field(body, name: "to"))
+      ) |> append(view: "}"))
     ))
     _ -> message_page(
       status: 404,
@@ -1210,12 +1210,12 @@ fn hold_json(form: View) -> View {
   freeze(buf: buf() |> append(view: "{\"key\":") |> write_json_string(
     text: text_of(field: form_field(body: form, name: "key"))
   ) |> append(view: ",\"tier\":") |> write_int(
-      value: number(field: form_field(body: form, name: "tier"))
-    ) |> append(view: ",\"buyer\":") |> write_json_string(
-      text: text_of(field: form_field(body: form, name: "buyer"))
-    ) |> append(view: ",\"qty\":") |> write_int(
-      value: number(field: form_field(body: form, name: "qty"))
-    ) |> append(view: "}"))
+    value: number(field: form_field(body: form, name: "tier"))
+  ) |> append(view: ",\"buyer\":") |> write_json_string(
+    text: text_of(field: form_field(body: form, name: "buyer"))
+  ) |> append(view: ",\"qty\":") |> write_int(
+    value: number(field: form_field(body: form, name: "qty"))
+  ) |> append(view: "}"))
 }
 
 fn held_page(outcome: Outcome) -> Buf {
@@ -1318,9 +1318,9 @@ fn page_events(out: Buf, rows: Rows[Event]) -> Buf {
         |> append(view: " &middot; \
             \(event_state(state))</p><table><tr><th>Tier</th><th>Price</th><th>Left</th><th></th></tr>")
         |> page_tiers(
-        rows: sql_all(row: Tier, query: "SELECT * FROM tiers WHERE event = :id ORDER BY id", id),
-        open: state == "onsale"
-      )
+          rows: sql_all(row: Tier, query: "SELECT * FROM tiers WHERE event = :id ORDER BY id", id),
+          open: state == "onsale"
+        )
         |> append(view: "</table>"),
       rows: rest
     )
@@ -1418,10 +1418,10 @@ fn hold_actions(out: Buf, hold: Hold) -> Buf {
     "confirmed" -> out
       |> append(view: "<p>Paid. Your tickets are below.</p>")
       |> ticket_rows(rows: sql_all(
-      row: Ticket,
-      query: "SELECT * FROM tickets WHERE hold = :id ORDER BY seat",
-      id
-    ))
+        row: Ticket,
+        query: "SELECT * FROM tickets WHERE hold = :id ORDER BY seat",
+        id
+      ))
     _ -> out
   }
 }
@@ -1447,25 +1447,26 @@ type MyHold { MyHold(id: Int, qty: Int, state: View, tier: View) }
 fn me_page(status: Int, buyer: View) -> Buf {
   page_top(status, title: "Tickets of " ++ buyer)
     |> append(
-    view: "<table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr>"
-  )
-    |> my_tickets(
-    buyer,
-    rows: sql_all(
-      row: Mine,
-      query: "SELECT k.id AS id, k.seat AS seat, k.state AS state, e.name AS event, t.name \
-          AS tier FROM tickets AS k JOIN holds AS h ON h.id = k.hold JOIN tiers AS t \
-          ON t.id = h.tier JOIN events AS e ON e.id = t.event WHERE k.owner = :buyer ORDER BY k.id",
-      buyer
+      view: "<table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr>"
     )
-  )
+    |> my_tickets(
+      buyer,
+      rows: sql_all(
+        row: Mine,
+        query: "SELECT k.id AS id, k.seat AS seat, k.state AS state, e.name AS event, t.name \
+            AS tier FROM tickets AS k JOIN holds AS h ON h.id = k.hold JOIN tiers AS t \
+            ON t.id = h.tier JOIN events AS e ON e.id = t.event WHERE k.owner = :buyer \
+            ORDER BY k.id",
+        buyer
+      )
+    )
     |> append(view: "</table><h2>Holds</h2>")
     |> my_holds(rows: sql_all(
-    row: MyHold,
-    query: "SELECT h.id AS id, h.qty AS qty, h.state AS state, t.name AS tier FROM holds AS h \
-        JOIN tiers AS t ON t.id = h.tier WHERE h.buyer = :buyer ORDER BY h.id DESC LIMIT 20",
-    buyer
-  ))
+      row: MyHold,
+      query: "SELECT h.id AS id, h.qty AS qty, h.state AS state, t.name AS tier FROM holds AS h \
+          JOIN tiers AS t ON t.id = h.tier WHERE h.buyer = :buyer ORDER BY h.id DESC LIMIT 20",
+      buyer
+    ))
     |> page_end
 }
 
@@ -1491,8 +1492,8 @@ fn give_form(out: Buf, id: Int, buyer: View, state: View) -> Buf {
   match state {
     "valid" -> out
       |> append(
-      view: "<form method=post action=\"give?id=\(id)\"><input type=hidden name=from value=\""
-    )
+        view: "<form method=post action=\"give?id=\(id)\"><input type=hidden name=from value=\""
+      )
       |> write_html(text: buyer)
       |> append(view: "\"><input name=to placeholder=\"give to\" required maxlength=40> \
           <button>Transfer</button></form>")

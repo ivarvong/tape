@@ -321,10 +321,10 @@ fn low_half(high: Int, low: Option[Int], next: Int) -> JsonChar {
   match low {
     Some(value) if value >= 56320
       and value < 57344 -> Char(
-      code: 65536 + ((high - 55296) << 10) + (value - 56320),
-      next,
-      escaped: True
-    )
+        code: 65536 + ((high - 55296) << 10) + (value - 56320),
+        next,
+        escaped: True
+      )
     _ -> BadChar
   }
 }
@@ -337,8 +337,8 @@ fn hex4(v: View, at: Int) -> Option[Int] {
       and is_hex(v[at + 1])
       and is_hex(v[at + 2])
       and is_hex(v[at + 3]) -> Some(
-      (hex(v[at]) << 12) | (hex(v[at + 1]) << 8) | (hex(v[at + 2]) << 4) | hex(v[at + 3])
-    )
+        (hex(v[at]) << 12) | (hex(v[at + 1]) << 8) | (hex(v[at + 2]) << 4) | hex(v[at + 3])
+      )
     else -> None
   }
 }
@@ -547,10 +547,10 @@ fn tree_member(
   match {
     at < len(v)
       and v[at] == 58 -> tree_value(
-      v,
-      at: json_ws(v, at: at + 1),
-      stack: Cons(head: Json_InObj(members, key), tail: stack)
-    )
+        v,
+        at: json_ws(v, at: at + 1),
+        stack: Cons(head: Json_InObj(members, key), tail: stack)
+      )
     else -> None
   }
 }
@@ -584,33 +584,33 @@ fn tree_done(v: View, node: Json_Tree, at: Int, stack: List[Json_Frame]) -> Opti
     Nil -> None
     Cons(head: Json_InArr(items), tail) if s < len(v)
       and v[s] == 44 -> tree_value(
-      v,
-      at: json_ws(v, at: s + 1),
-      stack: Cons(head: Json_InArr(items: Cons(head: node, tail: items)), tail)
-    )
+        v,
+        at: json_ws(v, at: s + 1),
+        stack: Cons(head: Json_InArr(items: Cons(head: node, tail: items)), tail)
+      )
     Cons(head: Json_InArr(items), tail) if s < len(v)
       and v[s] == 93 -> tree_done(
-      v,
-      node: Json_Arr(items: reverse(list: Cons(head: node, tail: items))),
-      at: s + 1,
-      stack: tail
-    )
+        v,
+        node: Json_Arr(items: reverse(list: Cons(head: node, tail: items))),
+        at: s + 1,
+        stack: tail
+      )
     Cons(head: Json_InObj(members, key), tail) if s < len(v)
       and v[s] == 44 -> tree_key(
-      v,
-      at: json_ws(v, at: s + 1),
-      members: Cons(head: Json_Member(key, value: node), tail: members),
-      stack: tail
-    )
+        v,
+        at: json_ws(v, at: s + 1),
+        members: Cons(head: Json_Member(key, value: node), tail: members),
+        stack: tail
+      )
     Cons(head: Json_InObj(members, key), tail) if s < len(v)
       and v[s] == 125 -> tree_done(
-      v,
-      node: Json_Obj(
-        members: reverse(list: Cons(head: Json_Member(key, value: node), tail: members))
-      ),
-      at: s + 1,
-      stack: tail
-    )
+        v,
+        node: Json_Obj(
+          members: reverse(list: Cons(head: Json_Member(key, value: node), tail: members))
+        ),
+        at: s + 1,
+        stack: tail
+      )
     _ -> None
   }
 }
@@ -623,11 +623,11 @@ fn tree_text(v: View, at: Int) -> Json_Got {
     e < len(v) and v[e] == 34 -> Json_Got(text: slice(v, from: at, to: e), whole: True, next: e + 1)
     e < len(v)
       and v[e] == 92 -> text_escaped(
-      v,
-      at: e,
-      out: append(buf: buf(), view: slice(v, from: at, to: e)),
-      whole: True
-    )
+        v,
+        at: e,
+        out: append(buf: buf(), view: slice(v, from: at, to: e)),
+        whole: True
+      )
     else -> Json_NoText
   }
 }
@@ -669,17 +669,17 @@ fn text_more(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got {
   match {
     e < len(v)
       and v[e] == 34 -> Json_Got(
-      text: freeze(append(buf: out, view: slice(v, from: at, to: e))),
-      whole,
-      next: e + 1
-    )
+        text: freeze(append(buf: out, view: slice(v, from: at, to: e))),
+        whole,
+        next: e + 1
+      )
     e < len(v)
       and v[e] == 92 -> text_escaped(
-      v,
-      at: e,
-      out: append(buf: out, view: slice(v, from: at, to: e)),
-      whole
-    )
+        v,
+        at: e,
+        out: append(buf: out, view: slice(v, from: at, to: e)),
+        whole
+      )
     else -> no_text(gone: freeze(out))
   }
 }
@@ -723,10 +723,10 @@ fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code {
   match low {
     Some(value) if value >= 56320
       and value < 57344 -> Json_Code(
-      code: 65536 + ((high - 55296) << 10) + (value - 56320),
-      lone: False,
-      next: at + 6
-    )
+        code: 65536 + ((high - 55296) << 10) + (value - 56320),
+        lone: False,
+        next: at + 6
+      )
     _ -> Json_Code(code: high, lone: True, next: at)
   }
 }

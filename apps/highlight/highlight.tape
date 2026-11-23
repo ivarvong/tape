@@ -45,21 +45,21 @@ fn token(src: View, at: Int, out: Buf, state: Scan, ch: Int) -> Buf {
     ch == 32 or ch == 9 or ch == 13 -> scan(src, at: at + 1, out: push(buf: out, byte: ch), state)
     ch == 47
       and byte_at(src, at: at + 1) == 47 -> scan(
-      src,
-      at: find(v: src, byte: 10, at),
-      out: span(out, class: "c", src, from: at, to: find(v: src, byte: 10, at)),
-      state
-    )
+        src,
+        at: find(v: src, byte: 10, at),
+        out: span(out, class: "c", src, from: at, to: find(v: src, byte: 10, at)),
+        state
+      )
     ch == 34 -> text(src, at, out, state, end: text_end(src, at: at + 1))
     ch >= 48 and ch <= 57 -> number(src, at, out, state, end: number_end(src, at))
     letter(b: ch)
       or (ch == 95 and word_byte(b: byte_at(src, at: at + 1))) -> word(
-      src,
-      at,
-      out,
-      state,
-      end: word_end(src, at: at + 1)
-    )
+        src,
+        at,
+        out,
+        state,
+        end: word_end(src, at: at + 1)
+      )
     ch == 123
       and opens_sql(state) -> block(src, at, out, state, end: sql_end(src, at: at + 1, depth: 1))
     else -> operator(src, at, out, state, size: op_size(src, at))
@@ -206,11 +206,11 @@ fn number(src: View, at: Int, out: Buf, state: Scan, end: Int) -> Buf {
   match {
     byte_at(src, at: end) == 102
       and not word_byte(b: byte_at(src, at: end + 1)) -> scan(
-      src,
-      at: end + 1,
-      out: span(out, class: float_class(src, at, f: end), src, from: at, to: end + 1),
-      state: pushed(state, kind: 0)
-    )
+        src,
+        at: end + 1,
+        out: span(out, class: float_class(src, at, f: end), src, from: at, to: end + 1),
+        state: pushed(state, kind: 0)
+      )
     refused(src, at, end) -> scan(
       src,
       at: end,
@@ -388,11 +388,11 @@ fn operator(src: View, at: Int, out: Buf, state: Scan, size: Int) -> Buf {
     )
     ch == 40
       or ch == 91 -> scan(
-      src,
-      at: at + 1,
-      out: span(out, class: "o", src, from: at, to: at + 1),
-      state: opened(state, brace: 0)
-    )
+        src,
+        at: at + 1,
+        out: span(out, class: "o", src, from: at, to: at + 1),
+        state: opened(state, brace: 0)
+      )
     ch == 123 -> scan(
       src,
       at: at + 1,
@@ -401,19 +401,19 @@ fn operator(src: View, at: Int, out: Buf, state: Scan, size: Int) -> Buf {
     )
     size == 1
       and (ch == 41 or ch == 93 or ch == 125) -> scan(
-      src,
-      at: at + 1,
-      out: span(out, class: "o", src, from: at, to: at + 1),
-      state: closed(state)
-    )
+        src,
+        at: at + 1,
+        out: span(out, class: "o", src, from: at, to: at + 1),
+        state: closed(state)
+      )
     size == 2
       and ch == 124
       and src[at + 1] == 62 -> scan(
-      src,
-      at: at + 2,
-      out: span(out, class: "o", src, from: at, to: at + 2),
-      state: piped(state)
-    )
+        src,
+        at: at + 2,
+        out: span(out, class: "o", src, from: at, to: at + 2),
+        state: piped(state)
+      )
     else -> scan(
       src,
       at: at + size,
@@ -499,9 +499,9 @@ fn text_end(src: View, at: Int) -> End {
     src[at] == 34 -> Closed(at: at + 1)
     src[at] == 92
       and byte_at(src, at: at + 1) == 40 -> text_end(
-      src,
-      at: past(end: hole_end(src, at: at + 2, depth: 1))
-    )
+        src,
+        at: past(end: hole_end(src, at: at + 2, depth: 1))
+      )
     src[at] == 92 and at + 1 < len(src) -> text_end(src, at: at + 2)
     else -> text_end(src, at: at + 1)
   }
@@ -611,39 +611,39 @@ fn body(src: View, at: Int, to: Int, out: Buf, sql: Bool) -> Buf {
     src[at] == 92
       and at + 1 < to
       and src[at + 1] == 40 -> body(
-      src,
-      at: past(end: hole_end(src, at: at + 2, depth: 1)),
-      to,
-      out: hole(src, at, out, end: hole_end(src, at: at + 2, depth: 1)),
-      sql
-    )
+        src,
+        at: past(end: hole_end(src, at: at + 2, depth: 1)),
+        to,
+        out: hole(src, at, out, end: hole_end(src, at: at + 2, depth: 1)),
+        sql
+      )
     src[at] == 92
       and at + 1 < to
       and src[at + 1] == 10 -> body(
-      src,
-      at: at + 1,
-      to,
-      out: span(out, class: "e", src, from: at, to: at + 1),
-      sql
-    )
+        src,
+        at: at + 1,
+        to,
+        out: span(out, class: "e", src, from: at, to: at + 1),
+        sql
+      )
     src[at] == 92
       and at + 1 < to
       and escape(b: src[at + 1]) -> body(
-      src,
-      at: at + 2,
-      to,
-      out: span(out, class: "e", src, from: at, to: at + 2),
-      sql
-    )
+        src,
+        at: at + 2,
+        to,
+        out: span(out, class: "e", src, from: at, to: at + 2),
+        sql
+      )
     src[at] == 92
       and at + 1 < to
       and src[at + 1] < 128 -> body(
-      src,
-      at: at + 2,
-      to,
-      out: span(out, class: "e x", src, from: at, to: at + 2),
-      sql
-    )
+        src,
+        at: at + 2,
+        to,
+        out: span(out, class: "e x", src, from: at, to: at + 2),
+        sql
+      )
     src[at] == 92 -> body(
       src,
       at: at + 1,
@@ -653,26 +653,26 @@ fn body(src: View, at: Int, to: Int, out: Buf, sql: Bool) -> Buf {
     )
     sql
       and placeholder_at(src, at, to) -> body(
-      src,
-      at: word_end(src: slice(v: src, from: 0, to), at: at + 1),
-      to,
-      out: span(
-        out,
-        class: "sp",
         src,
-        from: at,
-        to: word_end(src: slice(v: src, from: 0, to), at: at + 1)
-      ),
-      sql
-    )
+        at: word_end(src: slice(v: src, from: 0, to), at: at + 1),
+        to,
+        out: span(
+          out,
+          class: "sp",
+          src,
+          from: at,
+          to: word_end(src: slice(v: src, from: 0, to), at: at + 1)
+        ),
+        sql
+      )
     sql
       and keyword_at(src, at, to) -> body(
-      src,
-      at: upper_end(src, at, to),
-      to,
-      out: span(out, class: "sk", src, from: at, to: upper_end(src, at, to)),
-      sql
-    )
+        src,
+        at: upper_end(src, at, to),
+        to,
+        out: span(out, class: "sk", src, from: at, to: upper_end(src, at, to)),
+        sql
+      )
     else -> body(src, at: at + 1, to, out: escaped(out, b: src[at]), sql)
   }
 }

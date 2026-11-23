@@ -132,9 +132,9 @@ fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
       |> write_rows(rows: sql_all(row: Job, query: "SELECT * FROM jobs ORDER BY id DESC LIMIT 100"))
     Request(method: "GET", path: "/stats") -> respond(status: 200)
       |> write_rows(rows: sql_all(
-      row: Stat,
-      query: "SELECT state, count(*) AS jobs FROM jobs GROUP BY state ORDER BY state"
-    ))
+        row: Stat,
+        query: "SELECT state, count(*) AS jobs FROM jobs GROUP BY state ORDER BY state"
+      ))
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }

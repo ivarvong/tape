@@ -33,13 +33,13 @@ fn handle(raw: View) -> Buf {
   let discount = off(coupon, subtotal)
   buf()
     |> write_json(value: Priced(
-    customer,
-    lines: length(list: lines),
-    items: fold(list: lines, from: 0, by: fn(sum: Int, line: Line) -> Int { sum + line.qty }),
-    subtotal,
-    discount,
-    total: subtotal - discount
-  ))
+      customer,
+      lines: length(list: lines),
+      items: fold(list: lines, from: 0, by: fn(sum: Int, line: Line) -> Int { sum + line.qty }),
+      subtotal,
+      discount,
+      total: subtotal - discount
+    ))
 }
 
 // What a coupon takes off: a tenth with TEN, five dollars with FIVE on fifty or more, nothing otherwise.

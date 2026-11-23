@@ -469,17 +469,17 @@ fn resource_member(v: View, k: Key, service: View, spans: List[Span]) -> Got[Pen
   match {
     k.name == "resource"
       and v[k.value] == 123 -> resource_named(
-      v,
-      got: described(v, at: inside(v, at: k.value), name: ""),
-      spans
-    )
+        v,
+        got: described(v, at: inside(v, at: k.value), name: ""),
+        spans
+      )
     k.name == "resource" -> resource(v, at: skipped(v, at: k.value), service: "", spans)
     k.name == "scopeSpans"
       and v[k.value] == 91 -> resource_scoped(
-      v,
-      got: scopes(v, at: inside(v, at: k.value), acc: Nil),
-      service
-    )
+        v,
+        got: scopes(v, at: inside(v, at: k.value), acc: Nil),
+        service
+      )
     k.name == "scopeSpans" -> resource(v, at: skipped(v, at: k.value), service, spans: Nil)
     else -> resource(v, at: skipped(v, at: k.value), service, spans)
   }
@@ -505,9 +505,9 @@ fn described_member(v: View, k: Key, name: View) -> Got[View] {
   match {
     k.name == "attributes"
       and v[k.value] == 91 -> described_read(
-      v,
-      got: service_in(v, at: inside(v, at: k.value), name: "")
-    )
+        v,
+        got: service_in(v, at: inside(v, at: k.value), name: "")
+      )
     k.name == "attributes" -> described(v, at: skipped(v, at: k.value), name: "")
     else -> described(v, at: skipped(v, at: k.value), name)
   }
@@ -566,10 +566,10 @@ fn scope_member(v: View, k: Key, base: List[Span], spans: List[Span]) -> Got[Lis
   match {
     k.name == "spans"
       and v[k.value] == 91 -> scope_read(
-      v,
-      got: span_items(v, at: inside(v, at: k.value), acc: base),
-      base
-    )
+        v,
+        got: span_items(v, at: inside(v, at: k.value), acc: base),
+        base
+      )
     k.name == "spans" -> scope(v, at: skipped(v, at: k.value), base, spans: base)
     else -> scope(v, at: skipped(v, at: k.value), base, spans)
   }
@@ -982,10 +982,10 @@ fn attr_member(v: View, k: Key, key: View, text: View) -> Got[Attr] {
     k.name == "key" -> attr_key(v, got: text_val(v, at: k.value), text)
     k.name == "value"
       and v[k.value] == 123 -> attr_value(
-      v,
-      got: any_value(v, at: inside(v, at: k.value), text: "", best: 99),
-      key
-    )
+        v,
+        got: any_value(v, at: inside(v, at: k.value), text: "", best: 99),
+        key
+      )
     k.name == "value" -> attr(v, at: skipped(v, at: k.value), key, text: "")
     else -> attr(v, at: skipped(v, at: k.value), key, text)
   }
@@ -1513,16 +1513,16 @@ fn walk(
     Nil -> Walked(rows, seen, count, nrows)
     Cons(head: Frame(span), tail) if check
       and seen_has(seen, idx: span.idx) -> walk(
-      stack: tail,
-      seen,
-      rows,
-      count,
-      nrows,
-      kids,
-      byid,
-      lo,
-      check
-    )
+        stack: tail,
+        seen,
+        rows,
+        count,
+        nrows,
+        kids,
+        byid,
+        lo,
+        check
+      )
     Cons(head: f, tail) -> visit(
       f,
       mine: sorted(list: held_kids(s: f.span, byid, kids), lo),
@@ -1558,33 +1558,33 @@ fn visit(
     Cons(head: k, tail: Nil) if f.span.kind == 3
       and k.kind == 2
       and not (check and seen_has(seen, idx: k.idx)) -> walk(
-      stack: framed(
-        list: sorted(list: held_kids(s: k, byid, kids), lo),
-        byid,
-        depth: f.depth + 1,
-        above: k.service,
-        prow: nrows,
-        acc: stack
-      ),
-      seen: noted(seen: noted(seen, idx: f.span.idx, check), idx: k.idx, check),
-      rows: Cons(
-        head: Frame(
-          span: f.span,
-          depth: f.depth,
-          mark: f.mark,
-          above: f.above,
-          prow: f.prow,
-          pair: Some(value: k)
+        stack: framed(
+          list: sorted(list: held_kids(s: k, byid, kids), lo),
+          byid,
+          depth: f.depth + 1,
+          above: k.service,
+          prow: nrows,
+          acc: stack
         ),
-        tail: rows
-      ),
-      count: count + 2,
-      nrows: nrows + 1,
-      kids,
-      byid,
-      lo,
-      check
-    )
+        seen: noted(seen: noted(seen, idx: f.span.idx, check), idx: k.idx, check),
+        rows: Cons(
+          head: Frame(
+            span: f.span,
+            depth: f.depth,
+            mark: f.mark,
+            above: f.above,
+            prow: f.prow,
+            pair: Some(value: k)
+          ),
+          tail: rows
+        ),
+        count: count + 2,
+        nrows: nrows + 1,
+        kids,
+        byid,
+        lo,
+        check
+      )
     _ -> walk(
       stack: framed(
         list: mine,
@@ -1924,8 +1924,8 @@ fn svg(rows: List[Frame], nrows: Int, axis: Axis, lo: Int, acc: Acc, sum: Summar
     |> gap_bands(list: axis.gaps, axis, top, bottom)
     |> ticks(axis, segs: segments(list: axis.gaps, from: 0, d: axis.d), j: 0, top, bottom)
     |> append(
-    view: "<line class=\"ax\" x1=\"0\" x2=\"100%\" y1=\"\(rule).5\" y2=\"\(rule).5\"/></svg>"
-  )
+      view: "<line class=\"ax\" x1=\"0\" x2=\"100%\" y1=\"\(rule).5\" y2=\"\(rule).5\"/></svg>"
+    )
     |> rows(list: rows, i: 0, top, axis, lo, cut: sum.cut)
     |> append(view: "<svg class=\"over\" x=\"33%\" width=\"65.5%\" height=\"\(bottom)\" \
         overflow=\"visible\">")
@@ -2106,22 +2106,23 @@ fn legend(out: Buf, acc: Acc, rows: List[Frame], sum: Summary, color: Int) -> Bu
       |> append(view: "</tspan>")
     color == 8
       and acc.services > 8 -> legend(
-      out: out |> append(view: "<tspan class=\"c7\" dx=\"14\">■</tspan> \(acc.services - 7) more"),
-      acc,
-      rows,
-      sum,
-      color: 9
-    )
+        out: out
+          |> append(view: "<tspan class=\"c7\" dx=\"14\">■</tspan> \(acc.services - 7) more"),
+        acc,
+        rows,
+        sum,
+        color: 9
+      )
     else -> legend(
       out: out
         |> append(view: "<tspan class=\"c\(color - 1)\"")
         |> swatch_gap(color)
         |> append(view: ">■</tspan> ")
         |> write_service(
-        name: service_named(map: acc.colors, color: color - 1),
-        cut: sum.cut,
-        n: 32
-      )
+          name: service_named(map: acc.colors, color: color - 1),
+          cut: sum.cut,
+          n: 32
+        )
         |> append(view: " <tspan class=\"v\">")
         |> write_int(value: rows_spans(list: rows, color: color - 1, n: 0))
         |> append(view: "</tspan>"),
@@ -2454,12 +2455,12 @@ fn row(out: Buf, f: Frame, y: Int, axis: Axis, lo: Int, cut: Int) -> Buf {
     |> markers(list: s.events, n: 0, b, e, axis)
     |> pair_markers(pair: f.pair, axis, lo)
     |> duration(
-    x,
-    xe,
-    d: e - b,
-    after: room(list: axis.gaps, edge: xe, after: True, axis),
-    before: room(list: axis.gaps, edge: x, after: False, axis)
-  )
+      x,
+      xe,
+      d: e - b,
+      after: room(list: axis.gaps, edge: xe, after: True, axis),
+      before: room(list: axis.gaps, edge: x, after: False, axis)
+    )
     |> append(view: "</svg></g>")
 }
 
@@ -2503,8 +2504,8 @@ fn accent(out: Buf, f: Frame, y: Int) -> Buf {
   match {
     f.span.code == 2 or pair_code(pair: f.pair) == 2 -> out
       |> append(
-      view: "<rect class=\"acc\" x=\"0\" y=\"\(y + 3)\" width=\"3\" height=\"20\" rx=\"1.5\"/>"
-    )
+        view: "<rect class=\"acc\" x=\"0\" y=\"\(y + 3)\" width=\"3\" height=\"20\" rx=\"1.5\"/>"
+      )
     else -> out
   }
 }
@@ -2973,11 +2974,11 @@ fn write_xml(out: Buf, v: View, at: Int, to: Int) -> Buf {
       and at + 2 < to
       and v[at + 1] == 191
       and (v[at + 2] == 190 or v[at + 2] == 191) -> write_xml(
-      out: append(buf: out, view: "�"),
-      v,
-      at: at + 3,
-      to
-    )
+        out: append(buf: out, view: "�"),
+        v,
+        at: at + 3,
+        to
+      )
     else -> write_xml(out: push(buf: out, byte: v[at]), v, at: at + 1, to)
   }
 }
@@ -3008,9 +3009,9 @@ fn near(out: Buf, raw: View, at: Int) -> Buf {
     else -> out
       |> append(view: "<text class=\"meta\" x=\"12\" y=\"80\"><tspan class=\"v\">near: </tspan>")
       |> write_short(
-      text: valid_slice(v: raw, from: max(a: 0, b: at - 24), to: min(a: len(raw), b: at + 24)),
-      n: 48
-    )
+        text: valid_slice(v: raw, from: max(a: 0, b: at - 24), to: min(a: len(raw), b: at + 24)),
+        n: 48
+      )
       |> append(view: "</text>")
   }
 }

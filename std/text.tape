@@ -365,18 +365,20 @@ fn utf8_at(v: View, at: Int) -> Utf8 {
       and cont(v, at: at + 1)
       and cont(v, at: at + 2)
       and second_of_3(b, c: v[at + 1]) -> Utf8(
-      code: ((b & 15) << 12) | ((v[at + 1] & 63) << 6) | (v[at + 2] & 63),
-      next: at + 3
-    )
+        code: ((b & 15) << 12) | ((v[at + 1] & 63) << 6) | (v[at + 2] & 63),
+        next: at + 3
+      )
     b >= 240
       and b <= 244
       and cont(v, at: at + 1)
       and cont(v, at: at + 2)
       and cont(v, at: at + 3)
       and second_of_4(b, c: v[at + 1]) -> Utf8(
-      code: ((b & 7) << 18) | ((v[at + 1] & 63) << 12) | ((v[at + 2] & 63) << 6) | (v[at + 3] & 63),
-      next: at + 4
-    )
+        code: ((b & 7) << 18) | ((v[at + 1] & 63) << 12) | (
+          (v[at + 2] & 63) << 6
+        ) | (v[at + 3] & 63),
+        next: at + 4
+      )
     else -> BadUtf8
   }
 }

@@ -322,16 +322,16 @@ fn place(shard: Int, shards: Int, window: Int, skew: Int) -> Buf {
       or shards > 64
       or shard < 0
       or shard >= shards -> problem(
-      status: 400,
-      reason: "a placement is shard i of n, 0 <= i < n <= 64"
-    )
+        status: 400,
+        reason: "a placement is shard i of n, 0 <= i < n <= 64"
+      )
     window < 1000
       or window > 86400000
       or skew < 1000
       or skew > 600000 -> problem(
-      status: 400,
-      reason: "the op window is 1000 to 86400000 ms and the clock allowance 1000 to 600000 ms"
-    )
+        status: 400,
+        reason: "the op window is 1000 to 86400000 ms and the clock allowance 1000 to 600000 ms"
+      )
     else -> placed(
       asked: Placed(shard, shards, window_ms: window, skew_ms: skew),
       now: sql_first(
@@ -394,9 +394,9 @@ fn mine(op: Op, once: View, shard: Int, at: Int) -> Buf {
     at == shard
       and len(once) == 0
       and unconditional(op) -> problem(
-      status: 428,
-      reason: "an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"
-    )
+        status: 428,
+        reason: "an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"
+      )
     at == shard and len(once) == 0 -> run(op, once, t: 0, cutoff: 0)
     at == shard -> timed(
       op,
