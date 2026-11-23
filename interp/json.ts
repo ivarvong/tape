@@ -4,7 +4,7 @@
 // compiled build words it.
 import type { Program, TypeAst, TypeDecl, Variant } from '../compiler/ast.ts';
 import { unreachable } from '../compiler/ast.ts';
-import { decExpected, refusalOf } from '../compiler/rule.ts';
+import { decExpected, elementRefusalOf, refusalOf } from '../compiler/rule.ts';
 import { type Adt, type Buf, type Value, adt, isDec } from './value.ts';
 import { dec, parse, text as decText } from './dec.ts';
 
@@ -151,7 +151,7 @@ const scalarOf = (k: Kind, x: unknown, scale: number): Value | null =>
 const join = (path: string, why: string): string =>
   why === 'missing' || why === 'null' || why.startsWith('expected ') || why.startsWith('not a valid ')
     ? `${path}: ${why}`
-    : why.startsWith('[')
+    : why.startsWith('[') || why.startsWith(': ')
       ? `${path}${why}`
       : `${path}.${why}`;
 
@@ -168,7 +168,7 @@ function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
       const v = scalarOf(sh.kind, x, sh.scale);
       if (v === null) return { why: notOf(sh) };
       if (typeof x === 'string' && !wellFormed(x)) return { why: SURROGATE };
-      return meets(t, v) ? { value: v } : { why: refusalOf(prog, t.name) };
+      return meets(t, v) ? { value: v } : { why: elementRefusalOf(prog, t.name) };
     }
     default:
       return unreachable(sh, 'shape');

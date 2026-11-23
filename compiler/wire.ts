@@ -14,7 +14,7 @@
 // (shadow.ts CORE), so a program's own max, push or List does not take their place.
 import { asType, partsOf } from './ast.ts';
 import type { Expr, Program, TypeAst, Variant } from './ast.ts';
-import { decExpected, refusalOf } from './rule.ts';
+import { decExpected, elementRefusalOf, refusalOf } from './rule.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
 export type WireKind =
@@ -234,20 +234,21 @@ export function wireSource(prog: Program): Wire {
     `parse_dec(text: json.json_number_text(found: ${found}), scale: ${k.scale ?? 0})`;
   // what decode's 400 says a value must be, after "expected ", as a Tape text literal's inside
   const said = (s: string): string => s.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
-  const refused = (t: TypeAst): string => said(refusalOf(prog, t.name));
+  const refused = (t: TypeAst): string => said(refusalOf(prog, t.name)),
+    refusedItem = (t: TypeAst): string => said(elementRefusalOf(prog, t.name));
   // a scalar element's value, its refinement checked
   function itemValue(k: Extract<WireKind, { k: 's' }>): string {
     const m = mangle(k.t);
     return once(`json_value_${m}`, () => {
       if (k.base === 'Dec') {
         const value = refined(k.t)
-          ? `  let ${k.t.name}(y) = x else -> Err(error: "${refused(k.t)}")\n  Ok(value: y)\n`
+          ? `  let ${k.t.name}(y) = x else -> Err(error: "${refusedItem(k.t)}")\n  Ok(value: y)\n`
           : `  Ok(value: x)\n`;
         return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  let Some(value: x) = ${decOf(k, 'Some(value: item)')} else -> Err(error: "expected ${decExpected(k.scale ?? 0)}")\n${value}}\n`;
       }
       const got = scalarOf(k.base, 'Some(value: item)');
       const body = refined(k.t)
-        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "${refused(k.t)}")\n  Ok(value: x)\n`
+        ? `  let ${k.t.name}(x) = ${got} else -> Err(error: "${refusedItem(k.t)}")\n  Ok(value: x)\n`
         : `  Ok(value: ${got})\n`;
       return `fn json_value_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n${body}}\n`;
     });

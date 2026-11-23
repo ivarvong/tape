@@ -579,4 +579,16 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   same('title < None: C19', code(said(prog('  title < None'))), 'C19:2');
 }
 
+// ---- a refined type's message is one text with no holes: anything else after `else` says the form
+{
+  const s = said(
+    'type Slug = View where len(self) >= 1 else slug_text\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n',
+  );
+  same(
+    'a message that is not a text: P01 with the form',
+    [code(s), hint(s).includes('`type Slug = View where … else "lowercase letters, digits and -"`')],
+    ['P01:1', true],
+  );
+}
+
 finish();

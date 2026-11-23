@@ -460,8 +460,8 @@ fn query_of(raw: View) -> View {
     title: 'Validate characters',
     uses: ['fn every_byte', 'fn is_lower', 'fn is_digit', 'fn is_alpha', 'fn is_alnum', 'builtin len'],
     text: '`v[i]` is the byte at `i`, as an Int. `is_digit`, `is_lower`, `is_upper`, `is_alpha`, `is_alnum`, `is_space` and `is_hex` test one byte; `every_byte(v: …, keep: …)` is True when `keep` holds for every byte of `v`, and `keep` may be a function of your own.',
-    program: `// a slug: 1 to 32 bytes of a-z, 0-9 and -
-type Slug = View where len(self) >= 1 and len(self) <= 32 and every_byte(v: self, keep: slug_byte)
+    program: `// a slug: 1 to 32 bytes of a-z, 0-9 and -; decode's 400 for one that is not says the text after else
+type Slug = View where len(self) >= 1 and len(self) <= 32 and every_byte(v: self, keep: slug_byte) else "1 to 32 of a-z, 0-9 and -"
 
 fn slug_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45

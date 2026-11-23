@@ -11,6 +11,7 @@ went](#what-went), below, has the forms each replaced.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | a refined type may say what decode's 400 says of a value that fails it: `type Slug = View where … else "lowercase letters, digits and -"` is `slug: lowercase letters, digits and -`, where it was `slug: not a valid Slug` |
 | 23 November 2026 | a call's first argument may be written without its name and passes the first parameter: `every_byte(self, keep: is_lower)` (13 refusals over 4 bench rounds, through every doc fix). A bare name that is one of the callee's parameters still passes that parameter; every argument after the first is named or such a name. C10 says so |
 | 23 November 2026 | `x == None` and `x != None` on an Option compare its constructor (5 bench runs in 2 rounds and 2 reports wrote `title != None` in a guard and were refused, C19); any other comparison of an Option is still C19, and its fix names this form and the step that takes the value apart |
 | 23 November 2026 | a refinement refused says its type and only bounds it can put plainly, `key: expected Key, 1 to 64 bytes`, `name: expected Name, at most 40 characters`; any other condition is `not a valid Slug`. It had echoed the program's source (`expected a InvoiceId: char_count(v: self) >= 1 and … len(self: self)`: 28 of 48 runs on the 2026-11-23g bench complained) |

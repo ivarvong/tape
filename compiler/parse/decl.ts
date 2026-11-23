@@ -88,7 +88,10 @@ function claimConstructors(c: Cursor, prog: Program, decl: TypeDecl): void {
     prog.ctors.set(known, { decl, vi });
   });
 }
-/** `type Name[A] { Ctor(…) … }`, or a refined type: `type Name = Base where condition`. `isPrivate`: `private type`. */
+/**
+ * `type Name[A] { Ctor(…) … }`, or a refined type: `type Name = Base where condition`, with `else "message"` for
+ * what decode's 400 says when the condition does not hold. `isPrivate`: `private type`.
+ */
 export function typeDecl(c: Cursor, prog: Program, isPrivate: boolean): void {
   const n = c.expect('Id'),
     tparams = typeParams(c);
@@ -97,8 +100,24 @@ export function typeDecl(c: Cursor, prog: Program, isPrivate: boolean): void {
     // the base type's values for which the condition holds
     const base = type(c);
     c.expect('id', 'where', 'A refined type is `type Name = Base where condition`, with `self` as the value.');
-    const name = claimType(c, prog, n);
-    prog.types.set(name, { name, params: [], variants: [], refine: { base, pred: binary(c, 1) }, ...c.at(n) });
+    const name = claimType(c, prog, n),
+      pred = binary(c, 1);
+    // `else "lowercase letters, digits and -"`: one text, with no holes, said as it is
+    const said = c.eat('kw', 'else')
+      ? c.expect(
+          'str',
+          undefined,
+          'A refined type\'s message is one text with no holes: `type Slug = View where … else "lowercase letters, digits and -"`.',
+        )
+      : null;
+    const message = said ? new TextDecoder().decode(Uint8Array.from(said.v)) : undefined;
+    prog.types.set(name, {
+      name,
+      params: [],
+      variants: [],
+      refine: { base, pred, ...(message === undefined ? {} : { message }) },
+      ...c.at(n),
+    });
     return;
   }
   c.expect('op', '{');

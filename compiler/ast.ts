@@ -226,8 +226,9 @@ export type TypeDecl = At & {
   private?: boolean;
   /** set by the build: a type that can contain itself, whose values are pointers into the arena */
   boxed?: boolean;
-  /** `type Name = Base where condition`, with `self` as the value */
-  refine?: { base: TypeAst; pred: Expr };
+  /** `type Name = Base where condition`, with `self` as the value; `else "…"`, what decode's 400 says of a value
+   * for which it does not hold */
+  refine?: { base: TypeAst; pred: Expr; message?: string };
 };
 export type FnDecl = At & {
   name: string;

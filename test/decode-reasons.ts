@@ -18,12 +18,14 @@ type Rate = Dec[2] where self > 0.00
 type Slug = View where every_byte(v: self, keep: is_lower)
 type Handle = View where char_count(v: self) >= 1 and char_count(v: self) <= 3
 type Tag = View where len(self) == 1
+type Code = View where len(self) >= 2 and every_byte(self, keep: is_upper) else "two or more capital letters"
+type Small = Int where self >= 1 and self <= 5 else "a size from 1 to 5"
 type Limit = Int where self <= flags.limit
 flag limit: Int = 10
 
 type Line { Line(sku: Key, price: Dec[2], qty: Qty) }
 type Order {
-  Order(key: Key, items: List[Line], note: Option[View], slug: Slug, paid: Bool, at: Option[Int], rate: Option[Rate], grid: List[List[Int]], weight: Option[Float], handle: Option[Handle], tag: Option[Tag], tags: Option[List[Tag]], limit: Option[Limit])
+  Order(key: Key, items: List[Line], note: Option[View], slug: Slug, paid: Bool, at: Option[Int], rate: Option[Rate], grid: List[List[Int]], weight: Option[Float], handle: Option[Handle], tag: Option[Tag], tags: Option[List[Tag]], limit: Option[Limit], code: Option[Code], small: Option[Small], codes: Option[List[Code]])
 }
 
 fn handle(raw: View) -> Buf {
@@ -64,6 +66,9 @@ const cases: readonly (readonly [string, string, string])[] = [
   ['a refinement of one byte', body({ tag: 'ab' }), '400 tag: expected Tag, 1 byte'],
   ['an element of a refined type', body({ tags: ['a', 'bc'] }), '400 tags[1]: expected Tag, 1 byte'],
   ['a bound the program names is not said', body({ limit: 99 }), '400 limit: not a valid Limit'],
+  ['a refinement with its own message', body({ code: 'ab' }), '400 code: two or more capital letters'],
+  ['its message, though its bounds could be said', body({ small: 9 }), '400 small: a size from 1 to 5'],
+  ['an element with its own message', body({ codes: ['AB', 'c'] }), '400 codes[1]: two or more capital letters'],
   ['an element: missing', body({ items: [line({}), { sku: 'y', price: '1.00' }] }), '400 items[1].qty: missing'],
   [
     'an element: a Dec',

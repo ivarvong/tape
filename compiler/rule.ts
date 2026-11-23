@@ -66,10 +66,20 @@ export const decExpected = (scale: number): string =>
   scale === 0 ? 'an integer' : `a number with at most ${scale} decimal${scale === 1 ? '' : 's'}`;
 
 /**
+ * The same, of a list's element: an author's message has no word of its own that says it carries no path (as
+ * `missing`, `expected …` and `not a valid …` do), so it is marked with the `: ` the element's index goes before
+ * (json_join, and interp/json.ts's join, put `[1]` before it: `codes[1]: two or more capital letters`).
+ */
+export const elementRefusalOf = (prog: Program, name: string): string =>
+  prog.types.get(name)?.refine?.message === undefined ? refusalOf(prog, name) : `: ${refusalOf(prog, name)}`;
+
+/**
  * The problem decode says of a value that fails the refinement of `name` (its base's too, when the base is
  * refined): `expected Key, 1 to 64 bytes` when every condition is a bound it can say, else `not a valid Key`.
  */
 export function refusalOf(prog: Program, name: string): string {
+  const own = prog.types.get(name)?.refine?.message;
+  if (own !== undefined) return own;
   const preds: Expr[] = [];
   const seen = new Set<string>();
   for (let n: string | undefined = name; n !== undefined && !seen.has(n);) {

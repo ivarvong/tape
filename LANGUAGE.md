@@ -80,7 +80,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | `Rows[T]` | the rows of a query, read with `next` |
 | `Sql` `Remote` `Clock` `Entropy` `Timer` | capabilities: only ever parameters, never stored or returned |
 | `type T { A(x: Int)  B }` | a sum of constructors, each with named fields. `type T[P] { … }` takes type parameters |
-| `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition |
+| `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition. `… else "lowercase letters, digits and -"` is what decode's 400 says of a value for which the condition does not hold (section 6) |
 | `interface Git { read head(Ref) -> Head }` | what a capability bound by the host can be asked |
 
 std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `Err(error)`), `Rounding`
@@ -318,6 +318,7 @@ index: `key`, `venue.city`, `items[2].price`, `grid[1][0]`. The problem is one o
 | `null` | the value is `null` and the field is not an `Option` (an `Option` field that is `null` or absent is `None`) |
 | `expected <what>` | the value is of another kind, or fails a refinement whose bounds it can say |
 | `not a valid <Type>` | the value fails any other refinement |
+| the type's own message | the value fails a refinement written `where … else "message"`: `slug: lowercase letters, digits and -` |
 
 `<what>` is `text`, `true or false`, `an integer`, `a number`, `a number with at most 2 decimals` (a `Dec[2]`),
 `an object`, `an array`, `text without lone surrogates`, or, for a refinement, its type and its bounds: `Key =
