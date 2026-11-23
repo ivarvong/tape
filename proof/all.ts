@@ -59,7 +59,7 @@ const service: Part[] = existsSync(`${root}service/node_modules`)
 const mcpReady = existsSync(`${root}mcp/node_modules`);
 const mcpSuite: Part = mcpReady
   ? [
-      'mcp suite (workerd): tape-mcp with the real Loader and rate limiter',
+      'mcp suite (workerd): mcp/src, served by the tape Worker, with the real Loader and rate limiter',
       ['npx', 'vitest', 'run'],
       /Tests\s+\d+ passed/,
       'mcp',

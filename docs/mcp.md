@@ -1,7 +1,7 @@
 # The hosted compiler and runner (MCP and HTTP)
 
 **Live** at https://tape.ivar.workers.dev/mcp (MCP) and https://tape.ivar.workers.dev/v1/compile,
-https://tape.ivar.workers.dev/v1/run (JSON). The same Worker answers at https://tape-mcp.ivar.workers.dev/mcp too.
+https://tape.ivar.workers.dev/v1/run (JSON), served by the `tape` Worker.
 You can also run it yourself ([below](#running-it-yourself)).
 
 `tape-mcp` compiles a Tape program you post and runs HTTP requests against it, and gives back what the compiler said,
@@ -222,12 +222,12 @@ day at most. The rate limit keys on the same hash.
 
 ## How it works
 
-[`mcp/`](../mcp/) is a Worker of its own, `tape-mcp`, with no Durable Objects and one private R2
-bucket, `tape-feedback`, which only the feedback tool writes. It is
-reached through the `tape` Worker at `/mcp`, `/v1/compile` and `/v1/run` (the `MCP` service binding in
-[`service/cloudflare.config.ts`](../service/cloudflare.config.ts), which passes the request as it came, before any
-token check), and answers on its own at https://tape-mcp.ivar.workers.dev too. Every answer names the tape-mcp
-version that gave it (`tape-mcp-version`).
+[`mcp/`](../mcp/) is a library the `tape` Worker serves in-process at `/mcp`, `/v1/compile`, `/v1/run` and
+`/v1/feedback` ([`service/src/index.ts`](../service/src/index.ts) calls `mcp/src/index.ts` with its own bindings,
+before any token check). It uses no Durable Objects and one private R2 bucket, `tape-feedback`, which only the feedback
+tool writes. (Until 2026-11-22 it was a Worker of its own, `tape-mcp`, behind a service binding; that Worker is
+retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-version`, the same id as
+`tape-worker-version`).
 
 - `src/serve.ts`: the routes, the checks before a tool runs, the log line. MCP is the service's transport,
   [`service/src/mcp.ts`](../service/src/mcp.ts).
@@ -237,26 +237,25 @@ version that gave it (`tape-mcp-version`).
   CPU limit, and is cached by the build's hash. The database is [sql.js](https://github.com/sql-js/sql.js) through
   the playground's adapter ([`apps/playground/src/sqlite.ts`](../apps/playground/src/sqlite.ts)), the one in-memory
   SQLite that runs in workerd (Durable Object SQLite would need a Durable Object; there is no `node:sqlite`).
-- Its settings: `KILL_SWITCH` (`on` refuses every call), `RATE` (the rate limit) and one secret, `IP_SALT`,
+- Its settings, bindings of the `tape` Worker ([`service/cloudflare.config.ts`](../service/cloudflare.config.ts)):
+  `KILL_SWITCH` (`on` refuses every hosted call), `RATE` (the rate limit), `FEEDBACK` and `FEEDBACK_RATE`, and one
+  secret, `IP_SALT`,
   which lives in Cloudflare, not in the repository. Without it every call is refused (503, `misconfigured`). Set
   it, or rotate it, with a long random value (rotating a secret uploads a new version of the Worker):
 
   ```sh
-  env -u CLOUDFLARE_API_TOKEN npx cf workers secrets update IP_SALT --worker tape-mcp --text "$(openssl rand -hex 32)"
+  env -u CLOUDFLARE_API_TOKEN npx cf workers secrets update IP_SALT --worker tape --text "$(openssl rand -hex 32)"
   ```
 
-- Deploying: `CLOUDFLARE_ACCOUNT_ID=<id> mcp/scripts/deploy.sh "<message>"`, from a clean commit on main that passed
-  the full gate (`service/scripts/gate.sh`): a 0% version, a smoke pinned to it
-  ([`service/scripts/mcp-smoke.ts`](../service/scripts/mcp-smoke.ts)), its telemetry, then 100%, the smoke again here
-  and through the `tape` Worker, with a rollback to the previous version if any step fails. Deploy tape-mcp before
-  a `tape` Worker that needs it.
+- Deploying: it ships with the `tape` Worker (`service/scripts/ship.sh`, CONTRIBUTING.md), whose pinned and prod
+  smokes include [`service/scripts/mcp-smoke.ts`](../service/scripts/mcp-smoke.ts) and the parity check.
 
 ### Running it yourself
 
 ```sh
-cd mcp && npm ci
-echo 'IP_SALT=dev-salt' > .dev.vars   # a salt for your own copy (.dev.vars is not tracked)
-npx cf dev                  # then POST to /mcp at the address it prints
-node test.ts                # the tools and the HTTP face in Node; --plants plants 43 bugs, each caught
-npx vitest run              # the Worker in workerd, with the real Loader and rate limiter
+(cd service && npm ci) && (cd mcp && npm ci)
+printf 'IP_SALT=dev-salt\nTOKEN=dev-token\n' > service/.dev.vars   # your own copy's secrets (.dev.vars is not tracked)
+(cd service && npm run site && npx cf dev)   # the tape Worker; then POST to /mcp at the address it prints
+node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 43 bugs, each caught
+(cd mcp && npx vitest run)  # mcp/src in workerd, with the real Loader and rate limiter
 ```

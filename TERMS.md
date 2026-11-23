@@ -3,8 +3,8 @@
 These are the rules for the hosted service at https://tape.ivar.workers.dev. They do not apply to the code in this
 repository, which is under the [MIT license](LICENSE), or to a copy of the service you run yourself.
 
-The hosted MCP server and API are live at https://tape.ivar.workers.dev/mcp (the same server also answers at
-https://tape-mcp.ivar.workers.dev/mcp). What is described here applies to both.
+The hosted MCP server and API are live at https://tape.ivar.workers.dev/mcp (and `/v1/compile`, `/v1/run`,
+`/v1/feedback` beside it).
 
 ## Alpha software
 

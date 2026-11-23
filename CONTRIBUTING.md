@@ -14,7 +14,7 @@ TypeScript that Node runs as written (types only: no enums, no namespaces), so t
 ```sh
 npm ci                     # the formatter, the type checker and the linter
 (cd service && npm ci)     # the service and its tests in workerd; needed only for the full gate
-(cd mcp && npm ci)         # tape-mcp, the hosted compiler and runner, and its tests in workerd
+(cd mcp && npm ci)         # mcp/, the hosted compiler and runner (served by the tape Worker), and its tests
 ```
 
 ## The gate
@@ -36,9 +36,10 @@ or whose TypeScript names one. It writes no gate record: a deploy needs `service
 then `--merge n`, which prints and records what one whole run does; the merged records were compared with whole
 runs and are the same but for times).
 
-Deploying both Workers from one gated commit: `CLOUDFLARE_ACCOUNT_ID=<id> service/scripts/ship.sh "<message>"`
-(tape-mcp then tape; `--dry-run` stops after the uploads; the stepped ramp only when the change touches the
-objects or their storage, or with `--ramp`). The two deploy.sh scripts remain for one Worker at a time.
+Deploying the one Worker, `tape` (the hosted compiler and runner, `mcp/src`, is served in it), from a gated commit:
+`CLOUDFLARE_ACCOUNT_ID=<id> service/scripts/ship.sh "<message>"` (`--dry-run` stops after the upload; the stepped
+ramp only when the change touches the objects or their storage, or with `--ramp`). `service/scripts/deploy.sh` is
+the always-ramped path.
 
 `proof/all.ts` runs every check below, prints one table, and exits 0 only when every part passed. A part passes when
 it exits 0, prints no line starting with `FAIL`, and prints the result recorded for it (how many planted bugs are
@@ -68,7 +69,7 @@ that load. `--quick` leaves out the service suite, three simulations and the app
 | `proof/sim-all.ts`, `proof/sim-invariants.ts`, `proof/sim-plants.ts` (full only) | the simulator on every program; a bug planted against every invariant; tickets' planted bugs found from the programs alone |
 | the apps' `--plants` (full only) | 13 bugs planted in `highlight.tape`, 37 in `trace.tape`, 18 in the playground's modules, each caught by the test meant for it |
 | service suite (full only) | `cd service && npx vitest run`, in workerd |
-| `mcp/test.ts`; mcp suite and `--plants` (full only) | tape-mcp's tools and HTTP face in Node, against README.md and the playground's traces; `cd mcp && npx vitest run` in workerd; 31 planted bugs, each caught |
+| `mcp/test.ts`; mcp suite and `--plants` (full only) | the hosted tools and HTTP face (mcp/src) in Node, against README.md and the playground's traces; `cd mcp && npx vitest run` in workerd; 31 planted bugs, each caught |
 
 What the recorded numbers do and do not hold fixed is in [`STATUS.md`](STATUS.md#how-strict-the-gates-numbers-are).
 `.github/workflows/check.yml` runs the full gate each night and on demand, not on every push; run `npm test`

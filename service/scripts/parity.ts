@@ -1,7 +1,7 @@
-// parity.ts: the playground and the hosted compiler (tape-mcp) run the same compiler. Both Workers embed it, and a
+// parity.ts: the playground and the hosted compiler (mcp/src, at /mcp) run the same compiler. Both embed it, and a
 // deploy (scripts/lockstep.sh) ships both from one commit; this checks the deployed pair.
 //   node scripts/parity.ts <base-url> [--pin <version-id>] [--sha <commit>] [--compilers-only]
-// 1. The homepage (the tape Worker, pinned with --pin) and /mcp (tape-mcp, through the tape Worker's binding) name
+// 1. The homepage (the tape Worker, pinned with --pin) and /mcp (on the same Worker and version) name
 //    the same commit (tape-version, = --sha when given) and the same compiler (tape-compiler: the hash of compiler.ts,
 //    compiler/ and std/, scripts/sha.ts).
 // 2. The playground's own build, as the site serves it (its compiler and std modules, fetched and imported here),

@@ -7,10 +7,10 @@
 #  1. preflight: a clean tree, the gate's record for this commit, nothing else deploying (a lock), cf logged in
 #  2. PREV: the version serving 100% (the deployment must not be split); it is what a rollback restores
 #  3. build (the site and the Worker, tape-version = the commit) and upload NEW (cf workers versions create): in no
-#     deployment yet; NEW must have the TOKEN secret
+#     deployment yet; NEW must have the TOKEN and IP_SALT secrets
 #  4. route PREV 100% / NEW 0%
 #  5. pinned smoke (scripts/smoke.ts --pin NEW --sha <commit>): the Worker and its static assets as NEW serves them;
-#     and scripts/mcp-smoke.ts: /mcp through NEW's service binding to tape-mcp (deploy tape-mcp first: mcp/scripts/deploy.sh);
+#     and scripts/mcp-smoke.ts: /mcp on NEW (the hosted compiler and runner, mcp/src, served in this Worker);
 #     and scripts/parity.ts: NEW's playground build and /mcp compile the same programs to the same diagnostics and Wasm.
 #     The Durable Objects still run PREV: an object runs the version the deployment gave its id, whatever version
 #     the override header pins the Worker to, so this smoke is NEW's Worker against PREV's objects, as in the ramp.
@@ -121,8 +121,8 @@ out=$(cf workers versions create --prebuilt --message "$(printf '%s' "$MSG [git 
 NEW=$(printf '%s\n' "$out" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' | head -1)
 [ -n "$NEW" ] || { echo "$out"; echo "no version id in the upload's output" >&2; record; exit 1; }
 say "new: $NEW"
-cf workers versions get "$NEW" --worker "$WORKER" | json 'import sys; sys.exit(0 if any(b["name"]=="TOKEN" and b["type"]=="secret_text" for b in d["bindings"]) else 1)' ||
-  { note "NEW has no TOKEN secret"; record; exit 1; }
+cf workers versions get "$NEW" --worker "$WORKER" | json 'import sys; b={x["name"]: x["type"] for x in d["bindings"]}; sys.exit(0 if b.get("TOKEN")=="secret_text" and b.get("IP_SALT")=="secret_text" else 1)' ||
+  { note "NEW has no TOKEN or IP_SALT secret"; record; exit 1; }
 
 # ---- 4. 0%
 route "$PREV:100" "$NEW:0"
@@ -139,8 +139,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ $ok = 1 ] || back "pinned requests never reached $NEW"
 node scripts/smoke.ts "$BASE" --pin "$NEW" --sha "$SHA" || back "pinned smoke"
-node scripts/mcp-smoke.ts "$BASE/mcp" --pin "$WORKER=$NEW" || back "pinned MCP smoke (/mcp through the binding to tape-mcp)"
-node scripts/parity.ts "$BASE" --pin "$NEW" --compilers-only || back "the playground and /mcp compile differently: deploy tape-mcp from this commit first"
+node scripts/mcp-smoke.ts "$BASE/mcp" --pin "$WORKER=$NEW" --mcp-version "$NEW" || back "pinned MCP smoke (/mcp on NEW)"
+node scripts/parity.ts "$BASE" --pin "$NEW" --sha "$SHA" || back "the playground and /mcp compile differently"
 
 # ---- 6. telemetry on NEW
 say "telemetry gate (0%)"

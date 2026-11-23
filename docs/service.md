@@ -8,9 +8,8 @@ end; how its behaviour is checked is in [`service/VERIFY.md`](../service/VERIFY.
 ## The public service
 
 **Live.** A hosted MCP server and API: post a program, and it is compiled and run, and its results and OTLP traces
-come back, at https://tape.ivar.workers.dev/mcp (and `POST /v1/compile`, `POST /v1/run`), with no token. It is a
-Worker of its own, `tape-mcp` ([`mcp/`](../mcp/)), which the `tape` Worker reaches through a service binding and
-which answers at https://tape-mcp.ivar.workers.dev/mcp too; [`docs/mcp.md`](mcp.md) says how to use it. The deployed service also serves the homepage (`/`) and the in-browser
+come back, at https://tape.ivar.workers.dev/mcp (and `POST /v1/compile`, `POST /v1/run`), with no token. It is
+[`mcp/`](../mcp/), served in the `tape` Worker itself; [`docs/mcp.md`](mcp.md) says how to use it. The deployed service also serves the homepage (`/`) and the in-browser
 playground (`/playground/`); every other route below needs its operator's token and answers 401 without it.
 
 The rules for using it are in [`TERMS.md`](../TERMS.md): it is alpha software that can change at any time, what

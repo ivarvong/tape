@@ -274,7 +274,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | `tape.ts`, `cli/` | The command line: run requests, `fmt`, `test`, `sim`. |
 | `sim.ts`, `sim/` | The simulator behind `tape sim`. |
 | `service/` | Tape as a service on Workers, with its tests, fault harnesses and protocol models. |
-| `mcp/` | `tape-mcp`: the hosted compiler and runner, a stateless Worker serving MCP and `/v1/compile`, `/v1/run`. |
+| `mcp/` | the hosted compiler and runner, served by the `tape` Worker at `/mcp`, `/v1/compile`, `/v1/run`, `/v1/feedback`. |
 | `adapters/` | Host-side adapters; `ply.ts` makes a git repository a `Git` capability using [ply](https://github.com/ivarvong/ply). |
 | `examples/`, `apps/` | Example programs, and applications written as a user would, each with its friction log; `apps/playground/` is the homepage and playground. |
 | `test/`, `proof/` | The tests, one file per subject, and the checks that are more than a test; `proof/all.ts` runs everything. |

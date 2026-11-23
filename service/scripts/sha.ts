@@ -14,7 +14,7 @@ export const tapeVersion = (): string => {
     return 'unknown';
   }
 };
-/** The compiler a build embeds, as both Workers name it in their tape-compiler header: the first 16 hex of the
+/** The compiler a build embeds, as the tape Worker and its hosted runner name it in their tape-compiler header: the first 16 hex of the
  * SHA-256 of compiler.ts, compiler/ and std/ (each file's path and bytes, in path order). Two builds with the same
  * hash compile alike, whatever else in the commit differs. */
 export const compilerHash = (): string => {

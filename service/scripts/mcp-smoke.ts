@@ -1,9 +1,8 @@
-// mcp-smoke.ts: what a deployed hosted compiler and runner (tape-mcp, docs/mcp.md) must answer, at an MCP URL.
+// mcp-smoke.ts: what a deployed hosted compiler and runner (mcp/src, docs/mcp.md) must answer, at an MCP URL.
 //   node scripts/mcp-smoke.ts <mcp-url> [--pin <worker>=<version-id>] [--mcp-version <version-id>]
-// <mcp-url> is https://tape.ivar.workers.dev/mcp (through the tape Worker's service binding) or
-// https://tape-mcp.ivar.workers.dev/mcp (tape-mcp itself); /v1/run and /v1/compile are beside it. With --pin every
+// <mcp-url> is https://tape.ivar.workers.dev/mcp (served in the tape Worker); /v1/run and /v1/compile are beside it. With --pin every
 // request carries Cloudflare-Workers-Version-Overrides for that Worker. With --mcp-version every answer must name that
-// tape-mcp version (its tape-mcp-version header). Eight calls of tape-mcp's 60 a minute, one of feedback's 5. Exits 1 if any check fails.
+// version (the tape-mcp-version header: the tape Worker's version id). Eight calls of tape-mcp's 60 a minute, one of feedback's 5. Exits 1 if any check fails.
 //
 // Checks: initialize (serverInfo tape, the instructions); tools/list is [compile, run, feedback]; a feedback report
 // (stored under smoke/: delete with node mcp/scripts/feedback.ts --delete-smoke); run with no files and

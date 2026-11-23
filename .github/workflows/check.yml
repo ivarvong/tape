@@ -22,7 +22,7 @@ jobs:
       - name: service dependencies
         run: npm ci
         working-directory: service
-      - name: tape-mcp dependencies
+      - name: mcp dependencies
         run: npm ci
         working-directory: mcp
       - name: every check
