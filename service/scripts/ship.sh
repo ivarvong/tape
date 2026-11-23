@@ -155,7 +155,9 @@ uuid() { grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
 NEW_tape=$(uuid "$STATE/upload.out")
 [ -n "$NEW_tape" ] || { cat "$STATE/upload.out"; note "no version id in the upload's output"; record; exit 1; }
 say "new: tape $NEW_tape"
-cf workers versions get "$NEW_tape" --worker tape | json 'import sys; b={x["name"]: x["type"] for x in d["bindings"]}; sys.exit(0 if b.get("TOKEN")=="secret_text" and b.get("IP_SALT")=="secret_text" and b.get("VERSION")=="version_metadata" else 1)' ||
+# a version just uploaded can answer 404 for a few seconds (seen twice on 2026-11-23): ask again before judging it
+for _ in 1 2 3 4 5 6; do cf workers versions get "$NEW_tape" --worker tape > "$STATE/version.json" 2>/dev/null && break; sleep 3; done
+json < "$STATE/version.json" 'import sys; b={x["name"]: x["type"] for x in d["bindings"]}; sys.exit(0 if b.get("TOKEN")=="secret_text" and b.get("IP_SALT")=="secret_text" and b.get("VERSION")=="version_metadata" else 1)' ||
   { note "tape NEW has no TOKEN or IP_SALT secret, or no VERSION binding"; record; exit 1; }
 if [ "$DRY" = 1 ]; then
   OUTCOME="dry run (uploaded, not routed)"
