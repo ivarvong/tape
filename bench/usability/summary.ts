@@ -138,6 +138,14 @@ export const render = (info: RunInfo, all: JobResult[]): string => {
       `answers too large for the CLI to show ${jobs.reduce((s, j) => s + (j.tooLarge ?? 0), 0)}; ` +
       `sessions started again because they were spoiled (no tape server, or a rate-limited compile or run) ${all.reduce((s, j) => s + (j.restarts ?? 0), 0)}; schema probes (a stand-in text, not counted as attempts) ${jobs.reduce((s, j) => s + (j.probes ?? 0), 0)}.`,
   );
+  const checked = jobs.flatMap(j => (j.savedCheck ? [{ id: j.id, c: j.savedCheck }] : []));
+  const parted = checked.filter(x => x.c.differsFromLastRun === true);
+  const broken = checked.filter(x => !x.c.compiles);
+  put(
+    `- Saved solution/ against the last program run (a metric; grading is of solution/ as before): ` +
+      `${parted.length} of ${checked.length} differ from it; ${broken.length} of ${checked.length} do not compile as saved` +
+      (broken.length === 0 ? '.' : ` (${broken.map(x => `${x.id}: ${x.c.codes.join(' ') || 'refused'}`).join('; ')}).`),
+  );
   put(
     `- Cost $${cost.toFixed(2)} (CLI-reported list price), ${jobs.reduce((s, j) => s + j.tokens.output, 0).toLocaleString('en-US')} output tokens.`,
     '',

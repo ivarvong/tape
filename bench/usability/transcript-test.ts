@@ -18,6 +18,9 @@ import { backoffMs, concurrencyFor, DEFAULT_CAPS, parseCaps, spoiledBy } from '.
 import { counted, render } from './summary.ts';
 import type { Graded } from './grade.ts';
 import type { JobResult, RunInfo } from './run.ts';
+import { sameProgram, savedAgainst } from './saved.ts';
+import type { SavedCheck } from './saved.ts';
+import type { File } from './lib.ts';
 
 const hello = raw('examples/hello.tape');
 const init = (status: string, tools: string[]): string =>
@@ -187,7 +190,7 @@ same('parseCaps refuses what is not model=count', refusedCaps, ['refused', 'refu
 
 // summary.ts: a job still spoiled after its last restart is in no number, and is listed with its reason
 const graded: Graded = { task: 'todo', compiled: true, diagnostics: [], checks: [], passed: 29, total: 29, skipped: 0 };
-const job = (id: string, spoiled: string | null, lines: string[]): JobResult => ({
+const job = (id: string, spoiled: string | null, lines: string[], savedCheck: SavedCheck | null = null): JobResult => ({
   ...analyse(lines, 60_000),
   task: 'todo',
   rep: 0,
@@ -196,6 +199,7 @@ const job = (id: string, spoiled: string | null, lines: string[]): JobResult => 
   timedOut: false,
   restarts: spoiled === null ? 0 : 3,
   spoiled,
+  savedCheck,
   solution: ['todo.tape'],
   solutionFrom: 'solution/',
   grade: spoiled === null ? graded : { ...graded, passed: 0 },
@@ -229,6 +233,64 @@ same(
     restarts: page.includes('rate-limited compile or run) 3;'),
   },
   { counted: ['todo-1'], leftOut: true, reason: true, accepted: true, attempts: true, restarts: true },
+);
+
+// saved.ts: solution/ as saved against the last program sent and the last that compiled. The 2e36c1a case: `True` fixed
+// in the text sent to run, `true` left in the file.
+const tested: File[] = [{ name: 'hello.tape', text: hello }];
+const lowered: File[] = [{ name: 'hello.tape', text: hello.replace('True', 'true') }];
+const two: File[] = [...tested, { name: 'b.tape', text: '// b' }];
+same(
+  'sameProgram: the same files by name and text, in any order',
+  [
+    sameProgram(tested, [{ name: 'hello.tape', text: hello }]),
+    sameProgram(two, [two[1] ?? tested[0] ?? { name: '', text: '' }, tested[0] ?? { name: '', text: '' }]),
+    sameProgram(tested, lowered),
+    sameProgram(tested, two),
+    sameProgram(tested, [{ name: 'other.tape', text: hello }]),
+  ],
+  [true, true, false, false, false],
+);
+same(
+  'savedAgainst: tested as saved; fixed in the run but not in the file; nothing ever sent',
+  [
+    savedAgainst(tested, tested, tested, { ok: true, codes: [] }),
+    savedAgainst(lowered, tested, tested, { ok: false, codes: ['C16'] }),
+    savedAgainst(tested, null, null, { ok: true, codes: [] }),
+  ],
+  [
+    { differsFromLastRun: false, differsFromLastCompiled: false, compiles: true, codes: [] },
+    { differsFromLastRun: true, differsFromLastCompiled: true, compiles: false, codes: ['C16'] },
+    { differsFromLastRun: null, differsFromLastCompiled: null, compiles: true, codes: [] },
+  ],
+);
+const savedJobs = [
+  job(
+    'ratelimit-1',
+    null,
+    [init('connected', ALL), ...call(1000, ANSWERED)],
+    savedAgainst(lowered, tested, tested, {
+      ok: false,
+      codes: ['C16'],
+    }),
+  ),
+  job(
+    'ratelimit-2',
+    null,
+    [init('connected', ALL), ...call(1000, ANSWERED)],
+    savedAgainst(tested, tested, tested, {
+      ok: true,
+      codes: [],
+    }),
+  ),
+  job('ratelimit-3', null, [init('connected', ALL)]),
+];
+same(
+  'summary: how many saved programs differ from the last one run, and which do not compile as saved',
+  render(info, savedJobs).includes(
+    'Saved solution/ against the last program run (a metric; grading is of solution/ as before): 1 of 2 differ from it; 1 of 2 do not compile as saved (ratelimit-1: C16).',
+  ),
+  true,
 );
 
 finish();

@@ -26,6 +26,8 @@ import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFile
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { analyse, connected } from './transcript.ts';
+import { compileSaved, savedAgainst } from './saved.ts';
+import type { SavedCheck } from './saved.ts';
 import { backoffMs, concurrencyFor, DEFAULT_CAPS, parseCaps, spoiledBy } from './sessions.ts';
 import type { Metrics } from './transcript.ts';
 import { grade, TASKS } from './grade.ts';
@@ -61,6 +63,9 @@ export type JobResult = Metrics & {
   restarts: number;
   /** why the session that counts is spoiled after the last restart (then summary.md leaves it out), or null */
   spoiled: string | null;
+  /** solution/ as saved against the last program tested (saved.ts); null when the agent saved nothing. A metric only:
+   * the graded program is still solution/, as before */
+  savedCheck: SavedCheck | null;
   solution: string[];
   solutionFrom: 'solution/' | 'last compiled call' | 'last call' | 'none';
   grade: Awaited<ReturnType<typeof grade>>;
@@ -257,6 +262,10 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
   mkdirSync(join(dir, 'solution'), { recursive: true });
   for (const f of files) writeFileSync(join(dir, 'solution', f.name), f.text);
   const graded = await grade(job.task, files);
+  const savedCheck =
+    solutionFrom === 'solution/'
+      ? savedAgainst(files, metrics.lastFiles, metrics.lastCompiledFiles, await compileSaved(files))
+      : null;
   const result: JobResult = {
     ...metrics,
     task: job.task,
@@ -266,6 +275,7 @@ const runJob = async (job: Job, info: RunInfo, outDir: string): Promise<JobResul
     timedOut,
     restarts,
     spoiled,
+    savedCheck,
     solution: files.map(f => f.name),
     solutionFrom,
     grade: graded,
@@ -308,6 +318,10 @@ const regrade = async (outDir: string): Promise<void> => {
       ? readdirSync(sol).map(f => ({ name: f, text: readFileSync(join(sol, f), 'utf8') }))
       : [];
     j.grade = await grade(j.task, files);
+    j.savedCheck =
+      j.solutionFrom === 'solution/' && files.length > 0
+        ? savedAgainst(files, j.lastFiles, j.lastCompiledFiles, await compileSaved(files))
+        : null;
     console.log(`${j.id}: ${j.grade.passed}/${j.grade.total}`);
   }
   writeFileSync(join(outDir, 'results.json'), JSON.stringify(saved, null, 2));
