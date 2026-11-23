@@ -22,7 +22,7 @@ import hostSchema from '../../host/schema.ts?erased';
 import { serve } from './serve.ts';
 import { LIMITS } from './tools.ts';
 import type { Deps, Program } from './tools.ts';
-import type { RanAll } from './runner.ts';
+import type { RanAll, RunRequest } from './runner.ts';
 import type { Runner } from './loaded.ts';
 import type { Store } from './feedback.ts';
 
@@ -54,7 +54,7 @@ const codeOf = (): Promise<string> =>
 
 const runIn =
   (env: Env) =>
-  async (program: Program, requests: readonly string[]): Promise<RanAll> => {
+  async (program: Program, requests: readonly RunRequest[]): Promise<RanAll> => {
     const wasm = hexOf(await crypto.subtle.digest('SHA-256', program.wasm)).slice(0, 32);
     const worker = env.LOADER.get(`tape-mcp/${await codeOf()}/${wasm}`, () => ({
       compatibilityDate: '2026-11-13',

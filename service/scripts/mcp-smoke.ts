@@ -103,7 +103,8 @@ const list = await rpc('tools/list');
 const names = arr(obj(list.j['result'])['tools']).map(t => obj(t)['name']);
 check(JSON.stringify(names) === '["compile","run","feedback"]', `tools/list: ${JSON.stringify(names)}`);
 
-const twice = { requests: ['GET /hello/ada', 'GET /hello/ada'] };
+// trace: 'full', the OTLP (the default is a summary of it)
+const twice = { requests: ['GET /hello/ada', 'GET /hello/ada'], trace: 'full' };
 const sees = (where: string, ran: J): string => {
   const rs = arr(ran['results']).map(obj);
   check(ran['ok'] === true, `${where}: ok ${String(ran['ok'])}`);

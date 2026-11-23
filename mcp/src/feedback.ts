@@ -108,7 +108,8 @@ export async function feedbackTool(
     expected,
     actual,
     files,
-    requests,
+    // as run takes them: text, or {request, at_ms} for one sent on the run's own clock
+    requests: requests?.map(r => (r.at_ms === null ? r.request : r)) ?? null,
     reproduced: built ? { ok: built.wasm !== null, diagnostic_codes: codes } : null,
     server: {
       tape_mcp_version: meta.tape_mcp_version,

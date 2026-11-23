@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import worker from '../src/index.ts';
 import hello from '../../examples/hello.tape?raw';
 import limits from './limits.tape?raw';
+import clock from './clock.tape?raw';
 
 type Fields = Record<string, unknown>;
 const isFields = (v: unknown): v is Fields => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -74,7 +75,7 @@ describe('tape-mcp in workerd', () => {
   });
 
   it('runs hello twice in a Dynamic Worker: the bodies, the named effects, replayed, and OTLP', async () => {
-    const { out, isError } = await call('run', { requests: ['GET /hello/ada', 'GET /hello/ada'] });
+    const { out, isError } = await call('run', { requests: ['GET /hello/ada', 'GET /hello/ada'], trace: 'full' });
     expect(isError).toBe(false);
     const [a, b] = results(out);
     expect([a?.['status'], a?.['body'], b?.['status'], b?.['body']]).toEqual([
@@ -90,6 +91,7 @@ describe('tape-mcp in workerd', () => {
           kind: 'sql',
           query: 'INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n',
           params: { ':name': 'ada' },
+          rows_returned: 1,
           rows: [[i + 1]],
           // an upsert changes one row each time, an insert and then an update (SQLite's changes())
           rows_written: 1,
@@ -104,6 +106,44 @@ describe('tape-mcp in workerd', () => {
     // a second call is a fresh database: ada is greeted for the first time again
     const again = await call('run', { requests: ['GET /hello/ada'] });
     expect(results(again.out)[0]?.['body']).toBe('Hello, ada');
+  });
+
+  it("runs on the run's own clock in the Dynamic Worker: at_ms moves now(), and a due timer runs before the request", async () => {
+    const at = (request: string, at_ms: number): Fields => ({ request, at_ms });
+    const { out } = await call('run', {
+      files: [{ name: 'clock.tape', text: clock }],
+      requests: [
+        at('POST /hit', 1000),
+        at('POST /later/7', 1000),
+        at('GET /window', 60_500),
+        at('GET /fired', 61_000),
+        at('GET /window', 61_000),
+      ],
+    });
+    const rs = results(out);
+    // a hit at 1000; the window at 60500 holds it, at 61000 it does not; the timer set at 1000 for 5000 ms has run
+    expect(rs.map(r => [r['request'], r['body']])).toEqual([
+      ['POST /hit', '{"n":1}'],
+      ['POST /later/7', ''],
+      ['woken {"key":7}', '{"n":1}'],
+      ['GET /window', '{"n":1}'],
+      ['GET /fired', expect.stringMatching(/^\[\{"key":7,"at":\d+\}\]$/)],
+      ['GET /window', '{"n":0}'],
+    ]);
+    expect(rs.map(r => r['at_ms'])).toEqual([1000, 1000, 60_500, 60_500, 61_000, 61_000]);
+    expect(F(rs[2]?.['woken'])).toEqual({ key: 7, due_ms: 6000 });
+    const nowOf = (r: Fields | undefined): number =>
+      Number(
+        F(
+          L(r?.['effects'])
+            .map(F)
+            .find(e => e['kind'] === 'now'),
+        )['now'],
+      );
+    expect(nowOf(rs[3]) - nowOf(rs[0])).toBe(59_500);
+    expect(out['timers']).toEqual({ fired: 1, pending: 0 });
+    // and the summary is the default trace
+    expect(F(rs[0]?.['trace'])['spans']).toEqual([expect.objectContaining({ name: 'POST /hit', status: 'ok' })]);
   });
 
   it("keeps Tape's budget and the body limit inside the Dynamic Worker", async () => {

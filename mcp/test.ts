@@ -25,6 +25,7 @@ const ROOT = new URL('../', import.meta.url).pathname;
 const HELLO = readFileSync(`${ROOT}examples/hello.tape`, 'utf8');
 const LIMITS_TAPE = readFileSync(`${HERE}test/limits.tape`, 'utf8');
 const UNDONE_TAPE = readFileSync(`${HERE}test/undone.tape`, 'utf8');
+const CLOCK_TAPE = readFileSync(`${HERE}test/clock.tape`, 'utf8');
 const README = readFileSync(`${ROOT}README.md`, 'utf8');
 
 type Mods = { runner: typeof RunnerM; tools: typeof ToolsM; serve: typeof ServeM };
@@ -174,7 +175,16 @@ function otlpProblems(trace: unknown): string[] {
   }
   return out;
 }
-const VARIES = new Set(['traceId', 'spanId', 'parentSpanId', 'startTimeUnixNano', 'endTimeUnixNano', 'timeUnixNano']);
+const VARIES = new Set([
+  'traceId',
+  'spanId',
+  'parentSpanId',
+  'startTimeUnixNano',
+  'endTimeUnixNano',
+  'timeUnixNano',
+  'trace_id',
+  'duration_us',
+]);
 /** A value with what differs between two runs of the same input replaced: ids, times, and attributes holding them. */
 function stable(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(stable);
@@ -350,6 +360,7 @@ const tests: Test[] = [
       const { out: r } = await tool(m, 'run', {
         files: [{ name: 'undone.tape', text: UNDONE_TAPE }],
         requests: ['GET /undo', 'GET /trap', 'GET /keep', 'GET /keep', 'GET /wake'],
+        trace: 'full',
       });
       const rs = RESULTS(r);
       // the first INSERT is undone by rollback(out), the second by the trap: the third request writes the row
@@ -567,7 +578,7 @@ const tests: Test[] = [
     run: async m => {
       const out: string[] = [];
       const requests = ['GET /hello/ada', 'GET /hello/ada', 'GET /nope'];
-      const { out: r } = await tool(m, 'run', { requests });
+      const { out: r } = await tool(m, 'run', { requests, trace: 'full' });
       const mine = RESULTS(r).map(x => x['trace']);
       for (const [i, t] of mine.entries()) out.push(...otlpProblems(t).map(p => `request ${i + 1}: ${p}`));
       // and a run that trapped, beside one that did not
@@ -575,6 +586,7 @@ const tests: Test[] = [
       const { out: t2 } = await tool(m, 'run', {
         files: [{ name: 'limits.tape', text: LIMITS_TAPE }],
         requests: trapped,
+        trace: 'full',
       });
       const mine2 = RESULTS(t2).map(x => x['trace']);
       for (const [i, t] of mine2.entries()) out.push(...otlpProblems(t).map(p => `limits request ${i + 1}: ${p}`));
@@ -707,6 +719,24 @@ const tests: Test[] = [
       await expect('a request that is not METHOD SP TARGET', { requests: ['hello ada'] }, 400, 'bad_request_line');
       await expect('a request that is not text', { requests: [7] }, 400, 'bad_requests');
       await expect('an unknown argument', { requests: ok, file: 'x' }, 400, 'unknown_argument');
+      await expect('trace: "otlp"', { requests: ok, trace: 'otlp' }, 400, 'bad_arguments');
+      await expect('effects: "all"', { requests: ok, effects: 'all' }, 400, 'bad_arguments');
+      await expect('at_ms -1', { requests: [{ request: 'GET /', at_ms: -1 }] }, 400, 'bad_at_ms');
+      await expect('at_ms 1.5', { requests: [{ request: 'GET /', at_ms: 1.5 }] }, 400, 'bad_at_ms');
+      await expect('at_ms past 30 days', { requests: [{ request: 'GET /', at_ms: 2_592_000_001 }] }, 400, 'bad_at_ms');
+      await expect(
+        'at_ms going back',
+        {
+          requests: [
+            { request: 'GET /', at_ms: 2000 },
+            { request: 'GET /', at_ms: 1999 },
+          ],
+        },
+        400,
+        'bad_at_ms',
+      );
+      await expect('a request with another field', { requests: [{ request: 'GET /', at: 1 }] }, 400, 'bad_requests');
+      await expect('a request object without text', { requests: [{ at_ms: 1 }] }, 400, 'bad_requests');
       await expect('requests given to compile', { $tool: 'compile', requests: ok }, 400, 'unknown_argument');
       // and what is allowed is: 16384 bytes of body, 20 requests, 8 files, 65536 bytes of source
       const { out: edge } = await tool(m, 'run', {
@@ -904,6 +934,169 @@ const tests: Test[] = [
       ).logs[0];
       if (JSON.stringify(c54?.['diagnostic_codes']) !== '["C54"]' || c54?.['ok'] !== false)
         out.push(`C54's line: ${JSON.stringify(c54)}`);
+      return out;
+    },
+  },
+  {
+    name: 'trace',
+    // trace: "summary" (the default) is the OTLP's spans in a few words each, "full" the OTLP, "none" nothing; the
+    // spans are compared with the playground's OTLP for the same requests, not with this code's own
+    run: async m => {
+      const out: string[] = [];
+      const files = [{ name: 'limits.tape', text: LIMITS_TAPE }];
+      const requests = ['GET /div/', 'GET /dice'];
+      const theirs = await workbenchOtlp('limits', LIMITS_TAPE, requests);
+      const { out: r } = await tool(m, 'run', { files, requests });
+      for (const [i, x] of RESULTS(r).entries()) {
+        const t = F(x['trace']);
+        if ('resourceSpans' in t) out.push(`request ${i + 1}: the default trace is the OTLP`);
+        const spans = L(F(L(F(L(F(theirs[i])['resourceSpans'])[0])['scopeSpans'])[0])['spans']).map(F);
+        const want = spans.map(sp => ({
+          name: sp['name'],
+          status: F(sp['status'])['code'] === 2 ? 'error' : 'ok',
+          events: L(sp['events']).length,
+        }));
+        const got = L(t['spans'])
+          .map(F)
+          .map(sp => ({ name: sp['name'], status: sp['status'], events: sp['events'] }));
+        if (JSON.stringify(got) !== JSON.stringify(want))
+          out.push(`request ${i + 1}: summary ${JSON.stringify(got)}, the playground's spans ${JSON.stringify(want)}`);
+        if (!/^[0-9a-f]{32}$/.test(String(t['trace_id'])))
+          out.push(`request ${i + 1}: trace_id ${String(t['trace_id'])}`);
+        for (const sp of L(t['spans']).map(F))
+          if (typeof sp['duration_us'] !== 'number' || sp['duration_us'] < 0)
+            out.push(`request ${i + 1}: duration_us ${String(sp['duration_us'])}`);
+      }
+      const [div] = L(F(RESULTS(r)[0]?.['trace'])['spans']).map(F);
+      if (!String(div?.['error']).includes('division by zero'))
+        out.push(`the trap's span error ${String(div?.['error'])}`);
+      const { out: full } = await tool(m, 'run', { files, requests, trace: 'full' });
+      for (const [i, x] of RESULTS(full).entries())
+        out.push(...otlpProblems(x['trace']).map(p => `full, request ${i + 1}: ${p}`));
+      const { out: none } = await tool(m, 'run', { files, requests, trace: 'none' });
+      if (!RESULTS(none).every(x => x['trace'] === null)) out.push('trace: "none" still gives a trace');
+      // and it is smaller: a summary is a fraction of the OTLP
+      const size = (x: Fields): number => JSON.stringify(x).length;
+      if (!(size(none) < size(r) && size(r) * 2 < size(full)))
+        out.push(`sizes: none ${size(none)}, summary ${size(r)}, full ${size(full)}`);
+      return out;
+    },
+  },
+  {
+    name: 'compact',
+    // effects: "compact" (the default) shows a query's rows only when it returned at most 20, and says how many;
+    // "full" shows them all
+    run: async m => {
+      const out: string[] = [];
+      const files = [{ name: 'clock.tape', text: CLOCK_TAPE }];
+      const sqlOf = (x: Fields | undefined): Fields =>
+        F(
+          L(x?.['effects'])
+            .map(F)
+            .find(e => e['kind'] === 'sql'),
+        );
+      for (const [n, shown] of [
+        [3, true],
+        [20, true],
+        [21, false],
+      ] as const) {
+        const { out: r } = await tool(m, 'run', { files, requests: [`POST /rows/${n}`, 'GET /rows'] });
+        const read = sqlOf(RESULTS(r)[1]);
+        if (read['rows_returned'] !== n) out.push(`${n} rows: rows_returned ${String(read['rows_returned'])}`);
+        if (shown !== Array.isArray(read['rows']) || (shown && L(read['rows']).length !== n))
+          out.push(`${n} rows: rows ${JSON.stringify(read['rows'])?.slice(0, 80)}`);
+        const write = L(RESULTS(r)[0]?.['effects']).map(F);
+        if (write.length !== n || write.some(e => e['rows_written'] !== 1 || 'rows' in e))
+          out.push(`${n} inserts: ${JSON.stringify(write).slice(0, 120)}`);
+      }
+      const { out: full } = await tool(m, 'run', { files, requests: ['POST /rows/25', 'GET /rows'], effects: 'full' });
+      const all = sqlOf(RESULTS(full)[1]);
+      if (L(all['rows']).length !== 25 || 'rows_returned' in all)
+        out.push(`full: ${L(all['rows']).length} rows, rows_returned ${String(all['rows_returned'])}`);
+      return out;
+    },
+  },
+  {
+    name: 'clock',
+    // at_ms: now() is the run's start plus at_ms, so a 60 s window can be stepped through; timers due by a
+    // request's time run before it, oldest first
+    run: async m => {
+      const out: string[] = [];
+      const files = [{ name: 'clock.tape', text: CLOCK_TAPE }];
+      const at = (request: string, at_ms: number): Fields => ({ request, at_ms });
+      const { out: r } = await tool(m, 'run', {
+        files,
+        requests: [
+          at('POST /hit', 0),
+          at('POST /hit', 1000),
+          'GET /window',
+          at('GET /window', 60_500),
+          at('GET /window', 61_000),
+        ],
+      });
+      const rs = RESULTS(r);
+      const bodies = rs.map(x => x['body']);
+      // hits at 0 and 1000; the window at t holds the hits after t - 60000
+      if (JSON.stringify(bodies) !== JSON.stringify(['{"n":1}', '{"n":1}', '{"n":2}', '{"n":1}', '{"n":0}']))
+        out.push(`window: ${JSON.stringify(bodies)}`);
+      if (JSON.stringify(rs.map(x => x['at_ms'])) !== JSON.stringify([0, 1000, 1000, 60_500, 61_000]))
+        out.push(`at_ms ${JSON.stringify(rs.map(x => x['at_ms']))}`);
+      const nows = rs.map(x =>
+        Number(
+          F(
+            L(x['effects'])
+              .map(F)
+              .find(e => e['kind'] === 'now'),
+          )['now'],
+        ),
+      );
+      const start = nows[0] ?? 0;
+      if (JSON.stringify(nows.map(n => n - start)) !== JSON.stringify([0, 1000, 1000, 60_500, 61_000]))
+        out.push(`now() - start: ${JSON.stringify(nows.map(n => n - start))}`);
+      if (Math.abs(start - Date.now()) > 60_000) out.push(`the run's start ${start} is not about now`);
+      if (r['ok'] !== true) out.push(`ok ${String(r['ok'])}`);
+      // a timer set at 0 for 5000 ms: not run by 4999, run (as its own result, before the request) by 5000
+      const { out: t } = await tool(m, 'run', {
+        files,
+        requests: [at('POST /later/7', 0), at('GET /fired', 4999), at('GET /fired', 5000), 'GET /fired'],
+      });
+      const ts = RESULTS(t);
+      const shape = ts.map(x => `${String(x['request'])} ${String(x['status'])} ${String(x['body'])}`);
+      const woken = ts[2];
+      const fired = ts[3];
+      const firedAt = Number(
+        F(
+          L(woken?.['effects'])
+            .map(F)
+            .find(e => e['kind'] === 'now'),
+        )['now'],
+      );
+      const wake = F(
+        L(ts[0]?.['effects'])
+          .map(F)
+          .find(e => e['kind'] === 'wake'),
+      );
+      if (ts.length !== 5 || ts[1]?.['body'] !== '[]' || String(woken?.['request']) !== 'woken {"key":7}')
+        out.push(`timers: ${JSON.stringify(shape)}`);
+      if (JSON.stringify(woken?.['woken']) !== '{"key":7,"due_ms":5000}' || woken?.['at_ms'] !== 5000)
+        out.push(`the timer's run: woken ${JSON.stringify(woken?.['woken'])} at_ms ${String(woken?.['at_ms'])}`);
+      if (woken?.['status'] !== 200 || woken['body'] !== '{"n":1}' || woken['replayed'] !== null)
+        out.push(
+          `the timer's run: ${String(woken?.['status'])} ${String(woken?.['body'])} ${String(woken?.['replayed'])}`,
+        );
+      if (fired?.['body'] !== `[{"key":7,"at":${firedAt}}]` || firedAt - start < 0 || wake['due'] !== firedAt)
+        out.push(`fired: ${String(fired?.['body'])}, the timer's now ${firedAt}, due ${String(wake['due'])}`);
+      if (JSON.stringify(t['timers']) !== '{"fired":1,"pending":0}') out.push(`timers ${JSON.stringify(t['timers'])}`);
+      if (t['ok'] !== true) out.push(`timers: ok ${String(t['ok'])}`);
+      if (String(ts[4]?.['request']) !== 'GET /fired' || ts[4]?.['at_ms'] !== 5000)
+        out.push(`a request without at_ms after one with it: ${String(ts[4]?.['at_ms'])}`);
+      // without at_ms: the real clock, no timer runs, no at_ms or timers in the answer
+      const { out: real } = await tool(m, 'run', { files, requests: ['POST /later/7', 'GET /fired'] });
+      if (RESULTS(real).length !== 2 || 'timers' in real || RESULTS(real).some(x => 'at_ms' in x))
+        out.push(`the real clock: ${JSON.stringify(real).slice(0, 160)}`);
+      // the clock is put back after a run
+      if (Math.abs(Date.now() - (performance.timeOrigin + performance.now())) > 1000)
+        out.push('Date.now is not the real clock after a run');
       return out;
     },
   },
@@ -1147,6 +1340,76 @@ const PLANTS: Plant[] = [
     file: 'serve.ts',
     from: '  if (!gate.salt)\n    return no(',
     to: '  if (false)\n    return no(',
+  },
+  {
+    test: 'trace',
+    what: 'the summary is the OTLP',
+    file: 'tools.ts',
+    from: "trace = full_trace && modes.trace === 'summary' ? summaryOf(full_trace) : full_trace;",
+    to: 'trace = full_trace;',
+  },
+  {
+    test: 'trace',
+    what: 'a span in error is summarised as ok',
+    file: 'tools.ts',
+    from: "status: sp.status.code === 2 ? 'error' : 'ok',",
+    to: "status: 'ok',",
+  },
+  {
+    test: 'trace',
+    what: 'trace: "none" gives the OTLP',
+    file: 'tools.ts',
+    from: "full_trace = modes.trace === 'none' ? null : otlp(",
+    to: 'full_trace = 1 > 2 ? null : otlp(',
+  },
+  {
+    test: 'compact',
+    what: 'compact effects show every row',
+    file: 'tools.ts',
+    from: "const shown = e.rows && (mode === 'full' || e.rows.length <= LIMITS.compactRows);",
+    to: 'const shown = e.rows;',
+  },
+  {
+    test: 'compact',
+    what: 'compact effects cut at 21 rows, not 20',
+    file: 'tools.ts',
+    from: "const shown = e.rows && (mode === 'full' || e.rows.length <= LIMITS.compactRows);",
+    to: "const shown = e.rows && (mode === 'full' || e.rows.length <= LIMITS.compactRows + 1);",
+  },
+  {
+    test: 'clock',
+    what: 'at_ms is ignored',
+    file: 'runner.ts',
+    from: '        setClock(last);\n',
+    to: '',
+  },
+  {
+    test: 'clock',
+    what: 'due timers do not run',
+    file: 'runner.ts',
+    from: 'key !== undefined && fired < MAX_WOKEN;',
+    to: 'key !== undefined && fired < 0;',
+  },
+  {
+    test: 'clock',
+    what: 'a timer runs a millisecond late',
+    file: 'runner.ts',
+    from: 'const now = start + last;',
+    to: 'const now = start + last - 1;',
+  },
+  {
+    test: 'clock',
+    what: 'the real clock is not put back',
+    file: 'runner.ts',
+    from: '    Date.now = realNow;\n',
+    to: '',
+  },
+  {
+    test: 'limits',
+    what: 'at_ms may go back',
+    file: 'tools.ts',
+    from: 'if (ms < before)',
+    to: 'if (ms < before - 1000)',
   },
   {
     test: 'determinism',

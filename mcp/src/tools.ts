@@ -15,7 +15,7 @@ import { otlp } from '../../service/src/view.ts';
 import type { Otlp } from '../../service/src/view.ts';
 import type { Entry, Joined, JoinedCall, RunHead } from '../../service/src/records.ts';
 import { NAME, UNREACHABLE } from './runner.ts';
-import type { Ran, RanAll } from './runner.ts';
+import type { Ran, RanAll, RunRequest } from './runner.ts';
 
 export const LIMITS = {
   /** every file's text together, in UTF-8 bytes */
@@ -34,6 +34,10 @@ export const LIMITS = {
   wallMs: 20_000,
   /** the CPU the Dynamic Worker running the program may use per call */
   cpuMs: 10_000,
+  /** a request's at_ms: up to 30 days after the run's start */
+  atMs: 30 * 24 * 3600 * 1000,
+  /** compact effects show a query's rows when it returned at most this many */
+  compactRows: 20,
 } as const;
 
 /** Why a call was not done: a code, the HTTP status, and a sentence that says what to change. */
@@ -54,7 +58,7 @@ export type Deps = {
   std: readonly Source[];
   /** examples/hello.tape, the program used when no files are given */
   hello: Source;
-  run: (program: Program, requests: readonly string[]) => Promise<RanAll>;
+  run: (program: Program, requests: readonly RunRequest[]) => Promise<RanAll>;
   /** the wall-clock guard on a run call (LIMITS.wallMs; a test shortens it) */
   wallMs?: number;
 };
@@ -73,6 +77,8 @@ export type EffectOut =
       query: string;
       params: Record<string, unknown>;
       rows?: unknown[][];
+      /** compact effects: how many rows the statement returned (rows are left out past LIMITS.compactRows) */
+      rows_returned?: number;
       rows_written?: number;
       /** the write was undone: its run's rollback(out) or trap rolled it back */
       undone?: true;
@@ -90,8 +96,19 @@ export type EffectOut =
   | { kind: 'now'; now: number }
   | { kind: 'random'; random: number }
   | { kind: 'wake'; key: number; after_ms: number; due: number; undone?: true };
+/** A run's spans in a few words each: name, status, how long, and how many events (the OTLP has them all). */
+export type TraceSummary = {
+  trace_id: string;
+  spans: { name: string; status: 'ok' | 'error'; error?: string; duration_us: number; events: number }[];
+};
+export type TraceMode = 'summary' | 'full' | 'none';
+export type EffectsMode = 'compact' | 'full';
 export type RunResultOne = {
   request: string;
+  /** on the run's own clock (a request with at_ms): when it ran, in ms from the run's start */
+  at_ms?: number;
+  /** a timer's run: the key, and when it was due */
+  woken?: { key: number; due_ms: number };
   status: number;
   content_type: string | null;
   body: string;
@@ -99,14 +116,22 @@ export type RunResultOne = {
   truncated: boolean;
   error: string | null;
   effects: EffectOut[] | null;
-  replayed: boolean;
+  /** null for a timer's run: the host replays `handle` only */
+  replayed: boolean | null;
   replay_error?: string;
   steps: number;
   memory_bytes: number | null;
-  trace: Otlp | null;
+  trace: Otlp | TraceSummary | null;
   omitted?: string;
 };
-export type RunResult = { ok: boolean; diagnostics: Diagnostic[]; error?: string; results: RunResultOne[] };
+export type RunResult = {
+  ok: boolean;
+  diagnostics: Diagnostic[];
+  error?: string;
+  results: RunResultOne[];
+  /** on the run's own clock: the timers that ran, and those still set at the end */
+  timers?: { fired: number; pending: number };
+};
 /** What the log line says of a call, beside what serve.ts knows (serve.ts, logLine). */
 export type Usage = {
   codes: string[];
@@ -172,15 +197,48 @@ export function filesOf(args: Fields, deps: Deps): Source[] | Refusal {
   return out;
 }
 
-/** The requests, or why not: each `METHOD SP TARGET`, then optionally a line feed and a body. */
-export function requestsOf(args: Fields): string[] | Refusal {
+/**
+ * The requests, or why not: each `METHOD SP TARGET`, then optionally a line feed and a body; or {request, at_ms},
+ * at_ms a whole number of ms from the run's start, never less than the one before it.
+ */
+export function requestsOf(args: Fields): RunRequest[] | Refusal {
   const requests = args['requests'];
   if (!Array.isArray(requests) || requests.length === 0)
     return refused(400, 'bad_requests', '`requests` is a list of at least one request, such as "GET /hello/ada"');
   if (requests.length > LIMITS.requests)
     return refused(413, 'too_many_requests', `${requests.length} requests; a run takes at most ${LIMITS.requests}`);
-  for (const [i, r] of requests.entries()) {
-    if (typeof r !== 'string') return refused(400, 'bad_requests', `requests[${i}] is not text`);
+  const out: RunRequest[] = [];
+  let before = 0;
+  for (const [i, item] of requests.entries()) {
+    let r: unknown = item,
+      at: number | null = null;
+    if (isFields(item)) {
+      const extra = Object.keys(item).filter(k => k !== 'request' && k !== 'at_ms');
+      if (extra.length > 0)
+        return refused(
+          400,
+          'bad_requests',
+          `requests[${i}] has ${extra.join(', ')}; a request is text, or {request, at_ms}`,
+        );
+      r = item['request'];
+      const ms = item['at_ms'];
+      if (ms !== undefined && ms !== null) {
+        if (typeof ms !== 'number' || !Number.isSafeInteger(ms) || ms < 0 || ms > LIMITS.atMs)
+          return refused(
+            400,
+            'bad_at_ms',
+            `requests[${i}].at_ms is ${JSON.stringify(ms)}; it is a whole number of ms from the run's start, 0 to ${LIMITS.atMs}`,
+          );
+        if (ms < before)
+          return refused(
+            400,
+            'bad_at_ms',
+            `requests[${i}].at_ms is ${ms}, before the ${before} of a request before it: the run's clock only goes forward`,
+          );
+        at = before = ms;
+      }
+    }
+    if (typeof r !== 'string') return refused(400, 'bad_requests', `requests[${i}] is not text, or {request, at_ms}`);
     const nl = r.indexOf('\n'),
       line = nl < 0 ? r : r.slice(0, nl),
       body = nl < 0 ? '' : r.slice(nl + 1);
@@ -194,8 +252,24 @@ export function requestsOf(args: Fields): string[] | Refusal {
       );
     if (enc.encode(body).length > LIMITS.requestBodyBytes)
       return refused(413, 'request_too_large', `requests[${i}]'s body is more than ${LIMITS.requestBodyBytes} bytes`);
+    out.push({ request: r, at_ms: at });
   }
-  return requests.filter(r => typeof r === 'string');
+  return out;
+}
+
+/** An argument that is one of a few words, or its default when it is absent. */
+function modeOf<T extends string>(args: Fields, name: string, modes: readonly T[], fallback: T): T | Refusal {
+  const v = args[name];
+  if (v === undefined || v === null) return fallback;
+  const found = modes.find(m => m === v);
+  return (
+    found ??
+    refused(
+      400,
+      'bad_arguments',
+      `\`${name}\` is ${JSON.stringify(v)}; it is one of ${modes.map(m => `"${m}"`).join(', ')}`,
+    )
+  );
 }
 
 const diagnosticsOf = (
@@ -268,7 +342,12 @@ const unpacked = (v: unknown): unknown => {
 const namesOf = (files: readonly Source[]): Map<string, string[]> =>
   new Map(files.flatMap(f => [...queryNames(f.text)]));
 
-function effectsOut(built: Built, effects: readonly Effect[], names: ReadonlyMap<string, string[]>): EffectOut[] {
+function effectsOut(
+  built: Built,
+  effects: readonly Effect[],
+  names: ReadonlyMap<string, string[]>,
+  mode: EffectsMode,
+): EffectOut[] {
   return effects.flatMap((e): EffectOut[] => {
     if (isHead(e)) return [];
     if ('q' in e) {
@@ -276,12 +355,14 @@ function effectsOut(built: Built, effects: readonly Effect[], names: ReadonlyMap
       const line = effectLine(built, e, names).sql,
         query = line?.query ?? built.queries[e.q]?.sql ?? `query ${e.q}`;
       const params = Object.fromEntries(e.p.map((v, i) => [line?.binds[i]?.[0] ?? `?${i + 1}`, jsonCell(v)]));
+      const shown = e.rows && (mode === 'full' || e.rows.length <= LIMITS.compactRows);
       return [
         {
           kind: 'sql',
           query,
           params,
-          ...(e.rows ? { rows: e.rows.map(r => r.map(jsonCell)) } : {}),
+          ...(e.rows && mode === 'compact' ? { rows_returned: e.rows.length } : {}),
+          ...(e.rows && shown ? { rows: e.rows.map(r => r.map(jsonCell)) } : {}),
           ...(e.r === undefined ? {} : { rows_written: e.r }),
           ...(e.undone ? { undone: true as const } : {}),
         },
@@ -344,14 +425,31 @@ export function joinedOf(built: Built, files: readonly Source[], ran: Ran, statu
   };
 }
 
+/** The OTLP of one run, in a few words a span. */
+export function summaryOf(trace: Otlp): TraceSummary {
+  const spans = trace.resourceSpans.flatMap(r => r.scopeSpans.flatMap(sc => sc.spans));
+  return {
+    trace_id: spans[0]?.traceId ?? '',
+    spans: spans.map(sp => ({
+      name: sp.name,
+      status: sp.status.code === 2 ? 'error' : 'ok',
+      ...(sp.status.code === 2 && sp.status.message !== undefined ? { error: sp.status.message } : {}),
+      duration_us: Number((BigInt(sp.endTimeUnixNano) - BigInt(sp.startTimeUnixNano)) / 1000n),
+      events: sp.events.length,
+    })),
+  };
+}
+
 const sizeOf = (v: unknown): number =>
   JSON.stringify(v, (_k, x: unknown) => (typeof x === 'bigint' ? String(x) : x)).length;
 
+type Modes = { trace: TraceMode; effects: EffectsMode };
 function resultOf(
   built: Built,
   files: readonly Source[],
   ran: Ran,
   names: ReadonlyMap<string, string[]>,
+  modes: Modes,
 ): RunResultOne {
   const res = ran.out ? responseOf(ran.out) : null,
     status = ran.failed ? 500 : (res?.status ?? 500),
@@ -360,11 +458,14 @@ function resultOf(
     cut = bytes > LIMITS.responseBodyBytes,
     body = cut ? dec.decode((res?.body ?? enc.encode(full)).subarray(0, LIMITS.responseBodyBytes)) : full;
   const [head] = ran.effects;
-  const effects = effectsOut(built, ran.effects, names),
-    trace = otlp(joinedOf(built, files, ran, status, full));
+  const effects = effectsOut(built, ran.effects, names, modes.effects),
+    full_trace = modes.trace === 'none' ? null : otlp(joinedOf(built, files, ran, status, full)),
+    trace = full_trace && modes.trace === 'summary' ? summaryOf(full_trace) : full_trace;
   const large = sizeOf(effects) + sizeOf(trace) > LIMITS.resultBytes;
   return {
     request: ran.request,
+    ...(ran.at_ms === undefined ? {} : { at_ms: ran.at_ms }),
+    ...(ran.woken ? { woken: ran.woken } : {}),
     status,
     content_type: ran.failed ? null : (res?.type ?? null),
     body,
@@ -379,7 +480,7 @@ function resultOf(
     trace: large ? null : trace,
     ...(large
       ? {
-          omitted: `the effect log and trace are more than ${LIMITS.resultBytes} bytes as JSON, so both are left out; run fewer requests, or return fewer rows`,
+          omitted: `the effect log and trace are more than ${LIMITS.resultBytes} bytes as JSON, so both are left out; run fewer requests, return fewer rows, or ask for less (effects: "compact", trace: "summary" or "none")`,
         }
       : {}),
   };
@@ -407,10 +508,14 @@ export async function runTool(
   deps: Deps,
 ): Promise<{ result: RunResult | Refusal; usage: Usage | null }> {
   if (!isFields(args)) return { result: refused(400, 'bad_arguments', 'the arguments are a JSON object'), usage: null };
-  const c = compiled(args, deps, ['files', 'requests']);
+  const c = compiled(args, deps, ['files', 'requests', 'trace', 'effects']);
   if (isRefusal(c)) return { result: c, usage: null };
   const requests = requestsOf(args);
   if (isRefusal(requests)) return { result: requests, usage: null };
+  const trace = modeOf<TraceMode>(args, 'trace', ['summary', 'full', 'none'], 'summary');
+  if (isRefusal(trace)) return { result: trace, usage: null };
+  const effects = modeOf<EffectsMode>(args, 'effects', ['compact', 'full'], 'compact');
+  if (isRefusal(effects)) return { result: effects, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
   if (!built) return { result: { ok: false, diagnostics: c.diagnostics, results: [] }, usage };
@@ -441,11 +546,16 @@ export async function runTool(
     };
   if (!all.ok) return { result: { ok: false, diagnostics: [], error: all.error, results: [] }, usage };
   const names = namesOf(c.files);
-  const results = all.runs.map(ran => resultOf(built, c.files, ran, names));
+  const results = all.runs.map(ran => resultOf(built, c.files, ran, names, { trace, effects }));
   usage.statuses = results.map(r => r.status);
   usage.steps = all.runs.reduce((n, r) => n + r.steps, 0);
   return {
-    result: { ok: results.every(r => r.error === null && r.replayed), diagnostics: [], results },
+    result: {
+      ok: results.every(r => r.error === null && r.replayed !== false),
+      diagnostics: [],
+      results,
+      ...(all.timers ? { timers: all.timers } : {}),
+    },
     usage,
   };
 }

@@ -6,10 +6,10 @@ import initSqlJs from './sql-wasm.js';
 import sqlite3 from './sqlite3.wasm';
 import program from './program.wasm';
 import { runAll, startSqlite } from './runner.ts';
-import type { RanAll } from './runner.ts';
+import type { RanAll, RunRequest } from './runner.ts';
 
 export class Runner extends WorkerEntrypoint {
-  async run(requests: string[]): Promise<RanAll> {
+  async run(requests: RunRequest[]): Promise<RanAll> {
     await startSqlite(initSqlJs, sqlite3);
     return runAll(program, requests);
   }
