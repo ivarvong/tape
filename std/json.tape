@@ -736,9 +736,38 @@ fn json_bad(v: View) -> View {
   }
 }
 
-// Internal: the value of the last member named `key` (JSON.parse keeps the last).
-fn json_get(list: List[Json_Member], key: View) -> Option[Json_Tree] {
-  json_get_from(list, key, found: None)
+// Internal: the object v holds (whitespace around it allowed), or why decode refuses it: "empty", "not JSON" or
+// "not an object". The decoders compiler/wire.ts writes start here.
+fn json_object(v: View) -> Result[Json_Tree, View] {
+  match json_tree(v) {
+    Some(value: Json_Obj(members)) -> Ok(value: Json_Obj(members))
+    None -> Err(error: json_bad(v))
+    _ -> Err(error: "not an object")
+  }
+}
+
+// Internal: is the value an object?
+fn json_is_object(item: Json_Tree) -> Bool {
+  match item {
+    Json_Obj -> True
+    _ -> False
+  }
+}
+
+// Internal: the value of a member that json_check found (null when there is none).
+fn json_value_of(found: Option[Json_Tree]) -> Json_Tree {
+  match found {
+    Some(value) -> value
+    None -> Json_Null
+  }
+}
+
+// Internal: the value of the last member of the object `obj` named `key` (JSON.parse keeps the last).
+fn json_get(obj: Json_Tree, key: View) -> Option[Json_Tree] {
+  match obj {
+    Json_Obj(members) -> json_get_from(list: members, key, found: None)
+    _ -> None
+  }
 }
 
 // Internal: the loop of json_get.
@@ -811,19 +840,46 @@ fn json_and(a: Json_Fit, b: Json_Fit) -> Json_Fit {
 }
 
 // Internal: is there a member named `key`?
-fn json_has(list: List[Json_Member], key: View) -> Bool {
+fn json_has(obj: Json_Tree, key: View) -> Bool {
+  match obj {
+    Json_Obj(members) -> json_has_in(list: members, key)
+    _ -> False
+  }
+}
+
+// Internal: the loop of json_has.
+fn json_has_in(list: List[Json_Member], key: View) -> Bool {
   match list {
     Cons(head: Json_Member(key: k)) if k == key -> True
-    Cons(tail) -> json_has(list: tail, key)
+    Cons(tail) -> json_has_in(list: tail, key)
     Nil -> False
   }
 }
 
 // Internal: 1 when there is a member named `key`, else 0.
-fn json_one(list: List[Json_Member], key: View) -> Int {
+fn json_one(obj: Json_Tree, key: View) -> Int {
   match {
-    json_has(list, key) -> 1
+    json_has(obj, key) -> 1
     else -> 0
+  }
+}
+
+// Internal: text appended (append, here so a decoder's writer names only std's functions, which a program's own
+// cannot take the place of).
+fn json_append(out: Buf, view: View) -> Buf {
+  append(buf: out, view)
+}
+
+// Internal: a byte appended (push, likewise).
+fn json_push(out: Buf, byte: Int) -> Buf {
+  push(buf: out, byte)
+}
+
+// Internal: the larger of two counts (text.max, likewise).
+fn json_most(a: Int, b: Int) -> Int {
+  match {
+    a > b -> a
+    else -> b
   }
 }
 
@@ -891,22 +947,6 @@ fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int] {
   }
 }
 
-// Internal: the members of a value json_check found to be an object.
-fn json_members_of(found: Option[Json_Tree]) -> List[Json_Member] {
-  match found {
-    Some(value: Json_Obj(members)) -> members
-    _ -> Nil
-  }
-}
-
-// Internal: the items of a value json_check found to be an array.
-fn json_items_of(found: Option[Json_Tree]) -> List[Json_Tree] {
-  match found {
-    Some(value: Json_Arr(items)) -> items
-    _ -> Nil
-  }
-}
-
 // Internal: a key that was there: its decoded value as Some.
 fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
   match decoded {
@@ -917,11 +957,11 @@ fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
 
 // Internal: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its
 // index.
-fn json_each[T](
-  items: List[Json_Tree],
-  by: Fn[Json_Tree, Result[T, View]]
-) -> Result[List[T], View] {
-  json_each_from(items, by, at: 0, acc: Nil)
+fn json_each[T](arr: Json_Tree, by: Fn[Json_Tree, Result[T, View]]) -> Result[List[T], View] {
+  match arr {
+    Json_Arr(items) -> json_each_from(items, by, at: 0, acc: Nil)
+    _ -> Ok(value: Nil)
+  }
 }
 
 // Internal: the loop of json_each.

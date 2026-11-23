@@ -1,13 +1,15 @@
 // compiler/wire.ts: Tape source generated for JSON. For every record type T a program can decode, a decoder:
 //   json_decode_T(json)     the bytes read once into a tree (std/json.tape json_tree), then json_as_T
-//   json_as_T(members)      the first constructor whose keys and kinds fit the object (or why not, from the one that
+//   json_as_T(obj)          the first constructor whose keys and kinds fit the object (or why not, from the one that
 //                           got furthest), its refined fields checked in order, then its records and lists decoded,
 //                           each reason with the path to it
 // and for a record type with a field that is a record or a List (`nested`):
 //   wire_write_T(out, value)  the object, field by field (types with one constructor and no Option, as write_json)
 // decode calls json_decode_T. A field is: Int, Bool, View (or a refinement); a record; List[…] of those; Option[…] of
 // any. What decode accepts and the reasons it gives are those of the host's decode before it (JSON.parse, then the
-// shape), with numbers read exactly (std/json.tape json_int).
+// shape), with numbers read exactly (std/json.tape json_int). The code calls std's functions by their qualified names
+// (json.json_get, text.write_int, json.json_append for append) and names only std types a program cannot define
+// (shadow.ts CORE), so a program's own max, push or List does not take their place.
 import type { Program, TypeAst, Variant } from './ast.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
@@ -141,16 +143,16 @@ export function wireSource(prog: Program): Wire {
   const refined = (t: TypeAst): boolean => !!types.get(t.name)?.refine;
   const scalarOf = (of: string, found: string): string =>
     of === 'View'
-      ? `json_text_of(found: ${found})`
+      ? `json.json_text_of(found: ${found})`
       : of === 'Bool'
-        ? `json_bool_of(found: ${found})`
-        : `json_int_of(found: ${found})`;
+        ? `json.json_bool_of(found: ${found})`
+        : `json.json_int_of(found: ${found})`;
   const maybeOf = (of: string, found: string): string =>
     of === 'View'
-      ? `json_maybe_text(found: ${found})`
+      ? `json.json_maybe_text(found: ${found})`
       : of === 'Bool'
-        ? `json_maybe_bool(found: ${found})`
-        : `json_maybe_int(found: ${found})`;
+        ? `json.json_maybe_bool(found: ${found})`
+        : `json.json_maybe_int(found: ${found})`;
   // Option[R] of a refined R, from Option[its base]: None when the value there is not an R
   const maybeRefined = (t: TypeAst, of: string): string =>
     once(
@@ -174,14 +176,14 @@ export function wireSource(prog: Program): Wire {
     const m = mangle(k.t);
     return once(`json_item_${m}`, () => {
       if (k.k === 'rec')
-        return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match item {\n    Json_Obj(members) -> json_as_${k.name}(members)\n    _ -> Err(error: "not an object")\n  }\n}\n`;
+        return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match {\n    json.json_is_object(item) -> json_as_${k.name}(obj: item)\n    else -> Err(error: "not an object")\n  }\n}\n`;
       const read =
         k.k === 'list'
-          ? `${each(k.of)}(items: json_items_of(found: Some(value: item)))`
+          ? `${each(k.of)}(arr: item)`
           : k.k === 's'
             ? `${itemValue(k)}(item)`
             : stop('an Option in a List');
-      return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match json_check(found: Some(value: item), kind: ${code(k)}, name: "value", optional: False, depth: 0) {\n    Json_Hit -> ${read}\n    Json_Miss(why) -> Err(error: json_plain(error: why))\n  }\n}\n`;
+      return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match json.json_check(found: Some(value: item), kind: ${code(k)}, name: "value", optional: False, depth: 0) {\n    Json_Hit -> ${read}\n    Json_Miss(why) -> Err(error: json.json_plain(error: why))\n  }\n}\n`;
     });
   }
   function each(k: WireKind): string {
@@ -190,22 +192,22 @@ export function wireSource(prog: Program): Wire {
     lists.set(`d${m}`, true);
     const by = item(k);
     out.push(
-      `fn json_list_${m}(items: List[Json_Tree]) -> Result[List[${text(k.t)}], View] {\n  json_each(items, by: fn(item: Json_Tree) -> Result[${text(k.t)}, View] { ${by}(item) })\n}\n`,
+      `fn json_list_${m}(arr: Json_Tree) -> Result[List[${text(k.t)}], View] {\n  json.json_each(arr, by: fn(item: Json_Tree) -> Result[${text(k.t)}, View] { ${by}(item) })\n}\n`,
     );
     return `json_list_${m}`;
   }
   // a deep field's decoded value (a Result), from the member's value `found`
   const deepOf = (k: WireKind, found: string): string => {
-    if (k.k === 'rec') return `json_as_${k.name}(members: json_members_of(found: ${found}))`;
-    if (k.k === 'list') return `${each(k.of)}(items: json_items_of(found: ${found}))`;
+    if (k.k === 'rec') return `json_as_${k.name}(obj: json.json_value_of(found: ${found}))`;
+    if (k.k === 'list') return `${each(k.of)}(arr: json.json_value_of(found: ${found}))`;
     if (k.k !== 'opt') return stop('a scalar is read, not decoded');
     const inner = k.of;
     const m = mangle(inner.t);
     if (inner.k === 'rec')
-      return `${once(`json_maybe_rec_${m}`, () => `fn json_maybe_rec_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value: Json_Obj(members)) -> json_some(decoded: json_as_${inner.name}(members))\n    _ -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
+      return `${once(`json_maybe_rec_${m}`, () => `fn json_maybe_rec_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value) -> json.json_some(decoded: json_as_${inner.name}(obj: value))\n    None -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
     if (inner.k === 'list') {
       const every = each(inner.of);
-      return `${once(`json_maybe_list_${m}`, () => `fn json_maybe_list_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value: Json_Arr(items)) -> json_some(decoded: ${every}(items))\n    _ -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
+      return `${once(`json_maybe_list_${m}`, () => `fn json_maybe_list_${m}(found: Option[Json_Tree]) -> Result[Option[${text(inner.t)}], View] {\n  match found {\n    Some(value) -> json.json_some(decoded: ${every}(arr: value))\n    None -> Ok(value: None)\n  }\n}\n`)}(found: ${found})`;
     }
     return stop('an Option of a scalar is read, not decoded');
   };
@@ -214,7 +216,7 @@ export function wireSource(prog: Program): Wire {
     const kindsOf = (v: Variant): WireKind[] =>
       v.fields.map(f => kind(f.type, false, new Set()) ?? stop(`${v.name}.${f.name} cannot be JSON`));
     out.push(
-      `fn json_decode_${n}(json: View) -> Result[${n}, View] {\n  match json_tree(v: json) {\n    Some(value: Json_Obj(members)) -> json_as_${n}(members)\n    None -> Err(error: json_bad(v: json))\n    _ -> Err(error: "not an object")\n  }\n}\n`,
+      `fn json_decode_${n}(json: View) -> Result[${n}, View] {\n  match json.json_object(v: json) {\n    Ok(value) -> json_as_${n}(obj: value)\n    Err(error) -> Err(error)\n  }\n}\n`,
     );
     const vs = d.variants;
     // of several constructors, the one that has all its fields (bar Options) among the keys and names the most of
@@ -223,46 +225,43 @@ export function wireSource(prog: Program): Wire {
       .slice(1)
       .map(
         (_, j) =>
-          `  let b${j + 1} = json_better(best: b${j}, most: m${j}, at: ${j + 1}, n: c${j + 1})\n  let m${j + 1} = max(a: m${j}, b: c${j + 1})\n`,
+          `  let b${j + 1} = json.json_better(best: b${j}, most: m${j}, at: ${j + 1}, n: c${j + 1})\n  let m${j + 1} = json.json_most(a: m${j}, b: c${j + 1})\n`,
       );
     const last = vs.length - 1;
     out.push(
       vs.length === 1
-        ? `fn json_as_${n}(members: List[Json_Member]) -> Result[${n}, View] {\n  json_one_${n}_0(members)\n}\n`
-        : `fn json_as_${n}(members: List[Json_Member]) -> Result[${n}, View] {\n${vs.map((_, i) => `  let c${i} = json_named_${n}_${i}(members)\n`).join('')}  let b0 = 0\n  let m0 = c0\n${steps.join('')}  match {\n    m${last} < 0 -> json_try_${n}_0(members, far: -1, why: "")\n${vs
+        ? `fn json_as_${n}(obj: Json_Tree) -> Result[${n}, View] {\n  json_one_${n}_0(obj)\n}\n`
+        : `fn json_as_${n}(obj: Json_Tree) -> Result[${n}, View] {\n${vs.map((_, i) => `  let c${i} = json_named_${n}_${i}(obj)\n`).join('')}  let b0 = 0\n  let m0 = c0\n${steps.join('')}  match {\n    m${last} < 0 -> json_try_${n}_0(obj, far: -1, why: "")\n${vs
             .slice(0, -1)
-            .map((_, i) => `    b${last} == ${i} -> json_one_${n}_${i}(members)\n`)
-            .join('')}    else -> json_one_${n}_${last}(members)\n  }\n}\n`,
+            .map((_, i) => `    b${last} == ${i} -> json_one_${n}_${i}(obj)\n`)
+            .join('')}    else -> json_one_${n}_${last}(obj)\n  }\n}\n`,
     );
     vs.forEach((v, i) => {
       const ks = kindsOf(v);
       const kAt = (j: number): WireKind => ks[j] ?? stop('kind');
       out.push(
-        `fn json_one_${n}_${i}(members: List[Json_Member]) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(members) {\n    Json_Hit -> json_build_${n}_${i}(members)\n    Json_Miss(why) -> Err(error: why)\n  }\n}\n`,
+        `fn json_one_${n}_${i}(obj: Json_Tree) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(obj) {\n    Json_Hit -> json_build_${n}_${i}(obj)\n    Json_Miss(why) -> Err(error: why)\n  }\n}\n`,
       );
       if (vs.length > 1) {
-        const required = v.fields
-          .filter((_, j) => kAt(j).k !== 'opt')
-          .map(f => `json_has(list: members, key: "${f.name}")`);
-        const count =
-          v.fields.length > 0 ? v.fields.map(f => `json_one(list: members, key: "${f.name}")`).join(' + ') : '0';
+        const required = v.fields.filter((_, j) => kAt(j).k !== 'opt').map(f => `json.json_has(obj, key: "${f.name}")`);
+        const count = v.fields.length > 0 ? v.fields.map(f => `json.json_one(obj, key: "${f.name}")`).join(' + ') : '0';
         out.push(
-          `fn json_named_${n}_${i}(members: List[Json_Member]) -> Int {\n${required.length > 0 ? `  match {\n    ${required.join(' and ')} -> ${count}\n    else -> -1\n  }\n` : `  ${count}\n`}}\n`,
+          `fn json_named_${n}_${i}(obj: Json_Tree) -> Int {\n${required.length > 0 ? `  match {\n    ${required.join(' and ')} -> ${count}\n    else -> -1\n  }\n` : `  ${count}\n`}}\n`,
         );
         const next = (far: string, why: string): string =>
-          i + 1 < vs.length ? `json_try_${n}_${i + 1}(members, far: ${far}, why: ${why})` : `Err(error: ${why})`;
+          i + 1 < vs.length ? `json_try_${n}_${i + 1}(obj, far: ${far}, why: ${why})` : `Err(error: ${why})`;
         out.push(
-          `fn json_try_${n}_${i}(members: List[Json_Member], far: Int, why: View) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(members) {\n    Json_Hit -> json_build_${n}_${i}(members)\n    Json_Miss(depth, why: reason) if depth > far -> ${next('depth', 'reason')}\n    _ -> ${next('far', 'why')}\n  }\n}\n`,
+          `fn json_try_${n}_${i}(obj: Json_Tree, far: Int, why: View) -> Result[${n}, View] {\n  match json_fit_${n}_${i}(obj) {\n    Json_Hit -> json_build_${n}_${i}(obj)\n    Json_Miss(depth, why: reason) if depth > far -> ${next('depth', 'reason')}\n    _ -> ${next('far', 'why')}\n  }\n}\n`,
         );
       }
       const fit = v.fields.reduceRight(
         (rest, f, j) =>
-          `json_and(a: json_check(found: json_get(list: members, key: "${f.name}"), kind: ${code(kAt(j))}, name: "${f.name}", optional: ${kAt(j).k === 'opt' ? 'True' : 'False'}, depth: ${j}), b: ${rest})`,
+          `json.json_and(a: json.json_check(found: json.json_get(obj, key: "${f.name}"), kind: ${code(kAt(j))}, name: "${f.name}", optional: ${kAt(j).k === 'opt' ? 'True' : 'False'}, depth: ${j}), b: ${rest})`,
         'Json_Hit',
       );
-      out.push(`fn json_fit_${n}_${i}(members: List[Json_Member]) -> Json_Fit {\n  ${fit}\n}\n`);
+      out.push(`fn json_fit_${n}_${i}(obj: Json_Tree) -> Json_Fit {\n  ${fit}\n}\n`);
       // the values: scalars read, then refinements checked in field order, then records and lists decoded
-      const get = (f: string): string => `json_get(list: members, key: "${f}")`;
+      const get = (f: string): string => `json.json_get(obj, key: "${f}")`;
       const lines: string[] = [];
       const as = new Map<string, string>();
       v.fields.forEach((f, j) => {
@@ -300,19 +299,19 @@ export function wireSource(prog: Program): Wire {
           ? `${v.name}(${v.fields.map(f => `${f.name}: ${as.get(f.name) ?? stop(f.name)}`).join(', ')})`
           : v.name;
       out.push(
-        `fn json_build_${n}_${i}(members: List[Json_Member]) -> Result[${n}, View] {\n${lines.join('')}  Ok(value: ${built})\n}\n`,
+        `fn json_build_${n}_${i}(obj: Json_Tree) -> Result[${n}, View] {\n${lines.join('')}  Ok(value: ${built})\n}\n`,
       );
     });
   }
   const write = (o: string, e: string, k: WireKind): string =>
     k.k === 's'
       ? k.base === 'Int'
-        ? `write_int(out: ${o}, value: ${e})`
+        ? `text.write_int(out: ${o}, value: ${e})`
         : k.base === 'Float'
-          ? `write_float(out: ${o}, value: ${e})`
+          ? `json.json_write_float(out: ${o}, value: ${e})`
           : k.base === 'Bool'
-            ? `write_bool(out: ${o}, value: ${e})`
-            : `write_json_string(out: ${o}, text: ${e})`
+            ? `json.write_bool(out: ${o}, value: ${e})`
+            : `json.write_json_string(out: ${o}, text: ${e})`
       : k.k === 'rec'
         ? nested.has(k.name)
           ? `wire_write_${k.name}(out: ${o}, value: ${e})`
@@ -326,8 +325,8 @@ export function wireSource(prog: Program): Wire {
     if (!lists.has(m)) {
       lists.set(m, true);
       out.push(
-        `fn wire_write_list_${m}(out: Buf, list: ${lt}) -> Buf {\n  wire_write_rest_${m}(out: push(buf: out, byte: 91), list, first: True)\n}\n`,
-        `fn wire_write_rest_${m}(out: Buf, list: ${lt}, first: Bool) -> Buf {\n  match list {\n    Cons(head, tail) if first -> wire_write_rest_${m}(out: ${write('out', 'head', k)}, list: tail, first: False)\n    Cons(head, tail) -> wire_write_rest_${m}(out: ${write('push(buf: out, byte: 44)', 'head', k)}, list: tail, first: False)\n    Nil -> push(buf: out, byte: 93)\n  }\n}\n`,
+        `fn wire_write_list_${m}(out: Buf, list: ${lt}) -> Buf {\n  wire_write_rest_${m}(out: json.json_push(out, byte: 91), list, first: True)\n}\n`,
+        `fn wire_write_rest_${m}(out: Buf, list: ${lt}, first: Bool) -> Buf {\n  match list {\n    Cons(head, tail) if first -> wire_write_rest_${m}(out: ${write('out', 'head', k)}, list: tail, first: False)\n    Cons(head, tail) -> wire_write_rest_${m}(out: ${write('json.json_push(out, byte: 44)', 'head', k)}, list: tail, first: False)\n    Nil -> json.json_push(out, byte: 93)\n  }\n}\n`,
       );
     }
     return `wire_write_list_${m}`;
@@ -358,10 +357,10 @@ export function wireSource(prog: Program): Wire {
         ks = kinds(v);
       let acc = 'out';
       v.fields.forEach((f, i) => {
-        acc = write(`append(buf: ${acc}, view: "${i ? ',' : '{'}\\"${f.name}\\":")`, vr(f.name), ks(i));
+        acc = write(`json.json_append(out: ${acc}, view: "${i ? ',' : '{'}\\"${f.name}\\":")`, vr(f.name), ks(i));
       });
       out.push(
-        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${v.fields.length > 0 ? `  let ${v.name}(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')}) = value\n  append(buf: ${acc}, view: "}")` : '  append(buf: out, view: "{}")'}\n}\n`,
+        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${v.fields.length > 0 ? `  let ${v.name}(${v.fields.map(f => `${f.name}: ${vr(f.name)}`).join(', ')}) = value\n  json.json_append(out: ${acc}, view: "}")` : '  json.json_append(out, view: "{}")'}\n}\n`,
       );
     }
   }

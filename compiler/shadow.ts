@@ -37,6 +37,11 @@ const CORE = new Set([
   'Rejected',
   'Skew',
   'Wake',
+  // the decoders compiler/wire.ts writes name these (std/json.tape)
+  'Json_Tree',
+  'Json_Fit',
+  'Json_Hit',
+  'Json_Miss',
 ]);
 export const SHADOWABLE = new Set([
   'len',

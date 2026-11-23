@@ -1181,14 +1181,21 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn tree_unicode(v: View, at: Int, unit: Option[Int]) -> Json_Code`: `at` is the position after \uXXXX.
 - `fn tree_pair(high: Int, low: Option[Int], at: Int) -> Json_Code`: a high surrogate at the escape before `at`: with the low one after it, one code point; alone, lone.
 - `fn json_bad(v: View) -> View`: "empty" or "not JSON", as decode says of bytes that are not JSON.
-- `fn json_get(list: List[Json_Member], key: View) -> Option[Json_Tree]`: the value of the last member named `key` (JSON.parse keeps the last).
+- `fn json_object(v: View) -> Result[Json_Tree, View]`: the object v holds (whitespace around it allowed), or why decode refuses it: "empty", "not JSON" or "not an object". The decoders compiler/wire.ts writes start here.
+- `fn json_is_object(item: Json_Tree) -> Bool`: is the value an object?
+- `fn json_value_of(found: Option[Json_Tree]) -> Json_Tree`: the value of a member that json_check found (null when there is none).
+- `fn json_get(obj: Json_Tree, key: View) -> Option[Json_Tree]`: the value of the last member of the object `obj` named `key` (JSON.parse keeps the last).
 - `fn json_get_from(list: List[Json_Member], key: View, found: Option[Json_Tree]) -> Option[Json_Tree]`: the loop of json_get.
 - `fn json_check(found: Option[Json_Tree], kind: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array); `depth` is how many fields fit before it.
 - `fn is_some(found: Option[Int]) -> Bool`: is there a value?
 - `fn json_kind(kind: Int) -> View`: what a kind of json_check is called in a reason.
 - `fn json_and(a: Json_Fit, b: Json_Fit) -> Json_Fit`: the first of two fits that misses, or Json_Hit (a key no field names is left unread).
-- `fn json_has(list: List[Json_Member], key: View) -> Bool`: is there a member named `key`?
-- `fn json_one(list: List[Json_Member], key: View) -> Int`: 1 when there is a member named `key`, else 0.
+- `fn json_has(obj: Json_Tree, key: View) -> Bool`: is there a member named `key`?
+- `fn json_has_in(list: List[Json_Member], key: View) -> Bool`: the loop of json_has.
+- `fn json_one(obj: Json_Tree, key: View) -> Int`: 1 when there is a member named `key`, else 0.
+- `fn json_append(out: Buf, view: View) -> Buf`: text appended (append, here so a decoder's writer names only std's functions, which a program's own cannot take the place of).
+- `fn json_push(out: Buf, byte: Int) -> Buf`: a byte appended (push, likewise).
+- `fn json_most(a: Int, b: Int) -> Int`: the larger of two counts (text.max, likewise).
 - `fn json_better(best: Int, most: Int, at: Int, n: Int) -> Int`: the constructor at `at` when it names more keys (n) than the best so far (most), else the best.
 - `fn json_text_of(found: Option[Json_Tree]) -> View`: the text of a value that json_check found to be text.
 - `fn json_bool_of(found: Option[Json_Tree]) -> Bool`: a value that json_check found to be true or false.
@@ -1197,10 +1204,8 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn json_maybe_text(found: Option[Json_Tree]) -> Option[View]`: an optional text field (json_check found it absent or text).
 - `fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool]`: an optional true or false.
 - `fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int]`: an optional whole number.
-- `fn json_members_of(found: Option[Json_Tree]) -> List[Json_Member]`: the members of a value json_check found to be an object.
-- `fn json_items_of(found: Option[Json_Tree]) -> List[Json_Tree]`: the items of a value json_check found to be an array.
 - `fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View]`: a key that was there: its decoded value as Some.
-- `fn json_each[T](items: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]]) -> Result[List[T], View]`: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
+- `fn json_each[T](arr: Json_Tree, by: Fn[Json_Tree, Result[T, View]]) -> Result[List[T], View]`: the elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
 - `fn json_each_from[T](items: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: the loop of json_each.
 - `fn json_each_next[T](decoded: Result[T, View], rest: List[Json_Tree], by: Fn[Json_Tree, Result[T, View]], at: Int, acc: List[T]) -> Result[List[T], View]`: json_each, after one element.
 - `fn json_at(at: Int, error: View) -> View`: "[2]: reason", or "[2][0]: reason" when the element was itself a list.
