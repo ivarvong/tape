@@ -78,6 +78,19 @@ ok(
   carried,
 );
 same('and is the same text', seen('t', flat(carried)), seen('t', body(text)));
+// a hole is an expression, not text: a break inside `\(two(n: secs % 60))` made a file that no longer compiled
+// (L05, the hole left open at the end of its line), found writing apps/products/webhook-inbox
+const holes = `buf() |> append(view: "\\(y)-\\(two(n: m))-\\(two(n: d)) \\(two(n: secs / 3600)):\\(two(n: secs / 60 % 60)):\\(two(n: secs % 60)) ok")`;
+const kept = format(body(holes));
+const lexed = (t: string): string => {
+  try {
+    return seen('t', t);
+  } catch (e) {
+    return String(e);
+  }
+};
+same('a text is not carried inside a hole', lexed(kept), lexed(body(holes)));
+ok('and no line of it ends inside a hole', !/\\\((?:[^)]|\)(?!\)))*\\\n/.test(kept), kept);
 same(
   'a line that fits is left alone',
   format(body('respond(status: 200) |> append(view: "ok")')),

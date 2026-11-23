@@ -270,6 +270,27 @@ const argEnds = (toks: readonly Tok[], depth: readonly number[], g: Group): numb
   ),
   g.close,
 ];
+/** For each character of a literal's source (from outside any hole), whether it is inside a hole `\(…)`. A hole
+ * holds no text literal (L05), so its brackets are counted as they stand. */
+function inHole(s: string): boolean[] {
+  const inside = new Array<boolean>(s.length).fill(false);
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '\\') continue;
+    if (s[i + 1] !== '(') {
+      i++; // an escape: \\ or \" cannot start a hole
+      continue;
+    }
+    let depth = 0;
+    let j = i + 1;
+    for (; j < s.length; j++) {
+      inside[j] = true;
+      if (s[j] === '(') depth++;
+      else if (s[j] === ')' && --depth === 0) break;
+    }
+    i = j;
+  }
+  return inside;
+}
 /** A text too long for its line, carried over lines: broken after a space, each line as full as it may be. `tail`
  * is the width of what follows the text on its last line (a comma, a closing bracket). */
 function carried(text: string, first: number, rest: number, tail: number): string {
@@ -278,11 +299,16 @@ function carried(text: string, first: number, rest: number, tail: number): strin
   for (let room = first; left.length + tail > room; room = rest) {
     // the last place within the room where a space is followed by something else; before a word in capitals
     // (a keyword of SQL) where there is one in the second half of the room, and not between two such words
-    // (DO NOTHING, ORDER BY stay together)
+    // (DO NOTHING, ORDER BY stay together). Never inside a hole, `\(…)`: it is an expression, and a carried
+    // line ends the text, so a break there leaves the hole open (L05)
     const within = left.slice(0, Math.max(room - 1, 1));
-    const keyword = [...within.matchAll(/(?<![A-Z]) (?=[A-Z]{2,}\b)/g)].at(-1)?.index;
+    const open = inHole(within);
+    const outside = (m: RegExpMatchArray): boolean => !open[m.index ?? 0];
+    const keyword = [...within.matchAll(/(?<![A-Z]) (?=[A-Z]{2,}\b)/g)].filter(outside).at(-1)?.index;
     const at =
-      keyword !== undefined && keyword >= room / 2 ? keyword : [...within.matchAll(/ (?=[^ ])/g)].at(-1)?.index;
+      keyword !== undefined && keyword >= room / 2
+        ? keyword
+        : [...within.matchAll(/ (?=[^ ])/g)].filter(outside).at(-1)?.index;
     if (at === undefined || at < 8) break;
     lines.push(left.slice(0, at + 1));
     left = left.slice(at + 1);
