@@ -350,6 +350,8 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     wake: (key: number, after: number) => wake(get(), key, after),
     // a Float's text: the shortest digits that read back as it (ECMA-262 Number::toString), as interp/float.ts
     float_text: (x: number) => block(get().mem, String(x)),
+    // a decimal number's nearest Float (ECMA-262 StringToNumber, correctly rounded), for parse_float; NaN for none
+    float_of: (ptr: number, len: number) => Number(textAt(get().mem, ptr, len)),
     allocated: (size: number) => {
       const { heap } = get().o;
       if (heap) allocated(heap, size);

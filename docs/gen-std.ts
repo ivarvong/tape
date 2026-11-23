@@ -175,6 +175,11 @@ const BUILT_INS: BuiltIn[] = [
     doc: 'Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\\(x)"`, writes).',
   },
   {
+    name: 'parse_float',
+    sig: 'parse_float(text: View) -> Option[Float]',
+    doc: 'The Float nearest the decimal number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number. decode reads a Float field with it.',
+  },
+  {
     name: 'scan_plain',
     sig: 'scan_plain(v: View, at: Int) -> Int',
     doc: 'The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. Reads 16 bytes at a time (Wasm SIMD); std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).',

@@ -239,6 +239,7 @@ const INTRINSIC = {
   log: ['x'],
   pow: ['x', 'y'],
   scan_plain: ['v', 'at'],
+  parse_float: ['text'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -314,6 +315,11 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'atan2':
     case 'pow':
       return finite(mathFn(name)(asFloat(a[0]), asFloat(a[1])));
+    // the Float nearest the decimal number, as the host's float_of; None when it is not finite or not a number
+    case 'parse_float': {
+      const x = Number(new TextDecoder().decode(asBytes(a[0])));
+      return Number.isFinite(x) ? adt('Some', { value: x }) : adt('None');
+    }
     // the first byte at or after `at` that is below 32, 128 or more, a quote or a backslash
     case 'scan_plain': {
       const v = asBytes(a[0]),

@@ -102,14 +102,27 @@ export function wireSource(prog: Program): Wire {
         !!types.get(n)?.variants.some(v => v.fields.some(f => deep(kind(f.type, false, new Set())))),
     ),
   );
-  const decodable = new Set(
-    [...types.keys()].filter(
-      n =>
-        record(n) &&
-        ![n, ...(types.get(n)?.variants ?? []).map(v => v.name)].some(x => x.startsWith('std.')) &&
-        able(n),
-    ),
-  );
+  // the program's own record types, std's Wake (a timer's message), and the records their fields hold: std's other
+  // types are never decoded, and every function is type-checked, so none is written for them
+  const decodable = new Set<string>();
+  const add = (n: string): void => {
+    if (decodable.has(n)) return;
+    decodable.add(n);
+    for (const v of types.get(n)?.variants ?? [])
+      for (const f of v.fields) {
+        let k = kind(f.type, false, new Set());
+        while (k && k.k !== 's' && k.k !== 'rec') k = k.of;
+        if (k?.k === 'rec') add(k.name);
+      }
+  };
+  for (const n of types.keys())
+    if (
+      record(n) &&
+      (!(types.get(n)?.file ?? '').startsWith('std/') || n === 'Wake') &&
+      ![n, ...(types.get(n)?.variants ?? []).map(v => v.name)].some(x => x.startsWith('std.')) &&
+      able(n)
+    )
+      add(n);
   // the helpers are std/json.tape's: a build without it decodes nothing (decode says so)
   if (!prog.fns.has('json_tree') || !prog.fns.has('write_bool'))
     return { text: '', nested: new Set(), decodable: new Set(), kind, writable: new Set() };
@@ -141,18 +154,29 @@ export function wireSource(prog: Program): Wire {
           ? 4
           : code(k.of);
   const refined = (t: TypeAst): boolean => !!types.get(t.name)?.refine;
+  // the check of a field (or a list item, named "value") of kind k, as json_check or, for a Float, json_check_float
+  const check = (k: WireKind, found: string, name: string, optional: boolean, depth: number): string => {
+    const one = k.k === 'opt' ? k.of : k;
+    return one.k === 's' && one.base === 'Float'
+      ? `json.json_check_float(found: ${found}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`
+      : `json.json_check(found: ${found}, kind: ${code(k)}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`;
+  };
   const scalarOf = (of: string, found: string): string =>
     of === 'View'
       ? `json.json_text_of(found: ${found})`
       : of === 'Bool'
         ? `json.json_bool_of(found: ${found})`
-        : `json.json_int_of(found: ${found})`;
+        : of === 'Float'
+          ? `json.json_float_of(found: ${found})`
+          : `json.json_int_of(found: ${found})`;
   const maybeOf = (of: string, found: string): string =>
     of === 'View'
       ? `json.json_maybe_text(found: ${found})`
       : of === 'Bool'
         ? `json.json_maybe_bool(found: ${found})`
-        : `json.json_maybe_int(found: ${found})`;
+        : of === 'Float'
+          ? `json.json_maybe_float(found: ${found})`
+          : `json.json_maybe_int(found: ${found})`;
   // Option[R] of a refined R, from Option[its base]: None when the value there is not an R
   const maybeRefined = (t: TypeAst, of: string): string =>
     once(
@@ -183,7 +207,7 @@ export function wireSource(prog: Program): Wire {
           : k.k === 's'
             ? `${itemValue(k)}(item)`
             : stop('an Option in a List');
-      return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match json.json_check(found: Some(value: item), kind: ${code(k)}, name: "value", optional: False, depth: 0) {\n    Json_Hit -> ${read}\n    Json_Miss(why) -> Err(error: json.json_plain(error: why))\n  }\n}\n`;
+      return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match ${check(k, 'Some(value: item)', 'value', false, 0)} {\n    Json_Hit -> ${read}\n    Json_Miss(why) -> Err(error: json.json_plain(error: why))\n  }\n}\n`;
     });
   }
   function each(k: WireKind): string {
@@ -256,7 +280,7 @@ export function wireSource(prog: Program): Wire {
       }
       const fit = v.fields.reduceRight(
         (rest, f, j) =>
-          `json.json_and(a: json.json_check(found: json.json_get(obj, key: "${f.name}"), kind: ${code(kAt(j))}, name: "${f.name}", optional: ${kAt(j).k === 'opt' ? 'True' : 'False'}, depth: ${j}), b: ${rest})`,
+          `json.json_and(a: ${check(kAt(j), `json.json_get(obj, key: "${f.name}")`, f.name, kAt(j).k === 'opt', j)}, b: ${rest})`,
         'Json_Hit',
       );
       out.push(`fn json_fit_${n}_${i}(obj: Json_Tree) -> Json_Fit {\n  ${fit}\n}\n`);

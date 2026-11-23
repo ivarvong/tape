@@ -71,6 +71,7 @@ export const SHADOWABLE = new Set([
   'log',
   'pow',
   'scan_plain',
+  'parse_float',
 ]);
 type Kind = 'types' | 'ctors';
 // the file that defines the type or constructor of this name, if one does

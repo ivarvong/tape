@@ -148,9 +148,9 @@ export function decode(prog: Program, bytes: Uint8Array, name: string, meets: (t
               ? finiteOf(x)
               : x instanceof Num
                 ? whole(x.source)
-              : typeof x === 'number' && Number.isSafeInteger(x)
-                ? BigInt(x)
-                : null;
+                : typeof x === 'number' && Number.isSafeInteger(x)
+                  ? BigInt(x)
+                  : null;
       if (value === null) return no(depth, `${fl.name}: expected ${KIND[k]}`);
       if (typeof x === 'string' && !wellFormed(x)) return no(depth, `${fl.name}: text with a lone surrogate`);
       f[fl.name] = inner ? adt('Some', { value }) : value;

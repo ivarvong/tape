@@ -788,7 +788,7 @@ fn json_get_from(
 }
 
 // Internal: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an
-// object, 4 an array); `depth` is how many fields fit before it.
+// object, 4 an array; a Float is json_check_float's); `depth` is how many fields fit before it.
 fn json_check(
   found: Option[Json_Tree],
   kind: Int,
@@ -814,6 +814,24 @@ fn json_check(
 
 // Internal: is there a value?
 fn is_some(found: Option[Int]) -> Bool {
+  match found {
+    Some -> True
+    None -> False
+  }
+}
+
+// Internal: json_check of a Float field: a finite number (parse_float). Apart from json_check so that only a
+// program with a Float in its JSON reads one (and imports the host's float_of).
+fn json_check_float(found: Option[Json_Tree], name: View, optional: Bool, depth: Int) -> Json_Fit {
+  match found {
+    Some(value: Json_Num(text)) if is_float(found: parse_float(text)) -> Json_Hit
+    Some -> Json_Miss(depth, why: name ++ ": expected a number")
+    None -> json_check(found, kind: 0, name, optional, depth)
+  }
+}
+
+// Internal: is there a Float?
+fn is_float(found: Option[Float]) -> Bool {
   match found {
     Some -> True
     None -> False
@@ -921,6 +939,27 @@ fn int_or_zero(found: Option[Int]) -> Int {
     Some(value) -> value
     None -> 0
   }
+}
+
+// Internal: a value that json_check found to be a number, as a Float.
+fn json_float_of(found: Option[Json_Tree]) -> Float {
+  match json_maybe_float(found) {
+    Some(value) -> value
+    None -> float(n: 0)
+  }
+}
+
+// Internal: an optional Float.
+fn json_maybe_float(found: Option[Json_Tree]) -> Option[Float] {
+  match found {
+    Some(value: Json_Num(text)) -> parse_float(text)
+    _ -> None
+  }
+}
+
+// Internal: a Float appended, as write_json writes one (write_float, here so a writer names only std's functions).
+fn json_write_float(out: Buf, value: Float) -> Buf {
+  write_float(out, value)
 }
 
 // Internal: an optional text field (json_check found it absent or text).

@@ -5,6 +5,7 @@ import type { Arg, Expr, FnDecl, Program, TypeAst, TypeDecl } from '../ast.ts';
 import { CompileError, fail, sleb, stemOf, vec } from '../common.ts';
 import type { DEFAULTS } from '../common.ts';
 import { integerParams } from '../../sql/analyze.ts';
+import { isStd } from '../shadow.ts';
 import { key } from '../types.ts';
 import { showExpr } from '../../rules/origins.ts';
 import type { Served } from './served.ts';
@@ -86,6 +87,7 @@ export type Imports = {
   ASK_IMPORT: number;
   WAKE_IMPORT: number;
   FLOAT_TEXT_IMPORT: number;
+  FLOAT_OF_IMPORT: number;
   TRACE_IMPORT: number;
   PROFILE_IMPORT: number;
   IMPORTS: number;
@@ -126,7 +128,8 @@ function numbered(uses: Uses, opts: Options): Imports {
   const ASK_IMPORT = MEMBER_IMPORT + n(uses.usesMember);
   const WAKE_IMPORT = ASK_IMPORT + n(uses.usesAsk);
   const FLOAT_TEXT_IMPORT = WAKE_IMPORT + n(uses.usesWake);
-  const TRACE_IMPORT = FLOAT_TEXT_IMPORT + n(uses.usesFloat);
+  const FLOAT_OF_IMPORT = FLOAT_TEXT_IMPORT + n(uses.usesFloat);
+  const TRACE_IMPORT = FLOAT_OF_IMPORT + n(uses.usesFloat);
   const PROFILE_IMPORT = TRACE_IMPORT + n(opts.trace);
   const IMPORTS = PROFILE_IMPORT + n(opts.profile);
   const after = { IMPORTS, ALLOC: IMPORTS, RESET: IMPORTS + 1, RESERVE: IMPORTS + 2, FIRST: IMPORTS + 3 };
@@ -136,6 +139,7 @@ function numbered(uses: Uses, opts: Options): Imports {
     ASK_IMPORT,
     WAKE_IMPORT,
     FLOAT_TEXT_IMPORT,
+    FLOAT_OF_IMPORT,
     TRACE_IMPORT,
     PROFILE_IMPORT,
   };
@@ -161,7 +165,11 @@ function mentionsFloat(prog: Program): boolean {
   };
   const inType = (d: TypeDecl): boolean =>
     d.variants.some(v => v.fields.some(f => typed(f.type))) || (d.refine !== undefined && typed(d.refine.base));
-  return [...prog.fns.values()].some(inFn) || [...prog.types.values()].some(inType);
+  // std's own (std/json.tape reads a Float field with parse_float) counts only when a program's code or type does
+  return (
+    [...prog.fns.values()].some(f => !isStd(f.file) && inFn(f)) ||
+    [...prog.types.values()].some(d => !isStd(d.file) && inType(d))
+  );
 }
 
 export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, served: readonly Served[]): Imports {

@@ -436,6 +436,29 @@ function scanPlain(u: Use): Type {
   return INT;
 }
 
+/**
+ * parse_float(text): Some of the Float nearest the decimal number `text` (ECMA-262's StringToNumber, the host's
+ * env.float_of: correctly rounded, the same everywhere), or None when that is not finite (1e400) or `text` is not a
+ * number.
+ */
+function parseFloat(u: Use): Type {
+  const { c } = u;
+  const [p, n] = view(u, 0);
+  const x = fresh(c, F64);
+  const opt = T('Option', FLOAT);
+  const adt = c.B.adtOf(opt, u.e);
+  const which = (name: string): number => adt.variants.findIndex(v => v.name === name);
+  // the host's Float, then whether it is finite: x - x is 0 (NaN for NaN and the infinities)
+  const read = [...get(p), ...get(n), 0x10, ...uleb(c.B.FLOAT_OF_IMPORT), ...set(x)];
+  c.code.push(...read, ...get(x), ...get(x), 0xa1, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0x61);
+  open(c, 0x04, adt.slots);
+  buildVariant(c, adt, which('Some'), [x]);
+  c.code.push(0x05);
+  buildVariant(c, adt, which('None'), []);
+  close(c);
+  return opt;
+}
+
 const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   len: u => {
     u.c.code.push(...get(view(u, 0)[1]), 0xad);
@@ -462,6 +485,7 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   wrapping_sub: wrapping(0x7d),
   wrapping_mul: wrapping(0x7e),
   scan_plain: scanPlain,
+  parse_float: parseFloat,
 };
 
 export function emitIntrinsic(c: Ctx, e: Call): Type {

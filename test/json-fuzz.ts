@@ -21,6 +21,7 @@ type Kind =
   | { k: 'int'; min?: number; max?: number; refined?: string }
   | { k: 'text'; min?: number; max?: number; refined?: string }
   | { k: 'bool' }
+  | { k: 'float' }
   | { k: 'rec'; name: string }
   | { k: 'list'; of: Kind }
   | { k: 'opt'; of: Kind };
@@ -57,6 +58,7 @@ const TYPES: Record<string, Ctor[]> = {
         ['label', TEXT],
         ['ok', { k: 'bool' }],
         ['size', SMALL],
+        ['x', { k: 'float' }],
       ],
     },
   ],
@@ -164,11 +166,13 @@ const kindName = (k: Kind): string =>
       ? 'true or false'
       : k.k === 'int'
         ? 'a whole number'
-        : k.k === 'rec'
-          ? 'an object'
-          : k.k === 'list'
-            ? 'an array'
-            : kindName(k.of);
+        : k.k === 'float'
+          ? 'a number'
+          : k.k === 'rec'
+            ? 'an object'
+            : k.k === 'list'
+              ? 'an array'
+              : kindName(k.of);
 function check(x: unknown, there: boolean, kind: Kind, name: string, depth: number): Fit {
   const k = kind.k === 'opt' ? kind.of : kind;
   if (!there) return kind.k === 'opt' ? { ok: true } : { ok: false, depth, why: `missing key ${JSON.stringify(name)}` };
@@ -179,9 +183,11 @@ function check(x: unknown, there: boolean, kind: Kind, name: string, depth: numb
         ? typeof x === 'boolean'
         : k.k === 'int'
           ? x instanceof Num && whole(x.source) !== null
-          : k.k === 'rec'
-            ? isObject(x)
-            : Array.isArray(x);
+          : k.k === 'float'
+            ? x instanceof Num && Number.isFinite(Number(x.source))
+            : k.k === 'rec'
+              ? isObject(x)
+              : Array.isArray(x);
   if (!right) return { ok: false, depth, why: `${name}: expected ${kindName(k)}` };
   if (typeof x === 'string' && !x.isWellFormed())
     return { ok: false, depth, why: `${name}: text with a lone surrogate` };
@@ -195,7 +201,8 @@ const fails = (k: Kind, v: unknown): boolean =>
   ('refined' in k && k.refined !== undefined && k.k === 'int' && typeof v === 'number'
     ? v < (k.min ?? -Infinity) || v > (k.max ?? Infinity)
     : false);
-const scalar = (k: Kind, x: unknown): unknown => (k.k === 'int' && x instanceof Num ? whole(x.source) : x);
+const scalar = (k: Kind, x: unknown): unknown =>
+  x instanceof Num ? (k.k === 'int' ? whole(x.source) : k.k === 'float' ? Number(x.source) : x) : x;
 function asRecord(type: string, o: Record<string, unknown>): R {
   const ctors = TYPES[type] ?? [];
   const fitOf = (c: Ctor): Fit =>
@@ -274,7 +281,7 @@ function written(type: string, v: unknown): string {
   const field = (k: Kind, x: unknown): string =>
     k.k === 'text'
       ? text(x)
-      : k.k === 'int'
+      : k.k === 'int' || k.k === 'float'
         ? String(x)
         : k.k === 'bool'
           ? String(x)
@@ -402,6 +409,7 @@ const STRINGS = [
 ];
 function scalarText(k: Kind): string {
   if (k.k === 'int') return rand(4) === 0 ? pick(NUMBERS) : String(rand(250) - 125);
+  if (k.k === 'float') return rand(3) === 0 ? pick(NUMBERS) : pick(['0.1', '-2.5e3', '3', '1e-7', '123.456', '1e308']);
   if (k.k === 'bool') return pick(['true', 'false']);
   return rand(3) === 0 ? pick(STRINGS) : JSON.stringify('abcdefghij'.slice(0, rand(11)));
 }

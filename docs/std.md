@@ -198,10 +198,10 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 ## Contents
 
-- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
+- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
-- [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`write_rows`](#fn-write_rows)
+- [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`write_each`](#fn-write_each), [`write_json_list`](#fn-write_json_list), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
@@ -378,6 +378,22 @@ write_float(out: Buf, value: Float) -> Buf
 ```
 
 Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\(x)"`, writes).
+
+### builtin parse_float
+
+```tape
+parse_float(text: View) -> Option[Float]
+```
+
+The Float nearest the decimal number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number. decode reads a Float field with it.
+
+### builtin scan_plain
+
+```tape
+scan_plain(v: View, at: Int) -> Int
+```
+
+The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. Reads 16 bytes at a time (Wasm SIMD); std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).
 
 ### builtin push
 
@@ -1186,8 +1202,10 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn json_value_of(found: Option[Json_Tree]) -> Json_Tree`: the value of a member that json_check found (null when there is none).
 - `fn json_get(obj: Json_Tree, key: View) -> Option[Json_Tree]`: the value of the last member of the object `obj` named `key` (JSON.parse keeps the last).
 - `fn json_get_from(list: List[Json_Member], key: View, found: Option[Json_Tree]) -> Option[Json_Tree]`: the loop of json_get.
-- `fn json_check(found: Option[Json_Tree], kind: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array); `depth` is how many fields fit before it.
+- `fn json_check(found: Option[Json_Tree], kind: Int, name: View, optional: Bool, depth: Int) -> Json_Fit`: whether a field is there with a value of its kind (0 text, 1 true or false, 2 a whole number, 3 an object, 4 an array; a Float is json_check_float's); `depth` is how many fields fit before it.
 - `fn is_some(found: Option[Int]) -> Bool`: is there a value?
+- `fn json_check_float(found: Option[Json_Tree], name: View, optional: Bool, depth: Int) -> Json_Fit`: json_check of a Float field: a finite number (parse_float). Apart from json_check so that only a program with a Float in its JSON reads one (and imports the host's float_of).
+- `fn is_float(found: Option[Float]) -> Bool`: is there a Float?
 - `fn json_kind(kind: Int) -> View`: what a kind of json_check is called in a reason.
 - `fn json_and(a: Json_Fit, b: Json_Fit) -> Json_Fit`: the first of two fits that misses, or Json_Hit (a key no field names is left unread).
 - `fn json_has(obj: Json_Tree, key: View) -> Bool`: is there a member named `key`?
@@ -1201,6 +1219,9 @@ Helpers (called by the functions above; callable, but not meant to be):
 - `fn json_bool_of(found: Option[Json_Tree]) -> Bool`: a value that json_check found to be true or false.
 - `fn json_int_of(found: Option[Json_Tree]) -> Int`: a value that json_check found to be a whole number.
 - `fn int_or_zero(found: Option[Int]) -> Int`: the number, or 0.
+- `fn json_float_of(found: Option[Json_Tree]) -> Float`: a value that json_check found to be a number, as a Float.
+- `fn json_maybe_float(found: Option[Json_Tree]) -> Option[Float]`: an optional Float.
+- `fn json_write_float(out: Buf, value: Float) -> Buf`: a Float appended, as write_json writes one (write_float, here so a writer names only std's functions).
 - `fn json_maybe_text(found: Option[Json_Tree]) -> Option[View]`: an optional text field (json_check found it absent or text).
 - `fn json_maybe_bool(found: Option[Json_Tree]) -> Option[Bool]`: an optional true or false.
 - `fn json_maybe_int(found: Option[Json_Tree]) -> Option[Int]`: an optional whole number.

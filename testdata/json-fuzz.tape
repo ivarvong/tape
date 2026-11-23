@@ -6,7 +6,7 @@ type Name = View where len(self) >= 1 and len(self) <= 8
 type Small = Int where self >= -100 and self <= 100
 type Point { Point(x: Int, y: Int) }
 type Tag { Tag(name: Name, on: Bool) }
-type Flat { Flat(id: Int, label: View, ok: Bool, size: Small) }
+type Flat { Flat(id: Int, label: View, ok: Bool, size: Small, x: Float) }
 type Box { Box(at: Point, tags: List[Tag], nums: List[Int]) }
 type Grid { Grid(rows: List[List[Small]], names: List[Name]) }
 type Deep { Deep(box: Box, grid: Grid, note: View) }

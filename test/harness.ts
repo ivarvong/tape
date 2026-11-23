@@ -60,7 +60,8 @@ export function functionsOf(module: WebAssembly.Module, imports: WebAssembly.Imp
   return out;
 }
 /** A module instantiated with no host: its functions, its memory, and the code of its last trap (0 for none).
- * Its one import, when it has Floats, is the host's text of a Float (host/run.ts float_text). */
+ * Its imports, when it has Floats, are the host's text of a Float and a Float of text (host/run.ts float_text,
+ * float_of). */
 export type Bare = { fns: Functions; memory: WebAssembly.Memory; why: () => number };
 export function bare(module: WebAssembly.Module): Bare {
   const late: { exports: WebAssembly.Instance['exports'] | null } = { exports: null };
@@ -73,7 +74,12 @@ export function bare(module: WebAssembly.Module): Bare {
     new Uint8Array(memory.buffer, at + 4, b.length).set(b);
     return at;
   };
-  const { exports } = new WebAssembly.Instance(module, { env: { float_text: floatText } });
+  const floatOf = (ptr: number, len: number): number => {
+    const { memory } = late.exports ?? {};
+    if (!(memory instanceof WebAssembly.Memory)) throw new TypeError('not linked');
+    return Number(new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)));
+  };
+  const { exports } = new WebAssembly.Instance(module, { env: { float_text: floatText, float_of: floatOf } });
   late.exports = exports;
   const { memory, why } = exports;
   if (!(memory instanceof WebAssembly.Memory)) throw new TypeError('the module exports no memory');
