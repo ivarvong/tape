@@ -626,6 +626,17 @@ function serviceCut(names: string[]): number {
   return names.every(name => name.length > cut) ? cut : 0;
 }
 
+// An event's mark: an SQL event whose first tape.sql.undone attribute is "true" is a write its run's rollback or
+// trap undid (16, a dashed tick), a timer whose first tape.timer.undone is "true" a timer it undid (32, a dashed
+// ring); otherwise by its name.
+function evKind(ev: Ev): number {
+  const k = kindBit(ev.name);
+  const first = (key: string): string => ev.attrs.find(a => a.key === key)?.value ?? '';
+  if (k === 1 && first('tape.sql.undone') === 'true') return 16;
+  if (k === 2 && first('tape.timer.undone') === 'true') return 32;
+  return k;
+}
+
 // What kinds of event: 1 SQL, 2 a timer, 4 an error, 8 any other.
 function kindBit(name: string): number {
   switch (name) {
@@ -654,7 +665,7 @@ const STYLE =
   ".otlp-waterfall text{fill:var(--_fg);font-size:12.5px}.otlp-waterfall .page{fill:var(--_bg)}.otlp-waterfall .h1{font-size:15px;font-weight:600}.otlp-waterfall .st{font-size:12px;font-weight:600}.otlp-waterfall .ok{fill:var(--_mut)}.otlp-waterfall .bad,.otlp-waterfall .errs{fill:var(--_err)}.otlp-waterfall .meta,.otlp-waterfall .lg{font-size:12px;fill:var(--_mut)}.otlp-waterfall .meta .v{fill:var(--_fg);font-weight:600}.otlp-waterfall .mono{font-family:var(--tr-mono,ui-monospace,'SF Mono',Menlo,Consolas,monospace);font-size:11.5px}.otlp-waterfall .tk,.otlp-waterfall .dur,.otlp-waterfall .gapl{font-size:11px;fill:var(--_mut)}.otlp-waterfall .svc,.otlp-waterfall .tag{font-size:11.5px;fill:var(--_mut)}.otlp-waterfall .tag{font-style:italic}.otlp-waterfall .anon{fill:var(--_mut);font-style:italic}" +
   '.otlp-waterfall .gl{stroke:var(--_grid);stroke-width:1}.otlp-waterfall .ax{stroke:var(--_grid);stroke-width:1}.otlp-waterfall .gap{fill:var(--_hover)}.otlp-waterfall .brk{fill:none;stroke:var(--_mut);stroke-width:1.25}.otlp-waterfall .gd,.otlp-waterfall .over{pointer-events:none}.otlp-waterfall .gd path{fill:none;stroke:var(--_grid);stroke-width:1}.otlp-waterfall .bg{fill:transparent}.otlp-waterfall .row{outline:none}.otlp-waterfall .row:hover .bg,.otlp-waterfall .row:focus-visible .bg{fill:var(--_hover)}.otlp-waterfall .row:focus-visible .bg{stroke:var(--_s1);stroke-width:2}.otlp-waterfall .acc{fill:var(--_err)}' +
   '.otlp-waterfall .c0{fill:var(--_s1);color:var(--_s1)}.otlp-waterfall .c1{fill:var(--_s2);color:var(--_s2)}.otlp-waterfall .c2{fill:var(--_s3);color:var(--_s3)}.otlp-waterfall .c3{fill:var(--_s4);color:var(--_s4)}.otlp-waterfall .c4{fill:var(--_s5);color:var(--_s5)}.otlp-waterfall .c5{fill:var(--_s6);color:var(--_s6)}.otlp-waterfall .c6{fill:var(--_s7);color:var(--_s7)}.otlp-waterfall .c7{fill:var(--_s8);color:var(--_s8)}.otlp-waterfall .bar.e{fill:var(--_err);color:var(--_err)}.otlp-waterfall .env{fill-opacity:.2;stroke:currentColor;stroke-opacity:.55;stroke-width:1}.otlp-waterfall .orphan .bar,.otlp-waterfall .cycle .bar{stroke:var(--_fg);stroke-width:1;stroke-dasharray:3 2}.otlp-waterfall .err .dur,.otlp-waterfall .err .nm{fill:var(--_err)}.otlp-waterfall .dur.in{fill:var(--_ink);font-weight:600}.otlp-waterfall .err .dur.in{fill:var(--_ink)}' +
-  '.otlp-waterfall .ev{stroke:var(--_bg);stroke-width:1}.otlp-waterfall .ev.q{stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall .ev.t{fill:var(--_bg);stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall .ev.o{fill:var(--_fg)}.otlp-waterfall .ev.x{fill:var(--_err)}.otlp-waterfall .ev.out{opacity:.45}.otlp-waterfall .k-q{fill:var(--_fg);font-weight:700}.otlp-waterfall .k-x{fill:var(--_err)}.otlp-waterfall .k-t,.otlp-waterfall .k-o{fill:var(--_fg)}.otlp-waterfall .why{font-size:15px;font-weight:600}.otlp-waterfall .warn{fill:var(--_s2)}@media (max-width:560px){.otlp-waterfall .odd,.otlp-waterfall .tid,.otlp-waterfall .gapl,.otlp-waterfall .ek,.otlp-waterfall .lg .v{display:none}}</style>';
+  '.otlp-waterfall .ev{stroke:var(--_bg);stroke-width:1}.otlp-waterfall .ev.q{stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall .ev.u{stroke:var(--_mut);stroke-width:1.5;stroke-dasharray:2 2}.otlp-waterfall .ev.tu{fill:var(--_bg);stroke:var(--_mut);stroke-width:1.5;stroke-dasharray:2 1.5}.otlp-waterfall .ev.t{fill:var(--_bg);stroke:var(--_fg);stroke-width:1.5}.otlp-waterfall .ev.o{fill:var(--_fg)}.otlp-waterfall .ev.x{fill:var(--_err)}.otlp-waterfall .ev.out{opacity:.45}.otlp-waterfall .k-q{fill:var(--_fg);font-weight:700}.otlp-waterfall .k-u{fill:var(--_mut);font-weight:700}.otlp-waterfall .k-x{fill:var(--_err)}.otlp-waterfall .k-t,.otlp-waterfall .k-o{fill:var(--_fg)}.otlp-waterfall .why{font-size:15px;font-weight:600}.otlp-waterfall .warn{fill:var(--_s2)}@media (max-width:560px){.otlp-waterfall .odd,.otlp-waterfall .tid,.otlp-waterfall .gapl,.otlp-waterfall .ek,.otlp-waterfall .lg .v{display:none}}</style>';
 
 const TOP = 100;
 
@@ -722,7 +733,9 @@ function header(rows: Frame[], axis: Axis, colors: Map<string, number>, sum: Sum
   }
   out += '<tspan class="ek" dx="18">';
   if (kinds & 1) out += '<tspan class="k-q">│</tspan> sql ';
+  if (kinds & 16) out += '<tspan class="k-u">┆</tspan> undone ';
   if (kinds & 2) out += '<tspan class="k-t">○</tspan> timer ';
+  if (kinds & 32) out += '<tspan class="k-u">◌</tspan> timer undone ';
   if (kinds & 4) out += '<tspan class="k-x">◆</tspan> error ';
   if (kinds & 8) out += '<tspan class="k-o">•</tspan> event ';
   return out + '</tspan></text>';
@@ -730,7 +743,7 @@ function header(rows: Frame[], axis: Axis, colors: Map<string, number>, sum: Sum
 
 function eventKinds(events: Ev[]): number {
   let kinds = 0;
-  for (const ev of events.slice(0, 100)) kinds |= kindBit(ev.name);
+  for (const ev of events.slice(0, 100)) kinds |= evKind(ev);
   return kinds;
 }
 
@@ -875,7 +888,7 @@ function duration(x: number, xe: number, d: string, after: boolean, before: bool
 }
 
 // A mark for each event, to 100, at its time (kept to the axis; an unreadable time is the span's start): a tick
-// for SQL, a ring for a timer, a red diamond for an error, a dot for anything else. One outside its span's time is
+// for SQL and a ring for a timer (each dashed when its run undid it), a red diamond for an error, a dot for anything else. One outside its span's time is
 // drawn faint and says so.
 function markers(s: Span, axis: Axis): string {
   let out = '';
@@ -883,19 +896,19 @@ function markers(s: Span, axis: Axis): string {
   for (const ev of s.events.slice(0, 100)) {
     const t = ev.time < 0n ? b : big(0n, small(ev.time - axis.t0, axis.d));
     const x = bp(xOf(t, axis));
-    const kind = kindBit(ev.name);
+    const kind = evKind(ev);
     const outside = ev.time >= 0n && (ev.time < s.b || ev.time > s.e);
     const faint = outside ? ' out' : '';
     let title = `${nonempty(ev.name, 120, '(unnamed event)')}\n`;
     title += t - b < 0n ? `${dur(b - t)} before the span starts` : `${dur(t - b)} after the span starts`;
     if (outside) title += "\noutside the span's time";
     title += attrLines(ev.attrs, 12);
-    if (kind === 1)
-      out += `<line class="ev q${faint}" x1="${x}" x2="${x}" y1="5" y2="21"><title>${title}</title></line>`;
+    if (kind === 1 || kind === 16)
+      out += `<line class="ev ${kind === 16 ? 'u' : 'q'}${faint}" x1="${x}" x2="${x}" y1="5" y2="21"><title>${title}</title></line>`;
     else if (kind === 4)
       out += `<svg class="ev x${faint}" x="${x}" overflow="visible"><title>${title}</title><path d="M0 7.5 5.5 13 0 18.5-5.5 13Z"/></svg>`;
     else
-      out += `<circle class="ev ${kind === 2 ? 't' : 'o'}${faint}" cx="${x}" cy="13" r="${kind === 2 ? '3.5' : '2.5'}"><title>${title}</title></circle>`;
+      out += `<circle class="ev ${kind === 2 ? 't' : kind === 32 ? 'tu' : 'o'}${faint}" cx="${x}" cy="13" r="${kind === 2 || kind === 32 ? '3.5' : '2.5'}"><title>${title}</title></circle>`;
   }
   return out;
 }
