@@ -178,12 +178,14 @@ function sqlCall(L: Linked, id: number, ptr: number, mode: number): number {
   const answer = (e: { r?: number; rows?: Cell[][] }): number =>
     mode === 0 ? (e.r ?? 0) : writeRows(L.mem, q, e.rows ?? []);
   if (L.live && !L.o.log) return answer(exec());
-  const same = JSON.stringify(p);
+  // the parameters as text only when there is a recorded entry to compare them with (a replay) or to say why not:
+  // a live run appends its entry without comparing, and stringifying every statement's parameters cost it 3%
+  const same = (): string => JSON.stringify(p);
   const e = effect(
     L,
     isSql,
-    x => x.q === id && JSON.stringify(x.p) === same,
-    () => `query ${id} ${same}`,
+    x => x.q === id && JSON.stringify(x.p) === same(),
+    () => `query ${id} ${same()}`,
     () => ({ q: id, p, ...exec() }),
   );
   L.o.trace?.push({

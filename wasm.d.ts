@@ -20,6 +20,7 @@ declare namespace WebAssembly {
     value: number | bigint;
   }
   class Memory {
+    constructor(descriptor: { initial: number; maximum?: number });
     readonly buffer: ArrayBuffer;
     grow(pages: number): number;
   }

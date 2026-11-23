@@ -19,8 +19,20 @@ export type FlagDecl = { name: string; type: string; default: number | boolean; 
 const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
 const strict = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const enc = new TextEncoder();
-const view = (m: Mem): DataView => new DataView(m.memory.buffer);
-const bytes = (m: Mem): Uint8Array => new Uint8Array(m.memory.buffer);
+// The views over a module's memory, made again only when its buffer changes (memory.grow detaches the old one).
+// A host call makes one or two of these per statement, so a fresh DataView each time was measurable (1.9% of ledger).
+type Views = { buffer: ArrayBuffer; d: DataView; u: Uint8Array };
+const seen = new WeakMap<WebAssembly.Memory, Views>();
+function views(m: Mem): Views {
+  const buffer = m.memory.buffer;
+  const had = seen.get(m.memory);
+  if (had !== undefined && had.buffer === buffer) return had;
+  const made = { buffer, d: new DataView(buffer), u: new Uint8Array(buffer) };
+  seen.set(m.memory, made);
+  return made;
+}
+const view = (m: Mem): DataView => views(m).d;
+const bytes = (m: Mem): Uint8Array => views(m).u;
 /** An i64 at `o`, from a whole number within ±2^53. */
 function setInt64(d: DataView, o: number, x: number): void {
   d.setInt32(o, x | 0, true);
@@ -84,17 +96,40 @@ const int = (v: Cell): number => {
   throw new Error(`sql: ${cellText(v)} is not an integer within ±2^53`);
 };
 
+// Text parameters this short that are all ASCII are read byte by byte; anything else (longer, or with a byte of
+// 128 or more) goes through the fatal TextDecoder, so what is refused, and how, does not change. A key or a name
+// is short and ASCII in nearly every statement, and TextDecoder costs about 0.1 µs a call before it reads a byte.
+const SHORT = 64;
+function textParam(u: Uint8Array, at: number, n: number): string {
+  if (n <= SHORT) {
+    let s = '';
+    let i = 0;
+    for (; i < n; i++) {
+      const b = u[at + i] ?? 128;
+      if (b > 127) break;
+      s += String.fromCodePoint(b);
+    }
+    if (i === n) return s;
+  }
+  return utf8.decode(new Uint8Array(u.buffer, at, n));
+}
+
 /** The parameters of a statement, read from the block the module wrote. */
 export function readParams(m: Mem, q: Query, ptr: number): SqlParam[] {
-  const d = view(m);
-  return Array.from(q.params, (kind, k) => {
+  const { d, u } = views(m);
+  const kinds = q.params;
+  const out: SqlParam[] = [];
+  for (let k = 0; k < kinds.length; k++) {
     const o = ptr + 16 * k;
-    if (kind === 't')
-      return utf8.decode(new Uint8Array(m.memory.buffer, d.getUint32(o, true), d.getUint32(o + 4, true)));
+    if (kinds[k] === 't') {
+      out.push(textParam(u, d.getUint32(o, true), d.getUint32(o + 4, true)));
+      continue;
+    }
     const x = d.getInt32(o + 4, true) * 4294967296 + d.getUint32(o, true);
     if (!Number.isSafeInteger(x)) throw new RangeError('sql: parameter outside ±2^53');
-    return x;
-  });
+    out.push(x);
+  }
+  return out;
 }
 
 // a lower-case kind (i, b, t) is a field that cannot be NULL; upper case (I, B, T) is an Option field: an i64
@@ -155,17 +190,13 @@ function writeCell(
 export function writeRows(m: Mem, q: Query, rows: readonly Cell[][]): number {
   const row = q.row ?? '';
   const ptr = m.alloc(rowsSize(q, row, rows));
-  const d = view(m);
-  const mem = bytes(m);
+  const { d, u } = views(m);
   d.setUint32(ptr, rows.length, true);
-  const wrong =
-    (c: number) =>
-    (should: string, is: string): Error =>
-      new Error(`sql: column ${q.columns?.[c]} should be ${should} but is ${is}: ${q.sql}`);
-  rows.flat().reduce<number>((o, v, k) => {
-    const c = k % row.length;
-    return o + writeCell(d, mem, o, v, row[c], wrong(c));
-  }, ptr + 8);
+  let c = 0;
+  const wrong = (should: string, is: string): Error =>
+    new Error(`sql: column ${q.columns?.[c]} should be ${should} but is ${is}: ${q.sql}`);
+  let o = ptr + 8;
+  for (const r of rows) for (c = 0; c < r.length; c++) o += writeCell(d, u, o, r[c] ?? null, row[c], wrong);
   return ptr;
 }
 
