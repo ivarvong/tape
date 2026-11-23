@@ -9,6 +9,7 @@
 // the Worker's headers, tape-worker-version the pinned version); "Bearer undefined" (401); a public route nobody
 // published (404); a public body over the cap (413); a bad trace link (401).
 import '../../node25.ts';
+import { fetchAsset } from './retry.ts';
 
 const args = process.argv.slice(2);
 const base = (args.find(a => !a.startsWith('--')) ?? '').replace(/\/$/, '');
@@ -81,7 +82,7 @@ async function page(path: string): Promise<void> {
   const loaded = await Promise.all(
     files.map(async f => {
       const at = new URL(f, `https://x${up}`).pathname,
-        a = await get(at);
+        a = await fetchAsset((url, init) => get(url, init), at, {}, { log: line => console.log(line) });
       await a.arrayBuffer();
       return { at, a };
     }),

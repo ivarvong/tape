@@ -13,6 +13,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { fetchAsset } from './retry.ts';
 
 const args = process.argv.slice(2);
 const base = (args.find((a, i) => !a.startsWith('--') && !args[i - 1]?.startsWith('--')) ?? '').replace(/\/$/, '');
@@ -52,6 +53,9 @@ const headers = (extra: Record<string, string> = {}): Record<string, string> => 
   ...extra,
 });
 const get = (path: string): Promise<Response> => fetch(`${base}${path}`, { headers: headers() });
+/** A static file: asked for again while a version's assets are still reaching the edge (scripts/retry.ts). */
+const asset = (path: string): Promise<Response> =>
+  fetchAsset(fetch, `${base}${path}`, { headers: headers() }, { log: line => console.log(line) });
 
 // ---- 1. the same commit and compiler
 const home = await get('/');
@@ -87,13 +91,13 @@ console.log(
 // ---- 2. the playground's build compiles as the hosted compiler does
 /** Every hashed module the playground loads, followed through its imports. */
 async function modules(): Promise<Map<string, string>> {
-  const page = await (await get('/playground/')).text();
+  const page = await (await asset('/playground/')).text();
   const todo = [...page.matchAll(/(?:href|src)="(?:\.\.\/)?a\/([^"]+\.js)"/g)].map(m => m[1] ?? '');
   const got = new Map<string, string>();
   while (todo.length > 0) {
     const name = todo.pop() ?? '';
     if (name === '' || got.has(name)) continue;
-    const r = await get(`/a/${name}`);
+    const r = await asset(`/a/${name}`);
     check(r.ok, `/a/${name}: ${r.status}`);
     const text = await r.text();
     got.set(name, text);
