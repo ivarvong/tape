@@ -205,7 +205,7 @@ const sleep = (ms: number): Promise<void> =>
     ],
     [202, 'paying', 0],
   );
-  w.advance(5000);
+  w.advance(10000); // the second unknown answer doubles the wait
   await w.fire();
   T(
     'unknown outcome: the third try reaches pay: confirmed, one charge',
@@ -216,6 +216,36 @@ const sleep = (ms: number): Promise<void> =>
     ['confirmed', 1],
   );
   inv('unknown outcome', w);
+}
+
+// 3b. A charge that never answers: the timer asks again with a wait that doubles to a cap, and after 10 unknown
+// answers the hold rests in unresolved with no timer set. Before the cap it re-armed a 5 s timer for ever
+// (jepsen-tix-c1/tickets: about 17,000 timers a day for days).
+{
+  const w = await fresh();
+  const h = made(await hold(w, 4, 'eve', 1));
+  w.faults.push(...Array.from({ length: 30 }, () => 'lost-before' as const));
+  const r = await w.req(`POST /holds/${h.id}/checkout`, { card: 'visa-4242' });
+  const waits: number[] = [];
+  for (let i = 0; i < 20 && w.app.next() !== null; i++) {
+    const next = w.app.next() ?? 0;
+    waits.push(next - w.now());
+    w.advance(next - w.now());
+    await w.fire();
+  }
+  T(
+    'never answered: 202, then 9 asks waiting 5 s doubling to 10 min, unresolved at the 10th, then no timer',
+    [
+      r.status,
+      waits,
+      w.row(`SELECT state FROM holds WHERE id = ${h.id}`).state,
+      w.app.next(),
+      w.calls.filter(c => c.method === 'charge').length,
+    ],
+    // the last wait is the timer set before giving up: it finds the hold unresolved and sets none
+    [202, [5000, 10000, 20000, 40000, 80000, 160000, 320000, 600000, 600000, 5000], 'unresolved', null, 10],
+  );
+  inv('never answered', w);
 }
 
 // 4. Duplicate checkout retries, and a declined card.

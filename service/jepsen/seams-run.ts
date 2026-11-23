@@ -6,7 +6,7 @@
 // final state and checker results go to <out>/<account>.json, its raw OTLP to <out>/<account>.traces.json; one
 // summary line per run to stdout.
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { faultable, flag, has, need, sources, tokenFromFile } from './cli.ts';
+import { faultable, flag, has, need, removeAccounts, sources, tokenFromFile } from './cli.ts';
 import { makeSender, stats as clientStats, RunnerError } from './client.ts';
 import type { Sender } from './client.ts';
 import { kvSeams, workflowSeams, coverage } from './seams.ts';
@@ -98,4 +98,8 @@ if (has('workflow')) {
   const account = `${prefix}wf`;
   await guarded(account, () => workflowSeams(wfSend(account), sources()));
 }
+await removeAccounts(base, [
+  ...sizes.map(shards => `${prefix}kv${shards}`),
+  ...(has('workflow') ? [`${prefix}wf`] : []),
+]);
 process.exit(failed > 0 ? 1 : 0);

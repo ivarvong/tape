@@ -8,7 +8,7 @@
 // minute, to show it levels off. The token is sent only in the authorization header and never printed.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { counted, faultable, flag, need, tokenFromFile } from './cli.ts';
+import { counted, faultable, flag, need, removeAccounts, tokenFromFile } from './cli.ts';
 import { makeSender, stats as clientStats } from './client.ts';
 import { at, list, messageOf, numOrNull } from './json.ts';
 import { check, checkFinal, checkTraces } from './retention.ts';
@@ -186,4 +186,5 @@ writeFileSync(
   JSON.stringify({ ...summary, final, storage, result, final_check: fin, trace_check: tr, traces, history }, null, 1),
 );
 console.log(JSON.stringify(summary));
+await removeAccounts(need('base'), [account]);
 process.exit(summary.valid ? 0 : 1);

@@ -8,7 +8,7 @@
 // operation to <out>/<account>.traces.json; one summary line per seed to stdout. Every operation carries its own
 // traceparent; after the run its trace is fetched and checked (traces.ts, kv.js checkTraces).
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { counted, faultable, flag, need, refuse, tokenFromFile } from './cli.ts';
+import { counted, faultable, flag, need, refuse, removeAccounts, tokenFromFile } from './cli.ts';
 // the clock watchdog of R-CLIENT-2 (it starts on import): a run during which the box was paused or restored is marked
 import { sendOnce, stats as clientStats } from './client.ts';
 import { at, list, text } from './json.ts';
@@ -26,11 +26,13 @@ mkdirSync(out, { recursive: true });
 const send = sendOnce({ base: need('base'), token: tokenFromFile() });
 
 let failed = 0;
+const made: string[] = [];
 for (const seed of seedsIn(flag('seeds') ?? '1')) {
   const account = `${prefix}${seed}`,
     cluster = 'j',
     began = Date.now(),
     shards = CONFIG.shards(seed);
+  made.push(account);
   await setup(send, { account, cluster, shards, seed, plan, tail });
   const { history, keys: names } = await load(send, {
     account,
@@ -92,4 +94,5 @@ for (const seed of seedsIn(flag('seeds') ?? '1')) {
     }),
   );
 }
+await removeAccounts(need('base'), made);
 process.exit(failed > 0 ? 1 : 0);

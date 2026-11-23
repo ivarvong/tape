@@ -267,8 +267,8 @@ ok(
 
 const tix = build(readFileSync(new URL('../apps/tickets/tickets.tape', import.meta.url), 'utf8'));
 ok(
-  'apps/tickets/tickets.tape builds, and declares seven invariants, one across two programs',
-  tix.wasm !== null && tix.invariants.length === 7 && tix.invariants[6]?.with?.join(',') === 'pay',
+  'apps/tickets/tickets.tape builds, and declares eight invariants, one across two programs',
+  tix.wasm !== null && tix.invariants.length === 8 && tix.invariants[7]?.with?.join(',') === 'pay',
   codes(tix),
 );
 

@@ -40,9 +40,9 @@ ok(
 );
 ok(
   'no Remote is stood in for when its program is given, and the invariants are found',
-  Object.keys(a.stubs).length === 0 && a.invariants.length === 9,
+  Object.keys(a.stubs).length === 0 && a.invariants.length === 10,
   String(a.invariants.length),
-); // seven of tickets, two of pay
+); // eight of tickets, two of pay
 const alone = autoOf([{ name: 'tickets', text: tickets }], { clients: 4, ops: 10 });
 ok(
   'alone, pay is stood in for by the reply types of charge and refund',

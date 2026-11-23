@@ -20,7 +20,7 @@ export const mutants: (readonly [string, ...Pair[]])[] = [
   ['1a refund timer keyed 999999', ['do wake(after: 5000, key: id)\n      refund_hold(hold: value)', 'do wake(after: 5000, key: 999999)\n      refund_hold(hold: value)']],
   ['1b decline timer keyed as the event (0 - id)', ['do wake(after: 0, key: id)\n      held_again(reason)', 'do wake(after: 0, key: 0 - id)\n      held_again(reason)']],
   ['1c new hold timer keyed by its tier', ['do wake(after: ms, key: hold.id)', 'do wake(after: ms, key: tier)']],
-  ['2a unknown outcome: no timer again', ['  do wake(after: 5000, key: id)\n  match sql_move(row: Hold, query: "UPDATE holds SET note', '  match sql_move(row: Hold, query: "UPDATE holds SET note']],
+  ['2a unknown outcome: no timer again', ['  do wake(after: 5000, key: id)\n  let Some(value: Count(n))', '  let Some(value: Count(n))'], ['      do wake(after, key: id)\n      asked(found: load_hold(id))', '      asked(found: load_hold(id))']],
   ['2b due before expiry: no timer again', ['      do wake(after: expires - now(), key: id)\n      ShowHold(status: 200, hold)', '      ShowHold(status: 200, hold)']],
   ['2c refund failed: no timer again', ['      do wake(after: 5000, key: id)\n      shown_hold(found: load_hold(id))', '      shown_hold(found: load_hold(id))']],
   ['2d due leaves a refunding hold alone', ['    Hold(state: "refunding") -> refund_hold(hold)\n', '    Hold(state: "refunding") -> ShowHold(status: 200, hold)\n']],

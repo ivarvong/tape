@@ -6,7 +6,7 @@
 // state, result and trace-checker result are written to <out>/<account>.json (raw OTLP per operation to
 // <out>/<account>.traces.json); one summary line per seed goes to stdout.
 import { writeFileSync, mkdirSync } from 'node:fs';
-import { faultable, flag, need, refuse, sources, tokenFromFile } from './cli.ts';
+import { faultable, flag, need, refuse, removeAccounts, sources, tokenFromFile } from './cli.ts';
 import { makeSender, stats as clientStats } from './client.ts';
 import type { Sender } from './client.ts';
 import { setup, load, heal, check, collectTraces, checkTraces, CONFIG } from './harness.ts';
@@ -28,10 +28,12 @@ const sender = (account: string): Sender =>
   makeSender({ base, token, route: path => (path === '/~faults' ? `/_faults/${account}` : `/${account}${path}`) });
 
 let failed = 0;
+const made: string[] = [];
 for (const seed of seedsIn(flag('seeds') ?? '1')) {
   const account = `${prefix}${seed}`,
     send = sender(account),
     began = Date.now();
+  made.push(account);
   const set = await setup(send, programs, { seed, plan, tail, router });
   const history = await load(send, { seed, clients, ops });
   const final = await heal(send),
@@ -63,4 +65,5 @@ for (const seed of seedsIn(flag('seeds') ?? '1')) {
     }),
   );
 }
+await removeAccounts(base, made);
 process.exit(failed > 0 ? 1 : 0);

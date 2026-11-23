@@ -3,7 +3,7 @@
 import { stateOf } from './rows.ts';
 import type { Card, Entry, Hold, State, Ticket, Tier, Wait } from './rows.ts';
 
-const TAKING = new Set(['held', 'paying', 'confirmed', 'refunding']);
+const TAKING = new Set(['held', 'paying', 'confirmed', 'refunding', 'unresolved']);
 const START: Readonly<Record<string, number>> = { 'visa-4242': 1000000000, 'amex-0005': 1000000000, 'poor-0002': 500 };
 const sum = (xs: readonly number[]): number => xs.reduce((n, x) => n + x, 0);
 
@@ -44,6 +44,8 @@ const mayMove = (h: Hold): number[] =>
     expired: [0],
     released: [0],
     paying: [0, h.amount],
+    // asked about too many times with no answer: either, for a person to settle with pay
+    unresolved: [0, h.amount],
   })[h.state] ?? [];
 
 /** Money: a hold is charged once at most, refunded once at most, and its card moved what its state says. */

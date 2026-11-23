@@ -8,7 +8,7 @@
 // (GET /audit, pay's /ledger and /cards) are checked against invariants.ts, the answers clients were given, and
 // the traces (harness.ts checkTraces). The token is read from the file and never printed.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { faultable, flag, need, tokenFromFile } from '../../service/jepsen/cli.ts';
+import { faultable, flag, need, removeAccounts, tokenFromFile } from '../../service/jepsen/cli.ts';
 import { makeSender, stats as clientStats } from '../../service/jepsen/client.ts';
 import type { Reply, Sender } from '../../service/jepsen/client.ts';
 import { recorder, collectTraces, checkTraces, rng, PLAN } from '../../service/jepsen/harness.ts';
@@ -221,9 +221,11 @@ const counted = (all: readonly string[]): Record<string, number> =>
   Object.fromEntries([...Map.groupBy(all, x => x)].map(([k, v]) => [k, v.length]));
 
 let failed = 0;
+const made: string[] = [];
 for (const seed of seedsIn(flag('seeds') ?? '1')) {
   const account = `${prefix}${seed}`,
     began = Date.now();
+  made.push(account);
   const send = makeSender({
     base,
     token,
@@ -307,4 +309,5 @@ for (const seed of seedsIn(flag('seeds') ?? '1')) {
     }),
   );
 }
+await removeAccounts(base, made);
 process.exit(failed > 0 ? 1 : 0);

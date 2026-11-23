@@ -16,6 +16,33 @@ export const need = (name: string): string => {
   return value;
 };
 export const tokenFromFile = (): string => readFileSync(need('token-file'), 'utf8').trim();
+/**
+ * At the end of a run, its accounts are deleted (DELETE /_accounts/:account, operator only): a run's programs keep
+ * their timers and data after it, and jepsen-tix-c1's tickets fired about 17,000 alarms a day for days after its
+ * run. The operator's token is read from --operator-token-file (default: --token-file). --keep leaves them, to look
+ * at afterwards. One line per account; a failed delete is reported, never thrown, so it cannot hide a run's result.
+ */
+export async function removeAccounts(base: string, accounts: readonly string[]): Promise<void> {
+  if (has('keep')) {
+    console.log(JSON.stringify({ kept: accounts }));
+    return;
+  }
+  const token = readFileSync(flag('operator-token-file') ?? need('token-file'), 'utf8').trim();
+  for (const account of accounts) {
+    try {
+      const res = await fetch(`${base}/_accounts/${account}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: account }),
+      });
+      const body: unknown = await res.json().catch(() => null);
+      const failed = typeof body === 'object' && body !== null && 'failed' in body ? body.failed : null;
+      console.log(JSON.stringify({ deleted: account, status: res.status, failed }));
+    } catch (e) {
+      console.log(JSON.stringify({ deleted: account, error: e instanceof Error ? e.message : String(e) }));
+    }
+  }
+}
 /** An account, or a prefix of accounts, that may take faults. */
 export const faultable = (account: string, what = 'prefix'): string => {
   if (!account.startsWith('jepsen-'))

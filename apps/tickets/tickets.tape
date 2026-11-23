@@ -83,6 +83,12 @@ migration 2 "demo events" {
   INSERT INTO tiers(client, event, name, price, capacity, left) VALUES ('demo-1-floor', 1, 'floor', 8500, 20, 20), ('demo-1-balcony', 1, 'balcony', 4500, 50, 50), ('demo-2-front', 2, 'front row', 12000, 4, 4), ('demo-2-general', 2, 'general', 3000, 100, 100)
 }
 
+// How many times in a row a paying hold's charge came back unknown. Before it, a charge that never answered was
+// asked about every 5 s for ever (jepsen-tix-c1: about 17,000 timers a day for days).
+migration 3 "payment asks" {
+  ALTER TABLE holds ADD COLUMN tries INTEGER NOT NULL DEFAULT 0
+}
+
 machine events.state {
   "onsale" -> "canceled"
 }
@@ -93,6 +99,7 @@ machine holds.state {
   "held" -> "released"
   "paying" -> "held"
   "paying" -> "confirmed"
+  "paying" -> "unresolved"
   "confirmed" -> "refunding"
   "refunding" -> "refunded"
   "refunding" -> "refund_failed"
@@ -418,7 +425,7 @@ fn checkout(id: Int, body: View) -> Outcome {
     )
     Hold(state: "held") -> paying(moved: sql_move(
       row: Hold,
-      query: "UPDATE holds SET state = 'paying', card = :card, attempt = attempt + 1 \
+      query: "UPDATE holds SET state = 'paying', card = :card, attempt = attempt + 1, tries = 0 \
           WHERE id = :id AND state = 'held' RETURNING *",
       card,
       id
@@ -475,14 +482,64 @@ fn charged(id: Int, reply: Result[Charged, CallError]) -> Outcome {
   }
 }
 
+// An unknown outcome: the charge may have been made. The timer asks pay again with the same once key, waiting
+// longer each time (std/retry backoff: 5 s, doubling, at most 10 min); after `tries` unknown answers in a row the
+// hold rests in unresolved, its seats still taken, for a person to settle with pay (its last timer then finds it
+// so and sets none). The count moves by compare-and-set, so a run woken twice counts once.
+fn pay_retry() -> Backoff {
+  Backoff(first: 5000, factor: 2, most: 600000, tries: 10)
+}
+
 fn unknown(id: Int) -> Outcome {
+  // first the shortest wait, so no way out of this run leaves the hold without a timer; ask_again moves it later
   do wake(after: 5000, key: id)
+  let Some(value: Count(n)) = sql_first(
+    row: Count,
+    query: "SELECT tries AS n FROM holds WHERE id = :id",
+    id
+  ) else -> Problem(status: 404, reason: "no such hold")
   match sql_move(
-    row: Hold,
-    query: "UPDATE holds SET note = 'payment outcome unknown; it is asked again' WHERE id = :id \
-        AND state = 'paying' RETURNING *",
+    row: Count,
+    query: "UPDATE holds SET tries = :n + 1, note = 'payment outcome unknown; it is asked again' \
+        WHERE id = :id AND state = 'paying' AND tries = :n RETURNING tries AS n",
+    n,
     id
   ) {
+    Moved(value: Count(n: asks)) -> ask_again(
+      id,
+      decided: backoff(policy: pay_retry(), failed: asks)
+    )
+    // another run counted first, or the hold left paying: decide from its count (a timer for a hold no longer
+    // paying finds it settled; giving up moves nothing)
+    Raced(now: Count(n: seen)) -> ask_again(id, decided: backoff(policy: pay_retry(), failed: seen))
+    NoRow -> Problem(status: 404, reason: "no such hold")
+  }
+}
+
+fn ask_again(id: Int, decided: Retry) -> Outcome {
+  match decided {
+    RetryIn(after) -> {
+      do wake(after, key: id)
+      asked(found: load_hold(id))
+    }
+    GaveUp(tries) -> gave_up(moved: sql_move(
+      row: Hold,
+      query: "UPDATE holds SET state = 'unresolved', note = 'payment outcome still unknown after \
+          ' || :tries || ' asks; settle it with pay' WHERE id = :id AND state = 'paying' \
+          RETURNING *",
+      tries,
+      id
+    ))
+  }
+}
+
+fn asked(found: Option[Hold]) -> Outcome {
+  let Some(value: hold) = found else -> Problem(status: 404, reason: "no such hold")
+  ShowHold(status: 202, hold)
+}
+
+fn gave_up(moved: Move[Hold]) -> Outcome {
+  match moved {
     Moved(value) -> ShowHold(status: 202, hold: value)
     Raced(now) -> ShowHold(status: 200, hold: now)
     NoRow -> Problem(status: 404, reason: "no such hold")
@@ -694,6 +751,7 @@ fn due(found: Option[Hold]) -> Outcome {
     Hold(state: "released") -> ShowHold(status: 200, hold)
     Hold(state: "refunded") -> ShowHold(status: 200, hold)
     Hold(state: "refund_failed") -> ShowHold(status: 200, hold)
+    Hold(state: "unresolved") -> ShowHold(status: 200, hold)
   }
 }
 
@@ -1356,7 +1414,7 @@ fn audit(out: Buf) -> Buf {
 // invariants() runs them on any database.
 
 invariant "a tier's seats left and seats held add up to its capacity" {
-  SELECT t.id, t.left, t.capacity FROM tiers AS t WHERE t.left + (SELECT coalesce(sum(h.qty), 0) FROM holds AS h WHERE h.tier = t.id AND h.state IN ('held', 'paying', 'confirmed', 'refunding', 'refund_failed')) <> t.capacity
+  SELECT t.id, t.left, t.capacity FROM tiers AS t WHERE t.left + (SELECT coalesce(sum(h.qty), 0) FROM holds AS h WHERE h.tier = t.id AND h.state IN ('held', 'paying', 'confirmed', 'refunding', 'refund_failed', 'unresolved')) <> t.capacity
 }
 
 invariant "a tier has no fewer than no seats left, and no more than it holds" {
@@ -1375,6 +1433,12 @@ invariant "no hold is left held, paying or refunding" settled {
   SELECT id, state, note FROM holds WHERE state IN ('held', 'paying', 'refunding')
 }
 
+// A paying hold is asked about at most pay_retry()'s tries times before it rests in unresolved: no timer re-arms
+// for ever (jepsen-tix-c1, before the cap).
+invariant "no hold is asked about its payment more often than the retry policy allows" {
+  SELECT id, state, tries FROM holds WHERE tries > 10 OR (state = 'unresolved' AND tries <> 10)
+}
+
 invariant "a canceled event has no paid hold and nobody waiting" settled {
   SELECT t.id AS tier FROM tiers AS t JOIN events AS e ON e.id = t.event WHERE e.state = 'canceled' AND (EXISTS (SELECT 1 FROM holds AS h WHERE h.tier = t.id AND h.state = 'confirmed') OR EXISTS (SELECT 1 FROM waitlist AS w WHERE w.tier = t.id AND w.state = 'waiting'))
 }
@@ -1382,5 +1446,5 @@ invariant "a canceled event has no paid hold and nobody waiting" settled {
 // Across two programs: what pay's ledger holds for a hold, against the hold. Only the simulator has both programs'
 // rows, so only it runs this one (`tape sim tickets.tape pay.tape`).
 invariant "a hold is charged its amount once it is confirmed, and nothing when it is not" settled with pay {
-  SELECT h.id, h.state, h.amount, (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) AS charged FROM holds AS h WHERE (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) <> CASE WHEN h.state IN ('confirmed', 'refund_failed') THEN h.amount ELSE 0 END
+  SELECT h.id, h.state, h.amount, (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) AS charged FROM holds AS h WHERE (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) <> CASE WHEN h.state IN ('confirmed', 'refund_failed') THEN h.amount WHEN h.state = 'unresolved' AND (SELECT coalesce(sum(l.amount), 0) FROM pay.ledger AS l WHERE l.ref = 'hold-' || h.id) = h.amount THEN h.amount ELSE 0 END
 }

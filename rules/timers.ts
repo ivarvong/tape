@@ -844,10 +844,15 @@ export function wayOut(m: Machine, ctx: MachineContext, writes: ReadonlyMap<Quer
     }
     return false;
   };
+  // what a request or a timer can run: handle, the exported functions, woken, and what they call. A function nothing
+  // calls is a root of byRequest (above), but its write is no way out of a state a run takes: an uncalled `unknown`
+  // with a move out of "paying" (tickets' give-up, in a mutant that pages instead) made "paying" look left without
+  // a call, and C79 stopped reading it
+  const live = reach(fnNames.filter(n => n === 'handle' || fnOf(n)?.exported === true || /(^|\.)woken$/.test(n)));
   const kind = new Map<string, StateKind>();
   for (const S of nonFinal) {
     const out = exits.get(S) ?? [];
-    const direct = out.filter(e => !afterCall(e.q.fn, e.q.at));
+    const direct = out.filter(e => live.has(e.q.fn.name) && !afterCall(e.q.fn, e.q.at));
     const deadline = direct.some(e => byTimer.has(e.q.fn.name) && clocked(e.q.fn, e.q.at));
     kind.set(S, {
       out,
