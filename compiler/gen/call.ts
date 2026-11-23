@@ -6,7 +6,7 @@ import { eachExpr } from '../ast.ts';
 import type { At, Call, Expr, FnDecl, Interface, TypeAst } from '../ast.ts';
 import { I32, fail, loadOp, sleb, stemOf, storeOp, uleb, utf8 } from '../common.ts';
 import { ROW_CALLS } from '../rows.ts';
-import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, T, VIEW, key } from '../types.ts';
+import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { fresh, get, mark, need, set } from './fn.ts';
 import type { Binding, Build, CExpr, Ctx, Stored } from './fn.ts';
@@ -126,6 +126,7 @@ export function peek(c: Ctx, e: CExpr): Type | null {
   }
   if (e.k === 'int') return INT;
   if (e.k === 'float') return FLOAT;
+  if (e.k === 'dec') return decType(e.s);
   if (e.k === 'str') return VIEW;
   if (e.k === 'call') return peekCall(c, e);
   return e.k === 'ctor' ? peekCtor(c, e) : null;

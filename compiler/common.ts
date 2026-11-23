@@ -24,6 +24,12 @@ export const f64 = (x: number): number[] => {
   new DataView(b.buffer).setFloat64(0, x, true);
   return [0x44, ...b];
 };
+/** A Dec literal as written: its digits m with s of them after the point (1230 and 2 are `12.30`). */
+export const decText = (m: bigint, s: number): string => {
+  const digits = (m < 0n ? -m : m).toString().padStart(s + 1, '0');
+  const whole = digits.slice(0, digits.length - s);
+  return `${m < 0n ? '-' : ''}${whole}${s > 0 ? `.${digits.slice(digits.length - s)}` : ''}`;
+};
 // trace: emit an event for every function entered and every arm or step tried and matched (for replay traces).
 export const DEFAULTS = {
   pin: {},

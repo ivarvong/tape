@@ -10,6 +10,7 @@ import { search } from '../sim.ts';
 import type { Searched } from '../sim/search.ts';
 import { autoOf, wrongIn } from './simulated.ts';
 import { interpret, Trap } from '../interp.ts';
+import { decText } from '../compiler/common.ts';
 import { bare, call, ok, finish, raw, read, std } from './harness.ts';
 
 const build = (text: string) => compile([...std, { name: 'program.tape', text }]);
@@ -53,7 +54,8 @@ const TRAPS: Readonly<Record<number, string>> = {
   8: 'float not finite',
 };
 for (const b of blocks.filter(x => x.kind === 'tape' && x.info === 'gives')) {
-  // an argument or a value is an Int, or a Float with its f (`2.5f`)
+  // an argument or a value is an Int, a Float with its f (`2.5f`), or a Dec with its point (`2.50`: its count, 250,
+  // to the compiled function, and shown at the scale written)
   const calls = [...b.text.matchAll(/^\/\/ (\w+)\(([^)]*)\) (?:is (-?[\d.e+-]+f?)|traps: (.+))$/gm)];
   const fns = [...new Set(calls.map(m => m[1] ?? ''))];
   const r = compile([...std, { name: 'program.tape', text: b.text }], { exports: fns });
@@ -66,12 +68,22 @@ for (const b of blocks.filter(x => x.kind === 'tape' && x.info === 'gives')) {
   const ex = bare(new WebAssembly.Module(r.wasm)),
     it = interpret([...std, { name: 'program.tape', text: b.text }]);
   for (const [line, fn = '', list = '', value, reason] of calls) {
-    const args =
-      list === ''
-        ? []
-        : list.split(',').map(a => (a.trim().endsWith('f') ? Number(a.trim().slice(0, -1)) : BigInt(a.trim())));
+    const written = list === '' ? [] : list.split(',').map(a => a.trim());
+    const decimals = (a: string): number => (a.includes('.') && !a.endsWith('f') ? a.length - a.indexOf('.') - 1 : -1);
+    const units = (a: string): bigint => BigInt(a.replace('.', ''));
+    const args = written.map(a => (a.endsWith('f') ? Number(a.slice(0, -1)) : units(a)));
+    const interpArgs = written.map((a, i) =>
+      decimals(a) >= 0 ? { k: 'dec' as const, m: units(a), s: decimals(a) } : (args[i] ?? 0n),
+    );
+    const scale = decimals(value ?? '');
     const shown = (v: unknown): string =>
-      typeof v === 'bigint' ? `is ${v}` : typeof v === 'number' ? `is ${v}f` : 'not a number';
+      typeof v === 'bigint'
+        ? `is ${scale >= 0 ? decText(v, scale) : v}`
+        : typeof v === 'number'
+          ? `is ${v}f`
+          : typeof v === 'object' && v !== null && 'm' in v && 's' in v
+            ? `is ${decText(BigInt(String(v.m)), Number(v.s))}`
+            : 'not a number';
     let compiled: string, interpreted: string;
     call(ex.fns, 'reset');
     try {
@@ -80,7 +92,7 @@ for (const b of blocks.filter(x => x.kind === 'tape' && x.info === 'gives')) {
       compiled = `traps: ${TRAPS[ex.why()] ?? ex.why()}`;
     }
     try {
-      const v = it.call(fn, args);
+      const v = it.call(fn, interpArgs);
       interpreted = shown(v);
     } catch (e) {
       interpreted = e instanceof Trap ? `traps: ${TRAPS[e.code] ?? e.code}` : String(e);

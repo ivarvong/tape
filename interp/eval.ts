@@ -16,6 +16,7 @@ import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
 import { Unsupported } from './json.ts';
 import { finite, floatArithmetic, mathFn, truncToInt } from './float.ts';
+import * as D from './dec.ts';
 import {
   type Env,
   type Fn,
@@ -27,6 +28,8 @@ import {
   asBytes,
   asFloat,
   asInt,
+  asDec,
+  isDec,
   isFn,
   sameBytes,
   wrap,
@@ -171,6 +174,7 @@ function binary(it: Interp, e: Bin, env: Env, file: string): Value {
   const l = ev(it, e.l, env, file),
     r = ev(it, e.r, env, file);
   if (typeof l === 'number') return floatBinary(e.op, l, asFloat(r));
+  if (isDec(l) || isDec(r)) return decBinary(e.op, l, r);
   switch (e.op) {
     case '++':
       return concat(asBytes(l), asBytes(r));
@@ -188,6 +192,34 @@ function binary(it: Interp, e: Bin, env: Env, file: string): Value {
       return asInt(l) >= asInt(r);
     default:
       return arithmetic(e.op, asInt(l), asInt(r));
+  }
+}
+// a Dec: + and - of one scale, * adds the scales (an Int is a count, of scale 0), comparisons exact across scales
+const asCount = (v: Value): D.Dec => (typeof v === 'bigint' ? D.dec(v, 0) : asDec(v));
+function decBinary(op: Bin['op'], l: Value, r: Value): Value {
+  const x = asCount(l),
+    y = asCount(r);
+  switch (op) {
+    case '+':
+    case '-':
+      if (x.s !== y.s || !isDec(l) || !isDec(r)) return stop(`Dec[${x.s}] ${op} Dec[${y.s}]`);
+      return D.dec(op === '+' ? x.m + y.m : x.m - y.m, x.s);
+    case '*':
+      return D.dec(x.m * y.m, x.s + y.s);
+    case '==':
+      return D.order(x, y) === 0;
+    case '!=':
+      return D.order(x, y) !== 0;
+    case '<':
+      return D.order(x, y) < 0;
+    case '<=':
+      return D.order(x, y) <= 0;
+    case '>':
+      return D.order(x, y) > 0;
+    case '>=':
+      return D.order(x, y) >= 0;
+    default:
+      return stop(`Dec has no ${op}`);
   }
 }
 function floatBinary(op: Bin['op'], l: number, r: number): Value {
@@ -240,6 +272,13 @@ const INTRINSIC = {
   pow: ['x', 'y'],
   scan_plain: ['v', 'at'],
   parse_float: ['text'],
+  rescale: ['x', 'to'],
+  round: ['x', 'to', 'rounding'],
+  mul: ['a', 'by', 'scale', 'rounding'],
+  div: ['a', 'by', 'scale', 'rounding'],
+  dec: ['n', 'scale'],
+  to_int: ['x', 'rounding'],
+  to_dec: ['x', 'scale', 'rounding'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -281,7 +320,7 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
       return wrap(asInt(a[0]) * asInt(a[1]));
     // the Float nearest the Int, a tie to the even one: ECMA-262's Number of a BigInt is correctly rounded
     case 'float':
-      return Number(asInt(a[0]));
+      return isDec(a[0]) ? D.toFloat(a[0]) : Number(asInt(a[0]));
     case 'trunc':
       return truncToInt(asFloat(a[0]));
     // exact in ECMA-262, as IEEE 754 defines them
@@ -294,6 +333,7 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'abs': {
       const x = a[0];
       if (typeof x === 'number') return Math.abs(x);
+      if (isDec(x)) return D.dec(x.m < 0n ? -x.m : x.m, x.s);
       return fit(asInt(x) < 0n ? -asInt(x) : asInt(x));
     }
     // Math.min and Math.max order -0 below 0, as Wasm's f64.min and f64.max do
@@ -301,6 +341,7 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'max': {
       const [x, y] = a;
       if (typeof x === 'number') return name === 'min' ? Math.min(x, asFloat(y)) : Math.max(x, asFloat(y));
+      if (isDec(x)) return (name === 'min' ? D.order(asDec(y), x) < 0 : D.order(asDec(y), x) > 0) ? asDec(y) : x;
       const p = asInt(x),
         q = asInt(y);
       return (name === 'min' ? q < p : q > p) ? q : p;
@@ -329,6 +370,20 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
       while (i < v.length && (v[i] ?? 0) >= 32 && (v[i] ?? 0) < 128 && v[i] !== 34 && v[i] !== 92) i++;
       return BigInt(i);
     }
+    case 'rescale':
+      return D.rescale(asDec(a[0]), Number(asInt(a[1])));
+    case 'round':
+      return D.round(asDec(a[0]), Number(asInt(a[1])), asAdt(a[2]).c);
+    case 'mul':
+      return D.mul(asDec(a[0]), asCount(a[1] ?? stop('mul by')), Number(asInt(a[2])), asAdt(a[3]).c);
+    case 'div':
+      return D.div(asDec(a[0]), asCount(a[1] ?? stop('div by')), Number(asInt(a[2])), asAdt(a[3]).c);
+    case 'dec':
+      return D.dec(asInt(a[0]) * 10n ** asInt(a[1]), Number(asInt(a[1])));
+    case 'to_int':
+      return D.toInt(asDec(a[0]), asAdt(a[1]).c);
+    case 'to_dec':
+      return D.ofFloat(asFloat(a[0]), Number(asInt(a[1])), asAdt(a[2]).c);
     default:
       return unreachable(name, 'intrinsic');
   }
@@ -409,6 +464,8 @@ function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value
       return fit(e.v);
     case 'float':
       return e.v;
+    case 'dec':
+      return D.dec(e.v, e.s);
     case 'str':
       return Uint8Array.from(e.bytes);
     case 'interp':
@@ -439,7 +496,7 @@ function step(it: Interp, e: Expr, env: Env, file: string, tail: boolean): Value
     }
     case 'neg': {
       const v = ev(it, e.e, env, file);
-      return typeof v === 'number' ? -v : fit(-asInt(v));
+      return typeof v === 'number' ? -v : isDec(v) ? D.dec(-v.m, v.s) : fit(-asInt(v));
     }
     case 'not':
       return !asBool(ev(it, e.e, env, file));

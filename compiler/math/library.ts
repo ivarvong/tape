@@ -13,8 +13,9 @@ import type { Def, Linker } from './wasm.ts';
 import { TRIG } from './trig.ts';
 import { INVERSE } from './inverse.ts';
 import { EXPLOG } from './explog.ts';
+import { DEC } from './dec.ts';
 
-export const LIBRARY: Readonly<Record<string, Def>> = { ...TRIG, ...INVERSE, ...EXPLOG };
+export const LIBRARY: Readonly<Record<string, Def>> = { ...TRIG, ...INVERSE, ...EXPLOG, ...DEC };
 /** The functions a program calls by name, with their parameters' names; the rest are their helpers. */
 export const PUBLIC: Readonly<Record<string, readonly string[]>> = {
   sin: ['x'],

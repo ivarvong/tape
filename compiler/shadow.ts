@@ -42,6 +42,13 @@ const CORE = new Set([
   'Json_Fit',
   'Json_Hit',
   'Json_Miss',
+  'Rounding',
+  'HalfEven',
+  'HalfUp',
+  'Down',
+  'Up',
+  'Floor',
+  'Ceiling',
 ]);
 export const SHADOWABLE = new Set([
   'len',
@@ -72,6 +79,13 @@ export const SHADOWABLE = new Set([
   'pow',
   'scan_plain',
   'parse_float',
+  'rescale',
+  'round',
+  'mul',
+  'div',
+  'dec',
+  'to_int',
+  'to_dec',
 ]);
 type Kind = 'types' | 'ctors';
 // the file that defines the type or constructor of this name, if one does

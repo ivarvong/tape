@@ -2,6 +2,7 @@
 export const BUILTIN_TYPES = new Set([
   'Int',
   'Float',
+  'Dec',
   'Bool',
   'View',
   'Buf',
@@ -77,6 +78,14 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     pow: ['x', 'y'],
     scan_plain: ['v', 'at'],
     parse_float: ['text'],
+    // Dec (compiler/gen/dec.ts)
+    rescale: ['x', 'to'],
+    round: ['x', 'to', 'rounding'],
+    mul: ['a', 'by', 'scale', 'rounding'],
+    div: ['a', 'by', 'scale', 'rounding'],
+    dec: ['n', 'scale'],
+    to_int: ['x', 'rounding'],
+    to_dec: ['x', 'scale', 'rounding'],
   }),
 );
 /** A type as the compiler holds it: a name applied to types. */
@@ -84,9 +93,13 @@ export type Type = { name: string; args: Type[] };
 export const T = (n: string, ...args: Type[]): Type => ({ name: n, args });
 export const INT = T('Int'),
   FLOAT = T('Float'),
+  /** Dec[s]: the scale is the type's one argument, its digits as a name */
+  decType = (s: number): Type => T('Dec', T(String(s))),
   BOOL = T('Bool'),
   VIEW = T('View'),
   BUF = T('Buf'),
   REMOTE = T('Remote');
 export const key = (t: Type): string => t.name + (t.args.length > 0 ? `[${t.args.map(key).join(', ')}]` : '');
 export const same = (a: Type, b: Type): boolean => key(a) === key(b);
+/** The scale of a Dec[s], or null for any other type. */
+export const scaleOf = (t: Type): number | null => (t.name === 'Dec' && t.args[0] ? Number(t.args[0].name) : null);

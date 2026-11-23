@@ -17,6 +17,8 @@ export type Token =
   | (At & { t: 'int'; v: bigint })
   /** `1.5f`: the nearest f64 to the digits */
   | (At & { t: 'float'; v: number })
+  /** `12.30`: the digits without the point (1230), and how many follow it (2) */
+  | (At & { t: 'dec'; v: bigint; s: number })
   | (At & { t: 'nl' | 'eof'; v?: undefined });
 export type TokenOf<K extends Token['t']> = Extract<Token, { t: K }>;
 
@@ -47,6 +49,8 @@ export type Let =
 export type Int = At & { k: 'int'; v: bigint };
 /** `1.5f`, `2f`, `1e-3f`: a Float literal, the nearest f64 to its digits. */
 export type FloatLit = At & { k: 'float'; v: number };
+/** `12.30`, `-0.5`: a Dec literal, its digits as an Int (1230) and its scale, the digits after the point (2). */
+export type DecLit = At & { k: 'dec'; v: bigint; s: number };
 export type Str = At & { k: 'str'; bytes: number[]; written?: string };
 /** How a use of a variable takes its value: as the owner, only to read it, or as the subject of a match. */
 export type UsePos = 'own' | 'read' | 'subject';
@@ -77,7 +81,23 @@ export type Match = At & { k: 'match' } & ({ subject: Expr; arms: PatArm[] } | {
 /** A value the compiler already holds in locals, passed where an expression goes. Never written in a program. */
 export type Held = At & { k: 'held'; held: { type: Resolved; locals: number[] } };
 export type Expr =
-  Int | FloatLit | Str | Interp | Var | Field | Index | Neg | Not | Bin | Call | Ctor | Lambda | Block | Match | Held;
+  | Int
+  | FloatLit
+  | DecLit
+  | Str
+  | Interp
+  | Var
+  | Field
+  | Index
+  | Neg
+  | Not
+  | Bin
+  | Call
+  | Ctor
+  | Lambda
+  | Block
+  | Match
+  | Held;
 
 /** decode's `as:` as a type: a name, or `List[…]` of one (an index expression as parsed); null for anything else. */
 export function asType(e: Expr): TypeAst | null {
@@ -91,6 +111,7 @@ export const partsOf = (e: Expr): Expr[] => {
   switch (e.k) {
     case 'int':
     case 'float':
+    case 'dec':
     case 'str':
     case 'var':
     case 'held':

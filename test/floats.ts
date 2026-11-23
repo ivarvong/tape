@@ -547,7 +547,7 @@ same(
 const refused = (program: string): string[] => problems(program, { exports: ['f'] }).map(p => p.code);
 const fnOf = (body: string, params = 'x: Float, n: Int'): string => `fn f(${params}) -> Float {\n  ${body}\n}\n`;
 same(
-  'refused: 1.5 and 1e3 without f, more than 20 digits, beyond the largest; an Int with a Float; %, bitwise, ++',
+  'refused: 1.5 (a Dec) and 1e3 without f, more than 20 digits, beyond the largest; an Int with a Float; %, bitwise, round of a Float',
   [
     refused(fnOf('1.5')),
     refused(fnOf('1e3')),
@@ -559,7 +559,7 @@ same(
     refused(fnOf('round(x)')),
     refused(`fn f(x: Float) -> Float {\n  x & x\n}\n`),
   ],
-  [['L06'], ['L06'], ['L06'], ['L06'], ['C14'], ['C14'], ['C19'], ['C22'], ['C19']],
+  [['C14'], ['L06'], ['L06'], ['L06'], ['C14'], ['C14'], ['C19'], ['C13'], ['C19']],
 );
 const mixed = problems(fnOf('x + 1'), { exports: ['f'] })[0]?.hint ?? '';
 same(

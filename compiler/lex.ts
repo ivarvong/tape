@@ -138,7 +138,8 @@ function text(sc: Scan): void {
 const digit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
 /**
  * A number: digits, then `.` and digits, then an exponent, then `f` for a Float (`1.5f`, `2f`, `1e-3f`); digits
- * alone are an Int. A point or an exponent without the `f` is refused: `1.5` is kept for an exact decimal.
+ * alone are an Int, and digits with a point are a Dec whose scale is the digits after the point (`12.30` is a
+ * Dec[2]). An exponent without the `f` is refused.
  */
 function number(sc: Scan): void {
   const src = sc.text;
@@ -150,14 +151,23 @@ function number(sc: Scan): void {
   if (exponent) end = runEnd(src, end + 1 + sign, digit);
   const written = src.slice(sc.i, end);
   if (src[end] !== 'f' || wordChar(src[end + 1])) {
-    if (point || exponent)
+    if (exponent)
       fail(
         here(sc),
         'L06',
-        `${written} is not a number Tape has: a point or an exponent is only for a Float, which ends in f`,
-        `Write \`${written}f\` for a Float. A number with a point and no f is kept for an exact decimal, which Tape does not have yet.`,
+        `${written} is not a number Tape has: an exponent is only for a Float, which ends in f`,
+        `Write \`${written}f\` for a Float, or the digits of an exact number (\`1000\`, \`0.001\`).`,
       );
-    sc.toks.push({ t: 'int', v: BigInt(written), ...here(sc) });
+    const [whole = '', fraction = ''] = written.split('.');
+    if (fraction.length > 18)
+      fail(
+        here(sc),
+        'L06',
+        `${written} has ${fraction.length} digits after the point, and a Dec has at most 18`,
+        `A Dec[s] holds s digits after the point, s from 0 to 18. A measurement with more is a Float: \`${written}f\`.`,
+      );
+    if (point) sc.toks.push({ t: 'dec', v: BigInt(whole + fraction), s: fraction.length, ...here(sc) });
+    else sc.toks.push({ t: 'int', v: BigInt(written), ...here(sc) });
     sc.i = end;
     return;
   }

@@ -17,7 +17,7 @@ import type {
   TokenOf,
   TypeAst,
 } from '../ast.ts';
-import { fail, utf8 } from '../common.ts';
+import { decText, fail, utf8 } from '../common.ts';
 import { numbered } from '../sqltext.ts';
 import { Cursor, shown } from './cursor.ts';
 
@@ -52,9 +52,16 @@ const isBinOp = (v: string): v is BinOp => v !== '|>' && PREC.has(v);
 // ---- types, fields and parameters as written
 export function type(c: Cursor): TypeAst {
   const t = c.expect('Id'),
-    args = c.eat('op', '[') ? c.list(type) : [];
+    args = c.eat('op', '[') ? c.list(typeArg) : [];
   if (args.length > 0) c.expect('op', ']');
   return { name: t.v, args, ...c.at(t) };
+}
+/** A type, or the digits of a Dec's scale: `Dec[2]`. */
+function typeArg(c: Cursor): TypeAst {
+  const t = c.peek();
+  if (t.t !== 'int') return type(c);
+  c.next();
+  return { name: String(t.v), args: [], ...c.at(t) };
 }
 const field = (c: Cursor): FieldDecl => {
   const name = c.fieldName().v;
@@ -86,6 +93,16 @@ function intLiteral(t: Token, v: bigint): bigint {
       'P08',
       `${v} does not fit in an Int`,
       'An Int is a 64-bit signed integer, from -9223372036854775808 to 9223372036854775807.',
+    );
+  return v;
+}
+function decLiteral(t: Token, v: bigint, s: number): bigint {
+  if (v < -(2n ** 63n) || v > 2n ** 63n - 1n)
+    fail(
+      t,
+      'P08',
+      `${decText(v, s)} does not fit in a Dec[${s}]`,
+      `A Dec[${s}] is a 64-bit count of ${decText(1n, s)}: from ${decText(-(2n ** 63n), s)} to ${decText(2n ** 63n - 1n, s)}.`,
     );
   return v;
 }
@@ -123,6 +140,7 @@ function atom(c: Cursor, t: Token): Expr {
   const at = c.at(t);
   if (t.t === 'int') return { k: 'int', v: intLiteral(t, t.v), ...at };
   if (t.t === 'float') return { k: 'float', v: t.v, ...at };
+  if (t.t === 'dec') return { k: 'dec', v: decLiteral(t, t.v, t.s), s: t.s, ...at };
   if (t.t === 'str') return { k: 'str', bytes: t.v, ...at };
   if (t.t === 'interp') return { k: 'interp', parts: t.v.flatMap(part => holeOrText(c, part, at)), ...at };
   if (t.t === 'kw' && t.v === 'fn') return lambda(c, t);
@@ -202,6 +220,10 @@ function unary(c: Cursor): Expr {
   if (n.t === 'int' && !(after.t === 'op' && (after.v === '.' || after.v === '['))) {
     c.next();
     return { k: 'int', v: intLiteral(t, -n.v), ...c.at(t) };
+  }
+  if (n.t === 'dec') {
+    c.next();
+    return { k: 'dec', v: decLiteral(t, -n.v, n.s), s: n.s, ...c.at(t) };
   }
   return { k: 'neg', e: unary(c), ...c.at(t) };
 }
@@ -308,7 +330,15 @@ function simplePattern(c: Cursor, inLet: boolean): Pattern {
   const t = c.next(),
     at = c.at(t);
   if (t.t === 'op' && t.v === '_') return { k: 'any', ...at };
-  if (t.t === 'float' || (t.t === 'op' && t.v === '-' && c.peek().t === 'float'))
+  const lit = t.t === 'op' && t.v === '-' ? c.peek().t : t.t;
+  if (lit === 'dec')
+    return fail(
+      t,
+      'C19',
+      'a Dec is not matched against a literal',
+      'Bind it and compare in a guard: `x if x == 0.00 -> …`, or `match { x < 10.00 -> … }`.',
+    );
+  if (lit === 'float')
     return fail(
       t,
       'C19',
@@ -434,8 +464,9 @@ function plainLet(c: Cursor): Let {
 const patternLet = (c: Cursor): boolean => {
   const first = c.peek(),
     next = c.peek(1);
-  if (first.t === 'Id' || first.t === 'str' || first.t === 'int' || first.t === 'float') return true;
-  if (first.t === 'op' && first.v === '-') return next.t === 'int' || next.t === 'float';
+  if (first.t === 'Id' || first.t === 'str' || first.t === 'int' || first.t === 'float' || first.t === 'dec')
+    return true;
+  if (first.t === 'op' && first.v === '-') return next.t === 'int' || next.t === 'float' || next.t === 'dec';
   if (first.t === 'op' && first.v === '_') return true;
   return first.t === 'id' && next.t === 'op' && (next.v === '++' || next.v === '(');
 };

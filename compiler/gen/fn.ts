@@ -5,7 +5,7 @@ import { showExpr } from '../../rules/origins.ts';
 import { F64, I32, TRAP, f64, fail, loadOp, sleb, storeOp, uleb } from '../common.ts';
 import type { Problem } from '../common.ts';
 import { shadowedHint } from '../shadow.ts';
-import { BUILTIN_TYPES, key, same } from '../types.ts';
+import { BUILTIN_TYPES, key, same, scaleOf } from '../types.ts';
 import type { Type } from '../types.ts';
 import type { Wire } from '../wire.ts';
 import type { Adt, BoxedField, FlatAdt, Shape } from './layout.ts';
@@ -154,6 +154,12 @@ const argText = (at: Place): string => {
   const text = isExpr(v) ? showExpr(v) : '';
   return text === '' || text === '…' ? 'it' : text;
 };
+/** How to bring a Dec[from] to a Dec[to]: up is exact, down names its rounding. */
+export const rescaleHint = (from: number, to: number, what = 'x'): string =>
+  to > from
+    ? `Make the scales equal: \`rescale(x: ${what}, to: ${to})\` adds digits, exactly.`
+    : `Make the scales equal: \`round(x: ${what}, to: ${to}, rounding: HalfEven)\` drops digits, rounding as it says (or bring the other side up to ${from} with \`rescale\`).`;
+
 /** What to write when a value of one type stands where another is wanted, for the mistakes agents make. */
 function mismatchHint(c: Ctx, got: Type, want: Type, at: Place): string {
   const e = argText(at),
@@ -165,6 +171,16 @@ function mismatchHint(c: Ctx, got: Type, want: Type, at: Place): string {
   if (want.name === 'Buf' && !BUILTIN_TYPES.has(got.name))
     return `A Buf is an answer's bytes being written (\`respond(status)\`, \`buf()\`), and ${key(got)} is not: write the value into one first (a function from ${key(got)} to Buf, or \`respond(status: 200) |> write_json(value: …)\` for a record).`;
   if ((got.name === 'Float' && want.name === 'Int') || (got.name === 'Int' && want.name === 'Float')) return MIXED;
+  const gs = scaleOf(c.B.strip(got)),
+    ws = scaleOf(want);
+  if (gs !== null && ws !== null) return rescaleHint(gs, ws, e === 'it' ? 'x' : e);
+  if (ws !== null && got.name === 'Int')
+    return `An Int is not a Dec: write the number with ${ws} digits after the point (\`${(0).toFixed(ws)}\`), or make one with \`dec(n: ${e === 'it' ? 'count' : e}, scale: ${ws})\`.`;
+  if (gs !== null && want.name === 'Int')
+    return `A Dec is not an Int: \`to_int(x: ${e === 'it' ? 'x' : e}, rounding: Down)\` names how to drop the digits after the point.`;
+  if (ws !== null && got.name === 'Float')
+    return `A Float is not a Dec: \`to_dec(x: ${e === 'it' ? 'x' : e}, scale: ${ws}, rounding: HalfEven)\` rounds its exact value.`;
+  if (gs !== null && want.name === 'Float') return `A Dec is not a Float: \`float(n: ${e === 'it' ? 'x' : e})\`.`;
   if (want.name === 'View' && got.name === 'List')
     return 'A List is not text: `length(list: …)` counts it, and `write_json(value: …)` writes it.';
   return '';
@@ -287,4 +303,24 @@ export function noConsume<T>(c: Ctx, at: Place, what: string, fn: () => T): T {
       "Bind the result with `let` first, or move it into the arm's expression.",
     );
   return r;
+}
+
+/** The index of a function of the math library (compiler/math) in the module; naming it puts it among those to compile. */
+export function mathIndex(B: Build, n: string): number {
+  const name = `math.${n}`;
+  if (!B.fns.has(name)) {
+    const at = { line: 0, file: 'math' };
+    const zero: Expr = { k: 'float', v: 0, ...at };
+    B.fns.set(name, {
+      name,
+      params: [],
+      retAst: { name: 'Float', args: [], ...at },
+      body: { k: 'block', lets: [], result: zero, ...at },
+      exported: false,
+      tparams: [],
+      math: n,
+      ...at,
+    });
+  }
+  return B.fnIndex(name);
 }

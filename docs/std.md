@@ -208,8 +208,8 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 ## Contents
 
-- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
-- [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
+- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
+- [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
@@ -272,10 +272,66 @@ a * b modulo 2^64: the low 64 bits of the exact result. Plain `*` traps on overf
 ### builtin float
 
 ```tape
-float(n: Int) -> Float
+float(n: Int) -> Float, float(n: Dec[s]) -> Float
 ```
 
-The Float nearest `n`, a tie to the even one: exact up to 2^53. The one way from an Int to a Float; there is no implicit conversion.
+The Float nearest `n`, a tie to the even one: exact up to 2^53 for an Int. The one way from an Int or a Dec to a Float; there is no implicit conversion.
+
+### builtin dec
+
+```tape
+dec(n: Int, scale: s) -> Dec[s]
+```
+
+The Int as a Dec[s], exactly: `dec(n: 3, scale: 2)` is 3.00. Beyond the Decs it traps (integer overflow, trap 6). The scale is a number written in the call.
+
+### builtin rescale
+
+```tape
+rescale(x: Dec[s], to: t) -> Dec[t]
+```
+
+The same number with more digits after the point, exactly (t ≥ s): `rescale(x: 1.5, to: 3)` is 1.500. Fewer digits is `round`. Traps (trap 6) when it does not fit.
+
+### builtin round
+
+```tape
+round(x: Dec[s], to: t, rounding: Rounding) -> Dec[t]
+```
+
+The nearest Dec with fewer digits (t < s), as the rounding says: `round(x: 2.345, to: 2, rounding: HalfEven)` is 2.34.
+
+### builtin to_int
+
+```tape
+to_int(x: Dec[s], rounding: Rounding) -> Int
+```
+
+The Int a Dec rounds to: `to_int(x: -2.5, rounding: HalfEven)` is -2, with `Floor` -3.
+
+### builtin mul
+
+```tape
+mul(a: Dec[s], by: Dec[u], scale: t, rounding: Rounding) -> Dec[t]
+```
+
+The exact product, rounded once to t digits: `a * b` is a Dec[s + u], and this is for when that has more digits than you keep, or more than 18. The product is 128 bits, so it traps (trap 6) only when the result does not fit. `by` may be an Int.
+
+### builtin div
+
+```tape
+div(a: Dec[s], by: Dec[u], scale: t, rounding: Rounding) -> Dec[t]
+```
+
+The quotient at t digits, rounded once: `div(a: 1.00, by: 3.00, scale: 2, rounding: HalfEven)` is 0.33. Exact in between (128 bits), so `a * b / c` loses nothing before the one rounding. By zero it traps (trap 4). `by` may be an Int. A Dec has no `/`.
+
+### builtin to_dec
+
+```tape
+to_dec(x: Float, scale: t, rounding: Rounding) -> Dec[t]
+```
+
+The Float's exact value (a binary fraction) rounded to t digits: `to_dec(x: 2.675f, scale: 2, rounding: HalfUp)` is 2.67, as 2.675f is a little below 2.675.
 
 ### builtin trunc
 
@@ -360,26 +416,26 @@ x to the y. A negative x takes only an integer y, and a result beyond the larges
 ### builtin abs
 
 ```tape
-abs(x: Int) -> Int, abs(x: Float) -> Float
+abs(x: Int) -> Int, abs(x: Dec[s]) -> Dec[s], abs(x: Float) -> Float
 ```
 
-The absolute value. Of the least Int it traps (integer overflow, trap 6).
+The absolute value. Of the least Int (or Dec) it traps (integer overflow, trap 6).
 
 ### builtin min
 
 ```tape
-min(a: Int, b: Int) -> Int, min(a: Float, b: Float) -> Float
+min(a: Int, b: Int) -> Int, min(a: Dec[s], b: Dec[s]) -> Dec[s], min(a: Float, b: Float) -> Float
 ```
 
-The smaller of two Ints, or of two Floats.
+The smaller of two Ints, two Decs of one scale, or two Floats.
 
 ### builtin max
 
 ```tape
-max(a: Int, b: Int) -> Int, max(a: Float, b: Float) -> Float
+max(a: Int, b: Int) -> Int, max(a: Dec[s], b: Dec[s]) -> Dec[s], max(a: Float, b: Float) -> Float
 ```
 
-The larger of two Ints, or of two Floats.
+The larger of two Ints, two Decs of one scale, or two Floats.
 
 ### builtin write_float
 
@@ -609,6 +665,21 @@ type Wake {
 ```
 
 What the host sends to `export fn woken` when a timer set with wake(timer, after, key) is due: that key.
+
+### type Rounding
+
+```tape
+type Rounding {
+  HalfEven
+  HalfUp
+  Down
+  Up
+  Floor
+  Ceiling
+}
+```
+
+How a Dec loses digits (round, to_int, mul, div, to_dec): HalfEven sends a tie to the even neighbour (2.5 to 2, -2.5 to -2), HalfUp sends it away from zero (2.5 to 3, -0.5 to -1); Down goes toward zero, Up away from it, Floor toward minus infinity and Ceiling toward plus infinity. The compiler reads the constructors in this order.
 
 ### type Step
 

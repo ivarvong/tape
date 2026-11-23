@@ -12,6 +12,7 @@ import { emitCallOut } from './callout.ts';
 import { decodeRow, emitDecode } from './decode.ts';
 import { emitSql } from './sql.ts';
 import { emitFloatIntrinsic } from './float.ts';
+import { emitDecIntrinsic } from './dec.ts';
 
 /** A call of an intrinsic with its arguments in the order of its parameters. */
 type Use = { readonly c: Ctx; readonly e: Call; readonly n: string; readonly args: readonly Arg[] };
@@ -525,7 +526,10 @@ export function emitIntrinsic(c: Ctx, e: Call): Type {
   if (n === 'now' || n === 'random') return ask(c, e, n);
   const float = emitFloatIntrinsic(c, e);
   if (float) return float;
-  const args = c.B.orderArgs(`function ${n}`, INTRINSICS.get(n) ?? [], e.args, e);
+  const ordered = (): Arg[] => c.B.orderArgs(`function ${n}`, INTRINSICS.get(n) ?? [], e.args, e);
+  const dec = emitDecIntrinsic(c, e, ordered);
+  if (dec) return dec;
+  const args = ordered();
   const known = Object.hasOwn(BY_NAME, n) ? BY_NAME[n] : undefined;
   return known
     ? known({ c, e, n, args })

@@ -105,6 +105,10 @@ export const abs = unary('abs', F64, 0x99);
 export const sqrt = unary('sqrt', F64, 0x9f);
 export const floor = unary('floor', F64, 0x9c);
 export const eqz = (a: E): E => op(I32, a.t === I64 ? 0x50 : 0x45, a);
+/** The leading zero bits of an i64 (64 for 0). */
+export const clz = unary('clz', I64, 0x79);
+/** (double)u for an unsigned i64, rounded to the nearest (a tie to the even one). */
+export const toFU = unary('toFU', I64, 0xba, F64);
 /** (double)n for an i32, an i64; (int32_t)x and (int64_t)x for a double in range (else the module traps). */
 export const toF = (a: E): E => op(F64, a.t === I64 ? 0xb9 : 0xb7, a);
 export const toI32 = unary('toI32', F64, 0xaa, I32);

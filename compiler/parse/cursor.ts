@@ -1,7 +1,7 @@
 // compiler/parse/cursor.ts: where a parse stands in a file's tokens. A production is a function from a Cursor to
 // what it read.
 import type { At, Token, TokenOf } from '../ast.ts';
-import { fail } from '../common.ts';
+import { decText, fail } from '../common.ts';
 import { KEYWORDS, lex } from '../lex.ts';
 
 const text8 = new TextDecoder();
@@ -17,7 +17,9 @@ export const shown = (t: Token): string =>
         ? 'a text literal'
         : t.t === 'float'
           ? `\`${t.v}f\``
-          : `\`${t.v}\``;
+          : t.t === 'dec'
+            ? `\`${decText(t.v, t.s)}\``
+            : `\`${t.v}\``;
 const wanted = (kind: Token['t'], v?: string): string =>
   v
     ? `\`${v}\``

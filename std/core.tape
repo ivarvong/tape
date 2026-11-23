@@ -41,6 +41,18 @@ type Wake {
   Wake(key: Int)
 }
 
+// How a Dec loses digits (round, to_int, mul, div, to_dec): HalfEven sends a tie to the even neighbour (2.5 to 2,
+// -2.5 to -2), HalfUp sends it away from zero (2.5 to 3, -0.5 to -1); Down goes toward zero, Up away from it, Floor
+// toward minus infinity and Ceiling toward plus infinity. The compiler reads the constructors in this order.
+type Rounding {
+  HalfEven
+  HalfUp
+  Down
+  Up
+  Floor
+  Ceiling
+}
+
 // One step through the rows of a query: next(rows) gives Next(value, rest) or End.
 type Step[T] {
   Next(value: T, rest: Rows[T])

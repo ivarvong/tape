@@ -26,9 +26,10 @@ waits on a call, another may run. Three things hold for every program:
 
 `//` starts a comment. Integers are decimal, from `-9223372036854775808` to `9223372036854775807`: a `-` written
 before the digits is part of the literal (`-7`, and in a pattern `-1 ->`), and a literal outside that range is
-refused (P08). A Float literal ends in `f`: `1.5f`, `2f`, `1e-3f`, `6.02E23f`, at most 20 significant digits and
-no larger than the largest Float (L06). A point or an exponent with no `f` is refused (L06): `1.5` is kept for an
-exact decimal. Text literals are in double quotes, on one line, with the escapes
+refused (P08). A number with a point is an exact decimal, a Dec whose scale is the digits written after the point:
+`12.30` is a `Dec[2]`, `-0.5` a `Dec[1]`, at most 18 of them (L06). A Float literal ends in `f`: `1.5f`, `2f`,
+`1e-3f`, `6.02E23f`, at most 20 significant digits and no larger than the largest Float (L06); an exponent with
+no `f` is refused (L06). Text literals are in double quotes, on one line, with the escapes
 `\" \\ \/ \n \r \t \b \f`. `\(e)` in a literal is a hole: `"Hello, \(name) #\(n)"` is the text with the value
 of each expression in its place, a View as it is, an Int in decimal, and a Float in the shortest digits that read
 back as it (`0.1`, `5`, `1e+21`, as JavaScript's `String` writes a number). A hole holds one expression with no text
@@ -65,6 +66,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | Type | What it is |
 |---|---|
 | `Int` | a 64-bit signed integer. Arithmetic is exact or it traps (section 10): there is no wrapping |
+| `Dec[s]` | an exact number with s digits after the point, 0 ≤ s ≤ 18: an Int count of 10^-s (12.30 is 1230 hundredths), so arithmetic is exact or it traps, as an Int's. For money, and any quantity with a fixed number of decimals |
 | `Float` | a 64-bit IEEE 754 number that is never NaN and never infinite: an operation that would make one traps. For measurements, not for money, counts or keys |
 | `Bool` | `True` or `False` |
 | `View` | read-only bytes (text is UTF-8 bytes) |
@@ -75,7 +77,8 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition |
 | `interface Git { read head(Ref) -> Head }` | what a capability bound by the host can be asked |
 
-std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `Err(error)`), `Move[T]`
+std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `Err(error)`), `Rounding`
+(`HalfEven`, `HalfUp`, `Down`, `Up`, `Floor`, `Ceiling`), `Move[T]`
 (`Moved(value)`, `Raced(now)`, `NoRow`), `CallError` (`Timeout`, `Unreachable`, `Rejected(reason)`,
 `Skew(reason)`), `Map[T]`, `List[T]`, `Request`, `Wake`.
 
@@ -87,6 +90,24 @@ and on the least Int by -1 (integer overflow: the quotient does not fit, so neit
 work on the 64 bits. `a << n` and `a >> n` take a shift `n` from 0 to 63 and trap on any other; `<<` drops the
 bits it moves out, `>>` copies the sign in. Where a hash or a checksum means arithmetic modulo 2^64, it says so:
 `wrapping_add(a, b)`, `wrapping_sub(a, b)` and `wrapping_mul(a, b)` give the low 64 bits of the exact result.
+
+On `Dec[s]`: `+` and `-` take two Decs of one scale. Two scales are refused (C14), and the fix is the one way to
+change a scale: `rescale(x, to: 3)` adds digits, exactly; `round(x, to: 2, rounding: HalfEven)` drops them as
+the rounding says. A literal is a Dec at the scale it is written: `price + 0.5` with a `Dec[2]` price is refused,
+and the fix is `0.50`; `5` is an Int, so a Dec of five is `5.00`. `a * b` is exact and adds the scales (a
+`Dec[2]` times a `Dec[3]` is a `Dec[5]`, refused past 18); an Int is a count, so `price * qty` stays a `Dec[2]`.
+`== != < <= > >=` compare values whatever the scales: `1.50 == 1.5`. There is no `/` or `%` (C19): `div(a, by:
+b, scale: 2, rounding: HalfEven)` is the quotient at a scale, and `mul(a, by: b, scale: 2, rounding: HalfEven)` a
+product with fewer digits than `*` keeps, each rounded once from the exact value: they compute through a 128-bit
+intermediate, so a rate applied to an amount, or `a * b / c`, loses nothing before the one rounding, and traps
+only when the result does not fit. `by` may be an Int. `dec(n, scale: 2)` is an Int as a Dec, `to_int(x,
+rounding: Down)` a Dec as an Int, `float(x)` the Float nearest a Dec, and `to_dec(x, scale: 2, rounding:
+HalfEven)` a Float's exact value, rounded (`2.675f` is a little below 2.675, so HalfUp gives 2.67). The scales
+these take are numbers written in the call. `abs`, `min` and `max` take Decs of one scale. The roundings:
+`HalfEven` sends a tie to the even neighbour (2.5 to 2, -2.5 to -2), `HalfUp` away from zero (2.5 to 3, -0.5 to
+-1, which is not JavaScript's `Math.round`), `Down` goes toward zero, `Up` away from it, `Floor` toward minus
+infinity and `Ceiling` toward plus infinity. A Dec is matched with a guard, `x if x == 0.00 ->`, never a literal
+pattern (C19).
 
 On `Float`: `+ - * /` are IEEE 754's, rounded once to the nearest Float (a tie to the even one), the same bits in
 every engine Wasm runs in; a result that would be infinite or not a number (`1f / 0f`, `0f / 0f`, `1e308f * 10f`)
@@ -188,7 +209,7 @@ A pattern can fail, and binds what it proves.
 | Pattern | Matches |
 |---|---|
 | `Ctor(field, other: P)` | that constructor; a field named bare is bound, fields left out are not looked at. A field given a pattern binds its own name too, where the arm reads it and nothing else binds it: `Some(value: Account(balance: 0)) -> value.id` |
-| `"text"`, `42`, `-1`, `True` | that value. A Float has no literal pattern (C19): bind it and compare in a guard |
+| `"text"`, `42`, `-1`, `True` | that value. A Dec or a Float has no literal pattern (C19): bind it and compare in a guard |
 | `"prefix" ++ rest` | bytes that start so; `rest` is matched against what follows |
 | `Some("")`, `Some(decimal(n))` | a constructor of one field, with a pattern for that field: as its one argument is passed bare, its one pattern needs no name. A constructor of two or more fields names each (C10) |
 | `Key(k)` | a value for which the refined type's condition holds; `k` has the type |
@@ -420,6 +441,9 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Write JSON | `write_json(value)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows)` for the rows of a query | C09 |
 | Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list, sep)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
+| Hold money, or any number with a fixed count of decimals | `Dec[s]`, with literals at its scale (`12.30`) | C14 |
+| Change a Dec's scale | `rescale(x, to: 3)` up, exactly; `round(x, to: 2, rounding: HalfEven)` down | C14 |
+| Divide a Dec, or apply a rate | `div(a, by: b, scale: 2, rounding: HalfEven)`, `mul(a, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
 | Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
@@ -561,8 +585,8 @@ more. Steps are a count of reductions, as in Erlang, not a time. They are the co
 a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's duration) can time its work.
 
 A trap ends the request, undoes its writes and is recorded: out of memory (64 MB), more than 50,000,000 steps, an
-index out of bounds, a division by zero (trap 4), an `Int` result that does not fit in 64 bits (trap 6, integer
-overflow), a shift by less than 0 or more than 63 (trap 7), a Float operation whose result would be infinite or
+index out of bounds, a division by zero (trap 4), an `Int` or `Dec` result that does not fit in 64 bits (trap 6,
+integer overflow), a shift by less than 0 or more than 63 (trap 7), a Float operation whose result would be infinite or
 not a number (trap 8, float not finite). Nothing else stops a program: every other failure is a
 value. A request that traps is answered 500 with the reason, `trap 6: integer overflow`. Each line `// f(…) is v`
 or `// f(…) traps: reason` below is a call `test/definition.ts` makes, compiled and in the reference interpreter:
@@ -603,6 +627,16 @@ fn whole(x: Float) -> Int {
   trunc(x)
 }
 
+// a price times a quantity, and the tax on it at a rate of four decimals, rounded once to the cent
+fn total(price: Dec[2], qty: Int, rate: Dec[4]) -> Dec[2] {
+  let net = price * qty
+  net + mul(a: net, by: rate, scale: 2, rounding: HalfEven)
+}
+
+fn share(total: Dec[2], n: Int) -> Dec[2] {
+  div(a: total, by: n, scale: 2, rounding: Down)
+}
+
 // fact(20) is 2432902008176640000
 // fact(21) traps: integer overflow
 // pow(-2, 63) is -9223372036854775808
@@ -613,6 +647,10 @@ fn whole(x: Float) -> Int {
 // mean(1f, 0) traps: float not finite
 // whole(-2.5f) is -2
 // whole(1e19f) traps: integer overflow
+// total(19.99, 3, 0.0825) is 64.92
+// share(10.00, 3) is 3.33
+// share(10.00, 0) traps: division by zero
+// total(92233720368547758.07, 2, 0.0000) traps: integer overflow
 ```
 
 ## 11. Changes in 0.4
@@ -622,6 +660,7 @@ what went before.
 
 | When | Change |
 |---|---|
+| 23 November 2026 | `Dec[s]`: an exact number with s digits after the point (0 to 18), an Int count of 10^-s. `12.30` is a `Dec[2]` (a point and no `f`, which was L06); `+ -` of one scale, `*` adding the scales, comparisons exact across scales, overflow a trap; `rescale` up and `round` down, the one way each; `mul` and `div` rounded once from an exact 128-bit intermediate (compiler/math/dec.ts), with std's `Rounding` (`HalfEven`, `HalfUp`, `Down`, `Up`, `Floor`, `Ceiling`); `dec(n, scale:)`, `to_int`, `float(d)` and `to_dec(x, scale:, rounding:)` the only conversions; `abs`, `min`, `max` |
 | 23 November 2026 | `write_json` writes what `decode` reads (feedback 20261123T030026.990Z-e454772fe5c9: a 5-constructor result was 30 lines of hand JSON): an `Option` field (`None` has no key), a type with several constructors (`{"Sets": {…}}`, which decode now reads back as that constructor), a `List` on its own and `Int`, `Bool`, `View`; `decode(json:, as: List[T])` reads an array. C09 no longer refuses an `Option` field, several constructors or a list on its own |
 | 23 November 2026 | a Float in JSON (a finite number in, the shortest digits out, in records and lists) and in SQL (bound as a number, kept REAL by SQLite; a REAL column reads into a Float field) |
 | 23 November 2026 | `sin`, `cos`, `atan2`, `exp`, `log`, `pow` on Float: musl's libm ported to Wasm (compiler/math), only what a program calls goes into its module; never the host's `Math`, whose results differ between engines |
@@ -643,7 +682,7 @@ what went before.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
 - Who is calling. A program is handed the request; identity is its own business.
 - JSON for bytes and maps.
-- An exact decimal (`Dec`): a number with a point and no `f` is kept for it.
+- A Dec in text, in JSON and in SQL.
 
 ## 13. What went
 

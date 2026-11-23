@@ -104,6 +104,17 @@ export function slotsOf(L: Layouts, t: Type, at: Place): number[] {
   if (L.prog.interfaces.has(t.name)) return [I32]; // a capability: which one the host bound
   const fixed = Object.hasOwn(FIXED, t.name) ? FIXED[t.name] : undefined;
   if (fixed) return [...fixed];
+  if (t.name === 'Dec') {
+    const [s] = t.args;
+    if (t.args.length !== 1 || !s || !/^\d+$/.test(s.name) || Number(s.name) > 18)
+      refuse(
+        at,
+        'C05',
+        t.args.length === 0 ? 'a Dec says its scale: Dec[2]' : `Dec[${t.args.map(key).join(', ')}] is not a Dec`,
+        'A Dec[s] is exact with s digits after the point, s from 0 to 18: `Dec[2]` for cents.',
+      );
+    return [I64];
+  }
   if (t.name === 'Rows') {
     const row = t.args.length === 1 ? t.args[0] : undefined;
     rowOf(

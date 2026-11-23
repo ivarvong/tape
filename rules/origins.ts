@@ -11,6 +11,7 @@ import {
   partsOf,
   unreachable,
 } from '../compiler/ast.ts';
+import { decText } from '../compiler/common.ts';
 import { conjunctsOf } from '../sql.ts';
 import { argFor, calleeOf, lc } from './syntax.ts';
 import type { Query, RuleContext } from './types.ts';
@@ -221,6 +222,7 @@ function originOf(tr: Trace, e: Expr, path: string[], fn: FnDecl, d: number): Or
   switch (e.k) {
     case 'int':
     case 'float':
+    case 'dec':
       return path.length > 0 ? unknown() : nothing();
     case 'neg':
       return path.length > 0 ? unknown() : flip(origin(tr, e.e, [], fn, d + 1));
@@ -321,6 +323,7 @@ export function showExpr(e: Expr | null | undefined): string {
   if (!e) return '';
   if (e.k === 'int') return String(e.v);
   if (e.k === 'float') return `${e.v}f`;
+  if (e.k === 'dec') return decText(e.v, e.s);
   if (e.k === 'var') return e.name;
   if (e.k === 'neg') return `-${showExpr(e.e)}`;
   if (e.k === 'field') return `${showExpr(e.e)}.${e.name}`;

@@ -2,6 +2,7 @@
 // each reader below gives the variant asked for or stops, so a program that would be ill-typed stops here and does
 // not go on with whatever JavaScript makes of it.
 import type { Block } from '../compiler/ast.ts';
+import type { Dec } from './dec.ts';
 
 export type Env = Map<string, Value>;
 /** A constructor applied to its fields: `Order(id: 1, state: "new")`. */
@@ -23,7 +24,7 @@ export type Family = { readonly k: 'family'; readonly family: string };
 /** What stands for Sql, Clock, Entropy or Timer: holding it is the permission, and it carries nothing else. */
 export type Capability = { readonly k: 'capability'; readonly capability: string };
 /** An Int is a bigint and a Float a number, so one is never taken for the other. */
-export type Value = bigint | number | boolean | Uint8Array | Adt | Buf | Fn | Rows | Remote | Family | Capability;
+export type Value = bigint | number | boolean | Uint8Array | Dec | Adt | Buf | Fn | Rows | Remote | Family | Capability;
 
 export const adt = (c: string, f: Record<string, Value> = {}): Adt => ({ k: 'adt', c, f });
 export const kindOf = (v: Value | undefined): string =>
@@ -39,7 +40,9 @@ export const kindOf = (v: Value | undefined): string =>
             ? 'text'
             : v.k === 'adt'
               ? v.c
-              : `a ${v.k}`;
+              : v.k === 'dec'
+                ? `a Dec[${v.s}]`
+                : `a ${v.k}`;
 const not = (want: string, v: Value | undefined): never => {
   throw new Error(`expected ${want}, found ${kindOf(v)}`);
 };
@@ -47,8 +50,10 @@ export const asInt = (v: Value | undefined): bigint => (typeof v === 'bigint' ? 
 export const asFloat = (v: Value | undefined): number => (typeof v === 'number' ? v : not('a Float', v));
 export const asBool = (v: Value | undefined): boolean => (typeof v === 'boolean' ? v : not('a Bool', v));
 export const asBytes = (v: Value | undefined): Uint8Array => (v instanceof Uint8Array ? v : not('text', v));
-const isObject = (v: Value | undefined): v is Adt | Buf | Fn | Rows | Remote | Family | Capability =>
+const isObject = (v: Value | undefined): v is Dec | Adt | Buf | Fn | Rows | Remote | Family | Capability =>
   typeof v === 'object' && !(v instanceof Uint8Array);
+export const isDec = (v: Value | undefined): v is Dec => isObject(v) && v.k === 'dec';
+export const asDec = (v: Value | undefined): Dec => (isDec(v) ? v : not('a Dec', v));
 export const isFn = (v: Value | undefined): v is Fn => isObject(v) && v.k === 'fn';
 export const asAdt = (v: Value | undefined): Adt => (isObject(v) && v.k === 'adt' ? v : not('a constructed value', v));
 export const asBuf = (v: Value | undefined): Buf => (isObject(v) && v.k === 'buf' ? v : not('a Buf', v));

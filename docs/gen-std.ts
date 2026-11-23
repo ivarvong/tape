@@ -122,8 +122,43 @@ const BUILT_INS: BuiltIn[] = [
   })),
   {
     name: 'float',
-    sig: 'float(n: Int) -> Float',
-    doc: 'The Float nearest `n`, a tie to the even one: exact up to 2^53. The one way from an Int to a Float; there is no implicit conversion.',
+    sig: 'float(n: Int) -> Float, float(n: Dec[s]) -> Float',
+    doc: 'The Float nearest `n`, a tie to the even one: exact up to 2^53 for an Int. The one way from an Int or a Dec to a Float; there is no implicit conversion.',
+  },
+  {
+    name: 'dec',
+    sig: 'dec(n: Int, scale: s) -> Dec[s]',
+    doc: 'The Int as a Dec[s], exactly: `dec(n: 3, scale: 2)` is 3.00. Beyond the Decs it traps (integer overflow, trap 6). The scale is a number written in the call.',
+  },
+  {
+    name: 'rescale',
+    sig: 'rescale(x: Dec[s], to: t) -> Dec[t]',
+    doc: 'The same number with more digits after the point, exactly (t ≥ s): `rescale(x: 1.5, to: 3)` is 1.500. Fewer digits is `round`. Traps (trap 6) when it does not fit.',
+  },
+  {
+    name: 'round',
+    sig: 'round(x: Dec[s], to: t, rounding: Rounding) -> Dec[t]',
+    doc: 'The nearest Dec with fewer digits (t < s), as the rounding says: `round(x: 2.345, to: 2, rounding: HalfEven)` is 2.34.',
+  },
+  {
+    name: 'to_int',
+    sig: 'to_int(x: Dec[s], rounding: Rounding) -> Int',
+    doc: 'The Int a Dec rounds to: `to_int(x: -2.5, rounding: HalfEven)` is -2, with `Floor` -3.',
+  },
+  {
+    name: 'mul',
+    sig: 'mul(a: Dec[s], by: Dec[u], scale: t, rounding: Rounding) -> Dec[t]',
+    doc: 'The exact product, rounded once to t digits: `a * b` is a Dec[s + u], and this is for when that has more digits than you keep, or more than 18. The product is 128 bits, so it traps (trap 6) only when the result does not fit. `by` may be an Int.',
+  },
+  {
+    name: 'div',
+    sig: 'div(a: Dec[s], by: Dec[u], scale: t, rounding: Rounding) -> Dec[t]',
+    doc: 'The quotient at t digits, rounded once: `div(a: 1.00, by: 3.00, scale: 2, rounding: HalfEven)` is 0.33. Exact in between (128 bits), so `a * b / c` loses nothing before the one rounding. By zero it traps (trap 4). `by` may be an Int. A Dec has no `/`.',
+  },
+  {
+    name: 'to_dec',
+    sig: 'to_dec(x: Float, scale: t, rounding: Rounding) -> Dec[t]',
+    doc: "The Float's exact value (a binary fraction) rounded to t digits: `to_dec(x: 2.675f, scale: 2, rounding: HalfUp)` is 2.67, as 2.675f is a little below 2.675.",
   },
   {
     name: 'trunc',
@@ -161,13 +196,13 @@ const BUILT_INS: BuiltIn[] = [
   },
   {
     name: 'abs',
-    sig: 'abs(x: Int) -> Int, abs(x: Float) -> Float',
-    doc: 'The absolute value. Of the least Int it traps (integer overflow, trap 6).',
+    sig: 'abs(x: Int) -> Int, abs(x: Dec[s]) -> Dec[s], abs(x: Float) -> Float',
+    doc: 'The absolute value. Of the least Int (or Dec) it traps (integer overflow, trap 6).',
   },
   ...(['min', 'max'] as const).map((name): BuiltIn => ({
     name,
-    sig: `${name}(a: Int, b: Int) -> Int, ${name}(a: Float, b: Float) -> Float`,
-    doc: `The ${name === 'min' ? 'smaller' : 'larger'} of two Ints, or of two Floats.`,
+    sig: `${name}(a: Int, b: Int) -> Int, ${name}(a: Dec[s], b: Dec[s]) -> Dec[s], ${name}(a: Float, b: Float) -> Float`,
+    doc: `The ${name === 'min' ? 'smaller' : 'larger'} of two Ints, two Decs of one scale, or two Floats.`,
   })),
   {
     name: 'write_float',

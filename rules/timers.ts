@@ -1225,6 +1225,7 @@ export function wayOut(m: Machine, ctx: MachineContext, writes: ReadonlyMap<Quer
         case 'lambda':
         case 'int':
         case 'float':
+        case 'dec':
         case 'str':
           return one('*', FAIL);
         case 'var': {

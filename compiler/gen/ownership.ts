@@ -112,6 +112,7 @@ function go(rd: Reading, e: Expr, pos: UsePos, path: readonly Step[], fl: Flags)
   switch (e.k) {
     case 'int':
     case 'float':
+    case 'dec':
     case 'str':
     case 'held':
       return;

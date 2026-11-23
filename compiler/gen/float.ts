@@ -4,9 +4,10 @@
 // rounded (roundTiesToEven), and floor, ceil, trunc and nearest exact.
 import type { Arg, Call, Expr } from '../ast.ts';
 import { F64, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
-import { BOOL, FLOAT, INT, INTRINSICS } from '../types.ts';
+import { BOOL, FLOAT, INT, INTRINSICS, scaleOf } from '../types.ts';
+import { decOrder, decToFloat } from './dec.ts';
 import type { Type } from '../types.ts';
-import { fresh, get, need, set, trapIf } from './fn.ts';
+import { fresh, get, mathIndex, need, set, trapIf } from './fn.ts';
 import type { Build, Ctx } from './fn.ts';
 import type { Compiled } from './assemble.ts';
 import { PUBLIC, defOf } from '../math/library.ts';
@@ -102,25 +103,6 @@ export function emitFloatBin(c: Ctx, e: Bin): Type {
 
 // ---- the math library (compiler/math): sin, cos, atan2, exp, log and pow, as Wasm functions of the module
 
-/** The index of a function of the math library in the module; naming it puts it among those to compile. */
-function mathIndex(B: Build, n: string): number {
-  const name = `math.${n}`;
-  if (!B.fns.has(name)) {
-    const at = { line: 0, file: 'math' };
-    const zero: Expr = { k: 'float', v: 0, ...at };
-    B.fns.set(name, {
-      name,
-      params: [],
-      retAst: { name: 'Float', args: [], ...at },
-      body: { k: 'block', lets: [], result: zero, ...at },
-      exported: false,
-      tparams: [],
-      math: n,
-      ...at,
-    });
-  }
-  return B.fnIndex(name);
-}
 export function compileMath(B: Build, n: string): Compiled {
   const def = defOf(n);
   const link = { index: (m: string) => mathIndex(B, m), data: B.constData, scratch: B.room };
@@ -150,6 +132,7 @@ function emitOrder(c: Ctx, e: Call): Type {
     c.code.push(e.name === 'min' ? 0xa4 : 0xa5);
     return FLOAT;
   }
+  if (t.name === 'Dec') return decOrder(c, e.name, t, b);
   need(c, t, INT, a, 'argument a');
   const x = fresh(c, I64),
     y = fresh(c, I64);
@@ -178,7 +161,10 @@ export function emitFloatIntrinsic(c: Ctx, e: Call): Type | null {
   }
   const [a] = argsOf(c, e);
   if (n === 'float') {
-    emitArg(c, a, INT, 'n');
+    const t = a ? c.B.strip(c.emit(a.value, null, false)) : INT;
+    const s = scaleOf(t);
+    if (s !== null) return decToFloat(c, s);
+    need(c, t, INT, a, 'argument n');
     c.code.push(0xb9);
     return FLOAT;
   }
@@ -194,6 +180,7 @@ export function emitFloatIntrinsic(c: Ctx, e: Call): Type | null {
   if (op === undefined) return null;
   // abs takes an Int too; the others a Float
   const t = a ? c.B.strip(c.emit(a.value, n === 'abs' ? null : FLOAT, false)) : FLOAT;
+  if (n === 'abs' && t.name === 'Dec') return decOrder(c, n, t);
   if (n === 'abs' && t.name === 'Int') {
     const x = fresh(c, I64);
     c.code.push(TEE, ...uleb(x), 0x42, ...sleb(-(2n ** 63n)), 0x51);
