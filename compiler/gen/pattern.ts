@@ -11,7 +11,7 @@ import type { Adt, BoxedField, FlatField } from './layout.ts';
 
 type Field = FlatField | BoxedField;
 /** A constructor pattern against a type: the constructor's index, and each sub-pattern with the field it reads. */
-type Taken = { adt: Adt; vi: number; subs: { fl: Field; pat: Pattern }[] };
+type Taken = { adt: Adt; vi: number; subs: { fl: Field; pat: Pattern; pun?: true }[] };
 type Of<K extends Pattern['k']> = Extract<Pattern, { k: K }>;
 
 export const isBool = (pt: Pattern): boolean => pt.k === 'ctor' && (pt.name === 'True' || pt.name === 'False');
@@ -51,7 +51,7 @@ export function ctorOf(c: Ctx, pt: CtorPat, type: Type): Taken {
   const subs = pt.subs.map(s => {
     // one field and one pattern: the pattern is for that field, whatever name it was written with
     if (only && fields.length === 1 && pt.subs.length === 1 && s.pun && s.field !== only.name)
-      return { fl: only, pat: s.pat };
+      return { fl: only, pat: s.pat, ...(s.pun ? { pun: s.pun } : {}) };
     const fl =
       fields.find(x => x.name === s.field) ??
       fail(
@@ -60,9 +60,21 @@ export function ctorOf(c: Ctx, pt: CtorPat, type: Type): Taken {
         `${pt.name} has no field ${s.field}`,
         `Its fields are ${fields.map(x => x.name).join(', ') || 'none'}.`,
       );
-    return { fl, pat: s.pat };
+    return { fl, pat: s.pat, ...(s.pun ? { pun: s.pun } : {}) };
   });
   return { adt, vi: made.vi, subs };
+}
+
+// `Missing(stack)` binds the field to a new name, its own; when the function already has that name, the C15 says
+// that it is the field's shorthand, and how to bind the field to another name
+function freshField(c: Ctx, ctor: string, s: Taken['subs'][number]): void {
+  if (s.pun && s.pat.k === 'bind' && c.env.has(s.pat.name))
+    fail(
+      s.pat,
+      'C15',
+      `${s.pat.name} is already defined`,
+      `\`${ctor}(${s.pat.name})\` is shorthand for \`${ctor}(${s.pat.name}: ${s.pat.name})\`, which binds the field to a new name, and this function already has a ${s.pat.name}. Bind the field to another name: \`${ctor}(${s.pat.name}: ${s.pat.name}_found)\`.`,
+    );
 }
 
 /** Does the pattern match every value of the type? */
@@ -237,6 +249,7 @@ function matchBoxed(c: Ctx, taken: Taken, ptr: number): void {
   if (!c.consuming) c.binderMode = 'borrowed';
   for (const s of taken.subs) {
     if (s.pat.k === 'any' || !('vts' in s.fl)) continue;
+    freshField(c, taken.adt.variants[taken.vi]?.name ?? '', s);
     const got = loadField(c, ptr, s.fl);
     // a part taken out of a shared value is shared too
     if (c.B.opts.reuse && c.consuming && ptrSlots(c, s.fl.type).length > 0) {
@@ -270,13 +283,15 @@ function matchCtor(c: Ctx, pt: CtorPat, type: Type, bt: Type, ls: number[]): voi
     c.code.push(...get(ls[0] ?? 0), ...i32(taken.vi), 0x47);
     fails(c);
   }
-  for (const s of taken.subs)
+  for (const s of taken.subs) {
+    freshField(c, pt.name, s);
     matchPat(
       c,
       s.pat,
       s.fl.type,
       s.fl.slots.map(i => ls[i] ?? 0),
     );
+  }
 }
 
 /** Matches the value in `ls` against a pattern: branches to the next arm on failure, binds names on the way. */

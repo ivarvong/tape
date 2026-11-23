@@ -116,4 +116,47 @@ fn push(stack: Int, item: Int) -> Int {
   );
 }
 
+// ---- C15 on a field's shorthand: `Missing(stack)` in a function with a parameter `stack` said "stack is already
+// defined: pick a new name", though nothing was written with that name but the pattern. The fix says it is the
+// field's shorthand and shows the form that binds it to another name, which compiles. Both kinds of type: a
+// record of Ints is kept in locals, one with a List in memory.
+for (const field of ['Int', 'List[Int]']) {
+  const C15 = `type R { Missing(stack: ${field}) Found(at: Int) }
+
+fn depth(stack: ${field}, r: R) -> Int {
+  match r {
+    Missing(stack) -> 1
+    Found(at) -> at
+  }
+}
+
+fn handle(raw: View) -> Buf {
+  respond(status: 200)
+}
+`;
+  const s = said(C15);
+  same(`C15 at the shorthand (a field of ${field})`, code(s), 'C15:5');
+  same(
+    '…and its fix says it is shorthand and shows the rename',
+    hint(s).includes('`Missing(stack)` is shorthand for `Missing(stack: stack)`') &&
+      hint(s).includes('`Missing(stack: stack_found)`'),
+    true,
+  );
+  same(
+    'the rename the fix shows compiles',
+    said(C15.replace('Missing(stack) ->', 'Missing(stack: stack_found) ->')),
+    'compiled',
+  );
+}
+same(
+  'a name bound twice by let keeps the plain C15',
+  said('fn f(n: Int) -> Int {\n  let n = 2\n  n\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n'),
+  {
+    code: 'C15',
+    line: 2,
+    message: 'n is already defined',
+    hint: 'Names are never reused in a function. Pick a new name.',
+  },
+);
+
 finish();
