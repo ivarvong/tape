@@ -338,6 +338,21 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
 }
 
 export function build(sources: readonly Source[], opts0: Options): Built {
+  return builds(sources, opts0, [])[0];
+}
+
+/**
+ * The module for opts0, then one more for each of `also` (opts0 with those options over it), all from one front:
+ * the sources lexed, parsed, checked and ruled once. What differs between them is code generation only (a traced
+ * build, { trace: true }, adds its trace calls), and the problems are the first's: the others are made only when it
+ * has none to throw. The hosted run's line trace compiled the program twice, half its CPU (profiles of tape
+ * dddd2c92, 2026-11-23); test/builds.ts checks each module is byte for byte the one a build of its own makes.
+ */
+export function builds(
+  sources: readonly Source[],
+  opts0: Options,
+  also: readonly Partial<Options>[],
+): [Built, ...Built[]] {
   const fr = front(sources);
   const { prog, served } = fr;
   const opts: Options = {
@@ -348,6 +363,9 @@ export function build(sources: readonly Source[], opts0: Options): Built {
     ],
   };
   const found: Problem[] = [];
+  // emitting adds functions to the program (a generic one per type arguments, a lambda, a trampoline), each with
+  // its types resolved for that build: each later build starts from the functions as they were written
+  const written = new Map(prog.fns);
   const made = finish(fr, opts, sources, found);
   // the rules' problems and the queries' (C67-C69, found while emitting), in the order of the source
   const byPlace = (a: Problem, b: Problem): number =>
@@ -357,5 +375,14 @@ export function build(sources: readonly Source[], opts0: Options): Built {
   // program to see whether what a rule refuses is a bug the simulator finds too); nothing else reads the option
   const [first] = found;
   if (first && opts.rules !== false) throw new CompileError(first, found);
-  return made;
+  // emitting adds the queries' problems to the front's list: each later build starts from the list as it stood
+  const sql = fr.sqlFound.length;
+  const rest = also.map(o => {
+    prog.fns.clear();
+    for (const [n, f] of written) prog.fns.set(n, f);
+    const b = finish(fr, { ...opts, ...o }, sources, [...found]);
+    fr.sqlFound.length = sql;
+    return b;
+  });
+  return [made, ...rest];
 }

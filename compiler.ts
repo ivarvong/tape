@@ -77,7 +77,7 @@ import { resolvePipes } from './compiler/pipes.ts';
 import { fuseRanges } from './compiler/fuse.ts';
 import { ambient } from './compiler/ambient.ts';
 import { rowColumns } from './compiler/rows.ts';
-import { build } from './compiler/build.ts';
+import { build, builds } from './compiler/build.ts';
 import type { Built, Source } from './compiler/build.ts';
 import type { Options } from './compiler/gen/module.ts';
 import { forgetAddedCapabilities } from './compiler/types.ts';
@@ -104,6 +104,26 @@ export function compile(sources: Sources, options: Partial<Options> = {}): Built
   const opts: Options = { ...DEFAULTS, ...options };
   try {
     return build(named(sources), opts);
+  } catch (e) {
+    if (e instanceof CompileError) return { wasm: null, errors: e.all ?? [e.info] };
+    throw e;
+  } finally {
+    forgetAddedCapabilities();
+  }
+}
+
+/**
+ * compile, and with it a module for each of `also` from the same parse and checks: compileAlso(sources, {}, [{ trace:
+ * true }]) is the build and its traced build for half the work of two compiles (compiler/build.ts builds).
+ */
+export function compileAlso(
+  sources: Sources,
+  options: Partial<Options>,
+  also: readonly Partial<Options>[],
+): [Built, ...Built[]] | Refused {
+  const opts: Options = { ...DEFAULTS, ...options };
+  try {
+    return builds(named(sources), opts, also);
   } catch (e) {
     if (e instanceof CompileError) return { wasm: null, errors: e.all ?? [e.info] };
     throw e;

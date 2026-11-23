@@ -5,7 +5,7 @@
 //
 // Few tools on purpose. Others an agent could use (fmt, the simulator, a program's tables) would each be a field of
 // these or a tool of its own; they wait until someone asks (test did: report 1fdd40f44552), so the list stays short.
-import { compile } from '../../compiler.ts';
+import { compileAlso } from '../../compiler.ts';
 import type { Built, Source } from '../../compiler.ts';
 import { isHead } from '../../host.ts';
 import type { Effect, Header } from '../../host.ts';
@@ -352,18 +352,24 @@ const diagnosticsOf = (
   errors: Built['errors'] | { code: string; file: string; line: number; message: string; hint: string }[],
 ): Diagnostic[] => errors.map(e => ({ file: e.file, line: e.line, code: e.code, message: e.message, fix: e.hint }));
 
-type Compiled = { built: Built | null; diagnostics: Diagnostic[]; files: Source[]; ms: number };
-function compiled(args: Fields, deps: Deps, known: readonly string[]): Compiled | Refusal {
+type Compiled = {
+  built: Built | null;
+  /** the build with { trace: true }, when asked for: made from the same parse and checks (compileAlso) */
+  traced: Built | null;
+  diagnostics: Diagnostic[];
+  files: Source[];
+  ms: number;
+};
+function compiled(args: Fields, deps: Deps, known: readonly string[], traced = false): Compiled | Refusal {
   const extra = unknownKeys(args, known);
   if (extra) return extra;
   const files = filesOf(args, deps);
   if (!Array.isArray(files)) return files;
   const t0 = Date.now(),
-    r = compile([...deps.std, ...files]),
+    r = compileAlso([...deps.std, ...files], {}, traced ? [{ trace: true }] : []),
     ms = Date.now() - t0;
-  return r.wasm === null
-    ? { built: null, diagnostics: diagnosticsOf(r.errors), files, ms }
-    : { built: r, diagnostics: [], files, ms };
+  if (!Array.isArray(r)) return { built: null, traced: null, diagnostics: diagnosticsOf(r.errors), files, ms };
+  return { built: r[0], traced: r[1] ?? null, diagnostics: [], files, ms };
 }
 const usageOf = (c: Compiled, requests = 0): Usage => ({
   codes: c.diagnostics.map(d => d.code),
@@ -636,14 +642,17 @@ export async function runTool(
   deps: Deps,
 ): Promise<{ result: RunResult | Refusal; usage: Usage | null }> {
   if (!isFields(args)) return { result: refused(400, 'bad_arguments', 'the arguments are a JSON object'), usage: null };
-  const c = compiled(args, deps, fieldsOfSchema(RUN_INPUT));
-  if (isRefusal(c)) return { result: c, usage: null };
   const requests = requestsOf(args);
-  if (isRefusal(requests)) return { result: requests, usage: null };
   // the line trace by default for one request only: 50 requests' traces made answers of 50,000 to 62,000
   // characters, more than a client shows (the usability bench, twice), and a run of many requests is read for its
   // statuses, bodies and effects; a trace is still there for the asking
-  const trace = modeOf<TraceMode>(args, 'trace', TRACE_MODES, requests.length === 1 ? 'lines' : 'none');
+  const trace = isRefusal(requests)
+    ? requests
+    : modeOf<TraceMode>(args, 'trace', TRACE_MODES, requests.length === 1 ? 'lines' : 'none');
+  // the line trace's build (with { trace: true }) comes from the same parse and checks as the build: one compile
+  const c = compiled(args, deps, fieldsOfSchema(RUN_INPUT), trace === 'lines');
+  if (isRefusal(c)) return { result: c, usage: null };
+  if (isRefusal(requests)) return { result: requests, usage: null };
   if (isRefusal(trace)) return { result: trace, usage: null };
   const effects = modeOf<EffectsMode>(args, 'effects', EFFECTS_MODES, 'compact');
   if (isRefusal(effects)) return { result: effects, usage: null };
@@ -651,7 +660,7 @@ export async function runTool(
   const built = c.built;
   if (!built) return { result: { ok: false, diagnostics: c.diagnostics, results: [] }, usage };
   // the line trace: the same program built with { trace: true }, each request replayed through it from its log
-  const traced = trace === 'lines' ? compile([...deps.std, ...c.files], { trace: true }) : null;
+  const traced = c.traced;
   const tracedWasm = traced?.wasm ?? null;
   const program = { wasm: built.wasm, build: built.build, ...(tracedWasm ? { traced: tracedWasm } : {}) };
   const t0 = Date.now();
