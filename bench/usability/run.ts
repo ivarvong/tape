@@ -262,8 +262,7 @@ if (args[0] === '--regrade') {
   await regrade(args[1] ?? '.');
 } else {
   const tasks = opt('tasks', TASKS.join(',')).split(',');
-  for (const t of tasks)
-    if (!(TASKS as readonly string[]).includes(t)) throw new Error(`no task ${t}: ${TASKS.join(', ')}`);
+  for (const t of tasks) if (!TASKS.some(x => x === t)) throw new Error(`no task ${t}: ${TASKS.join(', ')}`);
   const v = await prodVersions();
   const date = new Date().toISOString().slice(0, 10);
   const info: RunInfo = {

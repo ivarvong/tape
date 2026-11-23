@@ -35,7 +35,7 @@ const GRADERS: Record<(typeof TASKS)[number], Grader> = {
   sales: sales.grader,
   invoice: invoice.grader,
 };
-const isTask = (t: string): t is (typeof TASKS)[number] => (TASKS as readonly string[]).includes(t);
+const isTask = (t: string): t is (typeof TASKS)[number] => TASKS.some(x => x === t);
 
 export const grade = async (task: string, files: File[]): Promise<Graded> => {
   if (!isTask(task)) throw new Error(`no task ${task}`);
@@ -74,7 +74,7 @@ export const grade = async (task: string, files: File[]): Promise<Graded> => {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const [task, ...paths] = process.argv.slice(2);
-  if (task === undefined || !(TASKS as readonly string[]).includes(task)) {
+  if (task === undefined || !TASKS.some(x => x === task)) {
     console.error(`usage: node bench/usability/grade.ts <${TASKS.join('|')}> <file.tape>...`);
     process.exit(2);
   }
