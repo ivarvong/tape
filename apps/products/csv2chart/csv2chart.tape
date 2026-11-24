@@ -372,6 +372,13 @@ fn nth(list: List[Option[Float]], i: Int) -> Option[Float] {
 }
 
 fn chart(t: Table, title: Option[View]) -> Buf {
+  respond_as(status: 200, content: Svg)
+    |> header(name: "cache-control", value: "no-store")
+    |> drawing(t, title)
+}
+
+// The chart as an <svg> element: the whole of an SVG answer, or a figure inside a page.
+fn drawing(out: Buf, t: Table, title: Option[View]) -> Buf {
   let Table(names, rows) = t
   let numbered = numeric(rows)
   let x = xs(rows, numbered, i: 0, out: Nil)
@@ -392,8 +399,7 @@ fn chart(t: Table, title: Option[View]) -> Buf {
     False -> axis(lo: 0f, hi: 1f)
   }
   let series = length(list: names) - 1
-  respond_as(status: 200, content: Svg)
-    |> header(name: "cache-control", value: "no-store")
+  out
     |> append(view: "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 720 \
         \(400 + 22 * ((series + 3) / 4))\" font-family=\"system-ui,sans-serif\" \
         font-size=\"12\"><rect width=\"100%\" height=\"100%\" fill=\"#fff\"/>")
@@ -583,8 +589,22 @@ fn legend(out: Buf, names: List[View], i: Int) -> Buf {
 
 // ---------- the page ----------
 
+// The sample, drawn into the page: the public route's CSP lets a page load images only from data: URLs, so an
+// <img src=demo> of the program's own SVG shows nothing.
+fn demo_figure(out: Buf) -> Buf {
+  match table(text: sample()) {
+    Ok(value: t) -> out |> drawing(t, title: Some(value: "Monthly visits, 2026"))
+    Err(error) -> out |> write_html(text: error)
+  }
+}
+
 fn home() -> Buf {
   respond_as(status: 200, content: Html)
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
-        content=\"width=device-width,initial-scale=1\"><title>csv2chart</title><style>:root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--line:#e3e4e6}@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;--line:#30343a}}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}main{max-width:48rem;margin:0 auto;padding:2rem 1rem}img{width:100%;height:auto;border:1px solid var(--line);border-radius:8px;background:#fff}pre{font:13px/1.45 ui-monospace,Menlo,monospace;overflow-x:auto;border:1px solid var(--line);border-radius:8px;padding:.75rem}.mute{color:var(--mute)}</style><main><h1>csv2chart</h1><p>POST a CSV, get an SVG line chart: the first column is x, every other column a line (up to 8). An x that is not a number makes the rows evenly spaced and labelled; an empty cell is a gap.</p><img src=\"demo\" alt=\"a sample chart: monthly visits to docs, playground and api\"><pre>curl --data-binary @data.csv 'https://tape.ivar.workers.dev/p/demo/csv2chart/?title=My+chart' -o chart.svg</pre><p class=mute>Written in Tape: the CSV is read, scaled and drawn in the program; labels are escaped, so nothing in a CSV becomes markup.</p></main></html>")
+        content=\"width=device-width,initial-scale=1\"><title>csv2chart</title><style>:root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--line:#e3e4e6}@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;--line:#30343a}}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}main{max-width:48rem;margin:0 auto;padding:2rem 1rem}figure{margin:1rem 0}figure svg{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:8px}pre{font:13px/1.45 ui-monospace,Menlo,monospace;overflow-x:auto;border:1px solid var(--line);border-radius:8px;padding:.75rem}.mute{color:var(--mute)}</style><main><h1>csv2chart</h1><p>POST a CSV, get an SVG line chart: the first column is x, every other column a line (up to 8). An x that is not a number makes the rows evenly spaced and labelled; an empty cell is a gap.</p><figure role=img aria-label=\"a sample chart: monthly visits to docs, playground and api\">")
+    |> demo_figure
+    |> append(view: "</figure><pre>curl --data-binary @data.csv \
+        'https://tape.ivar.workers.dev/p/demo/csv2chart/?title=My+chart' -o chart.svg</pre><p \
+        class=mute>Written in Tape: the CSV is read, scaled and drawn in the program; labels are \
+        escaped, so nothing in a CSV becomes markup.</p></main></html>")
 }

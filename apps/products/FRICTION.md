@@ -22,7 +22,8 @@ is deployed.
 | 13 | The trap answer is lost locally: `node tape.ts prog.tape 'POST /…'` stops the whole run with `Error: trap 8: float not finite` instead of printing the 500 the service answers. And only `\n` is unescaped in a request argument, so a header needs the shell's `$'\r'`. | csv2chart with `1,1e308` | CLI | **open** |
 | 14 | No date formatting in std, and a program on the service is one file, so days-to-civil is written three times (shortlinks, webhook-inbox, sunclock). No `asin`, `acos`, `tan`, `pi` or Float `%` (written from `atan2`, `sqrt`, `sin/cos`, `floor`). | `"\(date(ms: now()))"` | missing std function | **open** |
 | 15 | The SQL checker refuses SQLite's `json_valid()` in an invariant (C86, "does not know its type"). | `invariant "…" { SELECT seq FROM d WHERE json_valid(body) = 0 }` | SQL checker | **open** |
-| 16 | A text literal inside a hole is refused (`"\(times(n, one: "time"))"`, L05). Documented; costs a `let` each time. | as shown | language | by design |
+| 16 | A public page cannot show an image of its own: the route's CSP is `img-src data:`, so csv2chart's `<img src="demo">` was a broken image (seen in headless Chrome; every status check passed). The chart is now drawn into the page. Likewise an unquoted `rx=6/>` in HTML swallowed the slash and sunclock's bar showed only night: both found only by looking at a screenshot. | `<img src="demo">` on a `/p/…` page | service policy / doc gap | **open**: say so in docs/service.md, or allow `img-src 'self'` |
+| 17 | A text literal inside a hole is refused (`"\(times(n, one: "time"))"`, L05). Documented; costs a `let` each time. | as shown | language | by design |
 
 ## What went well
 
