@@ -128,7 +128,7 @@ fn page(status: Int, title: View) -> Buf {
 
 fn end(out: Buf) -> Buf {
   out
-    |> append(view: "<p class=mute>Written in Tape. Links go only to https URLs, and every link \
+    |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/shortlinks/shortlinks.tape\">source</a>). Links go only to https URLs, and every link \
         shows its destination before you follow it.</p></main></html>")
 }
 

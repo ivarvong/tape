@@ -409,7 +409,8 @@ fn home() -> Buf {
     out: balances,
     rows: sql_all(row: Transfer, query: "SELECT * FROM transfers ORDER BY id DESC LIMIT 25")
   )
-    |> append(view: "</table></div><footer>A small program written in Tape.</footer></html>")
+    |> append(view: "</table></div><footer>A small program written in <a href=\"/\">Tape</a> · <a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/ledger/ledger.tape\">source</a></footer></html>")
 }
 
 fn balance_cells(out: Buf, rows: Rows[Account]) -> Buf {

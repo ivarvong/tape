@@ -6,7 +6,7 @@
 //   POST /events            {"key","name","at"}: at is UTC, "2026-12-31T23:59:59Z", "…T23:59Z" or "2026-12-31",
 //                           from now to ten years ahead. 201 {"id","name","at","at_ms"}; the same key again
 //                           answers the countdown it made (200)
-//   GET  /events/<id>       the page; it reloads itself every 15 seconds
+//   GET  /events/<id>       the page, counted when it is loaded (a public page is sandboxed: it cannot reload itself)
 //   GET  /events/<id>.json  {"id","name","at","left_ms","days","done"}: days is a Dec[2] of the time left
 
 migration 1 "events" {
@@ -112,7 +112,7 @@ fn page(found: Option[Event], at: Int) -> Buf {
     Some(value: Event(name, at: when, at_ms, created)) -> {
       let ms = at_ms - at
       let gone = fraction(done: at - created, of: at_ms - created)
-      shell(status: 200, title: name, refresh: True)
+      shell(status: 200, title: name)
         |> append(view: "<div class=card>")
         |> ring(gone)
         |> append(view: "<div><p class=big>")
@@ -127,11 +127,11 @@ fn page(found: Option[Event], at: Int) -> Buf {
         })
         |> write_html(text: when)
         |> append(view: " · \(percent(gone))% of the wait has gone</p></div></div>")
-        |> append(view: "<p class=meta>Counted on the server at each load; this page reloads \
-            every 15 s.</p>")
+        |> append(view: "<p class=meta>Counted on the server when this page was loaded; load it \
+            again to count again.</p>")
         |> foot
     }
-    None -> shell(status: 404, title: "no such countdown", refresh: False)
+    None -> shell(status: 404, title: "no such countdown")
       |> append(view: "<p><a href=\"../\">All countdowns</a></p>")
       |> foot
   }
@@ -350,7 +350,7 @@ fn number(v: View) -> Option[Int] {
 }
 
 fn home(at: Int) -> Buf {
-  let out = shell(status: 200, title: "countdowns", refresh: False)
+  let out = shell(status: 200, title: "countdowns")
     |> append(
       view: "<p>A page that counts down to an event, computed on the server at each load.</p>"
     )
@@ -387,14 +387,10 @@ fn problem(status: Int, error: View) -> Buf {
   respond_as(status, content: Json) |> write_json(value: Problem(error))
 }
 
-fn shell(status: Int, title: View, refresh: Bool) -> Buf {
+fn shell(status: Int, title: View) -> Buf {
   respond_as(status, content: Html)
     |> header(name: "cache-control", value: "no-store")
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
-    |> append(view: match refresh {
-      True -> "<meta http-equiv=refresh content=15>"
-      False -> ""
-    })
     |> append(view: "<meta name=viewport content=\"width=device-width,initial-scale=1\"><title>")
     |> write_html(text: title)
     |> append(view: "</title><style>")
@@ -424,5 +420,7 @@ fn shell(status: Int, title: View, refresh: Bool) -> Buf {
 }
 
 fn foot(out: Buf) -> Buf {
-  out |> append(view: "<footer>A small program written in Tape.</footer></html>")
+  out
+    |> append(view: "<footer>A small program written in <a href=\"/\">Tape</a> · <a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/countdown/countdown.tape\">source</a></footer></html>")
 }

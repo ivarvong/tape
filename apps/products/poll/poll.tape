@@ -403,5 +403,7 @@ fn shell(status: Int, title: View) -> Buf {
 }
 
 fn foot(out: Buf) -> Buf {
-  out |> append(view: "<footer>A small program written in Tape.</footer></html>")
+  out
+    |> append(view: "<footer>A small program written in <a href=\"/\">Tape</a> · <a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/poll/poll.tape\">source</a></footer></html>")
 }

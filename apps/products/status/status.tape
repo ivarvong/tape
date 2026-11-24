@@ -442,7 +442,8 @@ fn page(at: Int) -> Buf {
     |> append(view: "--maintenance:#8fb0f0}body .banner{color:#151514}}body{margin:0 \
         auto;max-width:720px;padding:24px 16px;")
     |> append(view: "background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}")
-    |> append(view: "h1{font-size:22px;margin:0 0 12px}h2{font-size:16px;margin:28px 0 8px}")
+    |> append(view: "h1{font-size:22px;margin:0 0 12px}h1 small{font:14px \
+        system-ui,sans-serif;color:var(--mute)}h2{font-size:16px;margin:28px 0 8px}")
     |> append(
       view: ".meta{color:var(--mute);font-size:14px}a{color:inherit}.banner{padding:14px 16px;"
     )
@@ -456,7 +457,8 @@ fn page(at: Int) -> Buf {
     |> append(
       view: ".i p{margin:4px 0}footer{margin-top:32px;color:var(--mute);font-size:13px}</style>"
     )
-    |> append(view: "<h1>Status</h1><div class=banner style=\"background:var(--\(state))\">")
+    |> append(view: "<h1>Status <small>of a made-up service</small></h1><div class=banner \
+        style=\"background:var(--\(state))\">")
     |> append(view: banner(state))
     |> append(view: "</div><h2>Components</h2>")
   let listed_out = fold(
@@ -470,8 +472,9 @@ fn page(at: Int) -> Buf {
     rows: sql_all(row: Incident, query: "SELECT * FROM incidents ORDER BY started DESC LIMIT 10")
   )
     |> append(view: "<footer>As of \(iso(ms: at)) · <a href=\"status.json\">status.json</a> · ")
-    |> append(view: "<a href=\"feed.json\">feed.json</a> · a small program written in \
-        Tape.</footer></html>")
+    |> append(view: "<a href=\"feed.json\">feed.json</a> · made-up data: a small program written \
+        in <a href=\"/\">Tape</a> · <a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/status/status.tape\">source</a></footer></html>")
 }
 
 fn banner(state: View) -> View {

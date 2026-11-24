@@ -443,7 +443,7 @@ fn page(status: Int, title: View) -> Buf {
 
 fn end(out: Buf) -> Buf {
   out
-    |> append(view: "<p class=mute>Computed in Tape from NOAA's solar equations: sunrise and \
+    |> append(view: "<p class=mute>Computed in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/sunclock/sunclock.tape\">source</a>) from NOAA's solar equations: sunrise and \
         sunset when the top of the sun meets the horizon (refraction 34′), dawn and dusk at 6° \
         below it (civil twilight). Within a minute or two of an ephemeris away from the \
         poles.</p></main></html>")

@@ -4,6 +4,13 @@ Ten programs written as a user would, each one file, served on the hosted servic
 at `https://tape.ivar.workers.dev/p/demo/<name>/`. What got in the way while writing them is in
 [`FRICTION.md`](FRICTION.md).
 
+Each is uploaded as [`docs/service.md`](../../docs/service.md) says, with the operator's token, and its page links
+back to the homepage and to its file here:
+
+```sh
+curl -H "authorization: Bearer $TAPE_TOKEN" --data-binary @apps/products/poll/poll.tape $URL/demo/poll   # 201, a new version
+```
+
 | Product | What it is | Shows |
 |---|---|---|
 | [`shortlinks/`](shortlinks/shortlinks.tape) | Short names for https links; each link shows its destination before you follow it, counts visits, and has a stats page. | refined `Url`/`Slug` with `else "…"` 400 messages, the slug as the client's key (`ON CONFLICT DO NOTHING`, 200 on a retry, 409 on a clash), a counter with `repeat: True`, dates from the clock |

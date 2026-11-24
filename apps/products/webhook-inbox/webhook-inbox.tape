@@ -285,7 +285,7 @@ fn page(status: Int, title: View) -> Buf {
 
 fn end(out: Buf) -> Buf {
   out
-    |> append(view: "<p class=mute>Written in Tape. Bodies are shown as text, never run; a box is \
+    |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/webhook-inbox/webhook-inbox.tape\">source</a>). Bodies are shown as text, never run; a box is \
         public to anyone who knows its name.</p></main></html>")
 }
 

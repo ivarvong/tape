@@ -605,6 +605,6 @@ fn home() -> Buf {
     |> demo_figure
     |> append(view: "</figure><pre>curl --data-binary @data.csv \
         'https://tape.ivar.workers.dev/p/demo/csv2chart/?title=My+chart' -o chart.svg</pre><p \
-        class=mute>Written in Tape: the CSV is read, scaled and drawn in the program; labels are \
+        class=mute>Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/csv2chart/csv2chart.tape\">source</a>): the CSV is read, scaled and drawn in the program; labels are \
         escaped, so nothing in a CSV becomes markup.</p></main></html>")
 }
