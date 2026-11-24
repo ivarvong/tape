@@ -104,9 +104,9 @@ const slow: Part[] = [
     s => (s.match(/^caught /gm) ?? []).length === 39 && !/^(MISSED|PLANT NOT FOUND)/m.test(s),
   ],
   [
-    "apps/playground/test.ts --plants: 18 bugs planted in the playground's modules, each caught by its test",
+    "apps/playground/test.ts --plants: 19 bugs planted in the playground's modules, each caught by its test",
     [node, 'apps/playground/test.ts', '--plants'],
-    /^all 18 plants caught$/m,
+    /^all 19 plants caught$/m,
     undefined,
     6,
   ],
