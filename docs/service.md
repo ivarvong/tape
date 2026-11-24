@@ -78,7 +78,8 @@ content-type, if-match, if-none-match, idempotency-key and x-…, never cookie o
 ### Public routes
 
 After `PUT /_public/:account/:name {"published": true}` (operator), `/p/:account/:name/<path>` answers GET, HEAD and
-POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. The program
+POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. A HEAD is run as
+the GET it stands for (the program sees `GET`, and the body is not sent), on this route and every other. The program
 sees who called: the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)` says so.
 For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
 box office served this way.

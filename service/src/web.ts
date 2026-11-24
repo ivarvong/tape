@@ -101,7 +101,9 @@ export const tapeRequest = async (
   search: string,
   via: string | null = null,
 ): Promise<Uint8Array<ArrayBuffer> | null> => {
-  const head = `${request.method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}${passedHeaders(request)}\n`,
+  // HEAD is GET without the body (RFC 9110 9.3.2): the program is asked GET, and the runtime sends no body for a HEAD
+  const method = request.method === 'HEAD' ? 'GET' : request.method;
+  const head = `${method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}${passedHeaders(request)}\n`,
     body = await bodyOf(request, BODY_MAX);
   return body === null ? null : new Uint8Array(await new Blob([head, body]).arrayBuffer());
 };

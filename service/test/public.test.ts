@@ -125,6 +125,15 @@ describe('public route', () => {
     // the request line cannot be forged from the path: a space in it arrives percent-encoded
     expect((await anyone('/p/ivar/pub2/reset%20x', { method: 'POST' })).status).toBe(404);
     expect((await anyone('/p/ivar/pub2/', { method: 'DELETE' })).status).toBe(405);
+    // HEAD is GET without the body (RFC 9110 9.3.2): the program is asked GET, and the answer's status and type
+    // are GET's. It answered 404 here, the program's fallback for a method it never names: every page of
+    // apps/products did that to HEAD, which link previews and uptime checks send
+    const headed = await anyone('/p/ivar/pub2/', { method: 'HEAD' });
+    expect([headed.status, headed.headers.get('content-type'), await headed.text()]).toEqual([
+      200,
+      'text/html; charset=utf-8',
+      '',
+    ]);
     expect((await anyone('/p/ivar/pub2/visit', { method: 'POST', body: 'x'.repeat(64 * 1024 + 1) })).status).toBe(413);
     // unpublished: 404 again, and the operator's route still runs
     expect(at(await got('/_public/ivar/pub2', { method: 'PUT', body: '{"published":false}' }), 'published')).toBe(
