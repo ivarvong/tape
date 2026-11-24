@@ -224,12 +224,16 @@ describe('public route', () => {
       'text/html; charset=utf-8',
       '<p>anyone 0</p>',
     ]);
-    // no trace link: a trace is the operator's
+    // no signed trace link: a trace page is the operator's. The request id, the traceparent and the outcome stay,
+    // so a failure on this route can be correlated (R-PUB-1, R-ANS-7).
     expect([
       r.headers.get('tape-trace-url'),
-      r.headers.get('tape-request-id'),
+      r.headers.get('tape-otlp-url'),
       r.headers.get('tape-supervisor-span'),
     ]).toEqual([null, null, null]);
+    expect(r.headers.get('tape-request-id')).toMatch(/^[0-9a-f-]{36}$/);
+    expect(r.headers.get('traceparent')).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
+    expect(r.headers.get('tape-outcome')).toBe('applied');
   });
 
   it("runs the latest version, tells the program the caller, and keeps the operator's routes the operator's", async () => {

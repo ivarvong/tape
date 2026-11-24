@@ -19,7 +19,9 @@ import { FAULTY, HOP_KINDS, decide, hopOf, planOf as faultPlanOf } from './fault
 import type { Fault, Plan as FaultPlan } from './faults.ts';
 import { diverged, planOf, sqlProblems } from './plan.ts';
 import type { Program, ServedCall } from './program.ts';
+import { APPLY } from './records.ts';
 import type {
+  Apply,
   CallMeta,
   Chain,
   CheckProblem,
@@ -38,7 +40,7 @@ import { entryOf as entryIn, policyOf } from './tools.ts';
 import type { Policy, ToolEntry } from './tools.ts';
 import * as view from './view.ts';
 import type { Links } from './view.ts';
-import { ACCOUNTS, messageOf, randomHex, reply } from './web.ts';
+import { ACCOUNTS, messageOf, randomHex, reply, unknownStop } from './web.ts';
 
 /** host.ts imports these by name */
 const HOST_PARTS = {
@@ -185,6 +187,12 @@ const brokenBy = (problems: readonly { version: number }[], candidate: number): 
 const are = (list: readonly unknown[]): string => (list.length > 1 ? 'are' : 'is');
 
 const enc = new TextEncoder();
+/** A response that is not a program's answer: it still names a request and what the request did. */
+const carry = (res: Response, outcome: Apply['outcome']): Response => {
+  if (res.headers.get('tape-request-id') === null) res.headers.set('tape-request-id', crypto.randomUUID());
+  if (res.headers.get('tape-outcome') === null) res.headers.set('tape-outcome', outcome);
+  return res;
+};
 const htmlPage = (html: string): Response =>
   new Response(html, {
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, max-age=300' },
@@ -812,7 +820,8 @@ export class Name extends DurableObject {
     options: InvokeOptions = {},
   ): Promise<Response> {
     const p = this.publication();
-    if (!p.published || p.latest === null) return Promise.resolve(reply({ error: 'no such page' }, 404));
+    if (!p.published || p.latest === null)
+      return Promise.resolve(carry(reply({ error: 'no such page', ...APPLY['not applied'] }, 404), 'not applied'));
     // a public answer carries no trace link, so its record need not be durable before the reply; a jepsen-*
     // account's is, as its faults are checked that way
     const after = !FAULTY.test(account) && (options.fault ?? null) === null;
@@ -826,13 +835,16 @@ export class Name extends DurableObject {
     options: InvokeOptions = {},
   ): Promise<Response> {
     if (this.#upgrading)
-      return reply(
-        {
-          error: `${name} is being upgraded to the current program; the request did not run: send it again`,
-          outcome: 'not applied',
-          upgrading: true,
-        },
-        503,
+      return carry(
+        reply(
+          {
+            error: `${name} is being upgraded to the current program; the request did not run: send it again`,
+            ...APPLY['not applied'],
+            upgrading: true,
+          },
+          503,
+        ),
+        'not applied',
       );
     this.#inflight++;
     try {
@@ -928,20 +940,24 @@ export class Name extends DurableObject {
         error = retired ? `v${version} is retired` : 'no such version';
       opened();
       note({ status: retired ? 410 : 404, error });
-      return reply({ error }, retired ? 410 : 404);
+      return carry(reply({ error, ...APPLY['not applied'] }, retired ? 410 : 404), 'not applied');
     }
     const unbuilt = this.#fresh(version);
     if (unbuilt) {
       const error = 'rebuild_failed';
       opened();
       note({ status: 503, error });
-      return reply(
-        {
-          error,
-          message: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
-          errors: unbuilt,
-        },
-        503,
+      return carry(
+        reply(
+          {
+            error,
+            message: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
+            errors: unbuilt,
+            ...APPLY['not applied'],
+          },
+          503,
+        ),
+        'not applied',
       );
     }
     if (faulty === 'reset_callee_before') this.reset('jepsen: the shard was reset before it ran the request');
@@ -953,7 +969,7 @@ export class Name extends DurableObject {
     const parent = call && span !== null ? `00-${call.trace}-${span}-01` : traceparent;
     const headers: Record<string, string> = {
       ...(parent === null || parent === '' ? {} : { traceparent: parent }),
-      ...(faulty === 'storage_error' ? { 'tape-fault': 'storage_error' } : {}),
+      ...(faulty === 'storage_error' || faulty === 'storage_reset' ? { 'tape-fault': faulty } : {}),
     };
     const facetBegan = Date.now();
     let res: Response;
@@ -966,13 +982,27 @@ export class Name extends DurableObject {
         redirect: 'manual',
       });
     } catch (e) {
-      // the facet stopped (reset, evicted) before it answered: what it committed is kept, its log is not written
-      note({
-        facet_began: facetBegan,
-        facet_took: Date.now() - facetBegan,
-        error: `the run stopped before it answered: ${messageOf(e)}`,
-      });
-      throw e;
+      // The facet's fetch rejected (it was reset or evicted) outside the run's own answer. What it committed, if
+      // the run had already passed a commit point, is kept, and this object cannot see the log: the outcome is
+      // unknown. The answer still names the request. A failure before the log began is answered by the facet
+      // itself (program.ts #failed) and does not arrive here.
+      const message = messageOf(e);
+      const id = crypto.randomUUID();
+      try {
+        note({
+          log_id: id,
+          facet_began: facetBegan,
+          facet_took: Date.now() - facetBegan,
+          status: 503,
+          error: `the run stopped before it answered: ${message}`,
+        });
+      } catch {
+        // the router's trace is the other link; the answer still names the request
+      }
+      const stoppedAt = unknownStop(message, parent ?? undefined);
+      stoppedAt.headers.set('tape-request-id', id);
+      if (span !== null) stoppedAt.headers.set('tape-supervisor-span', span);
+      return stoppedAt;
     }
     const facetTook = Date.now() - facetBegan;
     // the run committed (the facet answers after its transaction): reset before this object records it

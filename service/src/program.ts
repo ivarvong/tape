@@ -22,8 +22,9 @@ import {
 import type { App, Effect, Header, MachineSpec, ServiceReply, Sql, TraceEvent, Transaction } from './host.ts';
 import versions from './versions.ts';
 import type { VersionBuild } from './versions.ts';
-import { isCheckHead, isEntry, isMigrationsHead, isRunHead } from './records.ts';
+import { APPLY, isCheckHead, isEntry, isMigrationsHead, isRunHead, unreachableOutcome } from './records.ts';
 import type {
+  Apply,
   CallMeta,
   Chain,
   CheckHead,
@@ -408,30 +409,49 @@ const editedMigration = (sql: Sql, candidate: number, chain: Chain): { done: num
     },
   };
 };
+/** `applied` as the older field beside `outcome` (R-ANS-1, R-ANS-2): false, partly, or absent when the request finished. */
+const appliedField = (apply: Apply): { applied: false | 'partly' } | { applied?: undefined } => {
+  switch (apply.outcome) {
+    case 'not applied':
+      return { applied: false };
+    case 'partly':
+      return { applied: 'partly' };
+    case 'applied':
+    case 'unknown':
+      return {};
+    default:
+      return unreachableOutcome(apply);
+  }
+};
 const failedResponse = (
-  message: string,
+  error: string,
+  reason: string,
   transient: boolean,
-  partly: boolean,
+  apply: Apply,
   headers: Record<string, string>,
-): Response =>
-  new Response(
+): Response => {
+  // A request that finished must not carry retry-after: the client would send it again and apply it twice.
+  const retry = transient && apply.outcome !== 'applied';
+  return new Response(
     JSON.stringify({
-      error: partly
-        ? `the program failed after a call; what it wrote before that call was kept, the rest was rolled back: ${message}`
-        : `the program failed and its transaction was rolled back: ${message}`,
-      applied: partly ? 'partly' : false,
-      ...(transient ? { transient: true } : {}),
+      error,
+      reason,
+      ...apply,
+      ...appliedField(apply),
+      ...(retry ? { transient: true } : {}),
     }),
     {
-      status: transient ? 503 : 500,
+      status: retry ? 503 : 500,
       headers: {
         ...headers,
         'content-type': 'application/json',
-        ...(partly ? {} : { 'tape-applied': 'false' }),
-        ...(transient ? { 'retry-after': '1' } : {}),
+        'tape-outcome': apply.outcome,
+        ...(apply.outcome === 'not applied' ? { 'tape-applied': 'false' } : {}),
+        ...(retry ? { 'retry-after': '1' } : {}),
       },
     },
   );
+};
 
 export class Program extends DurableObject<Env> {
   readonly #apps = new Map<number, App>();
@@ -648,10 +668,12 @@ export class Program extends DurableObject<Env> {
   /** The headers every answer of a run carries: its id, the next timer, and its place in the trace. */
   #headers(id: string | null, head: Effect | undefined): Record<string, string> {
     const at = head && isHead(head) ? head : null;
+    const trace = at?.trace ?? '',
+      span = at?.span ?? '';
     return {
-      'tape-request-id': String(id),
+      'tape-request-id': id ?? crypto.randomUUID(),
       'tape-next-wake': String(this.nextWake() ?? ''),
-      traceparent: `00-${at?.trace ?? ''}-${at?.span ?? ''}-01`,
+      ...(trace !== '' && span !== '' ? { traceparent: `00-${trace}-${span}-01` } : {}),
     };
   }
   override async fetch(request: Request): Promise<Response> {
@@ -663,16 +685,22 @@ export class Program extends DurableObject<Env> {
     } catch (e) {
       return json({ error: messageOf(e) }, 409);
     }
-    // tape-fault: storage_error (jepsen-* only, set by the supervisor): the transaction fails as it commits, after
-    // every statement ran, the way a storage error at commit would; SQLite rolls it back
-    const storageFault = request.headers.get('tape-fault') === 'storage_error';
+    // tape-fault (jepsen-* only, set by the supervisor): storage_error fails the transaction as it commits, after
+    // every statement ran; storage_reset fails as the transaction opens, before the run logs anything, the way
+    // "Internal error in Durable Object storage caused object to be reset" does. SQLite rolls either back.
+    const tapeFault = request.headers.get('tape-fault');
+    const storageFault = tapeFault === 'storage_error';
+    const storageReset = tapeFault === 'storage_reset';
     // The run's log is written in the transaction of its writes, so the two commit together. A run that makes calls
     // commits at each one (a stretch); its log so far, marked partial, is written with each stretch's writes, and
     // the whole log with the last. So whatever a run committed is in its log, even when it stopped mid-way (its
     // object reset while it waited on a call), and a run with no log committed nothing.
     const log = this.#logger(version, bytes);
+    const parent = traceOfHeader(request.headers.get('traceparent'));
     const transaction: Transaction = f =>
       this.ctx.storage.transactionSync(() => {
+        // before the run: nothing has been logged, so a failure here kept nothing
+        if (storageReset) throw new StorageFault('Internal error in Durable Object storage caused object to be reset.');
         const r = f(),
           { out, pending } = stretchOf(r);
         if (storageFault && Boolean(out))
@@ -681,7 +709,7 @@ export class Program extends DurableObject<Env> {
         return r;
       });
     try {
-      const ran = await app.runLogged(bytes, { transaction, trace: traceOfHeader(request.headers.get('traceparent')) });
+      const ran = await app.runLogged(bytes, { transaction, trace: parent });
       const { status, body, type, headers } = split(ran.out);
       // the whole log, with its measured took (and, for a run that rolled itself back, written only now)
       log.keep(ran.effects, false);
@@ -689,6 +717,7 @@ export class Program extends DurableObject<Env> {
         status,
         headers: {
           ...this.#headers(log.id(), ran.effects[0]),
+          'tape-outcome': APPLY.applied.outcome,
           ...(type === undefined ? {} : { 'content-type': type }),
         },
       });
@@ -696,31 +725,77 @@ export class Program extends DurableObject<Env> {
       for (const h of headers) res.headers.append(h.name, h.value);
       return res;
     } catch (err) {
-      return this.#failed(err, log);
+      return this.#failed(err, log, version, bytes, parent);
     }
   }
-  // The run failed inside its transaction (a trap, a storage error), so nothing it wrote was kept: that is a
-  // known outcome, recorded with what the run did before it failed, and answered with applied: false. A storage
-  // failure is transient (RUNTIME-SPEC R-ANS-2): 503 with retry-after, as the same request sent again with its key
-  // may succeed. A trap is the program's: 500, as sending it again does the same.
-  #failed(err: unknown, log: Logger): Response {
+  // The run failed inside its transaction (a trap, a storage error). A storage failure is transient (R-ANS-2): 503
+  // with retry-after, and the same request sent again with its key may succeed. A trap is the program's: 500.
+  // A failure before the log began kept nothing (the log commits with the writes): that is `not applied`, recorded
+  // when the store still accepts a row, and answered even when it does not. The service does not run the request
+  // again itself. A storage reset fails the requests in flight together; retrying them in the same turn hits the
+  // object while it is being reset, and a GET is not a read (a program may write on any method).
+  #failed(
+    err: unknown,
+    log: Logger,
+    version: number,
+    bytes: Uint8Array,
+    parent: { trace: string; parent: string } | null,
+  ): Response {
     const effects = effectsOf(err),
       message = messageOf(err),
-      storage = err instanceof StorageFault,
+      storage = err instanceof StorageFault || /Durable Object (?:storage|reset)/i.test(message),
       // oxlint-disable-next-line typescript/prefer-includes -- FULL is a pattern beside TRANSIENT, as the tests read them
       transient = (storage || TRANSIENT.test(message)) && !FULL.test(message);
-    if (!effects) throw err; // it failed before its log began: nothing to record (the caller sees the exception)
+    // a run that failed after a call had committed the stretches before it: the log row is that commit
+    const kept = log.id() !== null;
     const failed: Failed = {
-      status: transient ? 503 : 500,
+      status: !effects && kept ? 500 : transient ? 503 : 500,
       error: message,
       rolled_back: true,
       ...(storage ? { storage: true } : {}),
+      ...(effects || kept ? {} : { unstarted: true }),
     };
-    // a run that failed after a call had committed the stretches before it: those writes stand ("applied" is
-    // then not false), and its log says so
-    const partly = log.id() !== null;
+    if (!effects) {
+      // The log never began, so this request's transaction did not commit. A later failure of the final log write,
+      // after a stretch had committed, is the other way to arrive here: those writes were kept.
+      const apply = kept ? APPLY.applied : APPLY['not applied'];
+      const noted = kept ? null : this.#unstarted(version, bytes, failed, parent);
+      const error = kept
+        ? `the request was applied, but its answer was not recorded: ${message}`
+        : `nothing was applied: ${message}`;
+      return failedResponse(error, message, transient, apply, this.#headers(noted?.id ?? log.id(), noted?.head));
+    }
+    const apply = kept ? APPLY.partly : APPLY['not applied'];
     log.keep(effects, false, failed);
-    return failedResponse(message, transient, partly, this.#headers(log.id(), effects[0]));
+    const error = kept
+      ? `the program failed after a call; what it wrote before that call was kept, the rest was rolled back: ${message}`
+      : `the program failed and its transaction was rolled back: ${message}`;
+    return failedResponse(error, message, transient, apply, this.#headers(log.id(), effects[0]));
+  }
+  /** A failure before the log began, recorded under a new id when the store accepts it. The id is the answer's
+   * either way: a store that has just reset may refuse the row, and the router's traceparent is the other link. */
+  #unstarted(
+    version: number,
+    bytes: Uint8Array,
+    failed: Failed,
+    parent: { trace: string; parent: string } | null,
+  ): { id: string; head: RunHead } {
+    const head: RunHead = {
+      build: 'unstarted',
+      flags: {},
+      at: Date.now(),
+      took: 0,
+      trace: parent?.trace ?? hex(16),
+      span: hex(8),
+      parent: parent?.parent ?? null,
+      name: null,
+      failed,
+    };
+    try {
+      return { id: this.record(version, bytes, [head]), head };
+    } catch {
+      return { id: crypto.randomUUID(), head };
+    }
   }
   // A call from another program: the latest version's exported method, logged like a request.
   // A method that fails here (a trap, a version not ready) rolled back its transaction and ran nothing, so it is a
@@ -989,6 +1064,16 @@ const runView = (
       partial: true,
     };
   }
+  // the run never began: there is no effect to replay, and another build's hash would refuse the log
+  if (head.failed?.unstarted === true)
+    return {
+      request,
+      status: head.failed.status,
+      response: `nothing was applied: ${head.failed.error}`,
+      trace: [['bad', `nothing was applied: ${head.failed.error}`]],
+      error: head.failed.error,
+      failed: head.failed,
+    };
   const t = replay();
   // a run that failed was rolled back: its recorded outcome stands, whatever the replay of its log does
   if (head.failed)

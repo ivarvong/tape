@@ -112,6 +112,7 @@ closed on 22 November: a keyed run claims its key in its first stretch, and an o
 | Id | Found by | Defect |
 |---|---|---|
 | S1 | fault seams | A failed cluster lookup answered "a shard stopped", outcome unknown, with no trace. |
+| S3 | production soak | A Durable Object storage reset before the run's log began was rethrown (`program.ts` `#failed`). The Worker answered 503 `outcome: unknown` with no `tape-request-id` and no `traceparent`, so a client could not tell whether a PUT had been kept or correlate the five failures (0.02% of 23,653 requests). |
 | S2 | fault seams | A callee whose commit failed answered Rejected, so its caller compensated and a racing retry then paid. |
 | H1 | production | An injected reset did not stop the invocation in production; the run went on and committed. |
 | K1 to K6 | checker mutation and review | Errors in the checkers themselves: a phantom-404 rule too lenient, a dropped response held to have a trace, a broken body taken as an answer, any failed read taken as "no such row", a read resent under the same trace id, no clock watchdog. |

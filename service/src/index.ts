@@ -57,6 +57,7 @@ import {
   ACCOUNTS,
   PUBLISHED,
   stopped,
+  unknownStop,
   SEGMENT,
   SOURCE_MAX,
   authorized,
@@ -87,9 +88,6 @@ const jsonOf = async (request: Request): Promise<unknown> => {
     return null;
   }
 };
-const STOPPED =
-  'the program stopped before it answered; what it committed before that is kept, so the outcome is unknown';
-
 const rejected = (why: string): ServiceReply => ({ status: 'rejected', body: enc.encode(why) });
 // Calls between programs: env.CALLS in each loaded program, bound to its account.
 export class Calls extends WorkerEntrypoint<Env, { account: string; from: string }> {
@@ -404,7 +402,7 @@ const publicRoute = async (
     );
   } catch (e) {
     stopped(e);
-    return reply({ error: STOPPED }, 503);
+    return unknownStop(messageOf(e));
   }
 };
 
@@ -591,7 +589,7 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
       return await handle({ request, m, account, name, url, token: env.TOKEN, origin: url.origin, ctx, stub });
     } catch (e) {
       stopped(e);
-      return reply({ error: STOPPED, reason: messageOf(e) }, 503);
+      return unknownStop(messageOf(e));
     }
   }
   return reply({ error: 'no such route' }, 404);

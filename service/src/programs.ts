@@ -4,7 +4,20 @@ import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
 import type { InvokeOptions, Name } from './name.ts';
 import { RouterTrace, store } from './spans.ts';
-import { BODY_MAX, SOURCE_MAX, bodyOf, hex, messageOf, reply, signed, stopped, tapeRequest, tooLarge } from './web.ts';
+import { APPLY } from './records.ts';
+import {
+  BODY_MAX,
+  SOURCE_MAX,
+  bodyOf,
+  hex,
+  messageOf,
+  reply,
+  signed,
+  stopped,
+  tapeRequest,
+  tooLarge,
+  unknownStop,
+} from './web.ts';
 
 export type Args = {
   request: Request;
@@ -103,8 +116,6 @@ export const buyerOf = (path: string | null | undefined, head: string | null | u
   return j === undefined ? null : unquoted(j);
 };
 
-const STOPPED =
-  'the program stopped before it answered; what it committed before that is kept, so the outcome is unknown';
 // Router faults (faults.ts) the object called carries out itself, and the ones that mean the call never ran
 const ROUTER_SUPERVISOR = new Set([
   'reset_callee_before',
@@ -112,6 +123,7 @@ const ROUTER_SUPERVISOR = new Set([
   'reset_callee_opened',
   'reset_callee_ran',
   'storage_error',
+  'storage_reset',
 ]);
 const ROUTER_NOT_SENT: Readonly<Record<string, string>> = {
   overload: 'the call was refused before it was sent (injected overload): the object never saw it',
@@ -208,7 +220,7 @@ export async function run(
       messageOf(e),
     );
     stopped(e);
-    out = reply({ error: STOPPED, outcome: 'unknown', reason: messageOf(e) }, 503);
+    out = unknownStop(messageOf(e), `00-${rt.trace}-${rt.span}-01`);
   }
   rt.finish(out.status);
   // The caller's wait on this invocation, the same header kv.ts writes for a shard: the span's own
@@ -217,13 +229,21 @@ export async function run(
     'server-timing',
     `tape-invoke;desc="caller-wall-ms-not-cpu";dur=${(call.end ?? call.start) - call.start}`,
   );
+  // Every answer names its request, says what the request did, and carries the router's traceparent. A public
+  // answer has no signed trace link (that link opens the run): the id and the traceparent are what correlate a
+  // failure, and they are not a link.
+  const id = out.headers.get('tape-request-id');
+  if (id === null || id === '' || id === 'null') out.headers.set('tape-request-id', crypto.randomUUID());
+  if (out.headers.get('tape-outcome') === null)
+    out.headers.set('tape-outcome', out.status >= 500 ? APPLY.unknown.outcome : APPLY.applied.outcome);
+  out.headers.set('traceparent', `00-${rt.trace}-${rt.span}-01`);
   const storeIt = (): Promise<string | null> =>
     store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);
-  // a trace link opens the run's whole log (its SQL, its calls): it is the operator's, so a public answer has none.
-  // With no link in the answer, the router's record is stored after the reply (it was a 37 ms call before it, trace
-  // 93a674291ab3e88eda1e14af41a0cddb); a jepsen-* account's still is stored before, as its faults are checked so.
+  // With no signed link in the answer, the router's record is stored after the reply (it was a 37 ms call before
+  // it, trace 93a674291ab3e88eda1e14af41a0cddb); a jepsen-* account's still is stored before, as its faults are
+  // checked so.
   if (open && fault === null && !FAULTY.test(account)) {
-    for (const h of ['tape-request-id', 'tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
+    for (const h of ['tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
     ctx.waitUntil(storeIt());
     return out;
   }
@@ -232,13 +252,12 @@ export async function run(
       ? "jepsen: the router's record could not be stored (injected)"
       : await storeIt();
   if (open) {
-    for (const h of ['tape-request-id', 'tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
+    for (const h of ['tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
     return out;
   }
   const link = await signed(token, url.origin, `/${account}/${name}/r/${call.span}`);
   out.headers.set('tape-trace-url', link);
   out.headers.set('tape-otlp-url', otlpOf(link, url.origin));
-  out.headers.set('traceparent', `00-${rt.trace}-${rt.span}-01`);
   out.headers.set('tape-trace-complete', lost === null ? 'true' : 'false');
   out.headers.delete('tape-supervisor-span');
   return out;

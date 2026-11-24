@@ -12,8 +12,42 @@ export type StatementError = { statement: string; reason: string };
 /** Why data would not take a version: the version, and the migration, statement or query that fails. */
 export type CheckProblem = { version: number; migration?: number; statement?: string; query?: string; reason: string };
 
-/** How a run that failed ended: its transaction was rolled back. */
-export type Failed = { status: number | string; error: string; rolled_back: true; storage?: true };
+/** How a run that failed ended: its transaction was rolled back.
+ * `unstarted`: the failure came before the log began, so no stretch committed. */
+export type Failed = {
+  status: number | string;
+  error: string;
+  rolled_back: true;
+  storage?: true;
+  unstarted?: true;
+};
+
+// What a request did to stored data. The retry line is part of the state, so a response cannot name an outcome and
+// leave out what the client should do. `partly` is the fourth state the three names sit beside: the stretches before
+// the run's last call were kept and the rest was rolled back (R-ANS-2).
+const RETRY = {
+  applied: 'the request finished; sending it again can apply it a second time',
+  notApplied: 'nothing was kept; send the same request again with the same idempotency key',
+  partly:
+    'writes before the last call were kept and the rest was rolled back; send it again only with the same idempotency key',
+  unknown: 'it may already have been applied; send it again only with the same idempotency key',
+} as const;
+/** What this request did, as far as the service can tell. Exactly one of these. */
+export type Apply =
+  | { outcome: 'applied'; retry: typeof RETRY.applied }
+  | { outcome: 'not applied'; retry: typeof RETRY.notApplied }
+  | { outcome: 'partly'; retry: typeof RETRY.partly }
+  | { outcome: 'unknown'; retry: typeof RETRY.unknown };
+export const APPLY = {
+  applied: { outcome: 'applied', retry: RETRY.applied },
+  'not applied': { outcome: 'not applied', retry: RETRY.notApplied },
+  partly: { outcome: 'partly', retry: RETRY.partly },
+  unknown: { outcome: 'unknown', retry: RETRY.unknown },
+} as const satisfies { [K in Apply['outcome']]: Extract<Apply, { outcome: K }> };
+/** A switch over an outcome with no case left. */
+export const unreachableOutcome = (x: never): never => {
+  throw new Error(`no case for this outcome: ${JSON.stringify(x)}`);
+};
 /** The timer a woken run answered. */
 export type Woke = { key: number; due: number | null };
 /** A run's first entry as the service stores it: the host's, and how the run ended when it did not finish. */

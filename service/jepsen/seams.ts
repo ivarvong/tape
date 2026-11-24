@@ -55,7 +55,9 @@ export async function kvSeams(
     account,
     cluster,
     shards,
-    kinds = HOP_KINDS.router,
+    // storage_reset is a router fault the focused test injects (service/test/storage-reset.test.ts). A seam at every
+    // position would answer before the program runs; that path is not what this matrix is for.
+    kinds = HOP_KINDS.router.filter(k => k !== 'storage_reset'),
     clientKinds = CLIENT_KINDS,
     retries = 2,
     onCase = () => {},
@@ -192,7 +194,7 @@ export async function workflowSeams(
   };
   const cases = hops.flatMap(hop =>
     HOP_KINDS[hop]
-      .filter(k => k !== 'lookup_error')
+      .filter(k => k !== 'lookup_error' && k !== 'storage_reset')
       .flatMap(kind => Array.from({ length: countOf(hop) }, (_, n): Case => ({ hop, kind, n }))),
   );
   const [index, of] = slice,

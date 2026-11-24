@@ -21,6 +21,9 @@
 //                         ran: SQLite rolls it back, and the shard answers 500 {"applied": false}
 //                         (a call between programs: the callee's transaction fails at commit, and the call is refused)
 //                         (a timer: the first commit of its woken run fails; the timer is kept and tried again later)
+//   storage_reset         (a router's call) the transaction fails as it opens, before the run logs anything, the way
+//                         "Internal error in Durable Object storage caused object to be reset" does. Nothing was
+//                         kept. The seam matrix does not inject it: service/test/storage-reset.test.ts does.
 //   reset_callee_opened   the callee's object is reset after it opened its record of the call, before the run
 //                         (a call from a router only: a call between programs opens no record before its run)
 //   reset_callee_ran      the callee ran and committed, then its object is reset before it recorded the run (a
@@ -34,7 +37,8 @@
 // The seams, by hop (jepsen/seams.ts injects at each one, at each position, one fault per run):
 //   router   a router (KV, or a program's /v/ route, with plan.router) calling the object it routes to: overload,
 //            delay, reset_callee_before, reset_callee_opened, storage_error, reset_callee_ran, reset_callee_after,
-//            lost, drop, slow_reply, trace_store_error, and lookup_error (KV)
+//            lost, drop, slow_reply, trace_store_error, and lookup_error (KV). storage_reset is a router fault too,
+//            and the seam matrix skips it (service/test/storage-reset.test.ts injects it).
 //   call     a program calling another: overload, delay, reset_callee_before, storage_error, reset_callee_ran,
 //            reset_callee_after, lost, drop, slow_reply, race, reset_caller, reset_caller_first
 //   wake     a timer's woken run (site wake>name#key, drawn by the alarm): storage_error
@@ -59,6 +63,7 @@ export const KINDS = [
   'reset_callee_ran',
   'trace_store_error',
   'lookup_error',
+  'storage_reset',
 ] as const;
 export type Kind = (typeof KINDS)[number];
 export type Hop = 'router' | 'call' | 'wake';
@@ -79,6 +84,7 @@ export const HOP_KINDS: Readonly<Record<Hop, readonly Kind[]>> = {
     'reset_callee_before',
     'reset_callee_opened',
     'storage_error',
+    'storage_reset',
     'reset_callee_ran',
     'reset_callee_after',
     'lost',

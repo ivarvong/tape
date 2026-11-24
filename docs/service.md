@@ -62,7 +62,8 @@ marked `contract` and waits until every older live version is retired. An upload
 live version, or whose machine the stored rows do not satisfy, is refused with 409. A program's `Remote`
 parameters reach the latest version of the program with that name in the same account.
 
-Every response names its request (`tape-request-id`) and carries signed links to its trace as a page
+Every response names its request (`tape-request-id`), says what the request did (`tape-outcome`), and carries a
+trace link (`traceparent`). An operator's response also carries signed links to its trace as a page
 (`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`), and names the step accounting the deployed compiler builds
 (`tape-step-version`). It also carries `server-timing`
 (`tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>`): `<ms>` is the whole milliseconds this Worker waited on
@@ -72,7 +73,20 @@ response. What the number measures, and the precision it has on Workers, is in
 what the run used of the limits below, `tape.memory_bytes`, `tape.steps` and `tape.step_version` (the first entry
 of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them; a module built
 before the tag has no `step_version`), whether it finished or stopped. A storage failure at commit answers 503
-with `retry-after: 1` and says whether anything was kept (`applied`); a trap answers 500.
+with `retry-after: 1` and says whether anything was kept (`applied`, and `outcome`); a trap answers 500.
+
+### What a client should do
+
+`tape-outcome` is one of four states. The body of a failure carries the same `outcome` and a `retry` line.
+
+| `outcome` | What happened | What to do |
+|---|---|---|
+| `applied` | The request finished. Anything it wrote was kept. | Do not send it again: sending it again can apply it a second time. |
+| `not applied` | Nothing this request wrote was kept. The run rolled back, or it failed before its log began (a Durable Object storage reset: the log is written in the same transaction as the writes, so no log means nothing was kept). | Send the same request again, with the same idempotency key. `retry-after` says how long to wait. |
+| `partly` | The writes before the run's last call were kept. The rest was rolled back. | Send it again only with the same idempotency key. |
+| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | Send it again only with the same idempotency key, and treat another success as the same effect. |
+
+The service does not retry a request itself. A storage reset fails the requests in flight on that object together, and an immediate retry hits the object while it is being reset. A GET is not a read: a program may write on any method, so the method is not a reason to retry. `not applied` is the reason, and the client is the one that waits and sends the same key again.
 
 ### What a program answers
 
@@ -101,12 +115,13 @@ and the path, wherever it is mounted. A client cannot set it, and a request that
 ### Public routes
 
 After `PUT /_public/:account/:name {"published": true}` (operator), `/p/:account/:name/<path>` answers GET, HEAD and
-POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. It keeps
-`server-timing` (`tape-invoke`), the same wait the operator's route reports. A name that is not published is
-answered by the list of published names and never calls the program's object, so that 404 has no `tape-invoke`.
-A HEAD is run as the GET it stands for (the program sees `GET`, and the body is not sent), on this route and every
-other. The program sees who called: the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)`
-says so.
+POST (a body of at most 64 KB) from anyone, through the latest live version, without a signed trace link (that link
+opens the run, and it is the operator's). A public answer still carries `tape-request-id`, `traceparent`,
+`tape-outcome` and `server-timing` (`tape-invoke`), the same wait the operator's route reports. A name that is not
+published is answered by the list of published names and never calls the program's object, so that 404 has no
+`tape-invoke`. A HEAD is run as the GET it stands for (the program sees `GET`, and the body is not sent), on this
+route and every other. The program sees who called: the request line ends in ` public`, and std/http's
+`Request(caller: Operator | Anyone)` says so.
 For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
 box office served this way.
 

@@ -315,6 +315,7 @@ const SUPERVISOR = new Set([
   'reset_callee_opened',
   'reset_callee_ran',
   'storage_error',
+  'storage_reset',
 ]);
 const NOT_SENT: Readonly<Record<string, string>> = {
   overload: 'the call was refused before it was sent (injected overload): the shard never saw it',
