@@ -96,7 +96,6 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     pow: ['x', 'y'],
     scan_plain: ['v', 'at'],
     scan: ['v', 'at', 'set'],
-    form_raw: ['body', 'name'],
     parse_float: ['text'],
     // Dec (compiler/gen/dec.ts)
     rescale: ['x', 'to'],

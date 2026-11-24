@@ -423,41 +423,6 @@ function parseFloat(u: Use): Type {
   return opt;
 }
 
-/**
- * form_raw(body, name): Some of the raw value (still `+` and %XX) of the first field whose name decodes to
- * `name`, or None. One pass (compiler/formscan.ts), so a lookup is not a step per byte. form_field decodes the
- * value it returns.
- */
-function formRaw(u: Use): Type {
-  const { c } = u;
-  const [bp, bl] = view(u, 0);
-  const [np, nl] = view(u, 1);
-  const found = fresh(c, I32);
-  const vp = fresh(c, I32);
-  const vl = fresh(c, I32);
-  const opt = T('Option', VIEW);
-  const adt = c.B.adtOf(opt, u.e);
-  const which = (variant: string): number => adt.variants.findIndex(v => v.name === variant);
-  c.code.push(
-    ...get(bp),
-    ...get(bl),
-    ...get(np),
-    ...get(nl),
-    0x10,
-    ...uleb(mathIndex(c.B, 'form_scan')),
-    ...set(vl),
-    ...set(vp),
-    ...set(found),
-    ...get(found),
-  );
-  open(c, 0x04, adt.slots);
-  buildVariant(c, adt, which('Some'), [vp, vl]);
-  c.code.push(0x05);
-  buildVariant(c, adt, which('None'), []);
-  close(c);
-  return opt;
-}
-
 const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   len: u => {
     u.c.code.push(...get(view(u, 0)[1]), 0xad);
@@ -485,7 +450,6 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   wrapping_mul: wrapping(0x7e),
   scan_plain: scanPlain,
   scan,
-  form_raw: formRaw,
   parse_float: parseFloat,
 };
 

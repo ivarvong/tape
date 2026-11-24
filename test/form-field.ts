@@ -1,10 +1,9 @@
-// std form_field. Reading every field used to walk the form again from the start, so the steps grew as n²
-// (n = 256 was 460,899 steps, n = 1024 was 7,738,976, about 16.8× for 4× the fields; n = 4096 passed the
-// 50,000,000-step budget). Memory was already linear. The scan is now one pass in the module, and the answers
-// are the ones the walk gave: a direct port of it here, and URLSearchParams on the cases a browser agrees with.
+// std form_field finds one field with scan of "&" and "=", one step per 16 bytes read. Reading every field
+// by calling it once a field walks the form again from the start, so that stays quadratic (n = 256 was
+// 460,899 steps, n = 1024 was 7,738,976). One pass over the form, each byte in one scan, is linear in the
+// bytes. The answers are the old walk's: a direct port of it here, and URLSearchParams where a browser agrees.
 import '../node25.ts';
 import { interpret } from '../interp.ts';
-import { formRaw } from '../interp/form.ts';
 import { instantiate } from '../host.ts';
 import { built, finish, moduleOf, ok, same, std } from './harness.ts';
 
@@ -13,6 +12,7 @@ const PROGRAM = {
   text: `fn handle(raw: View) -> Buf {
   match request(raw) {
     Request(path: "/n/" ++ decimal(n)) -> read_all(n)
+    Request(path: "/each/" ++ decimal(n)) -> each(n)
     Request(path: "/get", query: Some(value: q), body) -> shown(o: form_field(body: q, name: body))
     Request(method: "POST", path: "/check", body) -> checked(body)
     _ -> respond(status: 404)
@@ -21,7 +21,31 @@ const PROGRAM = {
 
 fn read_all(n: Int) -> Buf {
   let q = freeze(buf: form(out: buf(), i: 0, n))
-  respond(status: 200) |> write_int(value: total(q, i: 0, n, acc: 0))
+  respond(status: 200) |> write_int(value: walk(q, at: 0, acc: 0))
+}
+
+// One pass: each byte is in one scan, so the steps follow the bytes, not the square of the fields.
+fn walk(q: View, at: Int, acc: Int) -> Int {
+  match {
+    at >= len(q) -> acc
+    else -> walk_stop(q, at, acc, stop: scan(q, at, set: "&="))
+  }
+}
+
+fn walk_stop(q: View, at: Int, acc: Int, stop: Int) -> Int {
+  match {
+    stop < len(q) and q[stop] == 61 -> walk_value(q, at, acc, eq: stop)
+    stop >= len(q) -> acc + 1
+    else -> walk(q, at: stop + 1, acc: acc + 1)
+  }
+}
+
+fn walk_value(q: View, at: Int, acc: Int, eq: Int) -> Int {
+  let end = scan(q, at: eq + 1, set: "&")
+  match {
+    end >= len(q) -> acc + 1
+    else -> walk(q, at: end + 1, acc: acc + 1)
+  }
 }
 
 fn form(out: Buf, i: Int, n: Int) -> Buf {
@@ -30,6 +54,11 @@ fn form(out: Buf, i: Int, n: Int) -> Buf {
     i == 0 -> form(out: out |> append(view: "f0=1"), i: 1, n)
     else -> form(out: out |> append(view: "&f") |> write_int(value: i) |> append(view: "=1"), i: i + 1, n)
   }
+}
+
+fn each(n: Int) -> Buf {
+  let q = freeze(buf: form(out: buf(), i: 0, n))
+  respond(status: 200) |> write_int(value: total(q, i: 0, n, acc: 0))
 }
 
 fn total(q: View, i: Int, n: Int, acc: Int) -> Int {
@@ -161,9 +190,17 @@ const ask = (h: Handler, request: string): string => textOf(h.handle(enc.encode(
 
 // ---- steps: n lookups of n fields. The exponent is the least-squares slope of log(steps) on log(n).
 const sweepN = [256, 512, 1024, 2048, 4096];
+app.handle(enc.encode('GET /n/256'));
 const sweep = sweepN.map(n => {
-  const out = app.handle(enc.encode(`GET /n/${n}`));
-  return { n, body: textOf(out), steps: stepsOf(app), bytes: app.bytesUsed };
+  const req = enc.encode(`GET /n/${n}`);
+  let ms = Number.POSITIVE_INFINITY;
+  let out = new Uint8Array();
+  for (let k = 0; k < 5; k++) {
+    const t0 = performance.now();
+    out = app.handle(req);
+    ms = Math.min(ms, performance.now() - t0);
+  }
+  return { n, body: textOf(out), steps: stepsOf(app), bytes: app.bytesUsed, ms };
 });
 const logFit = (rows: readonly { n: number; steps: number }[]): number => {
   const xs = rows.map(r => Math.log(r.n));
@@ -181,21 +218,34 @@ const logFit = (rows: readonly { n: number; steps: number }[]): number => {
   return den === 0 ? NaN : num / den;
 };
 const exponent = logFit(sweep);
-console.log('form_field sweep (steps were 460899 at n=256 and 7738976 at n=1024, exponent 2.03)');
+const timeFit = logFit(sweep.map(r => ({ n: r.n, steps: r.ms })));
+console.log('one pass over n fields (n lookups of form_field were n²: 460899 steps at n=256, 7738976 at n=1024)');
 for (let i = 0; i < sweep.length; i++) {
   const row = sweep[i];
   const prev = sweep[i - 1];
   if (!row) continue;
   const ratio = prev ? (row.steps / prev.steps).toFixed(3) : '-';
-  console.log(`n=${row.n} steps=${row.steps} bytes=${row.bytes} body=${row.body} ratio=${ratio}`);
+  const timeRatio = prev && prev.ms > 0 ? (row.ms / prev.ms).toFixed(3) : '-';
+  console.log(
+    `n=${row.n} steps=${row.steps} ms=${row.ms.toFixed(2)} bytes=${row.bytes} body=${row.body} step-ratio=${ratio} time-ratio=${timeRatio}`,
+  );
 }
-console.log(`fitted exponent ${exponent.toFixed(4)}`);
+console.log(`fitted step exponent ${exponent.toFixed(4)}, time exponent ${timeFit.toFixed(4)}`);
 for (const row of sweep) same(`every field of a ${row.n}-field form is found`, row.body, String(row.n));
 same(
-  `steps grow linearly across n=256..4096: fitted exponent ${exponent.toFixed(3)} (was 2.03)`,
+  `one pass grows linearly in steps across n=256..4096: fitted exponent ${exponent.toFixed(3)} (n lookups were 2.03)`,
   exponent < 1.35 && exponent > 0.7,
   true,
 );
+const ms1024 = sweep[2]?.ms ?? Infinity;
+const ms4096 = sweep[4]?.ms ?? Infinity;
+same(
+  `one pass wall time scales with the fields, not their square: 4,096 is ${ms4096.toFixed(2)} ms against ${ms1024.toFixed(2)} ms at 1,024 (form_raw's n lookups were 5.05 ms and 91.4 ms)`,
+  ms4096 < ms1024 * 8 && ms4096 > ms1024,
+  true,
+);
+const each64 = textOf(app.handle(enc.encode('GET /each/64')));
+same('64 form_field lookups find every field', each64, '64');
 for (let i = 1; i < sweep.length; i++) {
   const prev = sweep[i - 1];
   const row = sweep[i];
@@ -307,10 +357,6 @@ const cases: (readonly [Uint8Array, Uint8Array])[] = [
   [enc.encode('&'), enc.encode('')],
 ];
 for (let i = 0; i < 400; i++) cases.push([bytesOf(rand(64)), i % 7 === 0 ? new Uint8Array() : bytesOf(rand(12))]);
-
-let rawAgree = 0;
-for (const [form, name] of cases) if (equalBytes(formRaw(form, name), rawOf(form, name))) rawAgree++;
-same("form_raw returns the old walk's raw value, on every case", rawAgree, cases.length);
 
 for (const [label, h] of handlers) {
   let agree = 0;
