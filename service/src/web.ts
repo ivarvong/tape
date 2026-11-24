@@ -81,11 +81,14 @@ export const bodyOf = async (request: Request, max: number): Promise<Uint8Array<
   return out;
 };
 
-// The request headers a program sees (std/http's header_of): those that say what a client asks for and how its
-// body is written, and the client's own x- headers. Never cookie, authorization (the operator's token), the
-// client's address or what Cloudflare adds. Each value is cut at HEADER_VALUE_MAX.
+// The request headers a program sees (std/http's header_of), an allow-list: those that say what a client asks for
+// and how its body is written, who the client says it is (user-agent), a webhook's id, time and signature as
+// Standard Webhooks names them (webhook-id, webhook-timestamp, webhook-signature: a receiver deduplicates by the
+// first and checks the others; apps/products/FRICTION.md #7), and the client's own x- headers. Never cookie,
+// authorization (the operator's token), the client's address or what Cloudflare adds. Each value is cut at
+// HEADER_VALUE_MAX. docs/service.md and docs/gen-std.ts list them.
 const PASSED =
-  /^(accept|accept-language|content-type|if-match|if-none-match|if-modified-since|idempotency-key|x-(?!forwarded|real-ip).+)$/;
+  /^(accept|accept-language|content-type|if-match|if-none-match|if-modified-since|idempotency-key|user-agent|webhook-(id|timestamp|signature)|x-(?!forwarded|real-ip).+)$/;
 export const HEADER_VALUE_MAX = 1024;
 const passedHeaders = (request: Request): string =>
   [...request.headers]

@@ -478,7 +478,7 @@ fn handle(raw: View) -> Buf {
   {
     title: 'Read a request header, set a response header',
     uses: ['fn header_of', 'fn header', 'type Request'],
-    text: '`header_of(request: r, name: "if-none-match")` is the header\'s value, `None` when it was not sent (the service passes accept, content-type, if-match, if-none-match, idempotency-key and x-…, never cookie or authorization). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`\'s.',
+    text: '`header_of(request: r, name: "if-none-match")` is the header\'s value, `None` when it was not sent (the service passes accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, webhook-id, webhook-timestamp, webhook-signature and x-… (but not x-forwarded-… or x-real-ip), never cookie or authorization). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`\'s.',
     program: `fn handle(raw: View) -> Buf {
   let r = request(raw)
   match r {

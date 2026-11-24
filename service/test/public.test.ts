@@ -5,6 +5,7 @@ import page from './fixtures/page.tape?raw';
 import redirect from './fixtures/redirect.tape?raw';
 import hello from '../../examples/hello.tape?raw';
 import { responseOf } from '../../host.ts';
+import { tapeRequest } from '../src/web.ts';
 import { anyone, at, call, got } from './help.ts';
 
 const enc = new TextEncoder(),
@@ -80,6 +81,61 @@ describe('headers (0.3)', () => {
     expect([e.status, e.headers.get('x-echo'), await e.text()]).toEqual([200, 'k7', 'k7']);
     const bad = await call('/ivar/redirect/v/1/bad', { method: 'POST', body: 'a\r\nset-cookie: x=1' });
     expect([bad.status, bad.headers.get('set-cookie'), bad.headers.get('x-bad')]).toEqual([500, null, null]);
+  });
+});
+
+describe('request headers', () => {
+  it('passes a program the headers of an allow-list, and no other', async () => {
+    const sent = {
+      accept: 'text/html',
+      'accept-language': 'en',
+      'content-type': 'application/json',
+      'if-match': '"1"',
+      'if-none-match': '"2"',
+      'if-modified-since': 'Tue, 24 Nov 2026 00:00:00 GMT',
+      'idempotency-key': 'k1',
+      // Standard Webhooks (Svix and others): the delivery's id, its time and its signature, which a program checks
+      'webhook-id': 'msg_1',
+      'webhook-timestamp': '1795478400',
+      'webhook-signature': 'v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=',
+      'user-agent': 'Svix-Webhooks/1.24',
+      'x-delivery-id': 'd1',
+      // never: credentials, the client's address, where it came from, what a proxy adds, a name near an allowed one
+      cookie: 'a=b',
+      authorization: 'Bearer t',
+      'proxy-authorization': 'Basic x',
+      'x-forwarded-for': '203.0.113.9',
+      'x-real-ip': '203.0.113.9',
+      'cf-connecting-ip': '203.0.113.9',
+      forwarded: 'for=203.0.113.9',
+      referer: 'http://elsewhere/',
+      origin: 'http://elsewhere',
+      'webhook-secret': 's',
+      'user-agent-x': 'y',
+    };
+    const bytes = await tapeRequest(
+      new Request('http://tape/x', { method: 'POST', headers: sent, body: 'b' }),
+      '/x',
+      '',
+    );
+    const [first = '', ...lines] = (dec.decode(bytes ?? new Uint8Array()).split('\n')[0] ?? '').split('\r');
+    expect(first).toBe('POST /x');
+    expect(lines.toSorted()).toEqual(
+      [
+        'accept: text/html',
+        'accept-language: en',
+        'content-type: application/json',
+        'idempotency-key: k1',
+        'if-match: "1"',
+        'if-modified-since: Tue, 24 Nov 2026 00:00:00 GMT',
+        'if-none-match: "2"',
+        'user-agent: Svix-Webhooks/1.24',
+        'webhook-id: msg_1',
+        'webhook-signature: v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4=',
+        'webhook-timestamp: 1795478400',
+        'x-delivery-id: d1',
+      ].toSorted(),
+    );
   });
 });
 
