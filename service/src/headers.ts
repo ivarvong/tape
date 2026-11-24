@@ -1,16 +1,21 @@
 // headers.ts: the headers on every response the Worker gives. The site's pages and files are the static assets',
 // with the headers in their _headers, and only they may be indexed. Nothing the Worker answers is sniffed, framed or
 // indexed, and nothing runs script: the API's JSON and text are sandboxed with nothing allowed; a trace page may use
-// its own inline style; a program's own HTML or SVG (its operator route and its public route) may use inline style
-// and data: images and post its forms to itself, and runs sandboxed, so it has no origin and runs no script. Every
-// response names the commit it was built from (tape-version) and the Worker version (tape-worker-version).
+// its own inline style; a program's own HTML or SVG (its operator route and its public route) may use inline style,
+// show images from this origin and data: URLs, and post its forms to itself, and runs sandboxed, so it has no
+// origin and runs no script. An image from this origin is what a page needs to show a chart another of its routes
+// draws (`<img src="chart">`, apps/products/FRICTION.md #16); it makes nothing active: an image runs no script (an
+// SVG's is not run in an <img>: Chrome 131, 24 November 2026), every response here is nosniff, a route that needs
+// a token gets none from a page (there are no cookies), and a GET of a public route is what any page anywhere can
+// already cause. Nothing is fetched from another origin. Every response names the commit it was built from
+// (tape-version) and the Worker version (tape-worker-version).
 // (Not in index.ts: with static assets, the main module may export only entrypoints.)
 import { COMPILER } from './build.ts';
 
 export const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
 export const TRACE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox";
 export const PROGRAM_CSP =
-  "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms";
+  "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms";
 const PROGRAM_PATH = /^\/p\/|^\/[^/]+\/[^/]+\/v\/\d+(\/|$)/;
 /** The commit this Worker was built from (vite.config.ts), or "dev" in the tests. */
 const SHA = typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev';

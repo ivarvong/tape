@@ -58,6 +58,9 @@ describe('security headers', () => {
       expect(csp.split('; ')).toEqual(expect.arrayContaining(["default-src 'none'", "frame-ancestors 'none'"]));
       expect(csp).toMatch(/(^|; )sandbox( |;|$)/);
       expect(csp).not.toMatch(/allow-scripts|allow-same-origin|script-src/);
+      // a page may show an image of its own (another of the program's routes, an Svg) or a data: URL, and no
+      // other: nothing is fetched from another origin
+      expect(csp.split('; ').filter(d => d.startsWith('img-src'))).toEqual(["img-src 'self' data:"]);
     }
   });
 });

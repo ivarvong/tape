@@ -76,6 +76,10 @@ list; other headers follow the status line, each after a carriage return (`heade
 `cache-control`), and the host refuses those it sets itself (content-type, set-cookie, the security headers) with a
 500 that says why. A first line that is neither form is all body.
 
+A program's HTML or SVG is served sandboxed (`content-security-policy`): no script runs, style is inline, a form
+posts to the service's own origin, and an image is one of this origin's (another route of the program that answers
+`Svg`: `<img src="chart">`) or a `data:` URL; nothing is loaded from another origin.
+
 A program reads the request headers the host passes with `header_of`. They are an allow-list: accept,
 accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, the Standard
 Webhooks headers (webhook-id, webhook-timestamp, webhook-signature) and the client's own x-… headers (but not
