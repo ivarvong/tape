@@ -86,6 +86,71 @@ fulfillment workflow charged twice, the ledger moved money twice and the KV writ
   of compiler. List literals deleted no line in the repository. Dropped; re-propose with a denser layout or new
   evidence. `range` and a fused `fold` (one step a number, no list) paid and stayed.
 
+## A byte literal, and not a vector
+
+Measured 24 November 2026 from a CommonMark renderer (`md.tape`, not in this repository: 1,574 lines, 114
+functions) and locked in `test/bytes.ts`. The renderer classifies bytes as decimal integers: 89 comparisons
+`== n` with `n` in 0..255, 16 pattern arms that are a byte, and 14 `byte:` arguments. It never writes `"*"[0]`.
+That form shows up as a pattern, where it is P01, because a pattern is a value and an index is an expression.
+
+`'*'` is the spelling. A single quote started nothing else (it was L01, "Tape text is in double quotes"), so it
+can open a literal without a prefix. `b"..."` is a name and then a text, which is why it parsed as P01, and a
+hex digit would be a second way to write every Int. The literal is one source character of code 0 to 127, or one
+of text's escapes plus `\'`. A character past ASCII is more than one byte of UTF-8, so it is not a byte, and
+128 to 255 stay decimal. There is no `\x` and no `\v`: each would be a second spelling of an integer that
+already has one. The lexer emits the Int. There is no new type and no new node, so the parser, the checker and
+the code generator are the digits' own.
+
+Replacing a constant in place leaves the module unchanged apart from the `build` section, which is a hash of
+the source and stays 24 bytes. Under the default build, `{reuse: false}` and `{check: true}`:
+
+| Program | Code | Data | Steps |
+|---|---|---|---|
+| `b == 42` and `b == '*'` | 143 bytes, the same | none added | 0, the same |
+| `is_ws`, `is_punct`, the arms of `esc_from`, `hex_digit`'s `48` written `'0'`, `find`'s byte, and the highlighter's `single`, `escape` and `escaped` tables | the same section | the same | the same |
+| `"*"[0]` against `42` | +36 bytes | +7 bytes | 0, the same |
+| `'A' + n - 10` against `55 + n` | +24 bytes |  | the same answers |
+
+`cost` counts a recursive entry and a fused fold. It counts neither a comparison nor the load `"*"[0]` does, so
+the step counter stays 0 for all three and the cost that shows up for the index is code and a data segment. The
+literal adds neither. `'A' + n - 10` is a different expression from `55 + n`, so `hex_digit` keeps `55 + n`.
+
+The renderer's call sites, before and after. The vertical tab is 11, which has no escape:
+
+```text
+fn is_ws(b: Int) -> Bool {
+  b == 32 or b == 9 or b == 10 or b == 13 or b == 12 or b == 11
+}
+fn is_ws(b: Int) -> Bool {
+  b == ' ' or b == '\t' or b == '\n' or b == '\r' or b == '\f' or b == 11
+}
+```
+
+```text
+fn is_punct(b: Int) -> Bool {
+  b >= 33 and b <= 47 or b >= 58 and b <= 64 or b >= 91 and b <= 96 or b >= 123 and b <= 126
+}
+fn is_punct(b: Int) -> Bool {
+  b >= '!' and b <= '/' or b >= ':' and b <= '@' or b >= '[' and b <= '`' or b >= '{' and b <= '~'
+}
+```
+
+`esc_from` matches 38, 60, 62 and 34, which are `'&'`, `'<'`, `'>'` and `'"'`. `hex_digit` is `48 + n` for a
+digit, and that is `'0' + n`. `url_byte` scans a 19-byte View, `";/?:@=+$,-_.!~*'()#"`, with `find`.
+
+A vector was not added. The same file uses `List` 81 times, `Cons` 64 and `Nil` 47, for the trees it walks
+(inlines, blocks, delimiter runs), not for a random-access table of scalars. The one byte table is that
+19-byte View. `let xs: Vec[Int] = [1, 2, 3]` is P01, "a `let` names a value without a type": the annotation is
+refused before the name is read as a type. `fn f(xs: Vec[Int])` is C06, unknown type `Vec`, and the nearest
+type offered is `Dec`. A `Vec` would be a second sequence beside `List`. List literals were measured on
+23 November, in the note above, and dropped: more Wasm, more steps, more heap, and no line deleted in the
+repository. Nothing in this renderer is a table that a vector would shorten and a `List` or a `View` does not
+already hold. Whether a vector is worth a type of its own is left open; this program does not make the case.
+
+The highlighter grew for a different reason. Its three tables compile to the same code as the digits. The
+scanner that recognizes the literal is new, and that module went from 22,023 bytes to 23,601 (+1,578). That is
+the tool learning the syntax, not a cost a program pays for writing `'*'`.
+
 ## Soundness of the rules
 
 The first prototype read SQL with regular expressions. The shipped rules read it with a SQL parser of their own
