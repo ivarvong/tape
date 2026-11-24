@@ -52,4 +52,23 @@ fn handle(raw: View) -> Buf {
   ],
 );
 
+// fuzz/programs.ts, 23 November 2026: the interpreter had no write_float (Unsupported), so a program that writes a
+// Float into a Buf had no reference meaning and the differential could not check it.
+same(
+  'write_float in the interpreter, as compiled: the shortest digits that read back',
+  both(
+    `fn handle(raw: View) -> Buf {
+  buf()
+    |> write_float(value: 0.1f + 0.2f)
+    |> append(view: " ")
+    |> write_float(value: -1e21f)
+    |> append(view: " ")
+    |> write_float(value: float(len(raw)))
+}
+`,
+    ['abc'],
+  ),
+  [['0.30000000000000004 -1e+21 3', '0.30000000000000004 -1e+21 3']],
+);
+
 finish();

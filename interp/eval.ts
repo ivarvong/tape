@@ -311,6 +311,7 @@ const INTRINSIC = {
   to_dec: ['x', 'scale', 'rounding'],
   parse_dec: ['text', 'scale'],
   write_dec: ['out', 'value'],
+  write_float: ['out', 'value'],
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
@@ -425,6 +426,12 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'write_dec': {
       const out = asBuf(a[0]);
       for (const b of enc.encode(D.text(asDec(a[1])))) out.buf.push(b);
+      return out;
+    }
+    // the shortest digits that read back as the Float, as ECMA-262's Number::toString writes them (host float_text)
+    case 'write_float': {
+      const out = asBuf(a[0]);
+      for (const b of enc.encode(String(asFloat(a[1])))) out.buf.push(b);
       return out;
     }
     default:
