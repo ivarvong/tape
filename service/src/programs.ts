@@ -105,16 +105,6 @@ export const buyerOf = (path: string | null | undefined, head: string | null | u
 
 const STOPPED =
   'the program stopped before it answered; what it committed before that is kept, so the outcome is unknown';
-/**
- * Server-Timing for one program call. `ms` is whole milliseconds the router waited on the Durable Object
- * (the invoke span: Date.now at begin, Date.now at done). A Worker's clock does not advance during compute
- * and cpuTimeMs arrives on the invocation log after the response, so this wait is what a client can read.
- * A fraction or a negative reading is not a duration; it is reported as 0, which is also a wait under 1 ms.
- */
-export const programTiming = (ms: number): string => {
-  const dur = Number.isInteger(ms) && ms > 0 ? ms : 0;
-  return `tape-invoke;desc="caller-wall-ms-not-cpu";dur=${dur}`;
-};
 // Router faults (faults.ts) the object called carries out itself, and the ones that mean the call never ran
 const ROUTER_SUPERVISOR = new Set([
   'reset_callee_before',
@@ -221,9 +211,12 @@ export async function run(
     out = reply({ error: STOPPED, outcome: 'unknown', reason: messageOf(e) }, 503);
   }
   rt.finish(out.status);
-  // The caller's wait on this invocation, on the response whose body is the program's. A 404 the list of
-  // published names answers itself never reaches here, so it carries no tape-invoke.
-  out.headers.set('server-timing', programTiming((call.end ?? call.start) - call.start));
+  // The caller's wait on this invocation, the same header kv.ts writes for a shard: the span's own
+  // milliseconds, unclamped. A 404 the list of published names answers itself never reaches here.
+  out.headers.set(
+    'server-timing',
+    `tape-invoke;desc="caller-wall-ms-not-cpu";dur=${(call.end ?? call.start) - call.start}`,
+  );
   const storeIt = (): Promise<string | null> =>
     store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);
   // a trace link opens the run's whole log (its SQL, its calls): it is the operator's, so a public answer has none.

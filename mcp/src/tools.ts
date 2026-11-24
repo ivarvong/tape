@@ -802,12 +802,6 @@ async function within<T>(p: Promise<T>, ms: number): Promise<T | 'timeout'> {
   }
 }
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-/**
- * A whole number of milliseconds, or null. Date.now on Workers and in Node is a whole millisecond; a fraction
- * would claim a precision the clock does not have, and a negative reading is a clock step, not a duration.
- */
-const wholeMs = (n: unknown): number | null =>
-  typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= Number.MAX_SAFE_INTEGER ? n : null;
 
 /** run: compile, then each request in order against one fresh database, each with its log, replay and trace. */
 export async function runTool(
@@ -870,9 +864,11 @@ export async function runTool(
       usage,
     };
   // The Worker's own reading of the RPC (index.ts) when it sent one; otherwise the wait just measured, which
-  // in Node is the in-process run (the clock there does advance during compute). A fraction is dropped.
-  const invoke_wall_ms = wholeMs(all.invoke_wall_ms) ?? wholeMs(usage.run_ms);
-  const timed = invoke_wall_ms === null ? {} : { invoke_wall_ms };
+  // in Node is the in-process run (the clock there does advance during compute). Date.now is already a whole
+  // millisecond, so there is nothing to reject.
+  const fromCaller = all.invoke_wall_ms;
+  const invoke_wall_ms = typeof fromCaller === 'number' ? fromCaller : usage.run_ms;
+  const timed = { invoke_wall_ms };
   if (!all.ok)
     return {
       result: { ok: false, diagnostics: [], cached: c.cached, error: all.error, results: [], ...timed },

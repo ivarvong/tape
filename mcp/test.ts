@@ -835,14 +835,6 @@ const tests: Test[] = [
       const wall = r['invoke_wall_ms'];
       if (typeof wall !== 'number' || !Number.isInteger(wall) || wall < 0) out.push(`invoke_wall_ms ${String(wall)}`);
       if ('invoke_wall_ms' in (a ?? {})) out.push('invoke_wall_ms is on a result');
-      // a caller that reports a fraction is not trusted: the clock's precision is 1 ms, and the wait just
-      // measured (an integer) is what the answer carries
-      const fraction = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/ada'] }), {
-        deps: { run: () => Promise.resolve({ ok: true, runs: [], invoke_wall_ms: 1.5 }) },
-      });
-      const fractionWall = F(fraction.body)['invoke_wall_ms'];
-      if (typeof fractionWall !== 'number' || !Number.isInteger(fractionWall))
-        out.push(`a fractional wait was kept: ${String(fractionWall)}`);
       const reported = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/ada'] }), {
         deps: { run: () => Promise.resolve({ ok: true, runs: [], invoke_wall_ms: 12 }) },
       });
@@ -2145,6 +2137,13 @@ const PLANTS: Plant[] = [
     file: 'runner.ts',
     from: 'random: seeded(7)',
     to: 'random: seeded(Date.now() + Math.floor(Math.random() * 1000))',
+  },
+  {
+    test: 'run',
+    what: 'the answer leaves off the caller wait',
+    file: 'tools.ts',
+    from: "const invoke_wall_ms = typeof fromCaller === 'number' ? fromCaller : usage.run_ms;",
+    to: 'const invoke_wall_ms = undefined;',
   },
 ];
 

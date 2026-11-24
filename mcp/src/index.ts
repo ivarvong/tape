@@ -103,8 +103,7 @@ const runIn =
     // covering every request in the call, the replay and a line trace, because they share the invocation.
     const t0 = Date.now();
     const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId);
-    const waited = Date.now() - t0;
-    return { ...ran, run_id: runId, ...(Number.isInteger(waited) && waited >= 0 ? { invoke_wall_ms: waited } : {}) };
+    return { ...ran, run_id: runId, invoke_wall_ms: Date.now() - t0 };
   };
 /** A doc examples build (doctest.ts), its functions called in a Dynamic Worker: this Worker cannot compile Wasm. */
 const examplesIn =

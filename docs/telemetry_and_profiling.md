@@ -138,16 +138,16 @@ What a client gets is the caller's wait, in whole milliseconds. It is a wall-clo
 inside that wait, because the caller is suspended on the RPC, and so is everything else the caller waited for.
 A difference of 1 ms is the resolution, not a measured change in the program. A 0 is a wait under 1 ms.
 
-- `POST /v1/run` and the MCP `run` tool put `invoke_wall_ms` on the JSON (mcp/src/index.ts measures it, mcp/src/tools.ts
-  checks it is a whole number). It is `Date.now` immediately before the Dynamic Worker RPC minus `Date.now` when that
+- `POST /v1/run` and the MCP `run` tool put `invoke_wall_ms` on the JSON (mcp/src/index.ts measures it). It is `Date.now` immediately before the Dynamic Worker RPC minus `Date.now` when that
   RPC returns, after the loader calls, so a compile that happened earlier is not in it. The invocation runs every
   request in the call, then each replay, then a line trace when one was made, so the number is one for the call and
   not one per request. `steps` on each result stays the per-request measure, and it is deterministic. The log line's
   `run_ms` is a wider window: it starts before the loader calls, and on Workers it can include earlier CPU during
   which the clock was stuck. In Node, where the tools run the program in process and the clock does advance during
-  compute, `invoke_wall_ms` is that process's wait. A fraction from a caller is dropped rather than shown.
+  compute, `invoke_wall_ms` is that process's wait.
 - A program's HTTP response, the operator's `/:account/:name/v/:version/…` and a published name's `/p/:account/:name/…`,
-  carries `server-timing: tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>` (service/src/programs.ts `programTiming`).
+  carries `server-timing: tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>`, written the same way `kv.ts` writes a
+  shard's (`dur` is the span's own milliseconds).
   `<ms>` is the router's `invoke` span, from `begin` to `done`, and `done` is after the body has been buffered, so
   the number is the wait for the Durable Object call and its body: the object's CPU, its SQLite, the RPC, and the
   object's work before it replies. A 404 from the list of published names never calls the object and has no header.

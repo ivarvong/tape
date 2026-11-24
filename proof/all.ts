@@ -111,9 +111,9 @@ const slow: Part[] = [
     6,
   ],
   [
-    'mcp/test.ts --plants: 50 bugs planted in tape-mcp, each caught by its test',
+    'mcp/test.ts --plants: 51 bugs planted in tape-mcp, each caught by its test',
     [node, 'mcp/test.ts', '--plants'],
-    /^all 50 plants caught$/m,
+    /^all 51 plants caught$/m,
   ],
   ...service,
   mcpSuite,
