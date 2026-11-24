@@ -226,4 +226,31 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// fuzz/compile.ts, 23 November 2026: a query with a character that is not SQL in it (`RET{RNING *`, from
+// examples/inventory.tape with one byte changed) made the compiler throw: the checker records the query's problem and
+// goes on to find the others, and the query was then numbered for the module (compiler/gen/module.ts queryId),
+// whose tokenizer threw "the character "{" is not SQL" out of compile() instead of a refusal.
+{
+  const text = `migration 1 "kv" {
+  CREATE TABLE kv(k TEXT PRIMARY KEY NOT NULL, v INTEGER NOT NULL)
+}
+
+type Kv {
+  Kv(k: View, v: Int)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  respond(status: 200) |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv WHERE v ^ 1 {"))
+}
+`;
+  let got: string;
+  try {
+    const b = compile([...std, { name: 'sqlchar.tape', text }]);
+    got = b.wasm === null ? `refused ${b.errors[0]?.code ?? '?'}` : 'compiled';
+  } catch (e) {
+    got = `threw: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  same('a query with a character that is not SQL is refused, not thrown', got, 'refused C67');
+}
+
 finish();

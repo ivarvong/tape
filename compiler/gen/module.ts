@@ -5,6 +5,7 @@ import type { Arg, Expr, FnDecl, Program, TypeAst, TypeDecl } from '../ast.ts';
 import { CompileError, fail, sleb, stemOf, vec } from '../common.ts';
 import type { DEFAULTS } from '../common.ts';
 import { integerParams } from '../../sql/analyze.ts';
+import { SqlError } from '../../sql/tokens.ts';
 import { isStd } from '../shadow.ts';
 import { key } from '../types.ts';
 import { showExpr } from '../../rules/origins.ts';
@@ -451,9 +452,22 @@ export function room(t: Tables, size: number): number {
   return at;
 }
 
+/**
+ * The text a query runs as. A statement the tokenizer cannot read is one the checker has already recorded as the
+ * program's problem (C67), and it goes on to find the rest: such a query runs as written (only a `rules: false`
+ * build keeps it), and is not thrown out of compile() (fuzz/compile.ts, 23 November 2026).
+ */
+function runText(q: Omit<QueryEntry, 'run'>): string {
+  try {
+    return integerParams(q.sql, q.params);
+  } catch (e) {
+    if (e instanceof SqlError) return q.sql;
+    throw e;
+  }
+}
 /** The number of a query in the module's list. The same query is kept once. */
 export function queryId(t: Tables, q0: Omit<QueryEntry, 'run'>): number {
-  const q = { ...q0, run: integerParams(q0.sql, q0.params) };
+  const q = { ...q0, run: runText(q0) };
   const k = JSON.stringify(q);
   const i = t.queries.findIndex(x => JSON.stringify(x) === k);
   return i < 0 ? t.queries.push(q) - 1 : i;
