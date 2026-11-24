@@ -115,8 +115,12 @@ describe('POST /_rebuild', () => {
     for (const f of failures) expect(String(at(f, 'code'))).toMatch(/^C\d+$/);
     expect(Number(at(r, 'rebuilt'))).toBeGreaterThanOrEqual(2);
     expect(Number(at(r, 'names'))).toBeGreaterThanOrEqual(2);
-    // a second walk finds nothing stale
-    expect(at(await got('/_rebuild', { method: 'POST', body: '{}' }), 'rebuilt')).toBe(0);
+    // a second walk finds nothing stale, and names the published names (ship.sh sends each one request: warm.ts)
+    expect((await call('/_public/rbw/two', { method: 'PUT', body: '{"published": true}' })).status).toBe(200);
+    const second = await got('/_rebuild', { method: 'POST', body: '{}' });
+    expect(at(second, 'rebuilt')).toBe(0);
+    expect(list(at(second, 'published'))).toContain('rbw/two');
+    expect(list(at(second, 'published'))).not.toContain('rbw/one');
     // and the first request runs the build it made, without building again
     const when = at(list(await got('/rbw/one'))[0], 'rebuilt_at');
     const h = await hello('/rbw/one/v/1/');

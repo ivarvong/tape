@@ -17,8 +17,9 @@
 #  4. 0% -> pinned smoke, pinned MCP smoke (/mcp on NEW, every answer naming NEW in tape-mcp-version), and parity
 #     (scripts/parity.ts: the playground NEW serves and /mcp on NEW name the same commit and compiler and compile
 #     alike) -> telemetry at 0% -> 100% (fast) or the ramp
-#  5. at 100%: unpinned requests answer from NEW; the prod smokes (and /mcp, and visual-smoke.ts in headless Chrome);
-#     the telemetry gate over the run
+#  5. at 100%: every live program rebuilt with NEW's compiler (POST /_rebuild); unpinned requests answer from NEW;
+#     one request to each published name (scripts/warm.ts); the prod smokes (and /mcp, and visual-smoke.ts in
+#     headless Chrome); the telemetry gate over the run
 # A failure in 4-5 rolls back to PREV, only while the deployment is still the one this run last wrote. One entry per
 # run in $DEPLOY_LOG, with NEW and PREV and the step times.
 set -euo pipefail
@@ -238,6 +239,15 @@ fi
 
 # ---- 5. at 100%
 all_from "$BASE/ivar/hello" tape-worker-version "$NEW_tape" || back "unpinned requests do not all reach tape $NEW_tape"
+# One request to each published name (scripts/warm.ts, the list POST /_rebuild answered), so the first visitor after
+# the deploy does not start its object. Recorded, never a reason to roll back.
+if [ -s "$STATE/rebuild.out" ] && [ -r "$TOKEN_FILE" ]; then
+  say "warm: one request to each published name"
+  node scripts/warm.ts "$BASE" "$STATE/rebuild.out" > "$STATE/warm.out" 2>&1 || true
+  note "$(tail -1 "$STATE/warm.out")"
+else
+  note "warm: skipped, no rebuild answer to read the published names from"
+fi
 say "prod smokes"
 node scripts/smoke.ts "$BASE" --sha "$SHA" > "$STATE/smoke.out" 2>&1 &
 S1=$!

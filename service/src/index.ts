@@ -526,6 +526,8 @@ const rebuildRoute = async (request: Request, ctx: ExecutionContext): Promise<Re
     // a version whose source today's compiler refuses (it answers 503 rebuild_failed), by name, with the first error
     failures: done.flatMap(d => d.failures.map(f => ({ name: d.name, ...f }))).slice(0, 100),
     older: older.n,
+    // every published account/name: the deploy sends each one request, so no visitor starts its object (warm.ts)
+    published: keys,
     errors: done.filter(d => d.error !== undefined).map(d => ({ name: d.name, error: d.error })),
     slowest: done
       .toSorted((a, b) => b.ms - a.ms)
