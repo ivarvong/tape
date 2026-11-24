@@ -71,8 +71,8 @@ Motion: 120–160 ms ease-out on colour and opacity only; none under `prefers-re
 
 Homepage: content 1200 px max, gutters 24 px (16 at ≤ 640). Hero: pill, h1, one sentence, two buttons, then the
 demo window full width: editor (left, 7/12) and output (right, 5/12), 480 px tall; below 960 px the two stack and
-each keeps a fixed height. Then three feature rows (heading, one sentence, an artefact), a "what is checked" grid
-and the status grid. Playground: an app shell of 100dvh: 56 px header, two panes split by a draggable divider
+each keeps a fixed height. Then three feature rows (heading, one sentence, an artefact), the ten programs of
+`apps/products` in two columns (name, one line, its file), a "what is checked" grid and the status grid. Playground: an app shell of 100dvh: 56 px header, two panes split by a draggable divider
 (keyboard: arrow keys), each pane scrolling inside itself; at ≤ 760 px one pane at a time behind a Code / Run /
 Trace segmented control.
 
