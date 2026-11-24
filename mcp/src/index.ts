@@ -20,6 +20,7 @@ import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
+import stepVersion from '../../compiler/step-version.ts?erased';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { serve } from './serve.ts';
 import { tailLines } from './tail.ts';
@@ -45,6 +46,8 @@ const MODULES = {
   'host/memory.js': hostMemory,
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
+  // host/run.js reads which step accounting a module was built for
+  'compiler/step-version.js': stepVersion,
 };
 // sql.js's Wasm, for the Dynamic Worker's modules: decoded once per isolate, when a run first needs it. Decoded at
 // the top level (and by a callback per byte) it was 34 of the 53 ms this Worker's module takes to start, in every

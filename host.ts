@@ -25,9 +25,9 @@ import type { Link, MachineSpec, Migrated } from './host/schema.ts';
 
 export { NO_TIMERS, TimedOut } from './host/call.ts';
 export type { Service, ServiceOptions, ServiceReply, Timers } from './host/call.ts';
-export { isCall, isEffect, isHead, isNow, isRandom, isSql, isWake, spans } from './host/log.ts';
+export { isCall, isEffect, isHead, isNow, isRandom, isSql, isWake, measuredText, spans } from './host/log.ts';
 export type { Cell, Effect, Flags, Head, Packed, Sql, SqlParam, Status, TraceEvent } from './host/log.ts';
-export { MAX_WAKE_MS } from './host/run.ts';
+export { MAX_WAKE_MS, stepVersionOf } from './host/run.ts';
 export type { App, Broken, Observed, Ran, RunOptions, Served, Woken } from './host/run.ts';
 export {
   MACHINE_PREFIX,

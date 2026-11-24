@@ -9,6 +9,7 @@ import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
+import stepVersion from '../../compiler/step-version.ts?erased';
 import programSrc from './program.ts?erased';
 import recordsSrc from './records.ts?erased';
 import type { CallEffect } from '../../host/log.ts';
@@ -47,6 +48,8 @@ const HOST_PARTS = {
   'host/memory.js': hostMemory,
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
+  // host/run.js reads which step accounting a module was built for
+  'compiler/step-version.js': stepVersion,
 };
 
 // RUNTIME-SPEC R-RET-6: the trace records of the newest TRACE_KEEP requests of each object are kept; a prune runs

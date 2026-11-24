@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { checkQueries } from '../check.ts';
 import { compile } from '../compiler.ts';
 import type { Built } from '../compiler.ts';
-import { instantiate, isCall, isHead, isNow, isRandom, isWake, traceOf } from '../host.ts';
+import { instantiate, isCall, isHead, isNow, isRandom, isWake, measuredText, traceOf } from '../host.ts';
 import type { Cell, Effect, TraceEvent } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
@@ -19,8 +19,7 @@ const answer = (e: { rows?: Cell[][] | undefined; r?: number | undefined }): str
 function effectLine(plain: Built, e: Effect): string {
   // a write or a timer that the run's rollback(out) or trap undid, and the run that did it
   const undone = 'undone' in e && e.undone ? '  (undone)' : '';
-  if (isHead(e))
-    return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${e.bytes} bytes of memory, ${e.steps ?? '?'} steps${undone}`;
+  if (isHead(e)) return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${measuredText(e)}${undone}`;
   if (isCall(e)) return `call    ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`;
   if (isWake(e)) return `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})${undone}`;
   if (isNow(e)) return `now     -> ${e.now}`;

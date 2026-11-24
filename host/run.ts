@@ -9,6 +9,8 @@
 // call gets more than what remains of it, and each service is told its budget so it can pass it on. A handler that
 // returns rollback(out) has that stretch's writes undone: the host throws out of `transaction`, so the storage
 // rolls back, and still answers with `out`; the log's first entry says `undone`.
+import { isStepVersion } from '../compiler/step-version.ts';
+import type { StepVersion } from '../compiler/step-version.ts';
 import { Pending, REAL_TIMERS, perform } from './call.ts';
 import type { Service, Timers } from './call.ts';
 import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
@@ -107,6 +109,11 @@ export function section(module: WebAssembly.Module, n: string): unknown {
   const [s] = WebAssembly.Module.customSections(module, n);
   return s ? JSON.parse(new TextDecoder().decode(s)) : [];
 }
+/** The step accounting a module was built for, or null when the module predates the tag. */
+export function stepVersionOf(module: WebAssembly.Module): StepVersion | null {
+  const v = section(module, 'step_version');
+  return isStepVersion(v) ? v : null;
+}
 /**
  * A custom section that is a list. The compiler wrote it (compiler/gen/assemble.ts), and the host takes its
  * word for what the entries are: this is the one place it does.
@@ -175,6 +182,8 @@ type Linked = {
   readonly names: () => Map<number, string>;
   readonly mem: Mem;
   readonly raw: Record<string, WebAssembly.ExportValue>;
+  /** the step accounting the module was built for; null when the module predates the tag */
+  readonly stepVersion: StepVersion | null;
   readonly flagNow: Flags;
   target: Target;
   remotes: string[];
@@ -515,10 +524,7 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
     // a run that stopped says how much memory it had used by then, and how many steps it had taken, as a finished
     // one does: the run to size is most often the one that ran out
     const [head] = L.effects;
-    if (head && isHead(head) && L.live) {
-      head.bytes = globalOf(L, 'heap') - floor;
-      head.steps = globalOf(L, 'cost');
-    }
+    if (head && isHead(head) && L.live) noteUse(L, head, globalOf(L, 'heap') - floor);
     const why = globalOf(L, 'why');
     throw new Error(stopped(L, why, err), { cause: err });
   }
@@ -539,6 +545,13 @@ function markUndone(L: Linked, effects: readonly Effect[]): void {
   for (const e of effects.slice(from)) if ((isSql(e) && WRITE.test(L.Q[e.q]?.sql ?? '')) || isWake(e)) e.undone = true;
 }
 
+/** What a live run used, written into its log: the bytes, the steps, and the step accounting the module was built for. */
+function noteUse(L: Linked, head: Head, bytes: number): void {
+  head.bytes = bytes;
+  head.steps = globalOf(L, 'cost');
+  if (L.stepVersion !== null) head.step_version = L.stepVersion;
+}
+
 /** The run's answer, with what it used written into its log. */
 function finished(L: Linked, bytes: Uint8Array, h: number, floor: number): Uint8Array<ArrayBuffer> {
   // how much memory this run used: the same number on every run and every replay of the same request
@@ -546,8 +559,7 @@ function finished(L: Linked, bytes: Uint8Array, h: number, floor: number): Uint8
   L.undone = globalOf(L, 'undo') !== 0;
   const [head] = L.effects;
   if (head && isHead(head) && L.live) {
-    head.bytes = L.used;
-    head.steps = globalOf(L, 'cost');
+    noteUse(L, head, L.used);
     if (L.undone) head.undone = true;
   }
   const out = answerAt(L.mem, h);
@@ -958,6 +970,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     live: !recorded,
     mem: { memory, alloc: size => Number(alloc(size)) },
     raw,
+    stepVersion: stepVersionOf(module),
     flagNow: Object.fromEntries(F.map(f => [f.name, f.default])),
     names: () => (names ??= functionNames(module)),
     target: { name: 'handle', params: E },

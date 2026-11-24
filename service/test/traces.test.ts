@@ -181,11 +181,19 @@ describe('traces: a routed request is one tree', () => {
       bytes = Number(at(ran, 'memory_bytes')) + 40;
     expect(steps).toBeGreaterThan(0);
     expect('\rtape-base: http://tape/trc/hi/v/1'.length).toBe(34);
-    expect([attr(run, 'tape.steps'), attr(run, 'tape.memory_bytes')]).toEqual([steps, bytes]);
+    const stepVersion = at(ran, 'step_version');
+    expect([attr(run, 'tape.steps'), attr(run, 'tape.memory_bytes'), attr(run, 'tape.step_version')]).toEqual([
+      steps,
+      bytes,
+      stepVersion,
+    ]);
+    expect(String(stepVersion)).toBe(r.headers.get('tape-step-version'));
+    expect(hosted.headers.get('tape-step-version')).toBe(r.headers.get('tape-step-version'));
     const id = r.headers.get('tape-request-id') ?? '';
     expect(at(await got(`/trc/hi/log/1/${id}`), 'effects', 0, 'steps')).toBe(steps);
+    expect(at(await got(`/trc/hi/log/1/${id}`), 'effects', 0, 'step_version')).toBe(stepVersion);
     expect(await (await call(`/trc/hi/trace/1/${id}?format=html`)).text()).toContain(
-      `${bytes} bytes of memory, ${steps} steps`,
+      `${bytes} bytes of memory, ${steps} steps, step version ${String(stepVersion)}`,
     );
   });
 });

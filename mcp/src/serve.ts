@@ -9,6 +9,7 @@
 // No CORS. The clients are MCP clients and HTTP tools, which are not browsers. A browser page cannot use this
 // service from its visitors' browsers: a request with an Origin header is refused, and a JSON POST from another
 // origin needs a preflight, which gets no CORS headers, so the browser never sends it.
+import { STEP_VERSION } from '../../compiler/step-version.ts';
 import { fieldsOf, serveMcp } from '../../service/src/mcp.ts';
 import type { Fields, McpServer } from '../../service/src/mcp.ts';
 import {
@@ -54,6 +55,7 @@ const HEADERS = {
   'content-security-policy': "default-src 'none'; sandbox",
   'cache-control': 'no-store',
   'referrer-policy': 'no-referrer',
+  'tape-step-version': String(STEP_VERSION),
 };
 /** Any answer, with the headers every answer has. */
 const secured = (res: Response): Response => {
@@ -169,12 +171,12 @@ export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a
 /** The tools' descriptions: what each does, and examples/hello.tape with what it gives, to check in one call. */
 export function listing(deps: Deps): Fields[] {
   const hello = `examples/hello.tape, the program used when \`files\` is left out:\n\n\`\`\`tape\n${deps.hello.text.trimEnd()}\n\`\`\``;
-  const limits = `Limits (alpha, may change): ${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, bodies up to ${LIMITS.requestBodyBytes / 1024} KB; Tape's budget per request: 50,000,000 steps, 64 MB; a step is one entry into a recursive function (std's too, as the byte scans of request(): an arm added above a route can change its steps); other calls are free; on Workers the clock moves only across I/O (spans last 0 µs), so steps are the cost measure; response bodies past ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. Calls are logged, never the source, bodies or responses: https://github.com/ivarvong/tape/blob/main/TERMS.md`;
+  const limits = `Limits (alpha, may change): ${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, bodies up to ${LIMITS.requestBodyBytes / 1024} KB; Tape's budget per request: 50,000,000 steps, 64 MB; a step is one entry into a recursive function (std's too: a route arm changes the count; step_version ${STEP_VERSION}); other calls are free; on Workers the clock moves only across I/O (spans last 0 µs), so steps are the cost measure; response bodies past ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. Calls are logged, never the source, bodies or responses: https://github.com/ivarvong/tape/blob/main/TERMS.md`;
   return [
     {
       name: 'compile',
       title: 'Compile a Tape program',
-      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size and its SQL statement count. \`run\` compiles too, and runs requests.
+      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size, its SQL statement count and step_version (the step accounting). \`run\` compiles too, and runs requests.
 
 To check it works: compile with no arguments gives {"ok": true, "diagnostics": []}. Send hello.tape with the line \`repeat: True,\` taken out, and it gives ok: false and one diagnostic, code C54 at hello.tape line 11: the INSERT … DO UPDATE SET n = n + 1 would apply twice if the request were run twice.
 
@@ -192,6 +194,7 @@ ${limits}`,
           wasm_bytes: { type: ['integer', 'null'] },
           cached: { type: 'boolean' },
           statements: { type: ['integer', 'null'] },
+          step_version: { type: 'integer' },
           ...refusalFields,
         },
         required: ['ok'],
@@ -203,7 +206,7 @@ ${limits}`,
       title: 'Run HTTP requests against a Tape program',
       description: `Compile a Tape program and send it HTTP requests, in order, on a fresh in-memory SQLite database. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} on the run's own clock: now() is its start plus at_ms (none: the time before), and each timer due by then runs first, as a result of its own (woken).
 
-Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects, the effect log (each SQL statement as written, its params, rows_written or rows_returned, and rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay of that log gave the same bytes; steps; trace: "lines" (each arm tried, ✓ or ✗, at its file:line, with its effects; at most ${TRACE_LINES} lines; default for one request), "full" (OTLP) or "none" (default for several). If it does not compile: ok false, with diagnostics. random() starts from one seed each call, going on across its requests. Calls to other programs answer Unreachable, or as \`remotes\` says.
+Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects, the effect log (each SQL statement as written, its params, rows_written or rows_returned, and rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay of that log gave the same bytes; steps and step_version; trace: "lines" (each arm tried, ✓ or ✗, at its file:line, with its effects; at most ${TRACE_LINES} lines; default for one request), "full" (OTLP) or "none" (default for several). If it does not compile: ok false, with diagnostics. random() starts from one seed each call, going on across its requests. Calls to other programs answer Unreachable, or as \`remotes\` says.
 
 ${CHEAT_SHEET}
 
@@ -244,7 +247,7 @@ fn greet(name: View) -> View {
 }
 \`\`\`
 
-Each example is compiled with its file and called on its own, in the compiled code; one that needs a capability (Sql, Clock, …) cannot be called. Returns ok (the program compiles and every example holds), diagnostics as compile gives them when it does not compile, and each example as {file, line, example, expected, ok}, with got (what it gave instead) or error (a compile error, a trap, no expected line); passed and failed count them. With no files, examples/hello.tape (it has none).
+Each example is compiled with its file and called on its own, in the compiled code; one that needs a capability (Sql, Clock, …) cannot be called. Returns ok (the program compiles and every example holds), diagnostics as compile gives them when it does not compile, and each example as {file, line, example, expected, ok}, with got (what it gave instead) or error (a compile error, a trap, no expected line); passed and failed count them, and step_version names the step accounting. With no files, examples/hello.tape (it has none).
 
 ${limits}`,
       inputSchema: TEST_INPUT,
@@ -257,6 +260,7 @@ ${limits}`,
           examples: { type: 'array', items: { type: 'object' } },
           passed: { type: 'integer' },
           failed: { type: 'integer' },
+          step_version: { type: 'integer' },
           ...refusalFields,
         },
         required: ['ok'],
@@ -344,6 +348,7 @@ export const logLine = (
         requests: seen.usage.requests,
         statuses: seen.usage.statuses,
         steps: seen.usage.steps,
+        step_version: seen.usage.step_version,
         cached: seen.usage.cached,
         isolate: seen.usage.isolate,
         cache_entries: seen.usage.cache_entries,
@@ -434,6 +439,7 @@ async function route(
     return json({
       name: 'tape-mcp',
       version: gate.release,
+      step_version: STEP_VERSION,
       what: 'Compile Tape programs, run requests against them and run their doc examples, and report what you find: MCP at POST /mcp, or JSON at POST /v1/compile, POST /v1/run, POST /v1/test and POST /v1/feedback.',
       docs: 'https://github.com/ivarvong/tape/blob/main/docs/mcp.md',
       terms: 'https://github.com/ivarvong/tape/blob/main/TERMS.md',

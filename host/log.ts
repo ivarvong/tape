@@ -1,5 +1,7 @@
 // host/log.ts: the effect log. Every call a program makes of its host is written down, so the same request can
 // be run again from the log alone and give the same answer.
+import type { StepVersion } from '../compiler/step-version.ts';
+
 /** A value read from a row: node:sqlite gives bytes as a Uint8Array, Durable Object SQLite as an ArrayBuffer. */
 export type Cell = string | number | bigint | null | Uint8Array | ArrayBuffer;
 export type SqlParam = string | number | bigint | null;
@@ -54,9 +56,18 @@ export type Head = Partial<Span> & {
   bytes?: number;
   /** the steps the run took, of the 50,000,000 a run may take: the module's `cost` when it ended, or stopped */
   steps?: number;
+  /** which step accounting produced `steps` (compiler/step-version.ts); absent in a log from before the tag */
+  step_version?: StepVersion;
   undone?: true;
   woke?: { key: number; due: number };
 };
+/** The memory and steps of a run, as its log's first line says them. The step version is written only when the
+ * module that ran carried one. */
+export const measuredText = (e: Pick<Head, 'bytes' | 'steps' | 'step_version'>): string => {
+  const version = e.step_version === undefined ? '' : `, step version ${e.step_version}`;
+  return `${e.bytes ?? '?'} bytes of memory, ${e.steps ?? '?'} steps${version}`;
+};
+
 /** `undone`: a write that its run's rollback(out) or trap undid (the host marks it; host/run.ts, markUndone) */
 export type SqlEffect = { q: number; p: SqlParam[]; r?: number; rows?: Cell[][]; undone?: true };
 export type CallEffect = {

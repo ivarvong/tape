@@ -6,7 +6,8 @@
 // trap leaves the exact count) and before it ends. Nothing else runs while it does, since it calls nothing. A
 // function with an instruction that stops the module without an `unreachable` of its own (integer division and
 // remainder, the float truncations that trap) or with a `return` is left as it is, and so is any function when an
-// instruction is not known. The counts are the same at every point anything can see them (test/inline.ts).
+// instruction is not known. The counts are the same at every point anything can see them (test/inline.ts). A change
+// that makes them differ is a new step version (compiler/step-version.ts).
 import { uleb } from '../common.ts';
 import { Unknown, bodyOf, copyTo, parse, walk } from './inline.ts';
 import type { Body, Fn } from './inline.ts';

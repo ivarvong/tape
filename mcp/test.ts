@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { std } from '../std.ts';
 import { INTRINSICS } from '../compiler/types.ts';
+import { STEP_VERSION } from '../compiler/step-version.ts';
 import { Workbench } from '../apps/playground/src/workbench.ts';
 import { nodeSql } from '../apps/playground/src/sqlite.ts';
 import { callExamples } from '../host/examples.ts';
@@ -738,6 +739,7 @@ const tests: Test[] = [
       const g = await tool(m, 'test', { files: [{ name: 'next.tape', text: good }] });
       if (g.out['ok'] !== true || seen(g.out) !== '[[3,true,null,null]]')
         out.push(`next.tape: ${JSON.stringify(g.out)}`);
+      if (g.out['step_version'] !== STEP_VERSION) out.push(`step_version ${String(g.out['step_version'])}`);
       // a library: examples and no handle (C30 for a program, nothing for examples, which never call it); and an
       // expected Dec or Float, which cannot be a pattern (C19), compared by value, the value it gave shown
       const lib = `// Half, to cents.\n//\n//   > half(x: 1.00)\n//   0.50\n//   > half(x: 1.01)\n//   0.51\n//   > quarter(n: 1)\n//   0.25f\nfn half(x: Dec[2]) -> Dec[2] {\n  div(a: x, by: 2, scale: 2, rounding: HalfEven)\n}\n\nfn quarter(n: Int) -> Float {\n  float(n) / 4f\n}\n`;
@@ -763,9 +765,15 @@ const tests: Test[] = [
       if (typeof size !== 'number' || size < 1000) out.push(`wasm_bytes ${String(ok['wasm_bytes'])}`);
       // hello.tape has one statement, the INSERT (README.md's log)
       if (ok['statements'] !== 1) out.push(`statements ${String(ok['statements'])}, not 1`);
+      if (ok['step_version'] !== STEP_VERSION) out.push(`step_version ${String(ok['step_version'])}`);
       const http = await post(m, '/v1/compile', JSON.stringify({ files: [{ name: 'hello.tape', text: HELLO }] }));
       if (http.status !== 200 || JSON.stringify(http.body) !== JSON.stringify(ok))
         out.push(`POST /v1/compile: ${http.status} ${http.text.slice(0, 200)}`);
+      if (http.headers.get('tape-step-version') !== String(STEP_VERSION))
+        out.push(`tape-step-version ${http.headers.get('tape-step-version')}`);
+      const root = await post(m, '/', '', { method: 'GET' });
+      if (root.status !== 200 || F(root.body)['step_version'] !== STEP_VERSION)
+        out.push(`GET / step_version ${String(F(root.body)['step_version'])}`);
       return out;
     },
   },
@@ -810,6 +818,8 @@ const tests: Test[] = [
         out.push(`third: ${String(c?.['status'])} ${JSON.stringify(c?.['body'])}`);
       if (a?.['content_type'] !== 'text/plain; charset=utf-8' || a['truncated'] !== false)
         out.push(`first: ${JSON.stringify(a?.['content_type'])} truncated ${String(a?.['truncated'])}`);
+      for (const one of RESULTS(r))
+        if (one['step_version'] !== STEP_VERSION) out.push(`step_version ${String(one['step_version'])}`);
       const http = await post(
         m,
         '/v1/run',
@@ -1193,6 +1203,8 @@ const tests: Test[] = [
         JSON.stringify(attrs['http.response.status_code']) !== '{"intValue":"200"}'
       )
         out.push(`span ${String(span['name'])} ${JSON.stringify(attrs['http.response.status_code'])}`);
+      if (JSON.stringify(attrs['tape.step_version']) !== `{"intValue":"${STEP_VERSION}"}`)
+        out.push(`tape.step_version ${JSON.stringify(attrs['tape.step_version'])}`);
       return out;
     },
   },
@@ -1510,6 +1522,7 @@ const tests: Test[] = [
         out.push(`source_bytes ${String(line['source_bytes'])}`);
       const steps = line['steps'];
       if (typeof steps !== 'number' || steps <= 0) out.push(`steps ${String(steps)}`);
+      if (line['step_version'] !== STEP_VERSION) out.push(`step_version ${String(line['step_version'])}`);
       for (const k of ['compile_ms', 'run_ms', 'total_ms']) if (typeof line[k] !== 'number') out.push(`no ${k}`);
       const all = JSON.stringify(line);
       for (const s of [secret, 'body-secret', '203.0.113.7', 'greeted'])

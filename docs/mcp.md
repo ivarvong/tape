@@ -80,11 +80,13 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
   "diagnostics": [{ "file": "hello.tape", "line": 11, "code": "C54",
                     "message": "run twice (a retried request, a timer that fires again), this write applies twice: …",
                     "fix": "Make the second run a no-op: … If every attempt is meant to count, say so in the call: `repeat: True`." }],
-  "wasm_bytes": null, "statements": null }
+  "wasm_bytes": null, "statements": null, "step_version": 1 }
 ```
 
 `ok` is true when the program compiles; then `diagnostics` is empty, `wasm_bytes` is the size of its module and
-`statements` the number of SQL statements it can run. `fix` is what to write instead.
+`statements` the number of SQL statements it can run. `fix` is what to write instead. `step_version` is the step
+accounting this compiler builds ([LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops)), whether or not
+the program compiled.
 
 `cached` (compile, run and test) is true when the compiler's answer came from the server's cache: the same files
 (names and text) were compiled before by the same compiler, on the same server instance, so they were not compiled
@@ -110,7 +112,7 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
     "effects": [{ "kind": "sql",
                   "query": "INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n",
                   "params": { ":name": "ada" }, "rows_returned": 1, "rows": [[2]] }],
-    "replayed": true, "steps": 77, "memory_bytes": 128,
+    "replayed": true, "steps": 77, "step_version": 1, "memory_bytes": 128,
     "trace": "handle\n  ✓ hello.tape:9  Request(method: \"GET\", path: \"/hello/\" ++ name) if len(name) > 0 -> greet(\n      sql INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  :name=\"ada\" -> [[2]]\ngreet\n  ✗ hello.tape:25  Some(value: Count(n)) if n == 1 -> …\n  ✓ hello.tape:26  Some(value: Count(n)) -> …" }] }
 ```
 
@@ -157,9 +159,11 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive
   function (each call, and each call of itself as its result), std's included: the byte scans behind `request()` take
   a few a byte, so an arm added above a route, or a longer path, changes its count. A call of a non-recursive function
-  is free. Steps are the only cost measure here: on Workers the clock moves only across I/O, so wall time cannot be
-  measured inside a run, and every span's duration in a trace is 0. [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops)
-  says more.
+  is free. `step_version` names which accounting produced `steps` (the same number on `test` and `compile`, and the
+  `tape-step-version` header). It changes only when what a step counts changes, so two counts are comparable only
+  when their versions are equal. Steps are the only cost measure here: on Workers the clock moves only across I/O,
+  so wall time cannot be measured inside a run, and every span's duration in a trace is 0.
+  [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops) says more.
 - A request that traps (the step budget, the 64 MB arena, a division by zero) is status 500 with `error` set; its
   writes are rolled back and the next request runs on.
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not
@@ -204,10 +208,11 @@ cannot be called. A library with no `handle` is tested as it is: examples never 
     { "file": "doctest-failures.tape", "line": 13, "example": "10 / (double(n: 0))", "expected": "0", "ok": false,
       "error": "trapped (division by zero)" },
     …],
-  "passed": 1, "failed": 5 }
+  "passed": 1, "failed": 5, "step_version": 1 }
 ```
 
-`ok` is true when the program compiles and every example holds. `got` is what a failing example gave instead (from
+`ok` is true when the program compiles and every example holds. `step_version` is the step accounting the examples
+were compiled with, the same number a run reports beside `steps`. `got` is what a failing example gave instead (from
 the reference interpreter); `error` is why one could not hold: a compile error of the example, a trap, or no
 expected line under it. If the program does not compile, `ok` is false, `diagnostics` says why, as compile gives
 it, and no example runs.
@@ -277,9 +282,9 @@ browsers, so a web page cannot use its visitors as clients.
 
 One line per call (feedback too) to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
-requests and their statuses, the steps used, the compile, run and total times, a hash of the client's address, the
-user agent, and whether it was rate limited. Not the program's source, the requests' bodies or headers, or the
-responses. We use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
+requests and their statuses, the steps used and their `step_version`, the compile, run and total times, a hash of
+the client's address, the user agent, and whether it was rate limited. Not the program's source, the requests'
+bodies or headers, or the responses. We use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
 
 A program deployed on the service (not one sent to `run`, which keeps nothing) records each request it serves in
 its effect log, with these request headers, the ones the program can read with `header_of`: `accept`,
@@ -299,7 +304,7 @@ and `/v1/feedback` ([`service/src/index.ts`](../service/src/index.ts) calls `mcp
 before any token check). It uses no Durable Objects and one private R2 bucket, `tape-feedback`, which only the feedback
 tool writes. (Until 2026-11-22 it was a Worker of its own, `tape-mcp`, behind a service binding; that Worker is
 retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-version`, the same id as
-`tape-worker-version`).
+`tape-worker-version`) and the step accounting (`tape-step-version`).
 
 - `src/serve.ts`: the routes, the checks before a tool runs, the log line. MCP is the service's transport,
   [`service/src/mcp.ts`](../service/src/mcp.ts).

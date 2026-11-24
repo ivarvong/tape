@@ -5,6 +5,7 @@ import { emptyProgram } from './ast.ts';
 import type { FnDecl, Program } from './ast.ts';
 import { ambient, granted } from './ambient.ts';
 import { CompileError, LEVEL_BASE, fail } from './common.ts';
+import { STEP_VERSION } from './step-version.ts';
 import type { Problem } from './common.ts';
 import { functionCompiler } from './function.ts';
 import { assemble } from './gen/assemble.ts';
@@ -372,8 +373,10 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
     ['calls', calls],
     ['methods', about.methods],
     ['build', about.build],
+    // the step accounting this module was built for (compiler/step-version.ts): a count is comparable only within it
+    ['step_version', STEP_VERSION],
   ];
-  // only a program that declares a machine has this section, so every other module is byte for byte as before
+  // only a program that declares a machine has this section
   if (about.machines.length > 0) custom.push(['machines', about.machines]);
   if (invariants.length > 0) custom.push(['invariants', invariants]);
   const { imports, table, compiled } = done;

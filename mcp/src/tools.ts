@@ -6,6 +6,8 @@
 // Few tools on purpose. Others an agent could use (fmt, the simulator, a program's tables) would each be a field of
 // these or a tool of its own; they wait until someone asks (test did: report 1fdd40f44552), so the list stays short.
 import { compileAlso } from '../../compiler.ts';
+import { STEP_VERSION, isStepVersion } from '../../compiler/step-version.ts';
+import type { StepVersion } from '../../compiler/step-version.ts';
 import { sha256 } from '../../compiler/sha256.ts';
 import type { Built, Source } from '../../compiler.ts';
 import { isHead } from '../../host.ts';
@@ -79,6 +81,8 @@ export type CompileResult = {
   wasm_bytes: number | null;
   /** the SQL statements the program can run */
   statements: number | null;
+  /** the step accounting this compiler builds, whether or not the program compiled */
+  step_version: StepVersion;
   /** the compiler's answer came from this isolate's cache of programs compiled here before */
   cached: boolean;
 };
@@ -128,6 +132,8 @@ export type RunResultOne = {
   replayed: boolean | null;
   replay_error?: string;
   steps: number;
+  /** which step accounting produced `steps` */
+  step_version: StepVersion;
   memory_bytes: number | null;
   trace: Otlp | string | null;
   omitted?: string;
@@ -156,6 +162,8 @@ export type Usage = {
   requests: number;
   statuses: number[];
   steps: number;
+  /** the step accounting those steps were counted with */
+  step_version: StepVersion;
   compile_ms: number;
   run_ms: number;
   /**
@@ -527,6 +535,7 @@ const usageOf = (c: Compiled, requests = 0): Usage => ({
   requests,
   statuses: [],
   steps: 0,
+  step_version: STEP_VERSION,
   compile_ms: c.ms,
   run_ms: 0,
 });
@@ -543,6 +552,7 @@ export function compileTool(args: unknown, deps: Deps): { result: CompileResult 
       diagnostics: c.diagnostics,
       wasm_bytes: c.built?.wasm.length ?? null,
       statements: c.built?.queries.length ?? null,
+      step_version: STEP_VERSION,
       cached: c.cached,
     },
     usage: usageOf(c),
@@ -760,6 +770,7 @@ function resultOf(
     replayed: ran.replayed,
     ...(ran.replay_error === null ? {} : { replay_error: ran.replay_error }),
     steps: ran.steps,
+    step_version: head && isHead(head) && isStepVersion(head.step_version) ? head.step_version : STEP_VERSION,
     memory_bytes: head && isHead(head) ? (head.bytes ?? null) : null,
     trace: large ? null : trace,
     ...(large
@@ -887,6 +898,8 @@ export type TestResult = {
   examples: ExampleOut[];
   passed: number;
   failed: number;
+  /** the step accounting the examples were compiled with */
+  step_version: StepVersion;
 };
 
 /** test: the doc examples in the program's files, as `tape test` runs them (doctest.ts), each called in deps.examples. */
@@ -902,7 +915,15 @@ export async function testTool(
   const library = !c.built && c.diagnostics.length > 0 && c.diagnostics.every(d => d.code === 'C30');
   if (!c.built && !library)
     return {
-      result: { ok: false, diagnostics: c.diagnostics, cached: c.cached, examples: [], passed: 0, failed: 0 },
+      result: {
+        ok: false,
+        diagnostics: c.diagnostics,
+        cached: c.cached,
+        examples: [],
+        passed: 0,
+        failed: 0,
+        step_version: STEP_VERSION,
+      },
       usage,
     };
   const sources = [...deps.std, ...c.files];
@@ -956,6 +977,7 @@ export async function testTool(
       examples,
       passed,
       failed: examples.length - passed,
+      step_version: STEP_VERSION,
     },
     usage,
   };

@@ -7,6 +7,7 @@
 // the log has it, never the address), the user agent and the MCP protocol version header, and, when a program is
 // sent, what the compiler says of it now, so a report says which version it reproduced on.
 import { compile } from '../../compiler.ts';
+import { STEP_VERSION } from '../../compiler/step-version.ts';
 import {
   FILES_SCHEMA,
   REQUESTS_SCHEMA,
@@ -156,6 +157,7 @@ export async function feedbackTool(
     requests: requests?.length ?? 0,
     statuses: [],
     steps: 0,
+    step_version: STEP_VERSION,
     compile_ms: Date.now() - t0,
     run_ms: 0,
   };

@@ -1,6 +1,7 @@
 // view.ts: one request, joined with the calls it made, as a page, as text, or as OTLP/JSON. Pure functions of
 // the data Name.joined builds: { account, name, version, ...the request's view, calls: [{ e, served }] }, where
 // e is the call's entry in the caller's log and served is what the callee recorded for it (null: nothing).
+import { measuredText } from '../../host/log.ts';
 import type { CallEffect } from '../../host/log.ts';
 import { isCheckHead, isMigrationsHead, isRunHead } from './records.ts';
 import type {
@@ -33,7 +34,7 @@ const headLine = (e: RunHead | MigrationsHead | CheckHead): string => {
   const flags = Object.keys(e.flags).length > 0 ? `  flags ${JSON.stringify(e.flags)}` : '',
     method = e.method === undefined || e.method === '' ? '' : `  method ${e.method}`,
     message = typeof e.message === 'string' ? `  message ${e.message}` : '';
-  return `start   build ${e.build}${flags}${method}${message}  ${e.bytes ?? '?'} bytes of memory, ${e.steps ?? '?'} steps${e.undone === true ? '  UNDONE: these writes were rolled back' : ''}`;
+  return `start   build ${e.build}${flags}${method}${message}  ${measuredText(e)}${e.undone === true ? '  UNDONE: these writes were rolled back' : ''}`;
 };
 /** A step of an upload check or a migration run, one line. */
 const stepLine = (e: Step): string => {
@@ -396,6 +397,7 @@ const runKind = (j: Joined, head: RunHead | MigrationsHead): Pick<OtlpSpan, 'nam
     'tape.build': head.build,
     'tape.memory_bytes': head.bytes,
     'tape.steps': head.steps,
+    'tape.step_version': head.step_version,
   };
   if (head.woke)
     return {

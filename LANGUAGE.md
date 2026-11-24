@@ -697,6 +697,12 @@ first takes 2002 and 24 bytes a number. Steps are a count of reductions, as in E
 measure all the same: on Workers a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's
 duration) can time its work.
 
+This definition is step version 1. The compiler builds that number into every module and reports it beside every
+step count (`step_version` on a run and in its log, `tape.step_version` on its span, the `tape-step-version`
+header), so a count from one version is not read as a count from another. The number changes only when what a step
+counts changes. `test/step-version.ts` holds each version's counts and fails when the compiler's are not the
+current version's.
+
 A request may also hold 80,000 units of recursion: a call of a recursive function holds, until it returns, 12 units
 and one for each value its frame keeps (its parameters and the values it names, a record one for each of its
 fields), unless the function only ever calls itself as its result and calls no other recursive function nor any
