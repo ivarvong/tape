@@ -80,10 +80,14 @@ clock timers (spans.ts `fresh`).
 What was cut after that measurement, each to be measured again on the version that ships it: the module no longer
 decodes sql.js's Wasm when it starts (53 to 19 ms of top-level evaluation in Node 25); the object reads its builds
 from its own rows instead of fetching each (the 47 / 122 ms); it keeps the machines of its live versions instead of
-parsing every live version's source (most of the 172 / 358 ms of CPU: 122 with one live version, up to 364 with four);
-and the Worker remembers "published" for ten minutes, not 30 s. What is left of a cold start is the platform's
-start of two objects, the Loader's start of the data's code (about 35 ms and 10 more per live version, both builds
-of each: retiring old versions is what shortens it) and the same durable log write a warm request waits for.
+parsing every live version's source (most of the 172 / 358 ms of CPU: 88 to 198 with one live version, 176 to 459
+with four); and the Worker remembers "published" for ten minutes, not 30 s. The same four in local workerd (`vite
+preview` of the built Worker, a new process for each start, so the name's object and its data's code are cold; the
+module's start is not in it; n=15 starts each, first request p50 / p95): csv2chart with four live versions 424 / 587
+ms on 1e318ed and 67 / 174 ms after; with one live version 149 / 285 and 52 / 68; the request after it 15 ms on
+both. What is left of a cold start is the platform's start of two objects, the Loader's start of the data's code
+(about 35 ms and 10 more per live version, both builds of each: retiring old versions is what shortens it) and the
+same durable log write a warm request waits for.
 
 ## Profiles (profile.ts)
 
