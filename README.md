@@ -9,6 +9,11 @@ request can be replayed and traced; the program contains no tracing code. It has
 time. It is not published as a package. What is checked, and what is known to be broken, is in
 [`STATUS.md`](STATUS.md).
 
+**Try it** with nothing to install: the [playground](https://tape.ivar.workers.dev/playground/) compiles and runs
+programs in your browser, and shows each request's effect log and trace. Ten small programs written in Tape
+(a pastebin, polls, a ledger, a rate limiter…) run on the hosted service; [`apps/products/`](apps/products/README.md)
+lists them, each with its page and its one file of source.
+
 This is a whole program, `examples/hello.tape`:
 
 ```tape
