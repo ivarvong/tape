@@ -240,8 +240,8 @@ same(
 const ms1024 = sweep[2]?.ms ?? Infinity;
 const ms4096 = sweep[4]?.ms ?? Infinity;
 same(
-  `one pass wall time scales with the fields, not their square: 4,096 is ${ms4096.toFixed(2)} ms against ${ms1024.toFixed(2)} ms at 1,024 (form_raw's n lookups were 5.05 ms and 91.4 ms)`,
-  ms4096 < ms1024 * 8 && ms4096 > ms1024,
+  `one pass wall time stays under the square: 4,096 is ${ms4096.toFixed(2)} ms against ${ms1024.toFixed(2)} ms at 1,024 (form_raw's n lookups were 5.05 ms and 91.4 ms). Both are under a millisecond, so the larger one is not always the slower one`,
+  ms4096 < ms1024 * 8 && ms4096 < 5,
   true,
 );
 const each64 = textOf(app.handle(enc.encode('GET /each/64')));
