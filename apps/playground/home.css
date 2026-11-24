@@ -509,6 +509,12 @@ html:not(.js) .panel-h {
 .facts h2 {
   margin-bottom: 24px;
 }
+.facts-lede {
+  max-width: 65ch;
+  margin: -8px 0 24px;
+  color: var(--fg-2);
+}
+.grid2,
 .grid3,
 .grid4 {
   display: grid;
@@ -521,12 +527,16 @@ html:not(.js) .panel-h {
   border-radius: var(--r-md);
   overflow: hidden;
 }
+.grid2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
 .grid3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 .grid4 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+.grid2 > li,
 .grid3 > li,
 .grid4 > div {
   background: var(--bg);
@@ -544,6 +554,30 @@ html:not(.js) .panel-h {
 }
 .grid4 dd {
   margin: 0;
+}
+.products > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 16px;
+  align-items: baseline;
+  align-content: start;
+}
+.products code {
+  white-space: nowrap;
+}
+.prod-name {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--fg);
+}
+.prod-src {
+  font-family: var(--mono);
+  font-size: var(--t-xs);
+  color: var(--muted);
+}
+.prod-what {
+  grid-column: 1 / -1;
+  grid-row: 2;
 }
 .closer {
   padding: 112px 0 96px;
@@ -628,6 +662,7 @@ html:not(.js) .panel-h {
   }
 }
 @media (max-width: 720px) {
+  .grid2,
   .grid3 {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -727,6 +762,7 @@ html:not(.js) .panel-h {
   .facts {
     padding-top: 72px;
   }
+  .grid2 > li,
   .grid3 > li,
   .grid4 > div {
     padding: 16px;

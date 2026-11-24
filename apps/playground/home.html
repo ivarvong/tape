@@ -157,6 +157,23 @@
   </article>
 </section>
 
+<section class="facts" aria-labelledby="products">
+  <h2 id="products">Ten programs, running</h2>
+  <p class="facts-lede">Each is one file of Tape, uploaded to this service and served from its own Durable Object. Open one, then read its source.</p>
+  <ul class="grid2 products">
+    <li><a class="prod-name" href="p/demo/pastebin/">pastebin</a><span class="prod-what">Post text, get a short link. A timer set in the same commit deletes the paste after 24 hours.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/pastebin/pastebin.tape" aria-label="Source of pastebin">pastebin.tape</a></li>
+    <li><a class="prod-name" href="p/demo/poll/">poll</a><span class="prod-what">Polls with one vote for each voter key. A vote sent twice is counted once.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/poll/poll.tape" aria-label="Source of poll">poll.tape</a></li>
+    <li><a class="prod-name" href="p/demo/countdown/">countdown</a><span class="prod-what">A countdown to a date, worked out from the clock each time the page is loaded.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/countdown/countdown.tape" aria-label="Source of countdown">countdown.tape</a></li>
+    <li><a class="prod-name" href="p/demo/ledger/">ledger</a><span class="prod-what">Double-entry play money: a transfer carries its client's id, and a balance cannot go below zero.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/ledger/ledger.tape" aria-label="Source of ledger">ledger.tape</a></li>
+    <li><a class="prod-name" href="p/demo/status/">status</a><span class="prod-what">A status page: components, incidents, a JSON feed. Only the operator writes. The data is made up.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/status/status.tape" aria-label="Source of status">status.tape</a></li>
+    <li><a class="prod-name" href="p/demo/shortlinks/">shortlinks</a><span class="prod-what">Short names for https links. Each shows where it goes before you follow it, and counts its visits.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/shortlinks/shortlinks.tape" aria-label="Source of shortlinks">shortlinks.tape</a></li>
+    <li><a class="prod-name" href="p/demo/webhook-inbox/">webhook-inbox</a><span class="prod-what">POST any JSON to a box and read back its last 50 deliveries. A delivery sent twice is kept once.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/webhook-inbox/webhook-inbox.tape" aria-label="Source of webhook-inbox">webhook-inbox.tape</a></li>
+    <li><a class="prod-name" href="p/demo/sunclock/">sunclock</a><span class="prod-what">Sunrise, sunset and twilight for a latitude and a longitude, from NOAA's solar equations.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/sunclock/sunclock.tape" aria-label="Source of sunclock">sunclock.tape</a></li>
+    <li><a class="prod-name" href="p/demo/csv2chart/">csv2chart</a><span class="prod-what">POST a CSV, get an SVG line chart with axes, ticks and a legend.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/csv2chart/csv2chart.tape" aria-label="Source of csv2chart">csv2chart.tape</a></li>
+    <li><a class="prod-name" href="p/demo/ratelimit/">ratelimit</a><span class="prod-what">Fixed-window rate limiting as a service, with <code>X-RateLimit</code> headers and 429.</span><a class="prod-src" href="{{github}}/blob/main/apps/products/ratelimit/ratelimit.tape" aria-label="Source of ratelimit">ratelimit.tape</a></li>
+  </ul>
+</section>
+
 <section class="facts" aria-labelledby="checked">
   <h2 id="checked">What is checked</h2>
   <ul class="grid3">
@@ -171,7 +188,7 @@
   <dl class="grid4">
     <div><dt>Alpha</dt><dd>The language is at 0.1. Anything can change at any time.</dd></div>
     <div><dt>In your browser</dt><dd>The compiler, your programs and SQLite run in the page. Nothing you type is sent anywhere.</dd></div>
-    <div><dt>Hosted</dt><dd>A hosted MCP server and API are coming.</dd></div>
+    <div><dt>Hosted</dt><dd>An MCP server and a JSON API compile and run a program you post, with no token: <a href="{{github}}/blob/main/docs/mcp.md">docs/mcp.md</a>.</dd></div>
     <div><dt>Terms</dt><dd>Use is under the <a href="{{github}}/blob/main/TERMS.md">terms</a>.</dd></div>
   </dl>
 </section>

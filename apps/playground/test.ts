@@ -20,7 +20,7 @@
 //              `node tape.ts sim`'s; every link is local or the repository; nothing inline the policy refuses
 import '../../node25.ts';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -760,11 +760,21 @@ const tests: Test[] = [
         const ex = /^playground\/#([\w-]+)$/.exec(href)?.[1];
         if (ex && m.data.DATA.examples.some(e => e.id === ex)) continue;
         if (href === REPO) continue;
+        // a product: one of apps/products' directories, served under the account `demo`
+        const product = /^p\/demo\/([\w-]+)\/$/.exec(href)?.[1];
+        if (product && existsSync(`${ROOT}apps/products/${product}/${product}.tape`)) continue;
         const doc = href.startsWith(`${REPO}/blob/main/`) ? href.slice(`${REPO}/blob/main/`.length) : null;
         if (doc && existsSync(`${ROOT}${doc}`)) continue;
         if (doc === 'TERMS.md') continue; // written in the main checkout; not on this branch yet
         out.push(`the homepage links to ${href}, which is not local or in the repository`);
       }
+      // the gallery: every program of apps/products (the tree's directories are the oracle), each with its page and
+      // its source
+      for (const name of readdirSync(`${ROOT}apps/products`, { withFileTypes: true })
+        .filter(entry => entry.isDirectory())
+        .map(entry => entry.name))
+        for (const href of [`p/demo/${name}/`, `${REPO}/blob/main/apps/products/${name}/${name}.tape`])
+          if (!page.includes(`href="${href}"`)) out.push(`the homepage does not link to ${href}`);
       if (
         (page.match(/https?:\/\/[^"\s<]+/g) ?? []).some(u => !u.startsWith(REPO) && !u.startsWith('http://www.w3.org/'))
       )
