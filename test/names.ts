@@ -390,4 +390,17 @@ fn shown(p: Parsed) -> Int {
   }
 }
 
+// A name is the first file's (LANGUAGE.md §4). The blog is compiled before the renderer so its handle serves.
+{
+  const prog = parseProgram([
+    { name: 'blog.tape', text: 'fn handle() -> Int {\n  1\n}\n' },
+    { name: 'md.tape', text: 'fn handle() -> Int {\n  2\n}\n' },
+  ]);
+  T(
+    "the first file's handle keeps the name; the later file's is md.handle",
+    [...prog.fns.keys()].filter(n => n === 'handle' || n.endsWith('.handle')),
+    ['handle', 'md.handle'],
+  );
+}
+
 finish();

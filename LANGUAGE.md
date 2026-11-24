@@ -182,6 +182,9 @@ the first is named or such a name (C10, C11). `a |> f(b: 1)` is `f(<first parame
 the first written argument is named too. `fmt` writes an argument as it was written.
 Every function is checked, whether anything calls it or not: a type error in one nothing calls yet is the
 program's error, at its line. A generic function is checked where it is called, for the types it is called with.
+A name is the first file's. Another file may define it again (C04 refuses a second definition in one file); that
+one is `file.name`, and in that file the bare name is its own. `handle` is the entry the host calls, so the
+first file that defines it serves requests and a later file's is `file.handle`.
 
 A body is steps, then one expression that is its value. There are three steps:
 

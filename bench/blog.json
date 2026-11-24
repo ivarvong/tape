@@ -1,0 +1,35 @@
+{
+  "now": "2026-11-24T12:00:00.000Z",
+  "md": {
+    "bytes": 52785,
+    "functions": 168
+  },
+  "blog": {
+    "bytes": 93299,
+    "functions": 274
+  },
+  "render": {
+    "steps": 63515,
+    "bytes": 119896
+  },
+  "put": {
+    "steps": 88084,
+    "bytes": 171136
+  },
+  "get": {
+    "steps": 331,
+    "bytes": 130896
+  },
+  "body": {
+    "steps": 293,
+    "bytes": 115328
+  },
+  "index": {
+    "steps": 256,
+    "bytes": 40688
+  },
+  "feed": {
+    "steps": 448,
+    "bytes": 132968
+  }
+}

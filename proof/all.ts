@@ -154,6 +154,8 @@ const all: Part[] = [
       ...tapes('apps/trace'),
       ...tapes('apps/trace/fixtures'),
       ...tapes('testdata/compare'),
+      'corpus/md.tape',
+      'corpus/blog.tape',
     ],
   ],
   ...tests.map((t): Part => [t, [node, t]]),
@@ -224,6 +226,11 @@ const all: Part[] = [
     'bench/hello.ts: hello.tape answers as the request by hand, with the log on and off',
     [node, 'bench/hello.ts'],
     /^204 requests answered three ways, 0 differ$/m,
+  ],
+  [
+    'bench/blog.ts: the renderer and the blog, steps exactly and bytes within 2%, against bench/blog.json',
+    [node, 'bench/blog.ts'],
+    /the record matches/,
   ],
   [
     'bench/usability/transcript-test.ts: the usability bench counts refusals, rate limits and oversized results right',
