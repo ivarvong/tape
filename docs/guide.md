@@ -428,8 +428,9 @@ renamed `std.Step`, `std.Next`, and a call from std reaches std's function or th
 have its own `Step` type and still loop over rows with std's `Next(value, rest)` and `End`.
 
 What is still refused, each with a hint:
-- C01 or C03 for the types the compiler reads by name: `Option`, `Result`, `Move`, `CallError`, `Wake` and their
-  constructors (`Some`, `Ok`, `Moved`, `Timeout`, …);
+- C01 or C03 for the types the compiler reads by name: `Option`, `Result`, `Move`, `CallError`, `Wake`, `Rounding` and
+  their constructors (`Some`, `Ok`, `Moved`, `Timeout`, `Up`, `Down`, `Floor`, …), and std's JSON tree (`Json_Tree`,
+  `Json_Fit`); a program's `type Sky { Up … Down … }` is refused, so name them otherwise (`AllDay`, `AllNight`);
 - C04 for a built-in the rules read (`sql_*`, `call`, `ask`, `decode`, `now`, `random`, `wake`, `remote`,
   `rollback`, `write_json`), and for two definitions of one name in one file;
 - C03 for one constructor name in two of the program's own files, and C45 for a call from a third file to a
