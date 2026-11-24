@@ -21,9 +21,10 @@ type SqlJsStatement = {
 type SqlJsDatabase = {
   prepare: (sql: string) => SqlJsStatement;
   exec: (sql: string) => unknown;
+  export: () => Uint8Array;
   close: () => void;
 };
-export type SqlJs = { Database: new () => SqlJsDatabase };
+export type SqlJs = { Database: new (file?: Uint8Array) => SqlJsDatabase };
 export type InitSqlJs = (config: { wasmBinary: ArrayBuffer }) => Promise<SqlJs>;
 
 /**
@@ -97,11 +98,48 @@ const asCell = (v: unknown): Cell => {
   throw new Error(`sql.js gave a value that is not a cell: ${typeof v}`);
 };
 
+// sql.js keeps every open database as an open file, and Emscripten's file table holds 4096: the 4094th database
+// not closed is "unable to open database file". The simulator makes a database for each program of each run and
+// one for each check of an invariant `with` another program, and closes none (node:sqlite's are collected), so
+// Simulate on Orders + stock and on Fulfillment failed within their first 300 runs, and on any example after
+// enough of them (24 November 2026). So at most OPEN_MAX databases are open at once: past that the one used
+// longest ago, outside a transaction, is put away as its file's bytes (collected with it if nothing asks again)
+// and opened from them when it is next asked.
+export const OPEN_MAX = 64;
+type Held = { db: SqlJsDatabase | null; file: Uint8Array | null; cache: Map<string, SqlJsStatement>; busy: number };
+/** the databases open now, the one used longest ago first */
+const held = new Set<Held>();
+function putAway(h: Held): void {
+  if (!h.db) return;
+  for (const st of h.cache.values()) st.free();
+  h.cache.clear();
+  h.file = h.db.export();
+  h.db.close();
+  h.db = null;
+  held.delete(h);
+}
+
 /** A fresh, empty in-memory database with nodeSql()'s interface. */
 export function nodeSql(): NodeSql {
   if (!SQL) throw new Error('SQLite has not loaded in this page yet');
-  const db = new SQL.Database(),
-    cache = new Map<string, SqlJsStatement>();
+  const sqljs = SQL;
+  const me: Held = { db: null, file: null, cache: new Map(), busy: 0 },
+    cache = me.cache;
+  /** this database, open, and the last one used */
+  const open = (): SqlJsDatabase => {
+    me.db ??= me.file ? new sqljs.Database(me.file) : new sqljs.Database();
+    me.file = null;
+    held.delete(me);
+    held.add(me);
+    if (held.size > OPEN_MAX)
+      for (const h of held)
+        if (h !== me && h.busy === 0) {
+          putAway(h);
+          break;
+        }
+    return me.db;
+  };
+  open();
   // the rows a statement wrote, as nodesql.ts counts them: how far total_changes() moved while it ran
   // (getRowsModified() is changes(), the last write's count, which a read after it leaves as it was)
   const changed = (): number => {
@@ -114,6 +152,7 @@ export function nodeSql(): NodeSql {
     }
   };
   const prep = (q: string): SqlJsStatement => {
+    const db = open();
     const made = cache.get(q) ?? db.prepare(q);
     cache.set(q, made);
     return made;
@@ -122,18 +161,27 @@ export function nodeSql(): NodeSql {
     close() {
       for (const st of cache.values()) st.free();
       cache.clear();
-      db.close();
+      me.db?.close();
+      me.db = null;
+      me.file = null;
+      held.delete(me);
     },
     // like ctx.storage.transactionSync: undo everything f wrote if it throws
     transaction<T>(f: () => T): T {
-      db.exec('BEGIN');
+      const db = open();
+      me.busy++;
       try {
-        const r = f();
-        db.exec('COMMIT');
-        return r;
-      } catch (e) {
-        db.exec('ROLLBACK');
-        throw e;
+        db.exec('BEGIN');
+        try {
+          const r = f();
+          db.exec('COMMIT');
+          return r;
+        } catch (e) {
+          db.exec('ROLLBACK');
+          throw e;
+        }
+      } finally {
+        me.busy--;
       }
     },
     exec(q: string, ...given: Cell[]) {

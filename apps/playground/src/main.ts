@@ -830,7 +830,12 @@ async function simulateNow(): Promise<void> {
   box.innerHTML = `<div class="card-title">Simulation <span class="muted">tape sim ${esc(example.files.map(f => `${f.name}.tape`).join(' '))}</span></div><div class="sim-run"><span class="spinner"></span>Running random requests, lost and cut calls, timers and the clock against the invariants…</div>`;
   await sqlite;
   const files = example.files.map(f => ({ name: f.name, text: texts[f.name] ?? '' }));
-  const a = await ask<'sim'>({ kind: 'sim', files, wasm: (sqliteWasm ?? new ArrayBuffer(0)).slice(0), seeds: 300 });
+  const a = await ask<'sim'>({
+    kind: 'sim',
+    files,
+    wasm: (sqliteWasm ?? new ArrayBuffer(0)).slice(0),
+    seeds: example.seeds ?? 300,
+  });
   simulating = false;
   if (a.kind === 'error') {
     box.innerHTML = `<div class="card-title">Simulation</div><pre class="block bad">${esc(a.message)}</pre>`;

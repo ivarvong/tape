@@ -30,6 +30,12 @@ export type Example = {
   presets: Preset[];
   /** a one-line edit that plants a bug the simulator finds (LANGUAGE.md section 9) */
   plant?: { file: string; from: string; to: string; what: string };
+  /**
+   * how many runs Simulate makes when 300, `tape sim`'s own count, takes too long to wait for in a page: measured
+   * with `node tape.ts sim … --seeds 300` on 24 November 2026, orders + stock took 10 s and fulfillment's four
+   * programs 44 s (54 s in Chrome)
+   */
+  seeds?: number;
 };
 
 const json = (v: unknown): string => JSON.stringify(v);
@@ -59,6 +65,7 @@ export const EXAMPLES: Example[] = [
       { name: 'orders', path: 'examples/orders.tape' },
       { name: 'stock', path: 'examples/stock.tape' },
     ],
+    seeds: 100,
     presets: [
       { label: 'Order a lamp', method: 'POST', path: '/orders', body: json({ key: 'o-1', item: 'lamp' }) },
       {
@@ -101,6 +108,7 @@ export const EXAMPLES: Example[] = [
       { name: 'payments', path: 'examples/payments.tape' },
       { name: 'shipping', path: 'examples/shipping.tape' },
     ],
+    seeds: 40,
     presets: [
       {
         label: 'Ship a lamp',

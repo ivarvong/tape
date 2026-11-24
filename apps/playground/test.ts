@@ -201,6 +201,30 @@ const tests: Test[] = [
         .toArray()[0];
       if (JSON.stringify(page) !== JSON.stringify({ ...node }))
         out.push(`bound values: page ${JSON.stringify(page)}, node:sqlite ${JSON.stringify({ ...node })}`);
+      // more databases than sql.js can hold open (4093, counted with `new SQL.Database()` on 24 November 2026), none
+      // closed, as the simulator leaves them: each still answers with the row it was given, one written in a
+      // transaction and one after, while the others were made
+      try {
+        const many = Array.from({ length: 5000 }, (_, i) => {
+          const db = m.sqlite.nodeSql();
+          db.exec('CREATE TABLE t(n INTEGER PRIMARY KEY, s TEXT)');
+          db.transaction(() => db.exec('INSERT INTO t VALUES (?1, ?2)', i, `row ${i}`));
+          return db;
+        });
+        for (const [i, db] of many.entries()) db.exec('INSERT INTO t VALUES (?1, ?2)', -1 - i, 'late');
+        const wrong = many.filter(
+          (db, i) =>
+            JSON.stringify(db.exec('SELECT n, s FROM t ORDER BY n').toArray()) !==
+            JSON.stringify([
+              { n: -1 - i, s: 'late' },
+              { n: i, s: `row ${i}` },
+            ]),
+        ).length;
+        if (wrong > 0) out.push(`${wrong} of 5000 databases left open lost their rows`);
+        for (const db of many) db.close();
+      } catch (e) {
+        out.push(`5000 databases left open: ${e instanceof Error ? e.message : String(e)}`);
+      }
       // every preset of every example, run through the workbench on both
       let requests = 0;
       for (const ex of m.data.DATA.examples) {
@@ -772,6 +796,13 @@ const PLANTS: Plant[] = [
     file: 'src/sqlite.ts',
     from: "if (typeof params[n - 1] !== 'number') continue;",
     to: 'continue;',
+  },
+  {
+    test: 'sqlite',
+    what: 'every database made stays open, past what sql.js can hold',
+    file: 'src/sqlite.ts',
+    from: 'if (held.size > OPEN_MAX)',
+    to: 'if (held.size > Infinity)',
   },
   {
     test: 'otlp',
