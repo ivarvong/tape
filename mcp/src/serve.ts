@@ -171,7 +171,7 @@ export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a
 /** The tools' descriptions: what each does, and examples/hello.tape with what it gives, to check in one call. */
 export function listing(deps: Deps): Fields[] {
   const hello = `examples/hello.tape, the program used when \`files\` is left out:\n\n\`\`\`tape\n${deps.hello.text.trimEnd()}\n\`\`\``;
-  const limits = `Limits (alpha, may change): ${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, bodies up to ${LIMITS.requestBodyBytes / 1024} KB; Tape's budget per request: 50,000,000 steps, 64 MB; a step is one entry into a recursive function (std's too: a route arm changes the count; step_version ${STEP_VERSION}); other calls are free; on Workers the clock moves only across I/O (spans last 0 µs), so steps are the cost measure; response bodies past ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. Calls are logged, never the source, bodies or responses: https://github.com/ivarvong/tape/blob/main/TERMS.md`;
+  const limits = `Limits (alpha, may change): ${LIMITS.files} files, ${LIMITS.sourceBytes / 1024} KB of source; ${LIMITS.requests} requests a call, bodies up to ${LIMITS.requestBodyBytes / 1024} KB; Tape's budget per request: 50,000,000 steps, 64 MB; a step is one entry into a recursive function (std's too: a route arm changes the count; step_version ${STEP_VERSION}); other calls are free; on Workers the clock moves only across I/O (spans last 0 µs), so steps are the cost measure, and invoke_wall_ms is the call's wait in whole ms, not CPU time; response bodies past ${LIMITS.responseBodyBytes / 1024} KB are cut (truncated: true); 60 calls a minute. Calls are logged, never the source, bodies or responses: https://github.com/ivarvong/tape/blob/main/TERMS.md`;
   return [
     {
       name: 'compile',
@@ -224,6 +224,12 @@ ${limits}`,
           cached: { type: 'boolean' },
           results: { type: 'array', items: { type: 'object' } },
           timers: { type: 'object' },
+          invoke_wall_ms: {
+            type: 'integer',
+            minimum: 0,
+            description:
+              'Whole milliseconds the caller waited for the invocation that ran every request. Not CPU time. Absent when nothing ran.',
+          },
           ...refusalFields,
         },
         required: ['ok'],

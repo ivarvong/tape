@@ -94,10 +94,22 @@ export type Ran = {
 };
 /** A line trace is made only for a run of at most this many steps: each step can add an event. */
 export const TRACE_STEPS = 200_000;
-/** Every request, or why the program could not be linked to a database (a schema statement SQLite refused). */
+/**
+ * Every request, or why the program could not be linked to a database (a schema statement SQLite refused).
+ * `invoke_wall_ms` is not measured here: this isolate's clock does not advance during compute, so a duration
+ * taken around the run reads 0 on Workers. The caller that waited on this invocation sets it (index.ts), whole
+ * milliseconds, beside `run_id`.
+ */
 export type RanAll =
-  | { ok: true; runs: Ran[]; timers?: { fired: number; pending: number }; memory?: RunMemory; run_id?: string }
-  | { ok: false; error: string; memory?: RunMemory; run_id?: string };
+  | {
+      ok: true;
+      runs: Ran[];
+      timers?: { fired: number; pending: number };
+      memory?: RunMemory;
+      run_id?: string;
+      invoke_wall_ms?: number;
+    }
+  | { ok: false; error: string; memory?: RunMemory; run_id?: string; invoke_wall_ms?: number };
 /**
  * What the run's isolate held at the end, which no platform metric says (the Dynamic Worker reports no memory): the
  * program's Wasm memory and sql.js's, in bytes, each as far as it has grown (a Wasm memory never shrinks; sql.js's

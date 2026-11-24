@@ -599,7 +599,7 @@ const tests: Test[] = [
           );
         if (d.length > 6000) out.push(`${String(t?.['name'])}: its description is ${d.length} characters, over 6000`);
       }
-      for (const said of ['at_ms', 'woken', '"lines"', '"compact"'])
+      for (const said of ['at_ms', 'woken', '"lines"', '"compact"', 'invoke_wall_ms'])
         if (!String(run?.['description']).includes(said)) out.push(`run: its description does not say ${said}`);
       const props = F(F(run?.['inputSchema'])['properties']);
       if (JSON.stringify(F(props['trace'])['enum']) !== '["lines","full","none"]') out.push('run: no trace enum');
@@ -800,6 +800,9 @@ const tests: Test[] = [
       });
       if (ran['ok'] !== false || L(ran['results']).length > 0 || F(L(ran['diagnostics'])[0])['code'] !== 'C54')
         out.push(`run: ${JSON.stringify(ran).slice(0, 200)}`);
+      // nothing ran, so there is no wait to report (a 0 would say the invocation returned within 1 ms)
+      if ('invoke_wall_ms' in ran)
+        out.push(`a refused compile reports invoke_wall_ms ${String(ran['invoke_wall_ms'])}`);
       return out;
     },
   },
@@ -827,6 +830,29 @@ const tests: Test[] = [
       );
       if (http.status !== 200 || !same(http.body, r))
         out.push(`POST /v1/run is not what the tool gives: ${http.status}`);
+      // the caller's wait, whole milliseconds. In Node the clock advances during compute, so a hello run reads
+      // above 0; the field is one number for the call, not one per result.
+      const wall = r['invoke_wall_ms'];
+      if (typeof wall !== 'number' || !Number.isInteger(wall) || wall < 0) out.push(`invoke_wall_ms ${String(wall)}`);
+      if ('invoke_wall_ms' in (a ?? {})) out.push('invoke_wall_ms is on a result');
+      // a caller that reports a fraction is not trusted: the clock's precision is 1 ms, and the wait just
+      // measured (an integer) is what the answer carries
+      const fraction = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/ada'] }), {
+        deps: { run: () => Promise.resolve({ ok: true, runs: [], invoke_wall_ms: 1.5 }) },
+      });
+      const fractionWall = F(fraction.body)['invoke_wall_ms'];
+      if (typeof fractionWall !== 'number' || !Number.isInteger(fractionWall))
+        out.push(`a fractional wait was kept: ${String(fractionWall)}`);
+      const reported = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/ada'] }), {
+        deps: { run: () => Promise.resolve({ ok: true, runs: [], invoke_wall_ms: 12 }) },
+      });
+      if (F(reported.body)['invoke_wall_ms'] !== 12)
+        out.push(`a caller's whole-ms wait was ${String(F(reported.body)['invoke_wall_ms'])}`);
+      const failed = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /hello/ada'] }), {
+        deps: { run: () => Promise.resolve({ ok: false, error: 'schema refused', invoke_wall_ms: 7 }) },
+      });
+      if (F(failed.body)['invoke_wall_ms'] !== 7 || F(failed.body)['error'] !== 'schema refused')
+        out.push(`a failed run: ${JSON.stringify(failed.body).slice(0, 200)}`);
       return out;
     },
   },

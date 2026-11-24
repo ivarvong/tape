@@ -162,9 +162,17 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   is free, except `scan(v:, at:, set:)` and `scan_plain(v:, at:)`, which cost one step per 16 bytes read.
   `step_version` names which accounting produced `steps` (the same number on `test` and `compile`, and the
   `tape-step-version` header). It changes only when what a step counts changes, so two counts are comparable only
-  when their versions are equal. Steps are the only cost measure here: on Workers the clock moves only across I/O,
-  so wall time cannot be measured inside a run, and every span's duration in a trace is 0.
+  when their versions are equal. Steps are the per-request cost. On Workers the clock moves only across I/O, so a
+  duration measured inside the run reads 0 and every span's duration in a trace is 0.
   [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops) says more.
+- `invoke_wall_ms` is the whole call, in whole milliseconds: how long the caller waited for the invocation that ran
+  every request (the program, the replay, and a line trace when one was made). It sits beside `results`, one number
+  for the call, because the requests share that invocation and the isolate running them cannot time each one. It is
+  a wall-clock reading at a resolution of 1 ms (a wait under 1 ms is 0). It is not CPU time. A Worker does not
+  report CPU time to the request that is still running: `cpu_ms` is on the run's tail, after the response, and the
+  clock inside the program's isolate does not advance during compute. A compile that failed has no `invoke_wall_ms`,
+  because nothing ran. What the number includes, and where it can read high, is in
+  [telemetry](telemetry_and_profiling.md#what-a-client-can-read-of-a-requests-cost).
 - A request that traps (the step budget, the 64 MB arena, a division by zero) is status 500 with `error` set; its
   writes are rolled back and the next request runs on.
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not
@@ -283,9 +291,10 @@ browsers, so a web page cannot use its visitors as clients.
 
 One line per call (feedback too) to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
-requests and their statuses, the steps used and their `step_version`, the compile, run and total times, a hash of
-the client's address, the user agent, and whether it was rate limited. Not the program's source, the requests'
-bodies or headers, or the responses. We use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
+requests and their statuses, the steps used and their `step_version`, the compile, run and total times (`run_ms`
+starts before the loader call; the client-visible `invoke_wall_ms` is only the program invocation), a hash of the
+client's address, the user agent, and whether it was rate limited. Not the program's source, the requests' bodies
+or headers, or the responses. We use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
 
 A program deployed on the service (not one sent to `run`, which keeps nothing) records each request it serves in
 its effect log, with these request headers, the ones the program can read with `header_of`: `accept`,

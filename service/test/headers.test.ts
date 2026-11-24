@@ -32,16 +32,21 @@ describe('security headers', () => {
     for (const r of answers) {
       expect(headersOf(r)).toEqual(BASE);
       expect(r.headers.get('content-security-policy')).toBe(API_CSP);
+      // none of these called a program's object, so none reports its wait
+      expect(r.headers.get('server-timing')).toBeNull();
     }
   });
 
   it('are on a trace page, which may use only its own inline style', async () => {
     await call('/ivar/hello', { method: 'POST', body: hello });
     const r = await call('/ivar/hello/v/1/hello/ada');
+    // the router's wait on the program's object, whole milliseconds, labeled as a wait and not as CPU
+    expect(r.headers.get('server-timing')).toMatch(/^tape-invoke;desc="caller-wall-ms-not-cpu";dur=\d+$/);
     const link = r.headers.get('tape-trace-url') ?? '';
     expect(link).toMatch(/^http:\/\/tape\/t\//);
     const t = await anyone(link.replace('http://tape', ''));
     expect([t.status, t.headers.get('content-type')]).toEqual([200, 'text/html; charset=utf-8']);
+    expect(t.headers.get('server-timing')).toBeNull();
     expect(headersOf(t)).toEqual(BASE);
     expect(t.headers.get('content-security-policy')).toBe(TRACE_CSP);
     // a bad signature is a JSON 401, sandboxed like the API
@@ -54,6 +59,7 @@ describe('security headers', () => {
     await call('/_public/ivar/hpage', { method: 'PUT', body: '{"published":true}' });
     for (const r of [await call('/ivar/hpage/v/1/'), await anyone('/p/ivar/hpage/')]) {
       expect([r.status, r.headers.get('content-type')]).toEqual([200, 'text/html; charset=utf-8']);
+      expect(r.headers.get('server-timing')).toMatch(/^tape-invoke;desc="caller-wall-ms-not-cpu";dur=\d+$/);
       expect(headersOf(r)).toEqual(BASE);
       const csp = r.headers.get('content-security-policy') ?? '';
       expect(csp.split('; ')).toEqual(expect.arrayContaining(["default-src 'none'", "frame-ancestors 'none'"]));

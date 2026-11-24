@@ -2,7 +2,9 @@
 // platform reports nothing of a Dynamic Worker to Workers Observability: no invocation, no CPU, no memory. Its tail
 // gets each invocation's CPU and wall time, outcome and exceptions (workerd's TraceItem); this makes one line of
 // each, joined to the hosted call's own line by the run id the runner logs first (loaded.ts). A pure function of
-// the events, so test.ts checks it in Node.
+// the events, so test.ts checks it in Node. cpu_ms is the platform's CPU time for the invocation. The tail
+// runs after the response is sent, so a client cannot read it there: the response carries the caller's wait
+// instead (invoke_wall_ms, index.ts; server-timing on a program's HTTP response).
 type Fields = Record<string, unknown>;
 /** The parts of a TraceItem this reads (the type is workerd's; Node has none). */
 export type TailEvent = {

@@ -97,7 +97,14 @@ const runIn =
     const runner = await runnerOf(env, ctx, program.wasm, traced);
     // the run's id: the runner logs it, so its tail's line (RunTail) and the call's line name the same run
     const runId = crypto.randomUUID();
-    return { ...(await runner.run([...requests], program.traced !== undefined, remotes, runId)), run_id: runId };
+    // Whole milliseconds this Worker waited on the Dynamic Worker RPC, from a clock the loader's awaits just
+    // moved. The child's Date.now does not advance during its compute (its `took` reads 0) and its tail's cpu_ms
+    // is logged after this response, so the wait is what a client can be shown: a wall-clock reading at 1 ms,
+    // covering every request in the call, the replay and a line trace, because they share the invocation.
+    const t0 = Date.now();
+    const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId);
+    const waited = Date.now() - t0;
+    return { ...ran, run_id: runId, ...(Number.isInteger(waited) && waited >= 0 ? { invoke_wall_ms: waited } : {}) };
   };
 /** A doc examples build (doctest.ts), its functions called in a Dynamic Worker: this Worker cannot compile Wasm. */
 const examplesIn =

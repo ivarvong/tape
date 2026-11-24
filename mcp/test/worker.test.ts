@@ -141,6 +141,11 @@ describe('tape-mcp in workerd', () => {
     // a second call is a fresh database: ada is greeted for the first time again
     const again = await call('run', { requests: ['GET /hello/ada'] });
     expect(results(again.out)[0]?.['body']).toBe('Hello, ada');
+    // the caller's wait on the Dynamic Worker, whole milliseconds, once for the call. workerd's clock does
+    // advance during compute, unlike production, so the reading is that wait and not a stuck 0.
+    const wall = out['invoke_wall_ms'];
+    expect(typeof wall === 'number' && Number.isInteger(wall) && wall >= 0).toBe(true);
+    expect(a?.['invoke_wall_ms']).toBeUndefined();
   });
 
   it("runs on the run's own clock in the Dynamic Worker: at_ms moves now(), and a due timer runs before the request", async () => {

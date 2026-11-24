@@ -125,6 +125,37 @@ go tool pprof -http=: profiles/<file>.sym.pb              # flame graph
 - **~3-20 % of wall is sampled CPU**; compare profiles only under the same load. For A/B numbers use cpu.ts.
 - `compile_ms` in the log reads 0: a Worker's clock does not move during compute. CPU per call is cpuTimeMs.
 
+## What a client can read of a request's cost
+
+True CPU time is not measurable in the request that is still running. `Date.now` and `performance.now` advance only
+across I/O, so a duration taken inside the isolate that is doing the compute reads 0. `scheduler.wait(0)` does not
+refresh that clock: a 0 ms timer renewed nothing in production, and a 1 ms timer (`fresh` in service/src/spans.ts)
+renewed some starts and not others. The platform's CPU time (`cpuTimeMs` on an invocation, `cpu_ms` on a Dynamic
+Worker's tail) is delivered after the response has been sent, so it cannot be written on that response. A profile
+of the isolate, and CPU on the spans, are follow-ups; neither is on the response.
+
+What a client gets is the caller's wait, in whole milliseconds. It is a wall-clock reading. The child's CPU is
+inside that wait, because the caller is suspended on the RPC, and so is everything else the caller waited for.
+A difference of 1 ms is the resolution, not a measured change in the program. A 0 is a wait under 1 ms.
+
+- `POST /v1/run` and the MCP `run` tool put `invoke_wall_ms` on the JSON (mcp/src/index.ts measures it, mcp/src/tools.ts
+  checks it is a whole number). It is `Date.now` immediately before the Dynamic Worker RPC minus `Date.now` when that
+  RPC returns, after the loader calls, so a compile that happened earlier is not in it. The invocation runs every
+  request in the call, then each replay, then a line trace when one was made, so the number is one for the call and
+  not one per request. `steps` on each result stays the per-request measure, and it is deterministic. The log line's
+  `run_ms` is a wider window: it starts before the loader calls, and on Workers it can include earlier CPU during
+  which the clock was stuck. In Node, where the tools run the program in process and the clock does advance during
+  compute, `invoke_wall_ms` is that process's wait. A fraction from a caller is dropped rather than shown.
+- A program's HTTP response, the operator's `/:account/:name/v/:version/…` and a published name's `/p/:account/:name/…`,
+  carries `server-timing: tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>` (service/src/programs.ts `programTiming`).
+  `<ms>` is the router's `invoke` span, from `begin` to `done`, and `done` is after the body has been buffered, so
+  the number is the wait for the Durable Object call and its body: the object's CPU, its SQLite, the RPC, and the
+  object's work before it replies. A 404 from the list of published names never calls the object and has no header.
+  The same span can read high when the isolate's clock was stale at `begin` and the 1 ms refresh did not catch up
+  (two calls that arrived 13 ms apart at a busy shard both read a start 140 ms before either was sent).
+
+Neither number is `cpuTimeMs`. `invoke_wall_ms` is already the whole call, so a sum of it across that call's results counts the wait once per result.
+
 ## Where hosted time goes (2026-11-23, tape dddd2c92)
 
 14 cpu profiles (10 s each; files `service/profiles/dddd2c92-cpu-*`): compile is 81-96 % of the Worker's CPU on every

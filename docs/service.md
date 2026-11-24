@@ -64,11 +64,15 @@ parameters reach the latest version of the program with that name in the same ac
 
 Every response names its request (`tape-request-id`) and carries signed links to its trace as a page
 (`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`), and names the step accounting the deployed compiler builds
-(`tape-step-version`). The run's span in the OTLP says what the run used of the limits below, `tape.memory_bytes`,
-`tape.steps` and `tape.step_version` (the first entry of its log holds the same, as `bytes`, `steps` and
-`step_version`, and the trace page shows them; a module built before the tag has no `step_version`), whether it
-finished or stopped. A storage failure at commit answers 503 with `retry-after: 1` and says whether anything was
-kept (`applied`); a trap answers 500.
+(`tape-step-version`). It also carries `server-timing`
+(`tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>`): `<ms>` is the whole milliseconds this Worker waited on
+the program's object, the same reading `kv.ts` puts on a shard call. The same header is on a published name's
+response. What the number measures, and the precision it has on Workers, is in
+[telemetry](telemetry_and_profiling.md#what-a-client-can-read-of-a-requests-cost). The run's span in the OTLP says
+what the run used of the limits below, `tape.memory_bytes`, `tape.steps` and `tape.step_version` (the first entry
+of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them; a module built
+before the tag has no `step_version`), whether it finished or stopped. A storage failure at commit answers 503
+with `retry-after: 1` and says whether anything was kept (`applied`); a trap answers 500.
 
 ### What a program answers
 
@@ -97,9 +101,12 @@ and the path, wherever it is mounted. A client cannot set it, and a request that
 ### Public routes
 
 After `PUT /_public/:account/:name {"published": true}` (operator), `/p/:account/:name/<path>` answers GET, HEAD and
-POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. A HEAD is run as
-the GET it stands for (the program sees `GET`, and the body is not sent), on this route and every other. The program
-sees who called: the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)` says so.
+POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. It keeps
+`server-timing` (`tape-invoke`), the same wait the operator's route reports. A name that is not published is
+answered by the list of published names and never calls the program's object, so that 404 has no `tape-invoke`.
+A HEAD is run as the GET it stands for (the program sees `GET`, and the body is not sent), on this route and every
+other. The program sees who called: the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)`
+says so.
 For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
 box office served this way.
 
