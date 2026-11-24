@@ -23,6 +23,7 @@ import type { Effect, Sql, TraceEvent } from './host/log.ts';
 import { dropMachines, installMachines, migrate } from './host/schema.ts';
 import type { Link, MachineSpec, Migrated } from './host/schema.ts';
 
+export { storageKind, transientAtEdge, transientBetween } from './host/failure.ts';
 export { NO_TIMERS, TimedOut } from './host/call.ts';
 export type { Service, ServiceOptions, ServiceReply, Timers } from './host/call.ts';
 export { isCall, isEffect, isHead, isNow, isRandom, isSql, isWake, measuredText, spans } from './host/log.ts';

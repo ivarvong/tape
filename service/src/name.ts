@@ -9,8 +9,10 @@ import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
+import hostFailure from '../../host/failure.ts?erased';
 import programSrc from './program.ts?erased';
 import recordsSrc from './records.ts?erased';
+import webSrc from './web.ts?erased';
 import type { CallEffect } from '../../host/log.ts';
 import type { MachineSpec } from '../../host/schema.ts';
 import { COMPILER, build, failing, isRefusal, machinesFor, rulesNow } from './build.ts';
@@ -49,6 +51,7 @@ const HOST_PARTS = {
   'host/memory.js': hostMemory,
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
+  'host/failure.js': hostFailure,
 };
 
 // RUNTIME-SPEC R-RET-6: the trace records of the newest TRACE_KEEP requests of each object are kept; a prune runs
@@ -774,6 +777,7 @@ export class Name extends DurableObject {
       modules: {
         'program.js': programSrc,
         'records.js': recordsSrc,
+        'web.js': webSrc,
         'host.js': hostSrc,
         ...HOST_PARTS,
         'versions.js': `${imports.join('\n')}\nexport default { ${entries.join(', ')} };`,

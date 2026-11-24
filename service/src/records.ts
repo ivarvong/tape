@@ -1,7 +1,6 @@
 // records.ts: what the service stores and passes between its parts, as types. A request's log is the program's
 // effect log (host/log.ts); a migration run and an upload check are recorded in the same table, as logs of their
 // own steps. Types only: program.ts runs in a Dynamic Worker that is given no module but the host.
-import { unreachable } from '../../compiler/ast.ts';
 import type { Effect, Head, MachineSpec, Migrated } from '../../host.ts';
 import type { CallEffect } from '../../host/log.ts';
 import type { RouterRecord } from './spans.ts';
@@ -78,8 +77,12 @@ export function encodeOutcome(
       return { body: { outcome: 'partly', retry: apply.retry, applied: 'partly' }, headers };
     case 'unknown':
       return { body: { outcome: 'unknown', retry: apply.retry }, headers };
-    default:
-      return unreachable(apply, 'outcome');
+    default: {
+      // The data object is given the host and records, not the compiler, so this is the never the shared
+      // unreachable would throw on. A new outcome is a type error here.
+      const missed: never = apply;
+      return missed;
+    }
   }
 }
 /** The timer a woken run answered. */

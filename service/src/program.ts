@@ -22,7 +22,7 @@ import {
 import type { App, Effect, Header, MachineSpec, ServiceReply, Sql, TraceEvent, Transaction } from './host.ts';
 import versions from './versions.ts';
 import type { VersionBuild } from './versions.ts';
-import { storageKind, transientAtEdge, transientBetween } from '../../host/failure.ts';
+import { storageKind, transientAtEdge, transientBetween } from './host.ts';
 import { APPLY, encodeOutcome, isCheckHead, isEntry, isMigrationsHead, isRunHead } from './records.ts';
 import { randomHex } from './web.ts';
 import type {
