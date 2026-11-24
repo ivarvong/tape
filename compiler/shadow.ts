@@ -78,6 +78,7 @@ export const SHADOWABLE = new Set([
   'log',
   'pow',
   'scan_plain',
+  'scan',
   'parse_float',
   'rescale',
   'round',

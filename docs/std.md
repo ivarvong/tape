@@ -191,6 +191,19 @@ fn handle(raw: View) -> Buf {
 
 Uses: [`every_byte`](#fn-every_byte), [`is_lower`](#fn-is_lower), [`is_digit`](#fn-is_digit), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`len`](#builtin-len).
 
+### Advance to the next byte in a set
+
+`scan(v:, at:, set:)` is the first position at or after `at` whose byte is one of `set`, a text literal, or `len(v)` when none is. It reads 16 bytes at a time and costs one step per 16 bytes read, rounded up. A CSV separator, the bytes HTML escapes and the bytes a line of Markdown stops on are sets of this form. `scan_plain(v:, at:)` is that scan for the bytes that end a JSON string's plain run.
+
+```tape
+fn handle(raw: View) -> Buf {
+  let at = scan(raw, at: 0, set: "*&<>")
+  respond(status: 200) |> append(view: slice(raw, from: 0, to: at))
+}
+```
+
+Uses: [`scan`](#builtin-scan), [`slice`](#builtin-slice), [`respond`](#fn-respond).
+
 ### Read a request header, set a response header
 
 `header_of(request: r, name: "if-none-match")` is the header's value, `None` when it was not sent (the service passes accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, webhook-id, webhook-timestamp, webhook-signature and x-… (but not x-forwarded-… or x-real-ip), never cookie or authorization; and its own `tape-base`, the URL the program's `/` is at, without the last slash, for links and redirects to its other pages). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`'s.
@@ -213,7 +226,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 
 ## Contents
 
-- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`parse_dec`](#builtin-parse_dec), [`write_dec`](#builtin-write_dec), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
+- [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`parse_dec`](#builtin-parse_dec), [`write_dec`](#builtin-write_dec), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`scan`](#builtin-scan), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
@@ -480,7 +493,15 @@ The Float nearest the number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, th
 scan_plain(v: View, at: Int) -> Int
 ```
 
-The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. Reads 16 bytes at a time (Wasm SIMD); std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).
+The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. `scan(v:, at:, set:)` of those bytes, which a text literal cannot spell. Reads 16 bytes at a time (Wasm SIMD). One step per 16 bytes read, rounded up, as `scan(v:, at:, set:)` does. std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).
+
+### builtin scan
+
+```tape
+scan(v: View, at: Int, set: View) -> Int
+```
+
+The first position at or after `at` whose byte is one of `set`; `len(v)` when none is. `set` is a text literal: its bytes, escapes included (`\n` is byte 10), and a character's UTF-8 bytes are each members (`"é"` is bytes 195 and 169). The same byte twice is one member. Reads 16 bytes at a time (Wasm SIMD when the set has at most 16 bytes, or the JSON set of `scan_plain(v:, at:)`). One step per 16 bytes read, rounded up: every byte from `at` through the one it stops on, or from `at` to the end when it does not stop; `at` equal to `len(v)` reads nothing and costs nothing. `at` outside 0 to `len(v)` traps (trap 3).
 
 ### builtin push
 

@@ -218,6 +218,11 @@ const all: Part[] = [
     /^126 inputs compared, 0 differ$/m,
   ],
   [
+    'bench/md-scan.ts: the Markdown byte walks, per byte and as scan, agree with the byte loop',
+    [node, 'bench/md-scan.ts'],
+    /^[0-9]+ inputs compared, 0 differ$/m,
+  ],
+  [
     'bench/cart.ts: cart.tape answers as the JavaScript beside it on 267 bodies, carts and not',
     [node, 'bench/cart.ts'],
     /^267 inputs compared, 0 differ$/m,

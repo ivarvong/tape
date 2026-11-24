@@ -11,6 +11,7 @@ import {
   type TypeAst,
   unreachable,
 } from '../compiler/ast.ts';
+import { JSON_PLAIN, byteSet, hasByte } from '../compiler/byteset.ts';
 import { DEPTH_BUDGET, TRAP } from '../compiler/common.ts';
 import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
@@ -301,6 +302,7 @@ const INTRINSIC = {
   log: ['x'],
   pow: ['x', 'y'],
   scan_plain: ['v', 'at'],
+  scan: ['v', 'at', 'set'],
   parse_float: ['text'],
   rescale: ['x', 'to'],
   round: ['x', 'to', 'rounding'],
@@ -315,6 +317,13 @@ const INTRINSIC = {
 } as const satisfies Record<string, readonly string[]>;
 type Intrinsic = keyof typeof INTRINSIC;
 const isIntrinsic = (name: string): name is Intrinsic => Object.hasOwn(INTRINSIC, name);
+/** The first index at or after `at` whose byte is in `set`, or the length. `at` outside 0..len traps (trap 3). */
+function scanAt(v: Uint8Array, at: bigint, set: readonly number[]): bigint {
+  if (at < 0n || at > BigInt(v.length)) throw new Trap(TRAP.BOUNDS);
+  let i = Number(at);
+  while (i < v.length && !hasByte(set, v[i] ?? 0)) i++;
+  return BigInt(i);
+}
 function intrinsic(name: Intrinsic, a: Value[]): Value {
   switch (name) {
     case 'len':
@@ -396,14 +405,12 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
       const x = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(t) ? Number(t) : NaN;
       return Number.isFinite(x) ? adt('Some', { value: x }) : adt('None');
     }
-    // the first byte at or after `at` that is below 32, 128 or more, a quote or a backslash
-    case 'scan_plain': {
-      const v = asBytes(a[0]),
-        at = asInt(a[1]);
-      if (at < 0n || at > BigInt(v.length)) throw new Trap(TRAP.BOUNDS);
-      let i = Number(at);
-      while (i < v.length && (v[i] ?? 0) >= 32 && (v[i] ?? 0) < 128 && v[i] !== 34 && v[i] !== 92) i++;
-      return BigInt(i);
+    // the first byte at or after `at` that is in the set; len(v) when none is. scan_plain is the JSON set.
+    case 'scan_plain':
+      return scanAt(asBytes(a[0]), asInt(a[1]), JSON_PLAIN);
+    case 'scan': {
+      const set = a[2] ?? stop('scan set');
+      return scanAt(asBytes(a[0]), asInt(a[1]), byteSet(asBytes(set)));
     }
     case 'rescale':
       return D.rescale(asDec(a[0]), Number(asInt(a[1])));

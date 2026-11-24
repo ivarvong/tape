@@ -634,7 +634,8 @@ fn tree_done(v: View, node: Json_Tree, at: Int, stack: List[Json_Frame]) -> Opti
 }
 
 // Internal: the string whose body starts at `at`. Plain bytes (and well-formed UTF-8) are found 16 at a time
-// (scan_plain); a string without escapes is a view of the input, one with escapes is decoded into new memory.
+// (scan_plain, 16 bytes at a time, one step per 16 bytes read); a string without escapes is a view of the input,
+// one with escapes is decoded into new memory.
 fn tree_text(v: View, at: Int) -> Json_Got {
   let e = text_run(v, at)
   match {

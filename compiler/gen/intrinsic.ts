@@ -13,6 +13,8 @@ import { decodeRow, emitDecode } from './decode.ts';
 import { emitSql } from './sql.ts';
 import { emitFloatIntrinsic } from './float.ts';
 import { emitDecIntrinsic } from './dec.ts';
+import { emitByteScan } from './scan.ts';
+import { JSON_PLAIN, byteSet } from '../byteset.ts';
 
 /** A call of an intrinsic with its arguments in the order of its parameters. */
 type Use = { readonly c: Ctx; readonly e: Call; readonly n: string; readonly args: readonly Arg[] };
@@ -366,120 +368,30 @@ const wrapping =
   };
 
 /**
- * scan_plain(v, at): the first position at or after `at` whose byte is below 32, 128 or more, a quote or a
- * backslash; len(v) when there is none. 16 bytes at a time (Wasm SIMD: one signed compare finds both the control
- * bytes and those of 128 or more), then byte by byte. `at` outside 0..len(v) traps.
+ * scan(v, at, set): the first position at or after `at` whose byte is in `set`, a text literal; len(v) when there
+ * is none. The bytes are fixed at compile time (compiler/gen/scan.ts). `at` outside 0..len(v) traps.
  */
+function scan(u: Use): Type {
+  const member = argAt(u, 2);
+  if (member.value.k !== 'str')
+    return fail(
+      member,
+      'C89',
+      'the set of scan must be a text literal',
+      'The bytes are fixed when the program is compiled, so the scan reads 16 at a time. Write the bytes to stop on as text: `set: "*_[]!<&"` (`\\n` is byte 10).',
+    );
+  return scanBytes(u, byteSet(member.value.bytes));
+}
+
+/** scan_plain(v, at): scan of the bytes that end a JSON string's plain run (below 32, 128 or more, a quote, a backslash). */
 function scanPlain(u: Use): Type {
-  const { c } = u;
+  return scanBytes(u, JSON_PLAIN);
+}
+
+function scanBytes(u: Use, mask: readonly number[]): Type {
   const [p, n] = view(u, 0);
   const at = int(u, 1);
-  const [i, m, b, x] = [fresh(c, I32), fresh(c, I32), fresh(c, I32), fresh(c, 0x7b)];
-  const simd = (op: number): number[] => [0xfd, ...uleb(op)];
-  const splat = (byte: number): number[] => [...i32(byte), ...simd(0x0f)];
-  const BLOCK = [0x02, 0x40],
-    LOOP = [0x03, 0x40],
-    END = 0x0b;
-  c.code.push(...get(at), ...get(n), 0xad, 0x56);
-  trapIf(c, TRAP.BOUNDS);
-  // i8x16: a byte below 32 or of 128 or more is below 32 as a signed byte; then the quote and the backslash
-  const stops = [
-    ...get(x),
-    ...splat(32),
-    ...simd(0x25),
-    ...get(x),
-    ...splat(34),
-    ...simd(0x23),
-    ...simd(0x50),
-    ...get(x),
-    ...splat(92),
-    ...simd(0x23),
-    ...simd(0x50),
-  ];
-  // 16 bytes at a time while 16 are left: the first stopping byte's place is the mask's trailing zeros
-  const blocks = [
-    ...LOOP,
-    ...get(i),
-    ...i32(16),
-    0x6a,
-    ...get(n),
-    0x4b,
-    0x0d,
-    1,
-    ...get(p),
-    ...get(i),
-    0x6a,
-    ...simd(0x00),
-    0,
-    0,
-    0x21,
-    ...uleb(x),
-    ...stops,
-    ...simd(0x64),
-    0x22,
-    ...uleb(m),
-    0x04,
-    0x40,
-    ...get(i),
-    ...get(m),
-    0x68,
-    0x6a,
-    ...set(i),
-    0x0c,
-    3,
-    END,
-    ...get(i),
-    ...i32(16),
-    0x6a,
-    ...set(i),
-    0x0c,
-    0,
-    END,
-  ];
-  // then byte by byte
-  const isStop = [
-    ...get(b),
-    ...i32(32),
-    0x49,
-    ...get(b),
-    ...i32(127),
-    0x4b,
-    0x72,
-    ...get(b),
-    ...i32(34),
-    0x46,
-    0x72,
-    ...get(b),
-    ...i32(92),
-    0x46,
-    0x72,
-  ];
-  const bytes = [
-    ...LOOP,
-    ...get(i),
-    ...get(n),
-    0x4f,
-    0x0d,
-    1,
-    ...get(p),
-    ...get(i),
-    0x6a,
-    0x2d,
-    0,
-    0,
-    ...set(b),
-    ...isStop,
-    0x0d,
-    1,
-    ...get(i),
-    ...i32(1),
-    0x6a,
-    ...set(i),
-    0x0c,
-    0,
-    END,
-  ];
-  c.code.push(...get(at), 0xa7, ...set(i), ...BLOCK, ...BLOCK, ...blocks, END, ...bytes, END, ...get(i), 0xad);
+  emitByteScan(u.c, p, n, at, mask);
   return INT;
 }
 
@@ -537,6 +449,7 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   wrapping_sub: wrapping(0x7d),
   wrapping_mul: wrapping(0x7e),
   scan_plain: scanPlain,
+  scan,
   parse_float: parseFloat,
 };
 

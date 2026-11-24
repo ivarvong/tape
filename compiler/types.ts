@@ -95,6 +95,7 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     log: ['x'],
     pow: ['x', 'y'],
     scan_plain: ['v', 'at'],
+    scan: ['v', 'at', 'set'],
     parse_float: ['text'],
     // Dec (compiler/gen/dec.ts)
     rescale: ['x', 'to'],

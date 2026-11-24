@@ -320,7 +320,7 @@ const sub = (g: G, t: Ty, d: number, env: Env): string => expr(g, t, d - 1, env)
 function intExpr(g: G, d: number, env: Env): string {
   const { r } = g;
   const I = (): string => sub(g, INT, d, env);
-  switch (r.int(40)) {
+  switch (r.int(41)) {
     case 0:
     case 1:
       return intLit(g);
@@ -426,6 +426,8 @@ function intExpr(g: G, d: number, env: Env): string {
       return `(${sub(g, VIEW, d, env)} |> len())`;
     case 37:
       return `scan_plain(v: ${sub(g, VIEW, d, env)}, at: ${smallInt(g, env, d)})`;
+    case 38:
+      return `scan(v: ${sub(g, VIEW, d, env)}, at: ${smallInt(g, env, d)}, set: ${r.one(['"a"', '"\\n"', '"*_[]"', '""', '"<>&"'])})`;
     default:
       return `(${I()} ${r.one(['+', '-', '*'])} ${intLit(g)})`;
   }

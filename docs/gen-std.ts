@@ -231,7 +231,12 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'scan_plain',
     sig: 'scan_plain(v: View, at: Int) -> Int',
-    doc: 'The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. Reads 16 bytes at a time (Wasm SIMD); std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).',
+    doc: 'The first position at or after `at` whose byte is below 32, 128 or more, a quote (34) or a backslash (92); `len(v)` when there is none. `scan(v:, at:, set:)` of those bytes, which a text literal cannot spell. Reads 16 bytes at a time (Wasm SIMD). One step per 16 bytes read, rounded up, as `scan(v:, at:, set:)` does. std/json.tape finds the plain runs of a string with it. `at` outside 0 to `len(v)` traps (trap 3).',
+  },
+  {
+    name: 'scan',
+    sig: 'scan(v: View, at: Int, set: View) -> Int',
+    doc: 'The first position at or after `at` whose byte is one of `set`; `len(v)` when none is. `set` is a text literal: its bytes, escapes included (`\\n` is byte 10), and a character\'s UTF-8 bytes are each members (`"é"` is bytes 195 and 169). The same byte twice is one member. Reads 16 bytes at a time (Wasm SIMD when the set has at most 16 bytes, or the JSON set of `scan_plain(v:, at:)`). One step per 16 bytes read, rounded up: every byte from `at` through the one it stops on, or from `at` to the end when it does not stop; `at` equal to `len(v)` reads nothing and costs nothing. `at` outside 0 to `len(v)` traps (trap 3).',
   },
   { name: 'push', sig: 'push(buf: Buf, byte: Int) -> Buf', doc: 'Appends one byte.' },
   { name: 'append', sig: 'append(buf: Buf, view: View) -> Buf', doc: 'Appends text.' },
@@ -472,6 +477,16 @@ fn handle(raw: View) -> Buf {
     Request(method: "GET", path: "/s/" ++ Slug(s)) -> respond(status: 200) |> append(view: s)
     _ -> respond(status: 400)
   }
+}
+`,
+  },
+  {
+    title: 'Advance to the next byte in a set',
+    uses: ['builtin scan', 'builtin slice', 'fn respond'],
+    text: "`scan(v:, at:, set:)` is the first position at or after `at` whose byte is one of `set`, a text literal, or `len(v)` when none is. It reads 16 bytes at a time and costs one step per 16 bytes read, rounded up. A CSV separator, the bytes HTML escapes and the bytes a line of Markdown stops on are sets of this form. `scan_plain(v:, at:)` is that scan for the bytes that end a JSON string's plain run.",
+    program: `fn handle(raw: View) -> Buf {
+  let at = scan(raw, at: 0, set: "*&<>")
+  respond(status: 200) |> append(view: slice(raw, from: 0, to: at))
 }
 `,
   },

@@ -686,7 +686,11 @@ A program says what must hold, and what must hold in the end (`settled`), and is
 A request may take 50,000,000 steps. A step of that budget (not a step of a body, section 4) is one entry into a
 recursive function, a function that can reach itself through the calls it makes: each time it is called, and each
 time it calls itself again as its result. A call of any other function is free however much it computes, and so is a
-built-in. The standard library's recursive functions count like the program's own: the byte scans behind `request()`,
+built-in, except `scan(v:, at:, set:)` and `scan_plain(v:, at:)`, which cost one step per 16 bytes read, rounded
+up. A read is every byte from `at` through the one it stops on, or from `at` to the end when none of the set is
+there; `at` equal to `len(v)` reads nothing. `scan_plain(v:, at:)` is `scan(v:, at:, set:)` of the bytes that end
+a JSON string's plain run (below 32, 128 or more, a quote or a backslash). The standard library's recursive
+functions count like the program's own: the byte scans behind `request()`,
 `until`, `after` and `decimal` take a few steps per byte. So a request's steps depend on its bytes and on the arms
 tried before the one that answers it, and a route's count can change while the route does not: an arm added above it,
 or a function made recursive by a call added elsewhere. In a program with two `GET` arms and a 404 fallback, one more
