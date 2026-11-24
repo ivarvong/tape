@@ -46,6 +46,16 @@ export function valueOf(schema: Schema | undefined, rand: () => number, ctx: Val
     if (kind && kind.length > 0 && rand() < 0.75) return fit(pick(kind));
     return fit(rand() < 0.6 && ctx.ids.length > 0 ? pick(ctx.ids) : pick([...near, 1, 2, 3, 5, 30]));
   }
+  // a Float, or a Dec (text with a scale, its pattern): an edge or a small number, within the bounds
+  if (schema.type === 'number' || (schema.type === 'string' && schema.pattern !== undefined)) {
+    const places = Number(/\{1,(\d+)\}/.exec(schema.pattern ?? '')?.[1] ?? (schema.type === 'number' ? 2 : 0));
+    const step = 10 ** -places;
+    const lo = schema.minimum ?? (schema.exclusiveMinimum !== undefined ? schema.exclusiveMinimum + step : -1e6),
+      hi = schema.maximum ?? (schema.exclusiveMaximum !== undefined ? schema.exclusiveMaximum - step : 1e6);
+    const n = Math.min(hi, Math.max(lo, pick([lo, hi, 0, 1, 2.5, 12.34, 30, 99.99, lo + (hi - lo) * rand()])));
+    const text = n.toFixed(places);
+    return schema.type === 'number' ? Number(text) : text;
+  }
   // text: a key is new most of the time and sometimes one sent before; other text is what the programs' rows hold
   const lo = schema.minLength ?? 0,
     hi = schema.maximum ?? schema.maxLength ?? 64,

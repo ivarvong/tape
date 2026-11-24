@@ -87,6 +87,66 @@ ok(
       new Set(made.map(v => v['key'])).size < 300,
     `${new Set(made.map(v => v['key'])).size} keys in 300`,
   );
+  // a Dec is text at its scale and a Float a number, each within its bounds (both were sent as names, `"ann"`, so a
+  // body with an amount in it was never decoded)
+  const money = Array.from({ length: 200 }, () =>
+    valueOf({ type: 'string', pattern: '^-?[0-9]+([.][0-9]{1,2})?$', minimum: 0.01, maximum: 9.99 }, r, ctx),
+  );
+  const measures = Array.from({ length: 200 }, () => valueOf({ type: 'number', exclusiveMinimum: 0 }, r, ctx));
+  ok(
+    'a Dec[2] is text with two places within its bounds, and a Float a number within its own',
+    money.every(m => typeof m === 'string' && /^\d+\.\d\d$/.test(m) && Number(m) >= 0.01 && Number(m) <= 9.99) &&
+      measures.every(m => typeof m === 'number' && m > 0),
+    JSON.stringify([money.slice(0, 6), measures.slice(0, 6)]),
+  );
+}
+
+// a body with a Dec in it is sent, decoded and run: a debit that answers 409 without its rollback keeps its claim
+{
+  const pot = (refused: string): string => `migration 1 "pot" {
+  CREATE TABLE pots(id INTEGER PRIMARY KEY, cents INTEGER NOT NULL CHECK (cents >= 0));
+  CREATE TABLE takes(key TEXT PRIMARY KEY NOT NULL, amount INTEGER NOT NULL);
+  INSERT INTO pots(id, cents) VALUES (1, 500)
+}
+
+invariant "the pot and what was taken from it are 5.00" {
+  SELECT id FROM pots WHERE cents + (SELECT coalesce(sum(amount), 0) FROM takes) <> 500
+}
+
+type Key = View where len(self) >= 1 and len(self) <= 64
+type Amount = Dec[2] where self >= 0.01 and self <= 9.99
+type Take { Take(key: Key, amount: Amount) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(method: "POST", path: "/takes", body) -> taken(body)
+    _ -> respond(status: 404)
+  }
+}
+
+fn taken(body: View) -> Buf {
+  let Ok(value: Take(key, amount)) = decode(json: body, as: Take) else -> respond(status: 400)
+  let 1 = sql_exec(
+    query: "INSERT INTO takes(key, amount) VALUES (:key, :amount) ON CONFLICT(key) DO NOTHING",
+    key,
+    amount
+  ) else -> respond(status: 200)
+  let 1 = sql_exec(
+    query: "UPDATE pots SET cents = cents - :amount WHERE id = 1 AND cents >= :amount",
+    amount
+  ) else -> ${refused}
+  respond(status: 201)
+}
+`;
+  const right = await search(autoOf([{ name: 'pot', text: pot('rollback(out: respond(status: 409))') }]).model, {
+    runs: 200,
+  });
+  const wrong = await search(autoOf([{ name: 'pot', text: pot('respond(status: 409)') }]).model, { runs: 200 });
+  ok(
+    'a pot taken from by Dec amounts: nothing wrong with the rollback; without it, the invariant breaks',
+    right.ok && !wrong.ok && /what was taken from it/.test(wrongIn(wrong)),
+    `${right.ok ? 'clean' : wrongIn(right).slice(0, 120)}; ${wrong.ok ? 'not found' : 'found'}`,
+  );
 }
 
 // as written: nothing wrong, with pay and without

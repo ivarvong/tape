@@ -4,6 +4,7 @@
 // `self < n` joined by `and`.
 import type { Expr } from '../ast.ts';
 import type { Type } from '../types.ts';
+import { scaleOf } from '../types.ts';
 import { adtOf, strip } from './layout.ts';
 import type { Layouts } from './layout.ts';
 
@@ -21,6 +22,8 @@ export type JsonSchema = {
   exclusiveMaximum?: number;
   minLength?: number;
   maxLength?: number;
+  /** a Dec[s] as text: digits, then a point and at most s of them */
+  pattern?: string;
 };
 type Place = object | null | undefined;
 
@@ -41,12 +44,18 @@ const measured = (x: Expr): '' | 'len' | null => {
   return only?.value.k === 'var' && only.value.name === 'self' ? 'len' : null;
 };
 
+/** A literal bound as a number: an Int, a Dec (`0.01`) or a Float (`1.5f`); null for anything else. */
+const literal = (x: Expr): number | null =>
+  x.k === 'int' ? Number(x.v) : x.k === 'dec' ? Number(x.v) / 10 ** x.s : x.k === 'float' ? x.v : null;
+
 /** `self op n` or `n op self`, as [op with self on the left, n, what is measured]. */
 function comparison(e: Extract<Expr, { k: 'bin' }>): [string, number, '' | 'len'] | null {
   const l = measured(e.l);
   const r = measured(e.r);
-  if (l !== null && e.r.k === 'int') return [e.op, Number(e.r.v), l];
-  if (r !== null && e.l.k === 'int') return [FLIP[e.op] ?? e.op, Number(e.l.v), r];
+  const rn = literal(e.r),
+    ln = literal(e.l);
+  if (l !== null && rn !== null) return [e.op, rn, l];
+  if (r !== null && ln !== null) return [FLIP[e.op] ?? e.op, ln, r];
   return null;
 }
 
@@ -81,9 +90,12 @@ function field(L: Layouts, ft: Type, at: Place): JsonSchema {
   const d = L.prog.types.get(inner.name);
   const [item] = inner.name === 'List' && inner.args.length === 1 ? inner.args : [];
   if (item) return { type: 'array', items: field(L, item, at) };
-  const base = strip(L, inner).name;
+  const stripped = strip(L, inner);
+  const base = stripped.name;
   if (d && !d.refine && !Object.hasOwn(JSON_TYPE, base)) return jsonSchema(L, inner, at);
   const out: JsonSchema = Object.hasOwn(JSON_TYPE, base) ? { type: JSON_TYPE[base] ?? '' } : {};
+  const scale = scaleOf(stripped);
+  if (scale !== null) out.pattern = scale === 0 ? '^-?[0-9]+$' : `^-?[0-9]+([.][0-9]{1,${scale}})?$`;
   if (d?.refine) {
     bounds(d.refine.pred, out);
     out.description = `${d.name}, a refined ${base}: its condition is checked when the message is decoded`;
