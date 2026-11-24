@@ -7,8 +7,8 @@
 // the same as JSON: an xml-stylesheet processing instruction cannot fetch anything. application/xhtml+xml is not a
 // type a program can name, because a browser would run it as a page. An image from this origin is what a page needs
 // to show a chart another of its routes draws (`<img src="chart">`, apps/products/FRICTION.md #16); it makes nothing
-// active: an image runs no script (an
-// SVG's is not run in an <img>: Chrome 131, 24 November 2026), every response here is nosniff, a route that needs
+// active: an image runs no script. An SVG's script is not run in an img (Chrome 131, 24 November 2026). Every
+// response here is nosniff, a route that needs
 // a token gets none from a page (there are no cookies), and a GET of a public route is what any page anywhere can
 // already cause. Nothing is fetched from another origin. Every response names the commit it was built from
 // (tape-version), the step accounting that compiler builds (tape-step-version) and the Worker version

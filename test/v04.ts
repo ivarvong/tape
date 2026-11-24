@@ -291,5 +291,11 @@ fn shown(found: Option[Account]) -> Buf {
     'SELECT id, balance FROM accounts WHERE id = :id AND balance > 0',
   );
 }
+const sheet = read('mcp/src/serve.ts');
+same(
+  'the cheat sheet still says write_json writes records, Lists and {"Sets": …}',
+  sheet.includes('records, Lists') && sheet.includes('{"Sets":'),
+  true,
+);
 
 finish();
