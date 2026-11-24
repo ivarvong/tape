@@ -210,11 +210,20 @@ export async function run(
     out = reply({ error: STOPPED, outcome: 'unknown', reason: messageOf(e) }, 503);
   }
   rt.finish(out.status);
+  const storeIt = (): Promise<string | null> =>
+    store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);
+  // a trace link opens the run's whole log (its SQL, its calls): it is the operator's, so a public answer has none.
+  // With no link in the answer, the router's record is stored after the reply (it was a 37 ms call before it, trace
+  // 93a674291ab3e88eda1e14af41a0cddb); a jepsen-* account's still is stored before, as its faults are checked so.
+  if (open && fault === null && !FAULTY.test(account)) {
+    for (const h of ['tape-request-id', 'tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
+    ctx.waitUntil(storeIt());
+    return out;
+  }
   const lost =
     fault?.kind === 'trace_store_error'
       ? "jepsen: the router's record could not be stored (injected)"
-      : await store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);
-  // a trace link opens the run's whole log (its SQL, its calls): it is the operator's, so a public answer has none
+      : await storeIt();
   if (open) {
     for (const h of ['tape-request-id', 'tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
     return out;
