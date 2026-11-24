@@ -101,6 +101,54 @@ ok(
   );
 }
 
+// a body that names a state is sent the machine's states: a job moved by `{"state": "running"}` reaches done (it
+// was sent seed words and names, `"ann"`, and only ever answered 400)
+{
+  const jobs = `migration 1 "jobs" {
+  CREATE TABLE jobs(id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT 'queued');
+  INSERT INTO jobs(id) VALUES (1)
+}
+
+machine jobs.state {
+  "queued" -> "running"
+  "running" -> "done"
+}
+
+type Change { Change(state: View) }
+type Job { Job(id: Int, state: View) }
+
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(method: "POST", path: "/jobs/" ++ decimal(id), body) -> changed(id, body)
+    _ -> respond(status: 404)
+  }
+}
+
+fn changed(id: Int, body: View) -> Buf {
+  let Ok(value: Change(state)) = decode(json: body, as: Change) else -> respond(status: 400)
+  match state {
+    "running" -> shown(m: sql_move(row: Job, query: "UPDATE jobs SET state = 'running' WHERE id = :id AND state = 'queued' RETURNING *", id))
+    "done" -> shown(m: sql_move(row: Job, query: "UPDATE jobs SET state = 'done' WHERE id = :id AND state = 'running' RETURNING *", id))
+    _ -> respond(status: 400)
+  }
+}
+
+fn shown(m: Move[Job]) -> Buf {
+  match m {
+    Moved(value) -> respond(status: 200) |> write_json(value)
+    Raced(now) -> respond(status: 409)
+    NoRow -> respond(status: 404)
+  }
+}
+`;
+  const r = await search(autoOf([{ name: 'jobs', text: jobs }]).model, { runs: 150 });
+  ok(
+    "a state asked for in a body is one of the machine's: the job reaches done",
+    r.ok && r.reached.includes('jobs.jobs=done'),
+    r.ok ? r.reached.join(' ') : wrongIn(r),
+  );
+}
+
 // a body with a Dec in it is sent, decoded and run: a debit that answers 409 without its rollback keeps its claim
 {
   const pot = (refused: string): string => `migration 1 "pot" {

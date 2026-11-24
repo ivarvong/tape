@@ -48,5 +48,11 @@ export function dictionaryOf(texts: readonly string[]): Dictionary {
         });
       }
     }
+  // the states a machine declares, under its column's name: a request that asks for a state (`{"state": "outage"}`)
+  // names one the program knows
+  for (const source of texts)
+    for (const [, , column = '', moves = ''] of source.matchAll(MACHINE))
+      for (const [, state = ''] of moves.matchAll(/"([^"]*)"/g)) put(column, state);
   return dict;
 }
+const MACHINE = /^machine\s+(\w+)\.(\w+)\s*\{([^}]*)\}/gm;
