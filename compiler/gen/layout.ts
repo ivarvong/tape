@@ -63,6 +63,8 @@ export function layouts(prog: Program, wire: Wire): Layouts {
     [...prog.types.values()].map((d): [string, Set<string>] => {
       const used = new Set<string>();
       for (const v of d.variants) for (const f of v.fields) names(f.type, used);
+      // a type parameter names no type: Option's `value: T` is not a program's type T (which was boxed for it)
+      for (const p of d.params) used.delete(p);
       return [d.name, used];
     }),
   );

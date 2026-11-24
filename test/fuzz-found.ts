@@ -158,4 +158,40 @@ fn handle(raw: View, db: Sql) -> Buf {
   );
 }
 
+// fuzz/sql.ts, 23 November 2026: a program's type named as a type parameter of std's (T of Option[T] and List[T], V
+// of Map[V], E of Result[T, E]) was taken for one that contains itself, so it was boxed: Option's field `value: T`
+// was read as the program's T (compiler/gen/layout.ts layouts). A boxed type is not a row type, so
+// `type T { T(id: Int, region: Option[View]) }` as a query's row was C09 ("T cannot be a row type"), where the same
+// type named Note compiles.
+{
+  const rowProgram = (name: string): string => `migration 1 "t" {
+  CREATE TABLE t(id INTEGER PRIMARY KEY, region TEXT)
+}
+
+type ${name} {
+  ${name}(id: Int, region: Option[View])
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let 1 = sql_exec(query: "INSERT INTO t(region) VALUES (:raw)", raw, repeat: True) else -> respond(status: 500)
+  respond(status: 200) |> write_rows(rows: sql_all(row: ${name}, query: "SELECT * FROM t ORDER BY id"))
+}
+`;
+  const answers = ['T', 'Note'].map(name => {
+    const b = compile([...std, { name: 'row.tape', text: rowProgram(name) }]);
+    if (b.wasm === null) return `refused: ${b.errors[0]?.code} ${b.errors[0]?.message}`;
+    const app = instantiate(new WebAssembly.Module(b.wasm), { sql: nodeSql() });
+    return (
+      dec
+        .decode(app.handle(enc.encode('x')))
+        .split('\n')
+        .at(-1) ?? ''
+    );
+  });
+  same('a row type named T reads its rows as one named Note does', answers, [
+    '[{"id":1,"region":"x"}]',
+    '[{"id":1,"region":"x"}]',
+  ]);
+}
+
 finish();
