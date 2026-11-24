@@ -1,10 +1,11 @@
-// compiler/math/decimal.ts: parse_float's fast path, in the module. For text of the form `-?digits(.digits)?` (a
-// digit on at least one side of the point) whose digits, the point left out, are an integer m <= 2^53, with at most
+// compiler/math/decimal.ts: parse_float's fast path, in the module. For text of the form `-?(0|[1-9]digits)(.digits)?`
+// (JSON's number syntax with no exponent) whose digits, the point left out, are an integer m <= 2^53, with at most
 // 22 digits after the point: m and 10^k are both exact doubles, so m / 10^k is one IEEE division, correctly rounded
 // (roundTiesToEven), and that is ECMA-262's StringToNumber of the text (Clinger, "How to Read Floating Point Numbers
 // Accurately", PLDI 1990, §3). The sign is put on afterwards, so -0 and -0.0 are -0. Anything else (an exponent, a
 // `+`, white space, more digits, the empty text) gives NaN, which this never gives otherwise, and the caller asks
-// the host's float_of (compiler/gen/intrinsic.ts parseFloat). test/float-of.ts holds it to Number(text).
+// the host's float_of (compiler/gen/intrinsic.ts parseFloat), which reads JSON's number syntax and nothing else.
+// test/float-of.ts holds both to that syntax read by Number.
 import {
   doubles,
   F64,
@@ -75,7 +76,12 @@ const parseDecimal: Def = {
         );
         b.set(at, add(at, i(1)));
       });
-      b.brIf('slow', or(eqz(digits), gtU(places, i(MAX_PLACES))));
+      // JSON's number syntax, which the host also holds the rest to: a digit before the point, one after a point,
+      // and no leading zero ("05", ".5" and "5." are for the host, which answers NaN)
+      const before = b.let(sub(digits, places));
+      b.brIf('slow', or(eqz(before), and(point, eqz(places))));
+      b.brIf('slow', and(gtU(before, i(1)), eq(loadB(add(b.p(0), minus)), i(48))));
+      b.brIf('slow', gtU(places, i(MAX_PLACES)));
       const x = b.let(div(toFU(m), loadF(add(b.data(doubles(POWERS)), shl(places, i(3))))));
       b.ret(select(minus, neg(x), x));
     });

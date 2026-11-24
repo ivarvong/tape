@@ -71,4 +71,25 @@ same(
   [['0.30000000000000004 -1e+21 3', '0.30000000000000004 -1e+21 3']],
 );
 
+// fuzz/numbers.ts, 23 November 2026: parse_float read its text with JavaScript's Number, which takes the empty text
+// and white space as 0 and reads 0x, 0b and 0o in their bases: parse_float("") was Some(0f), " 12 " Some(12f),
+// "0x1F" Some(31f). It reads a number in JSON's syntax, as parse_dec does, and nothing else.
+{
+  const texts = ['', ' 12 ', '\t2', '0x1F', '0b11', '0o7', '+1', '.5', '5.', '05', '-', 'Infinity', '﻿1', '1e5'];
+  same(
+    'parse_float of text that is not a number in JSON syntax is None, compiled and interpreted',
+    both(
+      `fn handle(raw: View) -> Buf {
+  match parse_float(raw) {
+    Some(value: x) -> buf() |> write_float(value: x)
+    None -> buf() |> append(view: "none")
+  }
+}
+`,
+      texts,
+    ),
+    texts.map(t => (t === '1e5' ? ['100000', '100000'] : ['none', 'none'])),
+  );
+}
+
 finish();

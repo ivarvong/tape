@@ -389,11 +389,11 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'atan2':
     case 'pow':
       return finite(mathFn(name)(asFloat(a[0]), asFloat(a[1])));
-    // the Float nearest the decimal number, as the host's float_of; None when it is not finite or not a number
+    // the Float nearest the number, as the host's float_of; None when it is not finite or not a number in JSON's
+    // syntax (Number also reads the empty text, white space, +1, .5, 5., 05, 0x…, 0b…, 0o… and Infinity)
     case 'parse_float': {
       const t = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true }).decode(asBytes(a[0]));
-      // a decimal number only: Number also reads "", spaces, hex and Infinity
-      const x = /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(t) ? Number(t) : NaN;
+      const x = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(t) ? Number(t) : NaN;
       return Number.isFinite(x) ? adt('Some', { value: x }) : adt('None');
     }
     // the first byte at or after `at` that is below 32, 128 or more, a quote or a backslash

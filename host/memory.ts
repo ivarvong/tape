@@ -41,6 +41,21 @@ export const copyOut = (m: Mem, ptr: number, len: number): Uint8Array<ArrayBuffe
 export const textAt = (m: Mem, ptr: number, len: number): string => utf8.decode(copyOut(m, ptr, len));
 /** The same text, decoded where it lies: no copy, for a host call made once per value (float_of). */
 export const textIn = (m: Mem, ptr: number, len: number): string => utf8.decode(views(m).u.subarray(ptr, ptr + len));
+/**
+ * float_of, for parse_float: the nearest Float of a number in JSON's syntax, as parse_dec reads one (ECMA-262
+ * StringToNumber, correctly rounded), NaN for any other text. Number alone also reads the empty text and white space
+ * as 0, `+1`, `.5`, `5.` and `05`, `0x1F`, `0b101` and `0o17` in their bases, and `Infinity`, and a decoder's default
+ * drops a leading U+FEFF: parse_float("") was Some(0f), parse_float(" 12 ") Some(12f) and parse_float("0x1F")
+ * Some(31f) until 23 November 2026 (fuzz/numbers.ts).
+ */
+export const floatOf = (m: Mem, ptr: number, len: number): number => floatOfBytes(views(m).u.subarray(ptr, ptr + len));
+/** float_of of bytes, for the hosts tests stand up. */
+export const floatOfBytes = (b: Uint8Array): number => {
+  const text = withBom.decode(b);
+  return JSON_NUMBER.test(text) ? Number(text) : NaN;
+};
+const withBom = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+const JSON_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
 /** Bytes copied into new room in the module; where they are. */
 export function copyIn(m: Mem, data: Uint8Array): number {
   const at = m.alloc(data.length);

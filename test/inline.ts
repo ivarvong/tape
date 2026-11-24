@@ -15,6 +15,7 @@ import { meter } from '../compiler/gen/meter.ts';
 import type { Fn } from '../compiler/gen/inline.ts';
 import { gen as csvGen } from '../bench/csv-gen.ts';
 import { link } from '../host/run.ts';
+import { floatOfBytes } from '../host/memory.ts';
 import { pack } from '../host/log.ts';
 import type { Observed } from '../host.ts';
 import { program } from '../proof/gen.ts';
@@ -45,7 +46,7 @@ function instance(bytes: Uint8Array<ArrayBuffer>): Run {
     return at;
   };
   const floatOf = (ptr: number, len: number): number =>
-    Number(dec.decode(new Uint8Array(late.memory?.buffer ?? new ArrayBuffer(0), ptr, len)));
+    floatOfBytes(new Uint8Array(late.memory?.buffer ?? new ArrayBuffer(0), ptr, len));
   const { exports } = new WebAssembly.Instance(new WebAssembly.Module(bytes), {
     env: { float_text: floatText, float_of: floatOf },
   });

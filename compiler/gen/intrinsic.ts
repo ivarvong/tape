@@ -484,9 +484,9 @@ function scanPlain(u: Use): Type {
 }
 
 /**
- * parse_float(text): Some of the Float nearest the decimal number `text` (the host's env.float_of: ECMA-262's
- * StringToNumber of a text that is a sign, digits with or without a point and an exponent; correctly rounded, the same
- * everywhere), or None when that is not finite (1e400) or `text` is not such a number ("", " 1", "0x10"). A
+ * parse_float(text): Some of the Float nearest the number `text` (the host's env.float_of, host/memory.ts floatOf:
+ * ECMA-262's StringToNumber of a number in JSON's syntax; correctly rounded, the same everywhere), or None when that
+ * is not finite (1e400) or `text` is not such a number ("", " 1", "0x10", "+1", ".5", "05"). A
  * plain decimal of at most 2^53 in its digits and 22 after the point is read in the module, exactly as the host would;
  * the rest is the host's.
  */

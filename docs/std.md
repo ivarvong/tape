@@ -472,7 +472,7 @@ Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (wh
 parse_float(text: View) -> Option[Float]
 ```
 
-The Float nearest the decimal number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a decimal number: a sign, digits with or without a point (`".5"`, `"1."`), an exponent, and nothing else, so `""`, `" 1"`, `"0x10"` and `"Infinity"` are None. decode reads a Float field with it.
+The Float nearest the number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number in the syntax of JSON, as `parse_dec` reads one (not `""`, white space, `+1`, `.5`, `5.`, `05`, `0x1F` or `Infinity`). decode reads a Float field with it.
 
 ### builtin scan_plain
 

@@ -6,6 +6,7 @@ import { compile } from '../compiler.ts';
 import type { Built, Options, Source } from '../compiler.ts';
 import type { Problem } from '../compiler/common.ts';
 import { std } from '../std.ts';
+import { floatOfBytes } from '../host/memory.ts';
 
 export { std };
 
@@ -77,7 +78,7 @@ export function bare(module: WebAssembly.Module): Bare {
   const floatOf = (ptr: number, len: number): number => {
     const { memory } = late.exports ?? {};
     if (!(memory instanceof WebAssembly.Memory)) throw new TypeError('not linked');
-    return Number(new TextDecoder().decode(new Uint8Array(memory.buffer, ptr, len)));
+    return floatOfBytes(new Uint8Array(memory.buffer, ptr, len));
   };
   const { exports } = new WebAssembly.Instance(module, { env: { float_text: floatText, float_of: floatOf } });
   late.exports = exports;
