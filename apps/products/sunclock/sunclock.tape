@@ -19,7 +19,7 @@ type Sky {
     elevation: Float
   )
   AllDay(noon: Float, elevation: Float)
-  AllNight(noon: Float, elevation: Float)
+  AllNight(noon: Float, elevation: Float, dawn: Option[Float], dusk: Option[Float])
 }
 
 type Event { Event(utc: View, local: View) }
@@ -257,7 +257,12 @@ fn sky(p: Place) -> Sky {
     }
     None -> match {
       elevation > 0f -> AllDay(noon, elevation)
-      else -> AllNight(noon, elevation)
+      else -> AllNight(
+        noon,
+        elevation,
+        dawn: event(p, zenith: 96f, side: -1f, guess: noon),
+        dusk: event(p, zenith: 96f, side: 1f, guess: noon)
+      )
     }
   }
 }
@@ -295,17 +300,17 @@ fn answer(p: Place) -> Answer {
       day_minutes: 1440,
       noon_elevation: tenths(x: elevation)
     )
-    AllNight(noon, elevation) -> Answer(
+    AllNight(noon, elevation, dawn, dusk) -> Answer(
       lat: p.lat,
       lon: p.lon,
       date: date_of(day: p.day),
       tz: p.tz,
       sky: "down all day",
-      dawn: None,
+      dawn: stamp(p, found: dawn),
       sunrise: None,
       noon: at(p, minutes: noon),
       sunset: None,
-      dusk: None,
+      dusk: stamp(p, found: dusk),
       day_minutes: 0,
       noon_elevation: tenths(x: elevation)
     )
@@ -507,7 +512,7 @@ fn bar(out: Buf, s: Sky, tz: Float) -> Buf {
   let shift = tz * 60f
   out
     |> append(view: "<svg viewBox=\"0 0 720 64\" role=img aria-label=\"daylight over the day\">")
-    |> append(view: "<rect class=night x=0 y=0 width=720 height=40 rx=6/>")
+    |> append(view: "<rect class=night x=0 y=0 width=720 height=40 rx=6></rect>")
     |> spans(s, shift)
     |> ticks(hour: 0)
     |> append(view: "</svg>")
@@ -523,6 +528,8 @@ fn spans(out: Buf, s: Sky, shift: Float) -> Buf {
     )
       |> band(class: "day", from: rise + shift, to: set + shift)
     AllDay -> out |> band(class: "day", from: 0f, to: 1440f)
+    AllNight(dawn: Some(value: d), dusk: Some(value: k)) -> out
+      |> band(class: "twi", from: d + shift, to: k + shift)
     AllNight -> out
   }
 }
@@ -547,16 +554,24 @@ fn band(out: Buf, class: View, from: Float, to: Float) -> Buf {
 fn rect(out: Buf, class: View, from: Float, to: Float) -> Buf {
   let x = tenths(x: from / 2f)
   let w = tenths(x: (to - from) / 2f)
-  out |> append(view: "<rect class=\(class) x=\(x) y=0 width=\(w) height=40/>")
+  out |> append(view: "<rect class=\(class) x=\(x) y=0 width=\(w) height=40></rect>")
+}
+
+// The first label starts at the left edge and the last ends at the right, so neither is cut off.
+fn anchor(hour: Int) -> View {
+  match hour {
+    0 -> "start"
+    24 -> "end"
+    _ -> "middle"
+  }
 }
 
 fn ticks(out: Buf, hour: Int) -> Buf {
   match {
     hour > 24 -> out
     else -> out
-      |> append(view: "<line class=tick x1=\(hour * 30) x2=\(hour * 30) y1=40 y2=46/>")
-      |> append(view: "<text class=lbl x=\(min(a: max(a: hour * 30, b: 8), b: 712)) y=60 \
-          text-anchor=middle>")
+      |> append(view: "<line class=tick x1=\(hour * 30) x2=\(hour * 30) y1=40 y2=46></line>")
+      |> append(view: "<text class=lbl x=\(hour * 30) y=60 text-anchor=\(anchor(hour))>")
       |> append(view: "\(two(n: hour % 24)):00</text>")
       |> ticks(hour: hour + 3)
   }
