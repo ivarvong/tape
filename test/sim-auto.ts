@@ -397,4 +397,32 @@ fn create(body: View) -> Buf {
   ok('alone, that invariant cannot be run and is passed over', lone.ok || !/is charged its amount/.test(wrongIn(lone)));
 }
 
+// a refined type in a path (`"/s/" ++ Slug(slug)`) is a word the requests fill: in apps/products/shortlinks,
+// webhook-inbox and ratelimit every such route was "not read", and tape sim sent only GET /
+{
+  const slugs = autoOf([
+    {
+      name: 'links',
+      text: `type Slug = View where len(self) >= 2 and len(self) <= 32
+type Box = View where len(self) >= 1
+
+fn handle(raw: View) -> Buf {
+  match request(raw) {
+    Request(method: "GET", path: "/s/" ++ Slug(slug)) -> respond(status: 200) |> append(view: slug)
+    Request(method: "GET", path: "/api/" ++ Box(box) ++ "/" ++ decimal(seq)) -> respond(status: 200) |> append(view: "\\(box) \\(seq)")
+    _ -> respond(status: 404)
+  }
+}
+`,
+    },
+  ]);
+  const seen = slugs.routes.map(r => r.path.map(p => p.lit ?? (p.int === undefined ? `<${p.word}>` : '<n>')).join(''));
+  ok(
+    'a refined type in a path is a word',
+    seen.includes('/s/<slug>') && seen.includes('/api/<box>/<n>'),
+    seen.join(' | '),
+  );
+  ok('and no arm is left unread', slugs.unread.length === 0, JSON.stringify(slugs.unread));
+}
+
 finish();

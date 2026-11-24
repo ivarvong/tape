@@ -17,18 +17,19 @@ const within = (e: Expr): Expr[] => [e, ...partsOf(e).flatMap(within)];
 const patternsIn = (p: Pattern): Pattern[] => [p, ...patternParts(p).flatMap(patternsIn)];
 const nameOf = (p: Pattern): string | undefined => ('name' in p ? p.name : undefined);
 
-// A path pattern as parts. null when this cannot say what the pattern matches.
-function pathParts(pattern: Pattern | undefined): Part[] | null {
+// A path pattern as parts. null when this cannot say what the pattern matches. A refined type (`Slug(slug)`) is a
+// word, as its binding would be: the words a request fills in either pass its condition or the arm is not taken.
+function pathParts(pattern: Pattern | undefined, prog: Program): Part[] | null {
   if (!pattern) return null;
   switch (pattern.k) {
     case 'str':
       return [{ lit: text(pattern.bytes) }];
     case 'prefix': {
-      const rest = pathParts(pattern.rest);
+      const rest = pathParts(pattern.rest, prog);
       return rest && [{ lit: text(pattern.bytes) }, ...rest];
     }
     case 'suffix': {
-      const head = pathParts(pattern.head);
+      const head = pathParts(pattern.head, prog);
       return head && [...head, { lit: text(pattern.bytes) }];
     }
     case 'bind':
@@ -40,11 +41,20 @@ function pathParts(pattern: Pattern | undefined): Part[] | null {
           : { word: nameOf(pattern.sub) ?? pattern.name },
       ];
     case 'as':
-      return pathParts(pattern.pat);
+      return pathParts(pattern.pat, prog);
+    case 'ctor': {
+      const [only] = pattern.subs;
+      const refined = prog.types.get(pattern.name)?.refine !== undefined && pattern.subs.length === 1;
+      return refined && only ? [{ word: nameOf(only.pat) ?? pattern.name.toLowerCase() }] : null;
+    }
+    case 'split': {
+      // P ++ "sep" ++ Q: the first sep splits it, so P is one part that holds no sep
+      const head = pathParts(pattern.head, prog),
+        rest = pathParts(pattern.rest, prog);
+      return head && rest && [...head, { lit: text(pattern.bytes) }, ...rest];
+    }
     case 'any':
     case 'int':
-    case 'split':
-    case 'ctor':
       return null;
     default:
       return unreachable(pattern, 'pattern');
@@ -124,7 +134,7 @@ function routeOf(prog: Program, decodes: Decodes, arm: PatArm): Route | 'unread'
   const request = arm.pat.k === 'ctor' && arm.pat.name === 'Request' ? arm.pat : null;
   const field = (name: string): Pattern | undefined => request?.subs.find(s => s.field === name)?.pat;
   const pathPattern = request ? field('path') : arm.pat;
-  const path = pathParts(pathPattern);
+  const path = pathParts(pathPattern, prog);
   const first = path?.[0]?.lit;
   if (!path || first?.startsWith('/') !== true) return holdsSlash(pathPattern) && !(path && first) ? 'unread' : null;
   const method = field('method');
