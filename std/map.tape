@@ -77,6 +77,41 @@ fn put[V](map: Map[V], key: View, value: V) -> Map[V] {
   }
 }
 
+// A map with the value under `key` replaced by `by` of it, or set to `by(from)` when the key is not there: one walk
+// down the tree where get and then put take two, and a path whose heights did not change is not balanced again. Counting words is `put_with(map: counts, key: word, from: 0, by: plus_one)`.
+//
+//   > Empty |> put_with(key: "a", from: 0, by: fn(n: Int) -> Int { n + 1 }) |> put_with(key: "a", from: 0, by: fn(n: Int) -> Int { n + 1 }) |> get(key: "a")
+//   Some(value: 2)
+//   > Empty |> put_with(key: "a", from: 10, by: fn(n: Int) -> Int { n * 2 }) |> get(key: "a")
+//   Some(value: 20)
+fn put_with[V](map: Map[V], key: View, from: V, by: Fn[V, V]) -> Map[V] {
+  match map {
+    Empty -> Node(left: Empty, key, value: by(from), right: Empty, height: 1)
+    Node(left, key: k, value: v, right, height) -> {
+      let order = compare(a: key, b: k)
+      match {
+        order < 0 -> {
+          let was = height(map: left)
+          let l = put_with(map: left, key, from, by)
+          match {
+            height(map: l) == was -> Node(left: l, key: k, value: v, right, height)
+            else -> balance(left: l, key: k, value: v, right)
+          }
+        }
+        order > 0 -> {
+          let was = height(map: right)
+          let r = put_with(map: right, key, from, by)
+          match {
+            height(map: r) == was -> Node(left, key: k, value: v, right: r, height)
+            else -> balance(left, key: k, value: v, right: r)
+          }
+        }
+        else -> Node(left, key: k, value: by(v), right, height)
+      }
+    }
+  }
+}
+
 // How many keys.
 //
 //   > Empty |> put(key: "a", value: 1) |> put(key: "b", value: 2) |> put(key: "a", value: 3) |> count

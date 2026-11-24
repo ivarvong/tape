@@ -1,5 +1,5 @@
-// words.tape: count the words in a text with the immutable Map. Each step replaces one entry; because nothing
-// else can see the old map, its memory is reused and the loop allocates almost nothing.
+// words.tape: count the words in a text with the immutable Map. Each step replaces one entry (put_with: one walk
+// down the tree); because nothing else can see the old map, its memory is reused and the loop allocates almost nothing.
 
 fn handle(raw: View) -> Buf {
   report(counts: words(rest: raw, counts: Empty))
@@ -12,20 +12,18 @@ fn words(rest: View, counts: Map[Int]) -> Map[Int] {
     start == len(rest) -> counts
     else -> words(
       rest: slice(v: rest, from: end, to: len(rest)),
-      counts: put(
+      counts: put_with(
         map: counts,
         key: slice(v: rest, from: start, to: end),
-        value: seen(found: get(map: counts, key: slice(v: rest, from: start, to: end))) + 1
+        from: 0,
+        by: plus_one
       )
     )
   }
 }
 
-fn seen(found: Option[Int]) -> Int {
-  match found {
-    Some(value) -> value
-    None -> 0
-  }
+fn plus_one(n: Int) -> Int {
+  n + 1
 }
 
 fn letter(byte: Int) -> Bool {

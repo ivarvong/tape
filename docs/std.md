@@ -219,7 +219,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`join`](#fn-join)
-- [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`count`](#fn-count)
+- [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 
 ## Built-ins
@@ -1600,6 +1600,21 @@ A map with `key` set to `value`; the old map is unchanged. Setting a key again r
 ```
 > Empty |> put(key: "a", value: 1) |> put(key: "a", value: 2) |> get(key: "a")
 Some(value: 2)
+```
+
+### fn put_with
+
+```tape
+fn put_with[V](map: Map[V], key: View, from: V, by: Fn[V, V]) -> Map[V]
+```
+
+A map with the value under `key` replaced by `by` of it, or set to `by(from)` when the key is not there: one walk down the tree where get and then put take two, and a path whose heights did not change is not balanced again. Counting words is `put_with(map: counts, key: word, from: 0, by: plus_one)`.
+
+```
+> Empty |> put_with(key: "a", from: 0, by: fn(n: Int) -> Int { n + 1 }) |> put_with(key: "a", from: 0, by: fn(n: Int) -> Int { n + 1 }) |> get(key: "a")
+Some(value: 2)
+> Empty |> put_with(key: "a", from: 10, by: fn(n: Int) -> Int { n * 2 }) |> get(key: "a")
+Some(value: 20)
 ```
 
 ### fn count

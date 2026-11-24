@@ -81,6 +81,71 @@ T(
   ),
   1000 * 1000000 + 2 * 1000,
 );
+// put_with is get then put in one walk: the same map (keys, values, order) for the same keys, and a tree that stays
+// balanced, with every stored height right, on keys that repeat (step 7 mod 1009 over 3,000: each key 2-3 times)
+// and on sorted keys (step 1). sig is a checksum of the in-order walk; avl is the height, or -1 when a node breaks
+// the AVL rule or stores a wrong height.
+const WITH = `fn plus_one(n: Int) -> Int {
+  n + 1
+}
+fn by_get_put(n: Int, step: Int, map: Map[Int]) -> Map[Int] {
+  match {
+    n == 0 -> map
+    else -> {
+      let key = name(n: (n * step) % 1009)
+      by_get_put(n: n - 1, step, map: put(map, key, value: or_zero(found: get(map, key)) + 1))
+    }
+  }
+}
+fn by_put_with(n: Int, step: Int, map: Map[Int]) -> Map[Int] {
+  match {
+    n == 0 -> map
+    else -> by_put_with(n: n - 1, step, map: put_with(map, key: name(n: (n * step) % 1009), from: 0, by: plus_one))
+  }
+}
+fn sig(map: Map[Int], acc: Int) -> Int {
+  match map {
+    Empty -> acc
+    Node(left, key, value, right) -> sig(map: right, acc: (sig(map: left, acc) * 31 + value * 1009 + len(key)) % 1000000007)
+  }
+}
+fn avl(map: Map[Int]) -> Int {
+  match map {
+    Empty -> 0
+    Node(left, right, height) -> {
+      let l = avl(map: left)
+      let r = avl(map: right)
+      match {
+        l < 0 or r < 0 -> 0 - 1
+        l - r > 1 or r - l > 1 -> 0 - 1
+        height != max(a: l, b: r) + 1 -> 0 - 1
+        else -> height
+      }
+    }
+  }
+}
+`;
+for (const step of [7, 1])
+  T(
+    `map: put_with is get then put, and stays balanced (step ${step})`,
+    run(
+      MAP +
+        WITH +
+        `fn f(n: Int) -> Int {
+  let a = by_get_put(n, step: ${step}, map: Empty)
+  let b = by_put_with(n, step: ${step}, map: Empty)
+  match {
+    sig(map: a, acc: 0) != sig(map: b, acc: 0) -> 1
+    count(map: a) != count(map: b) -> 2
+    avl(map: b) < 0 -> 3
+    avl(map: b) > 12 -> 4
+    else -> 0
+  }
+}`,
+      [3000n],
+    ),
+    0,
+  );
 T(
   'map stays balanced on sorted inserts',
   Number(

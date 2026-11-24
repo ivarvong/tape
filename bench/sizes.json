@@ -1,18 +1,18 @@
 {
   "bench/money.tape": {
-    "bytes": 31397,
+    "bytes": 31484,
     "functions": 121
   },
   "bench/suite/crud.tape": {
-    "bytes": 31362,
+    "bytes": 31449,
     "functions": 116
   },
   "bench/suite/ledger.tape": {
-    "bytes": 31577,
+    "bytes": 31664,
     "functions": 117
   },
   "bench/suite/webhook.tape": {
-    "bytes": 31822,
+    "bytes": 31909,
     "functions": 116
   },
   "examples/bump.tape": {
@@ -20,7 +20,7 @@
     "functions": 119
   },
   "examples/cart.tape": {
-    "bytes": 27461,
+    "bytes": 27548,
     "functions": 112
   },
   "examples/counter.tape": {
@@ -108,7 +108,7 @@
     "functions": 106
   },
   "examples/words.tape": {
-    "bytes": 7764,
+    "bytes": 8009,
     "functions": 29
   }
 }
