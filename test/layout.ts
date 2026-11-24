@@ -95,5 +95,28 @@ same(
   format(body(`buf() |> append(view: ${arg}) |> append(view: "x")`)),
   `fn handle(raw: View) -> Buf {\n  buf()\n    |> append(\n      view: ${arg}\n    )\n    |> append(view: "x")\n}\n`,
 );
+same(
+  'a pipeline with a block in it is broken before each of its `|>`s, though every line fits',
+  format(
+    body(
+      'buf() |> append(view: "a") |> append(view: match {\n    n > 0 -> "b"\n    else -> "c"\n  }) |> append(view: "d")',
+    ),
+  ),
+  'fn handle(raw: View) -> Buf {\n  buf()\n    |> append(view: "a")\n    |> append(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n    |> append(view: "d")\n}\n',
+);
+same(
+  'and so is one with two blocks, whose middle line closes one and opens the other',
+  format(
+    body(
+      'buf() |> f(view: match {\n    n > 0 -> "b"\n    else -> "c"\n  }) |> f(view: match {\n    n > 0 -> "b"\n    else -> "c"\n  })',
+    ),
+  ),
+  'fn handle(raw: View) -> Buf {\n  buf()\n    |> f(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n    |> f(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n}\n',
+);
+same(
+  'and a pipeline inside an argument is not',
+  format(body('f(a: buf() |> g(by: fn(x: Int) -> Int {\n    x\n  }) |> h)')),
+  body('f(a: buf() |> g(by: fn(x: Int) -> Int {\n    x\n  }) |> h)'),
+);
 
 finish();

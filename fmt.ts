@@ -294,7 +294,8 @@ function breaksOf(toks: readonly Tok[], indent: number): number[] {
   // a comment runs to the end of its line: such a line is left as it is
   if (toks.some(x => x.t === 'comment' || x.t === 'sql')) return [];
   const depth = depths(toks);
-  const pipes = toks.flatMap((x, k) => (k > 0 && depth[k] === 0 && x.t === 'op' && x.v === '|>' ? [k] : []));
+  // the step's own `|>`s: at depth 0, or after the closers a line starts with (`}) |> append(…)`)
+  const pipes = toks.flatMap((x, k) => (k > 0 && depth[k] === baseOf(toks) && x.t === 'op' && x.v === '|>' ? [k] : []));
   if (pipes.length > 0) return pipes;
   // a long condition: before each `and` and `or` outside brackets, which carry the line on as `|>` does
   const logic = toks.flatMap((x, k) =>
@@ -334,11 +335,51 @@ function carriedIn(toks: readonly Tok[], indent: number): Tok[] | null {
   return broken === text.v ? null : toks.map((x, at) => (at === k ? { t: 'str', v: broken } : x));
 }
 
+/** The depth of a line's own tokens: below 0 by the closers it starts with. */
+function baseOf(toks: readonly Tok[]): number {
+  let base = 0;
+  for (let k = 0; k < toks.length && closes(toks[k]); k++) base--;
+  return base;
+}
+/**
+ * The `|>`s of a line that is part of a step spanning lines (it leaves a bracket open, or closes one an earlier line
+ * opened), where the `|>` is the step's own, in no round or square bracket (`inside`, the innermost bracket open at
+ * each token): a pipeline with a block in it (`|> append(view: match {` … `})`) is broken before each `|>`, however
+ * narrow its lines, so each stage of it starts a line as it does in a pipeline that is only too wide.
+ */
+function spannedPipes(toks: readonly Tok[], inside: readonly (string | undefined)[]): number[] {
+  if (toks.some(x => x.t === 'comment' || x.t === 'sql')) return [];
+  // a bracket the line closes and did not open, or opens and does not close (`}) |> f(view: match {` does both)
+  const depth = depths(toks);
+  const low = Math.min(0, ...depth);
+  const last = toks.at(-1);
+  if (low === 0 && (depth.at(-1) ?? 0) + (opens(last) ? 1 : 0) === 0) return [];
+  return toks.flatMap((x, k) =>
+    k > 0 && x.t === 'op' && x.v === '|>' && (inside[k] === undefined || inside[k] === '{') ? [k] : [],
+  );
+}
+/** For each token, the innermost bracket open where it stands. */
+function insideOf(toks: readonly Tok[]): (string | undefined)[] {
+  const open: string[] = [];
+  return toks.map(x => {
+    if (closes(x)) open.pop();
+    const at = open.at(-1);
+    if (opens(x)) open.push(x.v);
+    return at;
+  });
+}
+
 /** One pass: a line break put in at every place a line wider than WIDTH can be broken; null when there is none. */
 function brokenOnce(toks: readonly Tok[]): Tok[] | null {
+  const inside = insideOf(toks);
   const starts = new Set(
     layOut(toks).flatMap(l =>
-      l && widthOf(l) > WIDTH ? breaksOf(toks.slice(l.from, l.to), l.indent).map(k => l.from + k) : [],
+      !l
+        ? []
+        : (widthOf(l) > WIDTH
+            ? breaksOf(toks.slice(l.from, l.to), l.indent)
+            : spannedPipes(toks.slice(l.from, l.to), inside.slice(l.from, l.to))
+          ).map(k => l.from + k),
     ),
   );
   return starts.size === 0 ? null : toks.flatMap((x, k) => (starts.has(k) ? [NL, x] : [x]));
