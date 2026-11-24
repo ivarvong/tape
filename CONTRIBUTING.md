@@ -98,6 +98,7 @@ the language has since removed) is hashed as `threw:`, so it still compares agai
 ## Other checks run by hand
 
 ```sh
+node fuzz/campaign.ts --seconds 3600 --jobs 10        # every fuzz target sharded across processes (findings under ~/.local/state/tape/fuzz); test/fuzz.ts runs a fixed slice of each in the gate
 node proof/mutate.ts 40 1 --files rules/,sql/ --all   # small changes to the rules, each run against every test (about a minute each)
 node service/jepsen/selftest.ts                       # the fault harnesses' checkers against fixtures
 node service/model/selftest.ts                        # the protocol models, with planted bugs

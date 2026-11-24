@@ -358,7 +358,8 @@ function reference(type: string, bytes: Uint8Array): string {
 }
 
 // ---- the documents
-let seed = 20261123;
+// fuzz/campaign.ts runs this at other seeds and sizes (FUZZ_SEED, FUZZ_N); the gate at these
+let seed = Number(process.env['FUZZ_SEED'] ?? 20261123);
 const rand = (n: number): number => {
   seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
   return (seed >>> 8) % n;
@@ -480,7 +481,7 @@ if (!built.wasm) throw new Error(built.errors.map(e => `${e.line} ${e.code} ${e.
 const app = instantiate(new WebAssembly.Module(built.wasm), { log: false });
 const it = interpret(sources);
 const dec = new TextDecoder();
-const N = 10000;
+const N = Number(process.env['FUZZ_N'] ?? 10000);
 let agree = 0,
   interpAgree = 0,
   interpRuns = 0,
