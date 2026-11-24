@@ -282,10 +282,12 @@ function pipe(c: Cursor, l: Expr, t: Token): Expr {
  * How deep an expression may stand, counting each bracket, call, match, lambda and operator it is inside. The tree
  * of an expression is walked by recursive functions (the parser itself, the checks, the code generator), so one too
  * deep for the engine's stack threw RangeError out of compile(): 800 nested lambdas, 1,600 nested matches, 3,200
- * nested parentheses or a chain of 3,200 `+` (fuzz/compile.ts, 23 November 2026). Workers give a smaller stack than
- * Node, so the bound is well under where Node failed.
+ * nested parentheses or a chain of 3,200 `+` (fuzz/compile.ts, 23 November 2026). A match costs the passes more
+ * stack than an operator, and counts four; a pipe counts two. At this bound every kind of nesting up to it compiles
+ * under --stack-size=850 (Workers give a little less stack than Node's default); 256 refused test/depth.ts's chain
+ * of 400 `+`.
  */
-export const MAX_DEPTH = 256;
+export const MAX_DEPTH = 1000;
 /** an expression whose operators all bind at least as tightly as `min` */
 export function binary(c: Cursor, min: number): Expr {
   const outer = c.depth;
@@ -318,6 +320,8 @@ function operators(c: Cursor, min: number): Expr {
     // each operator of a chain puts what came before it one deeper in the tree
     deeper(c);
     if (!isBinOp(t.v)) {
+      // a pipe is a call around what came before it: it counts two
+      deeper(c);
       l = pipe(c, l, t);
       continue;
     }
@@ -496,6 +500,8 @@ function condArm(c: Cursor): CondArm {
 }
 // from just after the word `match`
 function match(c: Cursor, word: Token): Match {
+  // a match costs the passes that walk it more stack than an operator does: it counts four
+  for (let i = 0; i < 4; i++) deeper(c);
   const at = c.at(word),
     subject = c.is('op', '{') ? null : binary(c, 1);
   c.expect('op', '{');

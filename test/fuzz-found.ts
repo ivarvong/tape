@@ -257,7 +257,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 // fuzz/compile.ts --scales, 23 November 2026: an expression nested deeper than the engine's stack goes threw
 // RangeError ("Maximum call stack size exceeded") out of compile(), from the parser or from a pass that walks the
 // tree: 3,200 nested parentheses, a chain of 3,200 `+`, 800 nested lambdas, 1,600 nested matches, 3,200 nested
-// constructors. An expression more than 256 deep is refused, P09.
+// constructors. An expression more than 1000 deep (a match counts four, a pipe two) is refused, P09.
 {
   const deep: [string, string][] = [
     ['nested parentheses', `fn f(n: Int) -> Int {\n  ${'('.repeat(3200)}n${')'.repeat(3200)}\n}\n`],
