@@ -60,7 +60,7 @@ export class Editor {
   constructor(root: HTMLElement) {
     this.root = root;
     root.classList.add('editor');
-    root.innerHTML = `<div class="scroller"><div class="sheet"><pre class="gutter" aria-hidden="true"></pre><div class="stack"><div class="bars" aria-hidden="true"></div><pre class="hl" aria-hidden="true"><code></code></pre><textarea spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Program source"></textarea></div></div></div>`;
+    root.innerHTML = `<div class="scroller"><div class="sheet"><pre class="gutter" aria-hidden="true"></pre><div class="stack"><div class="bars" aria-hidden="true"></div><pre class="hl" aria-hidden="true"><code></code></pre><textarea spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Program source. Tab indents once you have typed here; Escape, then Tab, leaves the editor."></textarea></div></div></div>`;
     const q = <T extends Element>(sel: string, kind: abstract new () => T): T => {
       const el = root.querySelector(sel);
       if (!(el instanceof kind)) throw new TypeError(`editor: no ${sel}`);
@@ -71,7 +71,11 @@ export class Editor {
     this.bars = q('.bars', HTMLElement);
     this.code = q('.hl code', HTMLElement);
     this.area = q('textarea', HTMLTextAreaElement);
+    this.area.addEventListener('focus', () => {
+      this.#typed = false;
+    });
     this.area.addEventListener('input', () => {
+      this.#typed = true;
       if (this.#hits.length > 0) {
         this.#hits = [];
         this.#lines = -1;
@@ -205,16 +209,20 @@ export class Editor {
       this.scroller.scrollTo({ top: Math.max(0, y - this.scroller.clientHeight / 3) });
   }
 
-  // Tab indents two spaces (Escape first, then Tab, leaves the editor); Enter keeps the line's indentation and adds
-  // two after an opening bracket. Both go through insertText, so undo keeps them.
+  // Tab indents two spaces; Enter keeps the line's indentation and adds two after an opening bracket. Both go
+  // through insertText, so undo keeps them. Tab is the editor's only once something has been typed since it took
+  // the focus, and Escape first gives the next Tab back: before, Tab never left the editor (the homepage's and the
+  // playground's, 14 presses each in Chrome, 24 November 2026), so the keyboard could not reach anything after it,
+  // and nothing said Escape was the way out. The textarea's label says both.
   #escaped = false;
+  #typed = false;
   #key(e: KeyboardEvent): void {
     if (this.readOnly || e.isComposing) return;
     if (e.key === 'Escape') {
       this.#escaped = true;
       return;
     }
-    if (e.key === 'Tab' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !this.#escaped) {
+    if (e.key === 'Tab' && !e.shiftKey && !e.metaKey && !e.ctrlKey && this.#typed && !this.#escaped) {
       e.preventDefault();
       this.#insert('  ');
     } else if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {

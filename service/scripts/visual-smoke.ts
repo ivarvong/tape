@@ -11,8 +11,8 @@
 //     primary button is drawn inverted
 //   - nothing is wider than the window (no horizontal scroll)
 //   - no console error, no exception, no message from the content security policy, no request that failed
-//   - the homepage compiled hello.tape in the page; the playground compiled its example, and its first request,
-//     sent with the page's own button, answered 200 "Hello, Ada"
+//   - the homepage compiled hello.tape in the page; the playground compiled its example, Tab leaves its editor,
+//     and its first request, sent with the page's own button, answered 200 "Hello, Ada"
 // and for each of apps/products' ten pages (/p/demo/<name>/, unless --no-products) at 375 px, light and dark: it
 // has its own style (a background that is not the browser's), nothing wider than the window, no console error.
 // Exits 1 if any check failed, printing each.
@@ -121,6 +121,8 @@ type Page = {
   value: (expression: string) => Promise<unknown>;
   /** wait until the expression is true; false if it never was */
   until: (expression: string, ms?: number) => Promise<boolean>;
+  /** press one key, as the keyboard does */
+  press: (key: string, code: number) => Promise<void>;
   shot: (name: string) => Promise<void>;
   close: () => Promise<void>;
 };
@@ -195,6 +197,10 @@ async function open(path: string, width: number, dark: boolean): Promise<Page> {
         await sleep(50);
       }
       return false;
+    },
+    press: async (key, code) => {
+      for (const type of ['keyDown', 'keyUp'])
+        await to('Input.dispatchKeyEvent', { type, key, code: key, windowsVirtualKeyCode: code });
     },
     shot: async name => {
       if (shots === null) return;
@@ -271,6 +277,14 @@ try {
       check(
         (await pg.value(BACKGROUND)) === bg,
         `/playground/ at ${at}: the body's background is ${text(await pg.value(BACKGROUND))}, not ${bg}`,
+      );
+      // the keyboard is not held by the editor: with the focus in it (where the page puts it on a desktop) and
+      // nothing typed, Tab moves on
+      await pg.value(`document.querySelector('#editor textarea')?.focus()`);
+      await pg.press('Tab', 9);
+      check(
+        (await pg.value(`document.activeElement?.tagName`)) !== 'TEXTAREA',
+        `/playground/ at ${at}: Tab does not leave the editor`,
       );
       // on a phone the request is behind the Run tab
       if (width < 600) await pg.value(`document.querySelector('[data-view="run"]')?.click()`);
