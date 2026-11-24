@@ -1,5 +1,6 @@
 // A stand-in for ctx.storage.sql over node:sqlite, for fast local iteration only (the workerd suite is the test).
-// exec(query, ...params) returns a cursor with raw(), toArray(), one() and rowsWritten.
+// exec(query, ...params) returns a cursor with raw(), toArray(), one(), rowsWritten and, for a statement that returns
+// no columns, changes.
 import './node25.ts';
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite';
 import type { Cell, Sql } from './host/log.ts';
@@ -38,11 +39,14 @@ export function nodeSql(): NodeSql {
         cols = st.columns(),
         params = given.map(p => (p instanceof ArrayBuffer ? new Uint8Array(p) : p)),
         before = changed();
-      const rows: Row[] = cols.length > 0 ? st.all(...params) : (st.run(...params), []);
+      const ran = cols.length > 0 ? null : st.run(...params);
+      const rows: Row[] = ran ? [] : st.all(...params);
       const written = changed() - before;
       const arrays = rows.map(r => cols.map(c => r[c.name] ?? null));
       return {
         rowsWritten: written,
+        // sqlite3_changes() after the statement, what `SELECT changes()` would read next
+        ...(ran ? { changes: Number(ran.changes) } : {}),
         raw: () => arrays.values(),
         toArray: () => rows,
         one: () => {

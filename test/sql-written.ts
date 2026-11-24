@@ -87,6 +87,39 @@ for (const [request, sql, params] of steps) {
   const r = logged.map(e => ('q' in e ? (e.r ?? 0) : null));
   same(`${request}: the rows it wrote, as SQLite counts them`, r, [want]);
 }
+// node:sqlite gives the count with the write (the cursor's `changes`), so the host runs no `SELECT changes()`;
+// Durable Object SQLite's cursor has none, and the host asks. Both ways log the same effects, and answer alike.
+function counted(hide: boolean): { log: string; answers: string; asked: number } {
+  const db = nodeSql();
+  let asked = 0;
+  const sql = {
+    exec: (q: string, ...p: Parameters<typeof db.exec>[1][]) => {
+      if (q === 'SELECT changes()') asked++;
+      const cur = db.exec(q, ...p);
+      if (!hide) return cur;
+      const { changes: _, ...rest } = cur;
+      return rest;
+    },
+  };
+  const a = instantiate(moduleOf(built([{ name: 'written.tape', text: program }])), { sql });
+  const answers: string[] = [];
+  const logs: unknown[] = [];
+  for (const [request] of steps) {
+    answers.push(new TextDecoder().decode(a.handle(enc.encode(request))));
+    logs.push(a.effects.filter((e: Effect) => !isHead(e)));
+  }
+  return { log: JSON.stringify(logs), answers: answers.join('\n'), asked };
+}
+const given = counted(false),
+  asked = counted(true);
+same('the count given with the write: the same effects as asking SQLite after it', given.log, asked.log);
+same('the count given with the write: the same answers', given.answers, asked.answers);
+same(
+  'a database that gives the count is not asked for it; one that does not is asked once a sql_exec',
+  [given.asked, asked.asked],
+  [0, 2],
+);
+
 // a write SQLite counts as having changed rows: the oracle itself says so, so the test above is not vacuous
 same('the oracle counts the upsert and the two-row insert', [written(steps[0]?.[1] ?? '', ['z']), count()], [1, 3]);
 

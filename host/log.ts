@@ -10,6 +10,9 @@ export type Sql = {
     ...params: SqlParam[]
   ) => {
     rowsWritten: number;
+    /** SQLite's changes() right after this statement, when the database has it without running another one
+     * (node:sqlite's run() does; Durable Object SQLite's cursor does not, and the host then asks `SELECT changes()`) */
+    changes?: number;
     raw: () => { toArray: () => Cell[][] };
     toArray: () => Record<string, Cell>[];
   };

@@ -230,6 +230,9 @@ function sqlCall(L: Linked, id: number, ptr: number, mode: number): number {
       cur = db.exec(q.run ?? q.sql, ...p),
       rows = cur.raw().toArray();
     if (mode !== 0) return cur.rowsWritten > 0 ? { rows, r: rows.length } : { rows };
+    // a second statement for the count costs as much as the write: crud, ledger and webhook ran 1.23, 1.62 and
+    // 1.70x their JS twins with it on node:sqlite, 0.88, 1.15 and 1.04x with the count the write itself gave
+    if (cur.changes !== undefined) return { r: cur.changes };
     const [[changed] = []] = db.exec('SELECT changes()').raw().toArray();
     return { r: Number(changed ?? 0) };
   };
