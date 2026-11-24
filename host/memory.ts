@@ -53,6 +53,9 @@ export const textIn = (m: Mem, ptr: number, len: number): string => utf8.decode(
 export const floatOf = (m: Mem, ptr: number, len: number): number => floatOfBytes(views(m).u.subarray(ptr, ptr + len));
 /** float_of of bytes, for the hosts tests stand up. */
 export const floatOfBytes = (b: Uint8Array): number => {
+  // JSON's numbers are ASCII: bytes that are not UTF-8 are not a number either (the fatal decoder threw on them, so
+  // parse_float of such a View stopped the request with a TypeError instead of being None)
+  if (b.some(x => x > 127)) return NaN;
   const text = utf8.decode(b);
   return JSON_NUMBER.test(text) ? Number(text) : NaN;
 };

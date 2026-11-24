@@ -194,4 +194,36 @@ fn handle(raw: View, db: Sql) -> Buf {
   ]);
 }
 
+// fuzz/programs.ts, 23 November 2026: parse_float of a View that is not UTF-8 (bytes C3 28) stopped the request: the
+// module asks the host's float_of for any text its fast path does not read, and float_of decoded it with a fatal
+// TextDecoder, which threw a TypeError out of the host call. The interpreter said None. Bytes of 128 or more are not
+// a number in JSON's syntax, and float_of says so without decoding them.
+{
+  const text = `fn handle(raw: View) -> Buf {
+  match parse_float(raw) {
+    Some(value: x) -> buf() |> write_float(value: x)
+    None -> buf() |> append(view: "none")
+  }
+}
+`;
+  const sources = [...std, { name: 'f8.tape', text }];
+  const b = compile(sources);
+  if (b.wasm === null) throw new Error(b.errors[0]?.message);
+  const ex = bare(new WebAssembly.Module(b.wasm)),
+    it = interpret(sources);
+  const inputs = [Uint8Array.of(0xc3, 0x28), Uint8Array.of(0x31, 0xff), Uint8Array.of(0x31, 0x2e, 0x35)];
+  same(
+    'parse_float of bytes that are not UTF-8 is None, compiled and interpreted',
+    inputs.map(i => {
+      const meant = it.call('handle', [i]);
+      return [handleBare(ex, i), meant instanceof Uint8Array ? dec.decode(meant) : 'not bytes'];
+    }),
+    [
+      ['none', 'none'],
+      ['none', 'none'],
+      ['1.5', '1.5'],
+    ],
+  );
+}
+
 finish();
