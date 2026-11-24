@@ -63,6 +63,14 @@ export function fnValue(c: Ctx, n: string): boolean {
 
 const ROW_RESULT: Readonly<Record<string, string>> = { sql_all: 'Rows', sql_first: 'Option', sql_move: 'Move' };
 
+/** The built-ins whose result is one type whatever they are given. */
+const MONO: ReadonlyMap<string, Type> = new Map([
+  ...['len', 'size', 'wrapping_add', 'wrapping_sub', 'wrapping_mul', 'trunc', 'to_int', 'now', 'random', 'wake'].map(
+    (n): [string, Type] => [n, INT],
+  ),
+  ...['slice', 'freeze'].map((n): [string, Type] => [n, VIEW]),
+  ...['floor', 'ceil', 'sqrt', 'sin', 'cos', 'exp', 'log', 'atan2', 'pow'].map((n): [string, Type] => [n, FLOAT]),
+]);
 /** The result type of a call, when its arguments say what the callee's type parameters are. */
 function peekCall(c: Ctx, e: Call): Type | null {
   // a query's result is named by its row type: Rows[R], Option[R], Move[R]
@@ -70,7 +78,7 @@ function peekCall(c: Ctx, e: Call): Type | null {
     const r = e.args.find(x => x.label === 'row')?.value;
     return r?.k === 'ctor' && c.B.types.has(r.name) ? T(ROW_RESULT[e.name] ?? '', T(r.name)) : null;
   }
-  if (INTRINSICS.has(e.name)) return null;
+  if (INTRINSICS.has(e.name)) return MONO.get(e.name) ?? null;
   const g = c.B.find(e.name, c.f.file, e);
   if (!g) return null;
   if (g.tparams.length === 0) return g.ret ?? null;
@@ -118,11 +126,21 @@ export function peek(c: Ctx, e: CExpr): Type | null {
     );
   if (e.k === 'held') return e.held.type;
   if (e.k === 'field') {
-    const base = e.e.k === 'var' ? c.env.get(e.e.name) : undefined;
+    // the field of any value whose type can be told: a name, a call, a constructor, a match
+    const base = peek(c, e.e);
     if (!base) return null;
-    const a = B.adtOrNull(B.strip(base.type), e);
+    const a = B.adtOrNull(B.strip(base), e);
     const [only] = a?.variants ?? [];
     return a?.variants.length === 1 ? (only?.fields.find(x => x.name === e.name)?.type ?? null) : null;
+  }
+  // a match has its arms' type: the first arm that can tell it (a name an arm's pattern binds is not in c.env, and
+  // no name is reused in a function, so an arm that reads one is skipped, never read as another value)
+  if (e.k === 'match') {
+    for (const a of e.arms) {
+      const t = peek(c, a.body);
+      if (t) return t;
+    }
+    return null;
   }
   if (e.k === 'int') return INT;
   if (e.k === 'float') return FLOAT;
