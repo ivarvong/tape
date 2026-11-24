@@ -11,6 +11,10 @@ const MODES: readonly Mode[] = ['js', 'tape-log', 'tape-nolog'];
 let bad = 0;
 for (const name of names) {
   const w = await load(name);
+  if (w.twin === false) {
+    console.log(`${name}: no JS twin, skipped`);
+    continue;
+  }
   const module = tapeModule(w.tape);
   const inputs = w.inputs();
   const answers: Record<Mode, string[]> = { js: [], 'tape-log': [], 'tape-nolog': [] };

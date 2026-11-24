@@ -12,10 +12,11 @@
 // sweep: crud and csv at three sizes (about 1, 10 and 100 ms of JS), opt tier.
 // Ways: js (the twin), tape (log on, as the service runs it), tape-nolog ({ log: false }).
 //   node bench/suite/run.ts [--quick] [--only crud,csv] [--no-cold] [--no-sweep] [--json out.json]
+// A workload with no JS twin is named and skipped; profile it with bench/suite/profile.ts.
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { cpus, tmpdir } from 'node:os';
-import { median, quantile } from './common.ts';
+import { median, quantile, sourcesOf } from './common.ts';
 import { wasmPath } from './wasm.ts';
 import { NAMES, load } from './workloads.ts';
 
@@ -23,7 +24,17 @@ const argv = process.argv.slice(2);
 const flag = (n: string): boolean => argv.includes(n);
 const opt = (n: string): string | undefined => (argv.includes(n) ? argv[argv.indexOf(n) + 1] : undefined);
 const quick = flag('--quick');
-const only = (argv.includes('--only') ? (opt('--only') ?? '').split(',') : [...NAMES]).filter(Boolean);
+const asked = (argv.includes('--only') ? (opt('--only') ?? '').split(',') : [...NAMES]).filter(Boolean);
+const chosen: string[] = [];
+for (const name of asked) {
+  const w = await load(name);
+  if (w.twin === false) {
+    console.log(`${name}: no JS twin; node bench/suite/profile.ts ${name} tape-nolog`);
+    continue;
+  }
+  wasmPath(sourcesOf(w));
+  chosen.push(name);
+}
 const SAMPLES = quick ? 10 : 30;
 const COLD = quick ? 3 : 10;
 const TIERS: Record<string, string[]> = {
@@ -114,9 +125,7 @@ const pad = (s: string, n: number): string => s.padStart(n);
 
 // ---- warm, per tier
 const warm: Record<string, Record<string, Record<string, Warm>>> = {};
-for (const name of only) {
-  const w = await load(name);
-  wasmPath(w.tape);
+for (const name of chosen) {
   warm[name] = {};
   for (const [tier, flags] of Object.entries(TIERS)) {
     const row = interleaved(flags, name, 1, SAMPLES);
@@ -134,7 +143,7 @@ results['warm'] = warm;
 // ---- cold
 const cold: Record<string, Record<string, Cold[]>> = {};
 if (!flag('--no-cold')) {
-  for (const name of only) {
+  for (const name of chosen) {
     cold[name] = {};
     for (const mode of MODES) {
       const runs: Cold[] = [];
@@ -156,7 +165,7 @@ const SWEEP: Record<string, number[]> = { crud: [0.1, 1, 10], csv: [0.05, 0.5, 3
 const sweep: Record<string, Record<string, Record<string, Warm>>> = {};
 if (!flag('--no-sweep')) {
   for (const [name, scales] of Object.entries(SWEEP)) {
-    if (!only.includes(name)) continue;
+    if (!chosen.includes(name)) continue;
     sweep[name] = {};
     for (const scale of scales) {
       const row = interleaved([], name, scale, quick ? 5 : 15);
@@ -176,7 +185,7 @@ if (!flag('--no-sweep')) {
 console.log(`\ntape/js per request (median; tape = log on, as shipped; in brackets log off). commit ${commit}`);
 const tiers = Object.keys(TIERS);
 console.log(`${'workload'.padEnd(9)}${pad('js ms', 8)}${tiers.map(t => pad(t, 14)).join('')}${pad('cold', 14)}`);
-for (const name of only) {
+for (const name of chosen) {
   const cell = (row: Record<string, Warm> | undefined): string => {
     const js = median(row?.['js']?.ms ?? []);
     return pad(

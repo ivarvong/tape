@@ -7,57 +7,41 @@
 // cold: the first request of this process: for Tape, compiling the Wasm (new WebAssembly.Module from the bytes the
 // service would store), instantiating it and running its schema, then the request; for JS, its schema, then the
 // request. Requests are made before the clock starts.
+// A workload may pin Date.now, or send opening requests before the timer. On one database those run once, during
+// warm-up, so a profile of the timed requests does not include them. `fresh` starts a database per request: its
+// schema is inside the profile and outside the timer. `all` needs a JS twin and one database per way.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { Session } from 'node:inspector';
-import { makeWay } from './common.ts';
+import { makeWay, prime, sourcesOf } from './common.ts';
 import type { Mode } from './common.ts';
 import { wasmPath } from './wasm.ts';
 import { load } from './workloads.ts';
 
 const [name = 'crud', mode = 'js', kind = 'warm', scaleText = '1', samplesText = '30'] = process.argv.slice(2);
 const w = await load(name);
+const pinned = w.now;
+if (pinned !== undefined) Date.now = () => pinned;
 const scale = Number(scaleText);
 const samples = Number(samplesText);
-const bytes = mode === 'js' ? null : readFileSync(wasmPath(w.tape));
+if (w.twin === false && (mode === 'js' || mode === 'all'))
+  throw new Error(`${w.name} has no JS twin; pass tape-log or tape-nolog`);
+if (mode === 'all' && w.fresh === true)
+  throw new Error(`${w.name} starts a database per request; pass one way, not all`);
+const bytes = mode === 'js' ? null : readFileSync(wasmPath(sourcesOf(w)));
 const MODES: Mode[] = ['js', 'tape-log', 'tape-nolog'];
 const asMode = (m: string): Mode => {
   const found = MODES.find(x => x === m);
   if (found === undefined) throw new Error(`no such way ${m}`);
   return found;
 };
+const WARM = 10;
+type Run = (req: Uint8Array) => Uint8Array | Promise<Uint8Array>;
 
-if (kind === 'cold') {
-  const req = w.request(0, scale);
-  const t0 = performance.now();
-  const module = bytes ? new WebAssembly.Module(bytes) : null;
-  const t1 = performance.now();
-  const run = makeWay(w, asMode(mode), module);
-  const t2 = performance.now();
-  await run(req);
-  const t3 = performance.now();
-  console.log(JSON.stringify({ compile: t1 - t0, setup: t2 - t1, request: t3 - t2, total: t3 - t0 }));
-} else if (mode === 'all') {
-  const module = new WebAssembly.Module(bytes ?? new Uint8Array());
-  const runs = MODES.map(m => makeWay(w, m, m === 'js' ? null : module));
-  const WARM = 10;
-  const ms: number[][] = MODES.map(() => []);
-  let requestBytes = 0;
-  for (let k = 0; k < WARM + samples; k++) {
-    const req = w.request(k, scale);
-    requestBytes = req.length;
-    for (let j = 0; j < runs.length; j++) {
-      const i = (j + k) % runs.length;
-      const t = performance.now();
-      await runs[i]?.(req);
-      if (k >= WARM) ms[i]?.push(performance.now() - t);
-    }
-  }
-  console.log(JSON.stringify({ ms: Object.fromEntries(MODES.map((m, i) => [m, ms[i]])), requestBytes }));
-} else {
-  const module = bytes ? new WebAssembly.Module(bytes) : null;
-  const run = makeWay(w, asMode(mode), module);
-  const WARM = 10;
-  const reqs = Array.from({ length: WARM + samples }, (_, k) => w.request(k, scale));
+/** The timed requests. `prepare` runs first, outside the timer: a fresh database, and its opening requests. */
+async function timed(
+  reqs: readonly Uint8Array[],
+  prepare: (k: number) => Promise<Run>,
+): Promise<{ ms: number[]; answerBytes: number }> {
   const ms: number[] = [];
   let size = 0;
   // TAPE_PROFILE=file: a CPU profile of the timed requests only (not the generator, not the warm-up), to file
@@ -75,6 +59,7 @@ if (kind === 'cold') {
   if (session) await post('Profiler.setSamplingInterval', { interval: 50 });
   for (const [k, req] of reqs.entries()) {
     if (k === WARM && session) await post('Profiler.start');
+    const run = await prepare(k);
     const t = performance.now();
     const out = await run(req);
     const took = performance.now() - t;
@@ -90,5 +75,48 @@ if (kind === 'cold') {
       ),
     );
   }
-  console.log(JSON.stringify({ ms, requestBytes: reqs[0]?.length ?? 0, answerBytes: size }));
+  return { ms, answerBytes: size };
+}
+
+if (kind === 'cold') {
+  const req = w.request(0, scale);
+  const t0 = performance.now();
+  const module = bytes ? new WebAssembly.Module(bytes) : null;
+  const t1 = performance.now();
+  const run = makeWay(w, asMode(mode), module);
+  await prime(w, run, 0);
+  const t2 = performance.now();
+  await run(req);
+  const t3 = performance.now();
+  console.log(JSON.stringify({ compile: t1 - t0, setup: t2 - t1, request: t3 - t2, total: t3 - t0 }));
+} else if (mode === 'all') {
+  const module = new WebAssembly.Module(bytes ?? new Uint8Array());
+  const runs = MODES.map(m => makeWay(w, m, m === 'js' ? null : module));
+  for (const run of runs) await prime(w, run, 0);
+  const ms: number[][] = MODES.map(() => []);
+  let requestBytes = 0;
+  for (let k = 0; k < WARM + samples; k++) {
+    const req = w.request(k, scale);
+    requestBytes = req.length;
+    for (let j = 0; j < runs.length; j++) {
+      const i = (j + k) % runs.length;
+      const t = performance.now();
+      await runs[i]?.(req);
+      if (k >= WARM) ms[i]?.push(performance.now() - t);
+    }
+  }
+  console.log(JSON.stringify({ ms: Object.fromEntries(MODES.map((m, i) => [m, ms[i]])), requestBytes }));
+} else {
+  const module = bytes ? new WebAssembly.Module(bytes) : null;
+  const way = asMode(mode);
+  const reqs = Array.from({ length: WARM + samples }, (_, k) => w.request(k, scale));
+  let held: Run | null = null;
+  const { ms, answerBytes } = await timed(reqs, async k => {
+    if (held && w.fresh !== true) return held;
+    const run = makeWay(w, way, module);
+    await prime(w, run, w.fresh === true ? k : 0);
+    held = run;
+    return run;
+  });
+  console.log(JSON.stringify({ ms, requestBytes: reqs[0]?.length ?? 0, answerBytes }));
 }

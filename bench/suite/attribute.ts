@@ -18,9 +18,8 @@ import { compile } from '../../compiler.ts';
 import { instantiate } from '../../host.ts';
 import { nodeSql } from '../../nodesql.ts';
 import type { NodeSql } from '../../nodesql.ts';
-import { readFileSync } from 'node:fs';
 import { std } from '../../std.ts';
-import { ROOT, median } from './common.ts';
+import { median, prime, programFiles, sourcesOf } from './common.ts';
 import { NAMES, load } from './workloads.ts';
 
 const argv = process.argv.slice(2);
@@ -175,15 +174,19 @@ function print(title: string, plainMs: number, m: Awaited<ReturnType<typeof meas
 
 for (const name of names.length > 0 ? names : NAMES) {
   const w = await load(name);
+  const realNow = Date.now;
+  const pinned = w.now;
+  if (pinned !== undefined) Date.now = () => pinned;
   const r = compile(
-    [...std, { name: w.tape, text: readFileSync(`${ROOT}${w.tape}`, 'utf8') }],
+    [...std, ...programFiles(sourcesOf(w))],
     argv.includes('--no-reductions') ? { reductions: false } : {},
   );
-  if (!r.wasm) throw new Error(`${w.tape} does not compile`);
+  if (!r.wasm) throw new Error(`${w.name} does not compile`);
   const module = new WebAssembly.Module(r.wasm);
   const reqs = Array.from({ length: 10 + SAMPLES }, (_, k) => w.request(k, scale));
   console.log(`${name}: ${w.describe}; ${reqs[0]?.length} bytes a request (scale ${scale})`);
-  for (const mode of ['js', 'tape-log', 'tape-nolog'] as const) {
+  const modes = w.twin === false ? (['tape-log', 'tape-nolog'] as const) : (['js', 'tape-log', 'tape-nolog'] as const);
+  for (const mode of modes) {
     const make = (): ((req: Uint8Array) => Promise<Uint8Array> | Uint8Array) => {
       const db = w.sql ? meteredDb() : null;
       if (mode === 'js') {
@@ -196,8 +199,23 @@ for (const name of names.length > 0 ? names : NAMES) {
       if (mode === 'tape-nolog') return db ? req => app.handleIn(f => db.transaction(f), req) : req => app.handle(req);
       return async req => (await app.runLogged(req, db ? { transaction: f => db.transaction(f) } : {})).out;
     };
-    const p = await plain(make(), reqs);
-    const m = await measure(make(), reqs);
+    // one database for the plain pass and another for the measured pass; opening runs before either is timed.
+    // fresh starts a database inside the request, so a write is never a cache hit
+    const ready = async (): Promise<(req: Uint8Array) => Promise<Uint8Array> | Uint8Array> => {
+      if (w.fresh === true) {
+        return async req => {
+          const one = make();
+          await prime(w, one, 0);
+          return one(req);
+        };
+      }
+      const one = make();
+      await prime(w, one, 0);
+      return one;
+    };
+    const p = await plain(await ready(), reqs);
+    const m = await measure(await ready(), reqs);
     print(mode, p, m, mode === 'js' ? 'js' : 'tape');
   }
+  Date.now = realNow;
 }

@@ -21,7 +21,7 @@ import { getHeapStatistics } from 'node:v8';
 import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { std } from '../std.ts';
-import { ROOT } from './suite/common.ts';
+import { prime, programFiles, ROOT, sourcesOf } from './suite/common.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { Workload } from './suite/common.ts';
 import { wasmPath } from './suite/wasm.ts';
@@ -29,6 +29,8 @@ import { load } from './suite/workloads.ts';
 
 const [name = 'crud', kind = 'time', ...rest] = process.argv.slice(2);
 const w = await load(name);
+const pinnedNow = w.now;
+if (pinnedNow !== undefined) Date.now = () => pinnedNow;
 
 type Tape = {
   run: (req: Uint8Array) => Promise<Uint8Array>;
@@ -67,7 +69,11 @@ function jsWay(wl: Workload): (req: Uint8Array) => Uint8Array {
   if (db) wl.seed?.(db);
   return db ? req => db.transaction(() => h(req)) : h;
 }
-const bytesOf = (): Uint8Array => readFileSync(wasmPath(w.tape));
+const bytesOf = (): Uint8Array => readFileSync(wasmPath(sourcesOf(w)));
+const jsAsked = kind === 'time' || ((kind === 'mem' || kind === 'cold') && (rest[0] ?? 'js') === 'js');
+if (jsAsked && w.twin === false) throw new Error(`${w.name} has no JS twin; pass tape for mem or cold`);
+if ((kind === 'time' || kind === 'mem') && w.fresh === true)
+  throw new Error(`${w.name} starts a database per request; node bench/suite/one.ts ${w.name} tape-nolog warm 1`);
 const same = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
 const print = (x: unknown): void => console.log(JSON.stringify(x));
 
@@ -76,6 +82,8 @@ if (kind === 'time') {
   const samples = Number(rest[1] ?? '30');
   const tape = tapeWay(w, new WebAssembly.Module(bytesOf()));
   const js = jsWay(w);
+  await prime(w, js, 0);
+  await prime(w, tape.run, 0);
   let k = 0;
   const first = w.request(k++, scale);
   const a = js(first);
@@ -123,6 +131,8 @@ if (kind === 'time') {
   const reqs = Array.from({ length: 5 }, (_, i) => w.request(i, scale));
   const tape = way === 'tape' ? tapeWay(w, new WebAssembly.Module(bytesOf())) : null;
   const js = way === 'js' ? jsWay(w) : null;
+  if (tape) await prime(w, tape.run, 0);
+  else if (js) await prime(w, js, 0);
   const rss0 = process.resourceUsage().maxRSS * 1024;
   const heapBefore = getHeapStatistics().used_heap_size;
   let heapPeak = 0,
@@ -152,17 +162,18 @@ if (kind === 'time') {
   const module = bytes ? new WebAssembly.Module(bytes) : null;
   const t1 = performance.now();
   const run: (r: Uint8Array) => Uint8Array | Promise<Uint8Array> = module ? tapeWay(w, module).run : jsWay(w);
+  await prime(w, run, 0);
   const t2 = performance.now();
   await run(req);
   const t3 = performance.now();
   print({ compile: t1 - t0, setup: t2 - t1, request: t3 - t2, total: t3 - t0 });
 } else if (kind === 'compile') {
-  const files = [...std, { name: w.tape, text: readFileSync(`${ROOT}${w.tape}`, 'utf8') }];
+  const files = [...std, ...programFiles(sourcesOf(w))];
   const once = (): { ms: number; wasm: Uint8Array } => {
     const t = performance.now();
     const r = compile(files);
     const ms = performance.now() - t;
-    if (!r.wasm) throw new Error(`${w.tape} did not compile`);
+    if (!r.wasm) throw new Error(`${w.name} did not compile`);
     return { ms, wasm: r.wasm };
   };
   const first = once();
@@ -170,8 +181,10 @@ if (kind === 'time') {
   const t = performance.now();
   const compiled = new WebAssembly.Module(first.wasm);
   const module = performance.now() - t;
-  if (WebAssembly.Module.exports(compiled).length === 0) throw new Error(`${w.tape}: a module with no exports`);
-  const source = readFileSync(`${ROOT}${w.tape}`, 'utf8');
+  if (WebAssembly.Module.exports(compiled).length === 0) throw new Error(`${w.name}: a module with no exports`);
+  const source = sourcesOf(w)
+    .map(p => readFileSync(`${ROOT}${p}`, 'utf8'))
+    .join('\n');
   print({
     first: first.ms,
     warm: again[5],
