@@ -35,7 +35,16 @@ try {
   const answer: unknown = JSON.parse(readFileSync(file, 'utf8'));
   const published: unknown = typeof answer === 'object' && answer !== null ? Reflect.get(answer, 'published') : null;
   if (!Array.isArray(published)) throw new TypeError('it has no `published` list (a Worker from before warm.ts?)');
-  listed = published.filter((k): k is string => typeof k === 'string' && KEY.test(k));
+  // a name with a version the new compiler could not build may answer its 503 (rebuild_failed), which the deploy's
+  // telemetry gate counts as a fault of the deploy: it is not sent a request (tape 9ef303dc was rolled back on
+  // ivar/e2e-sunset's, 24 November 2026)
+  const failures: unknown = typeof answer === 'object' && answer !== null ? Reflect.get(answer, 'failures') : null;
+  const unbuilt = new Set(
+    (Array.isArray(failures) ? failures : []).map((f: unknown) =>
+      typeof f === 'object' && f !== null ? String(Reflect.get(f, 'name')) : '',
+    ),
+  );
+  listed = published.filter((k): k is string => typeof k === 'string' && KEY.test(k) && !unbuilt.has(k));
 } catch (e) {
   console.log(`warm: skipped, ${file} could not be read: ${e instanceof Error ? e.message : String(e)}`);
   process.exit(0);
