@@ -178,17 +178,24 @@ const messageOf = (e: unknown): string => (e instanceof Error ? e.message : Stri
 // entered; 0: arm or step tried; 1: matched; sites are in the compile result), { sql, p, r | rows }, { json },
 // { call, method, within, status }. For a method's log (one served to another object), `bytes` may be null: the
 // message it was sent is in the log.
+// A request that loops over its input tries an arm per byte, so its events are kept to `most`: past that only
+// effects are recorded, and `cut` counts the line events left out (csv2chart's 60 KB CSV made 2,234,855 of them,
+// 124 MB of heap, and the Worker that replayed it for its trace page ran out of memory: 1101).
+export const TRACE_SITES = 100_000;
 export function traceOf(
   tracedModule: WebAssembly.Module,
   bytes: Uint8Array | null,
   effects: Effect[],
-): { events: TraceEvent[]; out: Uint8Array | null; error: string | null } {
+  most: number = TRACE_SITES,
+): { events: TraceEvent[]; out: Uint8Array | null; error: string | null; cut: number } {
   const events: TraceEvent[] = [];
-  const app = link(tracedModule, { recorded: effects, trace: events });
+  const cut = { n: 0 };
+  const app = link(tracedModule, { recorded: effects, trace: events, traceMost: most, traceCut: cut });
   try {
-    return { events, out: app.handle(bytes), error: null };
+    const out = app.handle(bytes);
+    return { events, out, error: null, cut: cut.n };
   } catch (e) {
-    return { events, out: null, error: messageOf(e) };
+    return { events, out: null, error: messageOf(e), cut: cut.n };
   }
 }
 

@@ -124,6 +124,36 @@ describe('tape service', () => {
     expect(trace).toContain('declined'); // a function of examples/tickets.tape, by name
   });
 
+  it('traces a run that loops over a long body up to TRACE_SITES arms, and says where it stopped', async () => {
+    // a 60 KB CSV through apps/products/csv2chart made 2.2 million trace events: the page and the OTLP link ran
+    // the Worker out of memory (1101). The trace keeps the first 100,000 and the write after them.
+    const loop = `schema "CREATE TABLE IF NOT EXISTS seen(n INTEGER NOT NULL)"
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let n = count(v: request(raw).body, at: 0, k: 0)
+  do sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
+  respond(status: 200) |> append(view: "\\(n)")
+}
+
+fn count(v: View, at: Int, k: Int) -> Int {
+  match {
+    at >= len(v) -> k
+    v[at] == 120 -> count(v, at: at + 1, k: k + 1)
+    else -> count(v, at: at + 1, k)
+  }
+}
+`;
+    await uploadAll('ivar', { looped: loop });
+    const res = await call('/ivar/looped/v/1/', { method: 'POST', body: 'x'.repeat(60_000) });
+    expect([res.status, await res.text()]).toEqual([200, '60000']);
+    const page = await opened(res.headers.get('tape-trace-url'), '&format=text');
+    expect(page.status).toBe(200);
+    const text = await page.text();
+    expect(text).toMatch(/the trace stops here: \d+ more arms tried were not kept/);
+    expect(text).toContain('sql 0 [60000] → 1 written');
+    expect((await opened(res.headers.get('tape-otlp-url'))).status).toBe(200);
+  });
+
   it('signs a trace URL into every response; the page opens without the token until it expires', async () => {
     await upload('pages', hello);
     const res = await call('/ivar/pages/v/1/hello/ada'),

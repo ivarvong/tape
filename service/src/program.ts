@@ -156,13 +156,20 @@ const effectLine = (e: TraceEvent): Line[] | null => {
   return null;
 };
 // The trace as [class, text] lines: functions entered, arms taken (✓) or tried and missed (✗), effects indented.
-const traceLines = (b: Version, events: readonly TraceEvent[]): Line[] => {
-  const siteOf = (e: TraceEvent | undefined): number | null => (e && 'site' in e ? e.site : null);
-  const matched = (i: number): boolean => {
-    const next = events.slice(i + 1).find(e => siteOf(e) === siteOf(events[i]));
-    return next !== undefined && 'what' in next && next.what === 1;
-  };
-  return events.flatMap((e, i): Line[] => {
+// A replay keeps the first TRACE_SITES line events (host.ts traceOf); `cut` says how many more there were.
+const traceLines = (b: Version, events: readonly TraceEvent[], cut = 0): Line[] => {
+  // for each event at a site, whether the next event at that site is its match (what 1): one pass from the end,
+  // where asking each event for its next by a slice and a search was quadratic in a long run's events
+  const matchedAt = new Array<boolean>(events.length).fill(false);
+  const nextAt = new Map<number, number>();
+  for (let i = events.length - 1; i >= 0; i--) {
+    const e = events[i];
+    if (e === undefined || !('site' in e)) continue;
+    matchedAt[i] = nextAt.get(e.site) === 1;
+    nextAt.set(e.site, e.what);
+  }
+  const matched = (i: number): boolean => matchedAt[i] === true;
+  const lines = events.flatMap((e, i): Line[] => {
     const line = effectLine(e);
     if (line || !('site' in e)) return line ?? [];
     const s = b.sites[e.site];
@@ -172,6 +179,15 @@ const traceLines = (b: Version, events: readonly TraceEvent[]): Line[] => {
     if (e.what === 1) return [['ok', `  ✓ ${at}`]];
     return s.kind !== 'else' && !matched(i) ? [['mut', `  ✗ ${at}`]] : [];
   });
+  return cut > 0
+    ? [
+        ...lines,
+        [
+          'mut',
+          `… the trace stops here: ${cut} more arms tried were not kept (the run went on, and its effects are above)`,
+        ],
+      ]
+    : lines;
 };
 const migrationLines = (steps: readonly Entry[]): Line[] =>
   steps.flatMap((m): Line[] =>
@@ -980,7 +996,7 @@ const runView = (
       request,
       status: head.failed.status,
       response: `the program failed and its transaction was rolled back: ${head.failed.error}`,
-      trace: traceLines(b, t.events),
+      trace: traceLines(b, t.events, t.cut),
       error: head.failed.error,
       failed: head.failed,
     };
@@ -990,7 +1006,7 @@ const runView = (
     status,
     ...(headers.length > 0 ? { headers } : {}),
     response: dec.decode(body),
-    trace: traceLines(b, t.events),
+    trace: traceLines(b, t.events, t.cut),
     error: t.error,
   };
 };

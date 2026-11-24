@@ -142,6 +142,9 @@ export type LinkOptions = {
   /** a log to answer from: nothing is performed */
   recorded?: Effect[] | null;
   trace?: TraceEvent[] | null;
+  /** at most this many line events ({ site, what }) go into `trace`; each one past it is counted in traceCut.n */
+  traceMost?: number | null;
+  traceCut?: { n: number } | null;
   services?: Readonly<Record<string, Service>>;
   name?: string | null;
   /** receives every finished log */
@@ -439,7 +442,10 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
       if (heap) allocated(heap, size);
     },
     trace: (site: number, what: number) => {
-      get().o.trace?.push({ site, what });
+      const { o } = get();
+      if (!o.trace) return;
+      if (o.traceMost === null || o.trace.length < o.traceMost) o.trace.push({ site, what });
+      else if (o.traceCut) o.traceCut.n++;
     },
   };
 }
@@ -926,7 +932,16 @@ function nextDue(L: Linked): number | null {
 function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
   const F = listed<FlagDecl>(module, 'flags');
   const E = listed<HostParam>(module, 'entry');
-  const { sql, log = true, recorded = null, trace = null, services = {}, name = null } = options;
+  const {
+    sql,
+    log = true,
+    recorded = null,
+    trace = null,
+    traceMost = null,
+    traceCut = null,
+    services = {},
+    name = null,
+  } = options;
   const { sink = null, heap = null, random = null, timers = REAL_TIMERS, observe = null } = options;
   const holder: { L: Linked | null } = { L: null };
   let names: Map<number, string> | null = null;
@@ -944,7 +959,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     BUILD: String(section(module, 'build')),
     C: listed<CallDecl>(module, 'calls'),
     M: listed<Method>(module, 'methods'),
-    o: { sql, log, recorded, trace, services, name, sink, heap, random, timers, observe },
+    o: { sql, log, recorded, trace, traceMost, traceCut, services, name, sink, heap, random, timers, observe },
     live: !recorded,
     mem: { memory, alloc: size => Number(alloc(size)) },
     raw,
