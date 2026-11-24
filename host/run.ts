@@ -99,6 +99,12 @@ function stopped(L: Linked, why: number, err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 /** the longest a timer may be set for: 30 days */
+/** The Float nearest a decimal number (`-1.5`, `+2`, `.5`, `1.`, `6.02e23`), as Number reads it; NaN for any other
+ * text. Number alone also reads the empty text and spaces as 0, hex, octal and binary, and Infinity: parse_float("")
+ * was Some(0), so a query parameter left empty read as the number 0. */
+export const decimalOf = (text: string): number =>
+  /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(text) ? Number(text) : NaN;
+
 export const MAX_WAKE_MS = 30 * 24 * 3600 * 1000;
 
 /** A custom section of a module, as the JSON it holds; [] when the module has none of that name. */
@@ -423,7 +429,11 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     // a Float's text: the shortest digits that read back as it (ECMA-262 Number::toString), as interp/float.ts
     float_text: (x: number) => block(get().mem, String(x)),
     // a decimal number's nearest Float (ECMA-262 StringToNumber, correctly rounded), for parse_float; NaN for none
-    float_of: (ptr: number, len: number) => Number(textIn(get().mem, ptr, len)),
+    // (a decimal number is ASCII: text that decodes shorter than its bytes, as a leading BOM does, is none)
+    float_of: (ptr: number, len: number) => {
+      const text = textIn(get().mem, ptr, len);
+      return text.length === len ? decimalOf(text) : NaN;
+    },
     allocated: (size: number) => {
       const { heap } = get().o;
       if (heap) allocated(heap, size);

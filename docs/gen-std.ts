@@ -226,7 +226,7 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'parse_float',
     sig: 'parse_float(text: View) -> Option[Float]',
-    doc: 'The Float nearest the decimal number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number. decode reads a Float field with it.',
+    doc: 'The Float nearest the decimal number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a decimal number: a sign, digits with or without a point (`".5"`, `"1."`), an exponent, and nothing else, so `""`, `" 1"`, `"0x10"` and `"Infinity"` are None. decode reads a Float field with it.',
   },
   {
     name: 'scan_plain',

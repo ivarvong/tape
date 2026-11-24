@@ -47,6 +47,11 @@ const floatOfAt = (text: string, at: number): number => {
   if (at + b.length < u.length) u[at + b.length] = 0x39;
   return Number(textIn(mem, at, b.length));
 };
+/** What parse_float reads: the Float nearest a decimal number as std.md says it, `-1.5`, `+2`, `.5`, `1.`, `6.02e23`,
+ * and NaN for any other text: the empty text, spaces around it, hex, binary or octal, `Infinity`, which JavaScript's
+ * Number reads as numbers (`""` was 0, so a query parameter left empty was read as the number 0). */
+const decimalNumber = (text: string): number =>
+  /^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$/.test(text) ? Number(text) : NaN;
 /** What `f` returned, or what it threw. */
 const thrown = (f: () => unknown): unknown => {
   try {
@@ -190,7 +195,7 @@ if (!b.wasm) throw new Error(b.errors.map(e => `${e.code} ${e.line} ${e.message}
 const app = instantiate(new WebAssembly.Module(b.wasm), { name: 'float-of' });
 const answer = (text: string): string => dec.decode(responseOf(app.handle(enc.encode(`POST /f\n${text}`))).body);
 const oracle = (text: string): string => {
-  const x = Number(text);
+  const x = decimalNumber(text);
   return Number.isFinite(x) ? String(x) : 'none';
 };
 const through = [...EDGES, ...seventeen.slice(0, 200), ...randoms.slice(0, 20000)];
@@ -240,7 +245,8 @@ const { exports: rx } = new WebAssembly.Instance(new WebAssembly.Module(rb.wasm)
     float_text: () => 0,
     float_of: (ptr: number, len: number): number => {
       asked++;
-      return Number(dec.decode(new Uint8Array(linked.memory?.buffer ?? new ArrayBuffer(0), ptr, len)));
+      const bytes = new Uint8Array(linked.memory?.buffer ?? new ArrayBuffer(0), ptr, len);
+      return decimalNumber(new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes));
     },
   },
 });
@@ -257,7 +263,7 @@ const reset = fn('reset'),
   isNumber = fn('is_number');
 const it = interpret(readerSources);
 const want = (text: string): [number, bigint] => {
-  const x = Number(text);
+  const x = decimalNumber(text);
   return Number.isFinite(x) ? [x, 1n] : [0.25, 0n];
 };
 type Tally = { fast: number; host: number; differ: string[]; rule: string[] };
