@@ -148,9 +148,9 @@ fn count(v: View, at: Int, k: Int) -> Int {
     expect([res.status, await res.text()]).toEqual([200, '60000']);
     const page = await opened(res.headers.get('tape-trace-url'), '&format=text');
     expect(page.status).toBe(200);
-    const text = await page.text();
-    expect(text).toMatch(/the trace stops here: \d+ more arms tried were not kept/);
-    expect(text).toContain('sql 0 [60000] → 1 written');
+    const lines = await page.text();
+    expect(lines).toMatch(/the trace stops here: \d+ more arms tried were not kept/);
+    expect(lines).toContain('sql 0 [60000] → 1 written');
     expect((await opened(res.headers.get('tape-otlp-url'))).status).toBe(200);
   });
 

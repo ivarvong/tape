@@ -273,7 +273,7 @@ const argEnds = (toks: readonly Tok[], depth: readonly number[], g: Group): numb
 /** For each character of a literal's source (from outside any hole), whether it is inside a hole `\(…)`. A hole
  * holds no text literal (L05), so its brackets are counted as they stand. */
 function inHole(s: string): boolean[] {
-  const inside = new Array<boolean>(s.length).fill(false);
+  const inside = Array.from({ length: s.length }, () => false);
   for (let i = 0; i < s.length; i++) {
     if (s[i] !== '\\') continue;
     if (s[i + 1] !== '(') {
@@ -304,11 +304,11 @@ function carried(text: string, first: number, rest: number, tail: number): strin
     const within = left.slice(0, Math.max(room - 1, 1));
     const open = inHole(within);
     const outside = (m: RegExpMatchArray): boolean => !open[m.index ?? 0];
-    const keyword = [...within.matchAll(/(?<![A-Z]) (?=[A-Z]{2,}\b)/g)].filter(outside).at(-1)?.index;
+    const keyword = [...within.matchAll(/(?<![A-Z]) (?=[A-Z]{2,}\b)/g)].findLast(outside)?.index;
     const at =
       keyword !== undefined && keyword >= room / 2
         ? keyword
-        : [...within.matchAll(/ (?=[^ ])/g)].filter(outside).at(-1)?.index;
+        : [...within.matchAll(/ (?=[^ ])/g)].findLast(outside)?.index;
     if (at === undefined || at < 8) break;
     lines.push(left.slice(0, at + 1));
     left = left.slice(at + 1);

@@ -160,7 +160,7 @@ const effectLine = (e: TraceEvent): Line[] | null => {
 const traceLines = (b: Version, events: readonly TraceEvent[], cut = 0): Line[] => {
   // for each event at a site, whether the next event at that site is its match (what 1): one pass from the end,
   // where asking each event for its next by a slice and a search was quadratic in a long run's events
-  const matchedAt = new Array<boolean>(events.length).fill(false);
+  const matchedAt = Array.from({ length: events.length }, () => false);
   const nextAt = new Map<number, number>();
   for (let i = events.length - 1; i >= 0; i--) {
     const e = events[i];
