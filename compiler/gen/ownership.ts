@@ -198,9 +198,18 @@ const clean = (o: Use, uses: readonly Use[]): boolean => o.pos !== 'read' && las
 function ownership(f: FnDecl, find: Find, owned: Map<string, boolean[]>): boolean {
   const rd: Reading = { f, find, owned, uses: [], derived: new Map(), mine: new Set(f.params.map(pm => pm.name)) };
   go(rd, f.body, 'own', null, {});
+  // a use is weighed only against the uses of its own name: against every use of the function it was quadratic in
+  // the function's size (a match of 800 arms, and the decoders written for its type, took 2.4 s to compile)
+  const byName = new Map<string, Use[]>();
+  for (const u of rd.uses) {
+    const same = byName.get(u.name);
+    if (same) same.push(u);
+    else byName.set(u.name, [u]);
+  }
   for (const o of rd.uses) {
-    o.node.clean = clean(o, rd.uses);
-    o.node.last = last(o, rd.uses);
+    const same = byName.get(o.name) ?? [];
+    o.node.clean = clean(o, same);
+    o.node.last = last(o, same);
   }
   const mine = owned.get(f.name) ?? [];
   let changed = false;
