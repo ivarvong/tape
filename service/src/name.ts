@@ -160,6 +160,8 @@ export type InvokeOptions = {
   fault?: string | null;
   /** from a router: the trace and the span of its call */
   call?: { trace: string; span: string } | null;
+  /** write this object's record of the call after the reply, not before and around the run (the public route) */
+  after?: boolean;
 };
 const NOTE_OLD =
   'uploaded before the compiler refused this, or before another live version declared a machine it does not keep to; it keeps running as it was built (the machine triggers allow what it does while it is live), and a new version must pass';
@@ -753,7 +755,10 @@ export class Name extends DurableObject {
   ): Promise<Response> {
     const p = this.publication();
     if (!p.published || p.latest === null) return Promise.resolve(reply({ error: 'no such page' }, 404));
-    return this.invoke(account, name, p.latest, bytes, options);
+    // a public answer carries no trace link, so its record need not be durable before the reply; a jepsen-*
+    // account's is, as its faults are checked that way
+    const after = !FAULTY.test(account) && (options.fault ?? null) === null;
+    return this.invoke(account, name, p.latest, bytes, { ...options, after });
   }
   async invoke(
     account: string,
@@ -788,37 +793,61 @@ export class Name extends DurableObject {
     began: number,
     faulty: string | null,
     lag: number,
+    after = false,
   ): { span: string | null; opened: () => void; note: (f: Outcome) => void } {
     if (!call) return { span: null, opened: () => {}, note: () => {} };
     this.#routedTables();
     const span = randomHex(8);
+    const open = (at: number): void => {
+      this.#sql.exec(
+        'INSERT INTO _tape_invoked(call_span, trace, version, name_span, began, fault, at, clock_lag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)',
+        call.span,
+        call.trace,
+        version,
+        span,
+        began,
+        faulty,
+        at,
+        lag,
+      );
+    };
+    const noted = (f: Outcome, took: number): void => {
+      this.#sql.exec(
+        'UPDATE _tape_invoked SET log_id = ?2, took = ?3, facet_began = ?4, facet_took = ?5, status = ?6, error = ?7 WHERE name_span = ?1',
+        span,
+        f.log_id ?? null,
+        took,
+        f.facet_began ?? null,
+        f.facet_took ?? null,
+        f.status ?? null,
+        f.error ?? null,
+      );
+    };
+    if (after) {
+      // A write before the reply holds it (the output gate) until the write is durable, and one before the run
+      // holds the call to the facet: in prod trace 93a674291ab3e88eda1e14af41a0cddb (tape 3d69cf9c) the facet call
+      // began 19 ms after this INSERT. Here both are written once the reply is on its way.
+      let at = Date.now();
+      return {
+        span,
+        opened: () => {
+          at = Date.now();
+        },
+        note: f => {
+          const took = Date.now() - began;
+          const write = async (): Promise<void> => {
+            await scheduler.wait(0);
+            open(at);
+            noted(f, took);
+          };
+          this.ctx.waitUntil(write());
+        },
+      };
+    }
     return {
       span,
-      opened: () => {
-        this.#sql.exec(
-          'INSERT INTO _tape_invoked(call_span, trace, version, name_span, began, fault, at, clock_lag) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)',
-          call.span,
-          call.trace,
-          version,
-          span,
-          began,
-          faulty,
-          Date.now(),
-          lag,
-        );
-      },
-      note: f => {
-        this.#sql.exec(
-          'UPDATE _tape_invoked SET log_id = ?2, took = ?3, facet_began = ?4, facet_took = ?5, status = ?6, error = ?7 WHERE name_span = ?1',
-          span,
-          f.log_id ?? null,
-          Date.now() - began,
-          f.facet_began ?? null,
-          f.facet_took ?? null,
-          f.status ?? null,
-          f.error ?? null,
-        );
-      },
+      opened: () => open(Date.now()),
+      note: f => noted(f, Date.now() - began),
     };
   }
   async #invoke(
@@ -826,7 +855,7 @@ export class Name extends DurableObject {
     name: string,
     asked: number,
     bytes: Uint8Array | ArrayBuffer,
-    { traceparent = null, fault = null, call = null }: InvokeOptions,
+    { traceparent = null, fault = null, call = null, after = false }: InvokeOptions,
   ): Promise<Response> {
     // the span begins when the call is running here, by a current clock (spans.ts fresh): this object may have
     // been busy with other calls, and its clock as old as its last I/O
@@ -835,7 +864,7 @@ export class Name extends DurableObject {
     // version 0: the latest live version, chosen here, so a cluster's upgrade (kvUpgrade) switches every request
     // at one point in this object's order, whatever version of the router sent it
     const version = asked === 0 ? this.plan().latest : asked;
-    const { span, opened, note } = this.#record(call, version, clock.now, faulty, clock.lag);
+    const { span, opened, note } = this.#record(call, version, clock.now, faulty, clock.lag, after);
     if (!this.plan().live.includes(version)) {
       const retired = this.versions().some(v => v.version === version),
         error = retired ? `v${version} is retired` : 'no such version';
