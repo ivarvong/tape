@@ -353,14 +353,37 @@ same('the interpreter agrees on the answers, traps included', stepInterp, STEP_C
 
 // ---- a set that is not a text literal
 const handle = (body: string): string => `fn handle(raw: View) -> Buf {\n  ${body}\n  respond(status: 200)\n}\n`;
-same('a computed set is C89', codes(handle('let n = scan(raw, at: 0, set: raw)')), ['C89:2']);
-same('a hole in the set is C89', codes(handle(`let n = scan(raw, at: 0, set: "a${BS}(raw)")`)), ['C89:2']);
-same('a joined set is C89', codes(handle('let n = scan(raw, at: 0, set: "ab" ++ raw)')), ['C89:2']);
+same('a computed set is C93', codes(handle('let n = scan(raw, at: 0, set: raw)')), ['C93:2']);
+same('a hole in the set is C93', codes(handle(`let n = scan(raw, at: 0, set: "a${BS}(raw)")`)), ['C93:2']);
+same('a joined set is C93', codes(handle('let n = scan(raw, at: 0, set: "ab" ++ raw)')), ['C93:2']);
 same('a missing set is C13', codes(handle('let n = scan(raw, at: 0)')), ['C13:2']);
 const shadow = `fn scan(v: View, at: Int, set: View) -> Int {\n  at\n}\nfn go(raw: View) -> Int {\n  scan(v: raw, at: 1, set: "a")\n}\n`;
 same('a program may define its own scan', codes(shadow, { exports: ['go'] }), []);
 const shadowed = instance(shadow, ['go']);
 same('its own scan is the one that runs', runInt(shadowed, 'go', fill(4)).value, '1');
+// the built-in qualifies the program's calls to `file.scan`. That name has to stay the recursive function:
+// without it, corpus/md.tape's render went from 63,515 steps to 52,851 (same HTML) because `inline`, `code_at`
+// and `run_at` no longer counted (seen failing).
+const recur = `fn scan(n: Int) -> Int {
+  match {
+    n <= 0 -> 0
+    else -> scan(n: n - 1)
+  }
+}
+fn go() -> Int {
+  scan(n: 10)
+}
+`;
+const rec = instance(recur, ['go']);
+const recGo = rec['go'],
+  recReset = rec['reset'];
+if (typeof recGo !== 'function' || typeof recReset !== 'function') throw new TypeError('no go');
+recReset();
+same(
+  'a program function named scan counts each entry',
+  [String(recGo()), Number(globalOf(rec, 'cost').value)],
+  ['0', 11],
+);
 const own = interpret([...std, { name: 'own.tape', text: shadow }]).call('go', [fill(4)]);
 same('the interpreter calls that scan too', typeof own === 'bigint' ? String(own) : 'not an int', '1');
 

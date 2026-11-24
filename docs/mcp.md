@@ -164,7 +164,7 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   `tape-step-version` header). It changes only when what a step counts changes, so two counts are comparable only
   when their versions are equal. Steps are the only cost measure here: on Workers the clock moves only across I/O,
   so wall time cannot be measured inside a run, and every span's duration in a trace is 0.
-  [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops) says more.)
+  [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops) says more.
 - A request that traps (the step budget, the 64 MB arena, a division by zero) is status 500 with `error` set; its
   writes are rolled back and the next request runs on.
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not

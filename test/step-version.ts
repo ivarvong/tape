@@ -65,7 +65,10 @@ type Sample = {
 };
 type Recorded = Sample & { readonly inlineOffMatches: boolean };
 const COUNTS = {
+  // version 1, before scan charged: seen failing once scan landed and the row was still the current one,
+  // got {"fold":1001,"tail":101,"helper":101,"fact":10,"json":48}, wanted json 47 (test/step-version.ts on that commit)
   1: { fold: 1001, tail: 101, helper: 101, fact: 10, json: 47, inlineOffMatches: true },
+  2: { fold: 1001, tail: 101, helper: 101, fact: 10, json: 48, inlineOffMatches: true },
 } satisfies Record<StepVersion, Recorded>;
 
 function stepsOf(text: string, fn: string, args: readonly bigint[], options: Partial<Options>): number {

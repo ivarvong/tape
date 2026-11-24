@@ -45,14 +45,17 @@ export function callGraph(fns: ReadonlyMap<string, FnDecl>): CallGraph {
   );
 }
 
-/** The functions that reach themselves. */
+/** The functions that reach themselves. A call the shadowing pass qualified (`md.scan`, when a built-in has the bare name) is the function that qualification names. */
 export function recursiveOf(fns: ReadonlyMap<string, FnDecl>, callsOf: CallGraph): Set<string> {
   const reaches = (from: string, target: string, seen = new Set<string>()): boolean => {
     for (const n of callsOf.get(from) ?? []) {
       if (n === target) return true;
-      if (!fns.has(n) || seen.has(n)) continue;
-      seen.add(n);
-      if (reaches(n, target, seen)) return true;
+      for (const k of meant(fns, n)) {
+        if (k === target) return true;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        if (reaches(k, target, seen)) return true;
+      }
     }
     return false;
   };

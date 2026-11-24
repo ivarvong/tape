@@ -1,5 +1,6 @@
-// bench/md-before.tape: the per-byte walks a Markdown renderer uses to find the next inline delimiter, the next
-// plain-text byte, and the next byte HTML must escape. One step a byte. bench/md-after.tape is the same walks as scan.
+// corpus/md-before.tape: the per-byte walks of corpus/md.tape (next_special, the plain-text skip, the HTML
+// escapes) to find the next inline delimiter, the next plain-text byte, and the next byte HTML must escape.
+// One step a byte. corpus/md-after.tape is the same walks as scan.
 fn next_special(t: View, at: Int) -> Int {
   match {
     at >= len(t) -> len(t)

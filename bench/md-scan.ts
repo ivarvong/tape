@@ -1,6 +1,7 @@
-// bench/md-scan.ts: the three byte walks a Markdown renderer spends its steps on, per byte (bench/md-before.tape)
-// and as scan (bench/md-after.tape), against a byte loop here. Then the steps and the time of each, on text where
-// a stopping byte is rare.
+// bench/md-scan.ts: the three byte walks of corpus/md.tape (next_special, the plain-text skip, the HTML escapes),
+// per byte (corpus/md-before.tape) and as scan (corpus/md-after.tape), against a byte loop here. The walks live
+// beside that corpus, not as a second copy of the renderer under bench/. Then the steps and the time of each, on
+// text where a stopping byte is rare.
 import '../node25.ts';
 import { built, read } from '../test/harness.ts';
 
@@ -63,8 +64,8 @@ function run(mod: Mod, fn: string, bytes: Uint8Array): { value: bigint; steps: n
   return { value, steps: Number(steps) };
 }
 
-const before = load('bench/md-before.tape');
-const after = load('bench/md-after.tape');
+const before = load('corpus/md-before.tape');
+const after = load('corpus/md-after.tape');
 const fill = (n: number, byte = 120): Uint8Array => new Uint8Array(n).fill(byte);
 const put = (n: number, pos: number, byte: number): Uint8Array => {
   const b = fill(Math.max(n, pos + 1));

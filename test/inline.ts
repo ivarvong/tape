@@ -394,6 +394,14 @@ const C = (n: number): number[] => [0x41, n];
   const bodies = meter(fns, 0);
   ok('the loop counts in a local', bodies[0] !== loop.body && JSON.stringify(bodies[0]) !== JSON.stringify(loop.body));
   same('a function that calls is left as it is', bodies[1], caller.body);
+  // a charge of 4 matches the old shape (get, something, add, set, get). That matcher rewrote the body
+  // (seen failing: the bytes were not the body's). Only +1 is an entry, so this one stays on the global.
+  const bulk: Fn = {
+    params: [],
+    results: [],
+    body: [0, 0x23, 0, 0x42, 4, 0x7c, 0x24, 0, 0x23, 0, 0x1a, 0x0b],
+  };
+  same('a charge other than +1 stays on the cost global', meter([bulk], 0), [bulk.body]);
   const counted = (m: WebAssembly.Module, x: number): string => {
     const { exports } = new WebAssembly.Instance(m, {});
     const f = exports['fn1'],

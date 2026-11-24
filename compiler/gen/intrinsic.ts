@@ -376,7 +376,7 @@ function scan(u: Use): Type {
   if (member.value.k !== 'str')
     return fail(
       member,
-      'C89',
+      'C93',
       'the set of scan must be a text literal',
       'The bytes are fixed when the program is compiled, so the scan reads 16 at a time. Write the bytes to stop on as text: `set: "*_[]!<&"` (`\\n` is byte 10).',
     );

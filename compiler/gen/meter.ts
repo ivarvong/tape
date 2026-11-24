@@ -1,7 +1,8 @@
 // compiler/gen/meter.ts: the step count of a recursive function that calls nothing, held in a local while it runs.
 // Such a function (a byte scan, a digit loop) counts each entry (compiler/function.ts countEntry: the count global
-// plus one, then a stop past the limit) and loops by calling itself as its result, a branch back to its start, so
-// it read and wrote the global on every round. Now it reads the global once when it is entered, counts and
+// plus one, then a stop past the limit). Only that +1 is rewritten; a charge of another amount stays on the
+// global. The function loops by calling itself as its result, a branch back to its start, so it read and wrote
+// the global on every round. Now it reads the global once when it is entered, counts and
 // compares in a local, and writes the local back where the count can be seen: before it stops (`unreachable`, so a
 // trap leaves the exact count) and before it ends. Nothing else runs while it does, since it calls nothing. A
 // function with an instruction that stops the module without an `unreachable` of its own (integer division and
@@ -41,8 +42,16 @@ function metered(f: Fn, cost: number): number[] | null {
     ends.push(x.end);
   });
   const g = (k: number, op: number): boolean => ops[k] === op && args[k] === cost;
-  // the entry count: global.get cost; i64.const 1; i64.add; global.set cost; global.get cost (then the limit)
-  const at = ops.findIndex((_, k) => g(k, 0x23) && ops[k + 2] === 0x7c && g(k + 3, 0x24) && g(k + 4, 0x23));
+  // an entry adds exactly one. The walker keeps a global's index, not a constant's value, so the 1 is read
+  // from the bytes: i64.const 1 is the opcode and one byte. A charge of any other amount (scan adds the bytes
+  // it read, compiler/gen/scan.ts) is left on the global.
+  const addsOne = (k: number): boolean => {
+    const from = starts[k] ?? -1;
+    return ops[k] === 0x42 && p.code[from + 1] === 1 && ends[k] === from + 2;
+  };
+  const at = ops.findIndex(
+    (_, k) => g(k, 0x23) && addsOne(k + 1) && ops[k + 2] === 0x7c && g(k + 3, 0x24) && g(k + 4, 0x23),
+  );
   if (at < 0) return null;
   const touches = ops.filter((op, k) => (op === 0x23 || op === 0x24) && args[k] === cost).length;
   if (touches !== 3 || ops.some(op => ALONE.has(op) || LEAVES.has(op))) return null;

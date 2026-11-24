@@ -155,6 +155,8 @@ const all: Part[] = [
       ...tapes('apps/trace/fixtures'),
       ...tapes('testdata/compare'),
       'corpus/md.tape',
+      'corpus/md-before.tape',
+      'corpus/md-after.tape',
       'corpus/blog.tape',
     ],
   ],
@@ -218,7 +220,7 @@ const all: Part[] = [
     /^126 inputs compared, 0 differ$/m,
   ],
   [
-    'bench/md-scan.ts: the Markdown byte walks, per byte and as scan, agree with the byte loop',
+    'bench/md-scan.ts: the walks of corpus/md.tape, per byte and as scan, agree with the byte loop',
     [node, 'bench/md-scan.ts'],
     /^[0-9]+ inputs compared, 0 differ$/m,
   ],

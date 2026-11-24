@@ -1,4 +1,4 @@
-// bench/md-after.tape: the walks of bench/md-before.tape, each one call of scan. The sets are the bytes those loops
+// corpus/md-after.tape: the walks of corpus/md-before.tape, each one call of scan. The sets are the bytes those loops
 // stop on: a backslash, a backtick, < [ ] ; a backslash, a backtick, * _ [ ! < and a newline; and & < > ".
 fn next_special(t: View, at: Int) -> Int {
   scan(t, at, set: "\\`<[]")

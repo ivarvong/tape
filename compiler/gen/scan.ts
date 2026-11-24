@@ -8,10 +8,11 @@
 // Steps, when the build counts them: one per 16 bytes read, rounded up. A read is every byte from `at` through the
 // one it stops on, or from `at` to the end when none is in the set. `at` equal to the length reads nothing. The
 // count is added before the result is given, and a count past the limit stops the request (trap 2), as an entry
-// into a recursive function does. The `nop` between the add and the store keeps this from looking like that entry
-// count, which compiler/gen/meter.ts rewrites into a local.
+// into a recursive function does. The amount is computed, so it is not the entry compiler/gen/meter.ts rewrites
+// into a local: that rewrite matches only `global.get` of the cost, `i64.const 1`, `i64.add`, `global.set`.
 import type { Ctx } from './fn.ts';
 import { close, fresh, get, open, set, trapIf } from './fn.ts';
+import { unreachable } from '../ast.ts';
 import { I32, TRAP, sleb, uleb } from '../common.ts';
 import { type ByteSet, JSON_PLAIN, bytesIn, sameSet } from '../byteset.ts';
 
@@ -38,74 +39,86 @@ function kindOf(c: Ctx, mask: ByteSet): Kind | null {
 
 /** A v128 of the lanes whose byte is in the set. JSON_PLAIN uses a signed compare; a short set, equality. */
 function stopsSimd(x: number, kind: Kind): number[] {
-  if (kind.k === 'json')
-    return [
-      ...get(x),
-      ...splat(32),
-      ...simd(0x25),
-      ...get(x),
-      ...splat(34),
-      ...simd(0x23),
-      ...simd(0x50),
-      ...get(x),
-      ...splat(92),
-      ...simd(0x23),
-      ...simd(0x50),
-    ];
-  if (kind.k === 'bits') return [];
-  const code: number[] = [];
-  kind.members.forEach((m, k) => {
-    code.push(...get(x), ...splat(m), ...simd(0x23));
-    if (k > 0) code.push(...simd(0x50));
-  });
-  return code;
+  switch (kind.k) {
+    case 'json':
+      return [
+        ...get(x),
+        ...splat(32),
+        ...simd(0x25),
+        ...get(x),
+        ...splat(34),
+        ...simd(0x23),
+        ...simd(0x50),
+        ...get(x),
+        ...splat(92),
+        ...simd(0x23),
+        ...simd(0x50),
+      ];
+    case 'eq': {
+      const code: number[] = [];
+      kind.members.forEach((m, k) => {
+        code.push(...get(x), ...splat(m), ...simd(0x23));
+        if (k > 0) code.push(...simd(0x50));
+      });
+      return code;
+    }
+    case 'bits':
+      return [];
+    default:
+      return unreachable(kind, 'scan');
+  }
 }
 
 /** Nonzero when the byte in `b` is in the set. */
 function stopsByte(b: number, kind: Kind): number[] {
-  if (kind.k === 'json')
-    return [
-      ...get(b),
-      ...i32(32),
-      0x49,
-      ...get(b),
-      ...i32(127),
-      0x4b,
-      0x72,
-      ...get(b),
-      ...i32(34),
-      0x46,
-      0x72,
-      ...get(b),
-      ...i32(92),
-      0x46,
-      0x72,
-    ];
-  if (kind.k === 'eq') {
-    const code: number[] = [];
-    kind.members.forEach((m, k) => {
-      code.push(...get(b), ...i32(m), 0x46);
-      if (k > 0) code.push(0x72);
-    });
-    return code;
+  switch (kind.k) {
+    case 'json':
+      return [
+        ...get(b),
+        ...i32(32),
+        0x49,
+        ...get(b),
+        ...i32(127),
+        0x4b,
+        0x72,
+        ...get(b),
+        ...i32(34),
+        0x46,
+        0x72,
+        ...get(b),
+        ...i32(92),
+        0x46,
+        0x72,
+      ];
+    case 'eq': {
+      const code: number[] = [];
+      kind.members.forEach((m, k) => {
+        code.push(...get(b), ...i32(m), 0x46);
+        if (k > 0) code.push(0x72);
+      });
+      return code;
+    }
+    case 'bits':
+      // bit (b & 7) of the table's byte b >> 3, the layout of hasByte
+      return [
+        ...i32(kind.at),
+        ...get(b),
+        ...i32(3),
+        0x76,
+        0x6a,
+        0x2d,
+        0,
+        0,
+        ...i32(1),
+        ...get(b),
+        ...i32(7),
+        0x71,
+        0x74,
+        0x71,
+      ];
+    default:
+      return unreachable(kind, 'scan');
   }
-  // bit (b & 7) of the table's byte b >> 3, the layout of hasByte
-  return [
-    ...i32(kind.at),
-    ...get(b),
-    ...i32(3),
-    0x76,
-    0x6a,
-    0x2d,
-    0,
-    0,
-    ...i32(1),
-    ...get(b),
-    ...i32(7),
-    0x71,
-    0x74,
-    0x71,
-  ];
 }
 
 /**
@@ -127,7 +140,6 @@ function charge(c: Ctx, at32: number, i: number, n: number): void {
     0x23,
     ...uleb(c.B.G_COST),
     0x7c,
-    0x01,
     0x24,
     ...uleb(c.B.G_COST),
     0x23,
