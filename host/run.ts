@@ -512,10 +512,13 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
     h = Number(call(L.target.name, args));
   } catch (err) {
     if (err instanceof Pending) throw err;
-    // a run that stopped says how much memory it had used by then, as a finished one does: the run to size is
-    // most often the one that ran out
+    // a run that stopped says how much memory it had used by then, and how many steps it had taken, as a finished
+    // one does: the run to size is most often the one that ran out
     const [head] = L.effects;
-    if (head && isHead(head) && L.live) head.bytes = globalOf(L, 'heap') - floor;
+    if (head && isHead(head) && L.live) {
+      head.bytes = globalOf(L, 'heap') - floor;
+      head.steps = globalOf(L, 'cost');
+    }
     const why = globalOf(L, 'why');
     throw new Error(stopped(L, why, err), { cause: err });
   }
@@ -544,6 +547,7 @@ function finished(L: Linked, bytes: Uint8Array, h: number, floor: number): Uint8
   const [head] = L.effects;
   if (head && isHead(head) && L.live) {
     head.bytes = L.used;
+    head.steps = globalOf(L, 'cost');
     if (L.undone) head.undone = true;
   }
   const out = answerAt(L.mem, h);

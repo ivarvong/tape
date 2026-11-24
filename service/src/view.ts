@@ -33,7 +33,7 @@ const headLine = (e: RunHead | MigrationsHead | CheckHead): string => {
   const flags = Object.keys(e.flags).length > 0 ? `  flags ${JSON.stringify(e.flags)}` : '',
     method = e.method === undefined || e.method === '' ? '' : `  method ${e.method}`,
     message = typeof e.message === 'string' ? `  message ${e.message}` : '';
-  return `start   build ${e.build}${flags}${method}${message}  ${e.bytes ?? '?'} bytes of memory${e.undone === true ? '  UNDONE: these writes were rolled back' : ''}`;
+  return `start   build ${e.build}${flags}${method}${message}  ${e.bytes ?? '?'} bytes of memory, ${e.steps ?? '?'} steps${e.undone === true ? '  UNDONE: these writes were rolled back' : ''}`;
 };
 /** A step of an upload check or a migration run, one line. */
 const stepLine = (e: Step): string => {
@@ -390,7 +390,13 @@ const runKind = (j: Joined, head: RunHead | MigrationsHead): Pick<OtlpSpan, 'nam
         'tape.migrations': j.effects.length - 1,
       },
     };
-  const run = { 'tape.request_id': j.id, 'tape.build': head.build, 'tape.memory_bytes': head.bytes };
+  // what the run used, of the limits docs/service.md gives: absent in a log from before it was recorded
+  const run = {
+    'tape.request_id': j.id,
+    'tape.build': head.build,
+    'tape.memory_bytes': head.bytes,
+    'tape.steps': head.steps,
+  };
   if (head.woke)
     return {
       name: `${j.name} woken by timer ${head.woke.key}`,

@@ -63,8 +63,10 @@ live version, or whose machine the stored rows do not satisfy, is refused with 4
 parameters reach the latest version of the program with that name in the same account.
 
 Every response names its request (`tape-request-id`) and carries signed links to its trace as a page
-(`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`). A storage failure at commit answers 503 with
-`retry-after: 1` and says whether anything was kept (`applied`); a trap answers 500.
+(`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`). The run's span in the OTLP says what the run used of the
+limits below, `tape.memory_bytes` and `tape.steps` (the first entry of its log holds the same, as `bytes` and
+`steps`, and the trace page shows them), whether it finished or stopped. A storage failure at commit answers 503
+with `retry-after: 1` and says whether anything was kept (`applied`); a trap answers 500.
 
 ### What a program answers
 

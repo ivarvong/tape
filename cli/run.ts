@@ -20,7 +20,7 @@ function effectLine(plain: Built, e: Effect): string {
   // a write or a timer that the run's rollback(out) or trap undid, and the run that did it
   const undone = 'undone' in e && e.undone ? '  (undone)' : '';
   if (isHead(e))
-    return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${e.bytes} bytes of memory${undone}`;
+    return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${e.bytes} bytes of memory, ${e.steps ?? '?'} steps${undone}`;
   if (isCall(e)) return `call    ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`;
   if (isWake(e)) return `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})${undone}`;
   if (isNow(e)) return `now     -> ${e.now}`;

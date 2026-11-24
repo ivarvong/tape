@@ -52,6 +52,8 @@ export type Head = Partial<Span> & {
   took_us?: number;
   /** the memory the run used */
   bytes?: number;
+  /** the steps the run took, of the 50,000,000 a run may take: the module's `cost` when it ended, or stopped */
+  steps?: number;
   undone?: true;
   woke?: { key: number; due: number };
 };
