@@ -84,7 +84,7 @@ with `retry-after: 1` and says whether anything was kept (`applied`, and `outcom
 | `applied` | The request finished. Anything it wrote was kept. | Do not send it again: sending it again can apply it a second time. |
 | `not applied` | Nothing this request wrote was kept. The run rolled back, or it failed before its log began (a Durable Object storage reset: the log is written in the same transaction as the writes, so no log means nothing was kept). | Send the same request again, with the same idempotency key. `retry-after` says how long to wait. |
 | `partly` | The writes before the run's last call were kept. The rest was rolled back. | Send it again only with the same idempotency key. |
-| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | Send it again only with the same idempotency key, and treat another success as the same effect. |
+| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | Send it again only with the same idempotency key, and treat another success as the same effect. There is no `retry-after`: that header is only on `not applied`. |
 
 The service does not retry a request itself. A storage reset fails the requests in flight on that object together, and an immediate retry hits the object while it is being reset. A GET is not a read: a program may write on any method, so the method is not a reason to retry. `not applied` is the reason, and the client is the one that waits and sends the same key again.
 

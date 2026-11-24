@@ -4,7 +4,7 @@ import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
 import type { InvokeOptions, Name } from './name.ts';
 import { RouterTrace, store } from './spans.ts';
-import { APPLY } from './records.ts';
+import { APPLY, encodeOutcome } from './records.ts';
 import {
   BODY_MAX,
   SOURCE_MAX,
@@ -234,8 +234,10 @@ export async function run(
   // failure, and they are not a link.
   const id = out.headers.get('tape-request-id');
   if (id === null || id === '' || id === 'null') out.headers.set('tape-request-id', crypto.randomUUID());
+  // A response the object returned is a finished request, including the program's own 500. Unknown is only the
+  // stop path, which already set the header (web.ts unknownStop).
   if (out.headers.get('tape-outcome') === null)
-    out.headers.set('tape-outcome', out.status >= 500 ? APPLY.unknown.outcome : APPLY.applied.outcome);
+    for (const [header, value] of Object.entries(encodeOutcome(APPLY.applied).headers)) out.headers.set(header, value);
   out.headers.set('traceparent', `00-${rt.trace}-${rt.span}-01`);
   const storeIt = (): Promise<string | null> =>
     store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);

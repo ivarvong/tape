@@ -1,6 +1,7 @@
 // records.ts: what the service stores and passes between its parts, as types. A request's log is the program's
 // effect log (host/log.ts); a migration run and an upload check are recorded in the same table, as logs of their
 // own steps. Types only: program.ts runs in a Dynamic Worker that is given no module but the host.
+import { unreachable } from '../../compiler/ast.ts';
 import type { Effect, Head, MachineSpec, Migrated } from '../../host.ts';
 import type { CallEffect } from '../../host/log.ts';
 import type { RouterRecord } from './spans.ts';
@@ -44,10 +45,43 @@ export const APPLY = {
   partly: { outcome: 'partly', retry: RETRY.partly },
   unknown: { outcome: 'unknown', retry: RETRY.unknown },
 } as const satisfies { [K in Apply['outcome']]: Extract<Apply, { outcome: K }> };
-/** A switch over an outcome with no case left. */
-export const unreachableOutcome = (x: never): never => {
-  throw new Error(`no case for this outcome: ${JSON.stringify(x)}`);
+/** The body fields and headers of one outcome. retry-after is only on `not applied`: an unknown outcome may already
+ * have been applied, so a header that says "send it again now" would apply it twice. */
+export type EncodedOutcome = {
+  outcome: Apply['outcome'];
+  retry: string;
+  applied?: false | 'partly';
+  transient?: true;
 };
+export function encodeOutcome(
+  apply: Apply,
+  transient = false,
+): { body: EncodedOutcome; headers: Record<string, string> } {
+  const headers: Record<string, string> = { 'tape-outcome': apply.outcome };
+  const retryAfter = transient && apply.outcome === 'not applied';
+  if (apply.outcome === 'not applied') headers['tape-applied'] = 'false';
+  if (retryAfter) headers['retry-after'] = '1';
+  switch (apply.outcome) {
+    case 'applied':
+      return { body: { outcome: 'applied', retry: apply.retry }, headers };
+    case 'not applied':
+      return {
+        body: {
+          outcome: 'not applied',
+          retry: apply.retry,
+          applied: false,
+          ...(retryAfter ? { transient: true } : {}),
+        },
+        headers,
+      };
+    case 'partly':
+      return { body: { outcome: 'partly', retry: apply.retry, applied: 'partly' }, headers };
+    case 'unknown':
+      return { body: { outcome: 'unknown', retry: apply.retry }, headers };
+    default:
+      return unreachable(apply, 'outcome');
+  }
+}
 /** The timer a woken run answered. */
 export type Woke = { key: number; due: number | null };
 /** A run's first entry as the service stores it: the host's, and how the run ended when it did not finish. */

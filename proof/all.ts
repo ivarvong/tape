@@ -184,6 +184,11 @@ const all: Part[] = [
     s => (s.match(/^caught /gm) ?? []).length === 7 && !/^(MISSED|missed|wrong)/m.test(s),
   ],
   [
+    'service/model/selftest.ts: the protocol models, including a retry of an unknown outcome with no key',
+    [node, 'service/model/selftest.ts'],
+    /\d+ passed, 0 failed/,
+  ],
+  [
     'service/verify/plant/plant.ts --check: every bug planted in the service still matches the code it edits',
     [node, 'service/verify/plant/plant.ts', '--check'],
     / 0 edits do not match/,

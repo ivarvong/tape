@@ -22,7 +22,9 @@ import {
 import type { App, Effect, Header, MachineSpec, ServiceReply, Sql, TraceEvent, Transaction } from './host.ts';
 import versions from './versions.ts';
 import type { VersionBuild } from './versions.ts';
-import { APPLY, isCheckHead, isEntry, isMigrationsHead, isRunHead, unreachableOutcome } from './records.ts';
+import { storageKind, transientAtEdge, transientBetween } from '../../host/failure.ts';
+import { APPLY, encodeOutcome, isCheckHead, isEntry, isMigrationsHead, isRunHead } from './records.ts';
+import { randomHex } from './web.ts';
 import type {
   Apply,
   CallMeta,
@@ -244,21 +246,14 @@ const checkLines = (steps: readonly Entry[]): Line[] =>
     ];
   });
 
-class StorageFault extends Error {}
-// the shapes of a storage failure (not the program's doing), as SQLite and the Durable Object runtime report them.
-// Between programs every one is `unreachable` (S2: never refused, so never compensated while a retry may apply it).
-// At the client edge each is 503 with retry-after, except FULL: a full database (the 10 GB limit) stays full until
-// rows are removed, so retry-after would promise what a retry cannot do; it answers 500 (R-ANS-2).
-export const TRANSIENT =
-  /SQLITE_(BUSY|LOCKED|IOERR|FULL|NOMEM|CANTOPEN|PROTOCOL)|Network connection lost|Durable Object (?:storage|reset)|internal error/i;
-export const FULL = /SQLITE_FULL/;
+class StorageFault extends Error {
+  readonly kind = 'reset' as const;
+}
 // W3C traceparent (version 00) to { trace, parent }, or null; all-zero ids are invalid
 const traceOfHeader = (h: string | null): { trace: string; parent: string } | null => {
   const [, trace = '', parent = ''] = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/.exec(h ?? '') ?? [];
   return trace !== '' && !/^0+$/.test(trace) && !/^0+$/.test(parent) ? { trace, parent } : null;
 };
-const hex = (n: number): string =>
-  [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
 /** The effects a failed run had logged before it failed, when its log had begun. */
 const effectsOf = (err: unknown): Effect[] | null => {
   const { effects } = fieldsOf(err);
@@ -409,20 +404,6 @@ const editedMigration = (sql: Sql, candidate: number, chain: Chain): { done: num
     },
   };
 };
-/** `applied` as the older field beside `outcome` (R-ANS-1, R-ANS-2): false, partly, or absent when the request finished. */
-const appliedField = (apply: Apply): { applied: false | 'partly' } | { applied?: undefined } => {
-  switch (apply.outcome) {
-    case 'not applied':
-      return { applied: false };
-    case 'partly':
-      return { applied: 'partly' };
-    case 'applied':
-    case 'unknown':
-      return {};
-    default:
-      return unreachableOutcome(apply);
-  }
-};
 const failedResponse = (
   error: string,
   reason: string,
@@ -430,27 +411,13 @@ const failedResponse = (
   apply: Apply,
   headers: Record<string, string>,
 ): Response => {
-  // A request that finished must not carry retry-after: the client would send it again and apply it twice.
-  const retry = transient && apply.outcome !== 'applied';
-  return new Response(
-    JSON.stringify({
-      error,
-      reason,
-      ...apply,
-      ...appliedField(apply),
-      ...(retry ? { transient: true } : {}),
-    }),
-    {
-      status: retry ? 503 : 500,
-      headers: {
-        ...headers,
-        'content-type': 'application/json',
-        'tape-outcome': apply.outcome,
-        ...(apply.outcome === 'not applied' ? { 'tape-applied': 'false' } : {}),
-        ...(retry ? { 'retry-after': '1' } : {}),
-      },
-    },
-  );
+  // retry-after only when nothing was kept. An unknown or a finished request must not ask to be sent again.
+  const encoded = encodeOutcome(apply, transient);
+  const status = apply.outcome === 'applied' ? 500 : apply.outcome === 'unknown' || transient ? 503 : 500;
+  return new Response(JSON.stringify({ error, reason, ...encoded.body }), {
+    status,
+    headers: { ...headers, 'content-type': 'application/json', ...encoded.headers },
+  });
 };
 
 export class Program extends DurableObject<Env> {
@@ -479,8 +446,8 @@ export class Program extends DurableObject<Env> {
           migrations: true,
           at,
           took: Date.now() - at,
-          trace: hex(16),
-          span: hex(8),
+          trace: randomHex(16),
+          span: randomHex(8),
           parent: null,
           name: env.SELF,
           build: 'migrations',
@@ -652,8 +619,8 @@ export class Program extends DurableObject<Env> {
       check: true,
       candidate,
       at: Date.now(),
-      trace: hex(16),
-      span: hex(8),
+      trace: randomHex(16),
+      span: randomHex(8),
       parent: null,
       name: this.env.SELF,
       build: 'check',
@@ -666,10 +633,9 @@ export class Program extends DurableObject<Env> {
     return this.record(version, enc.encode(request), effects);
   }
   /** The headers every answer of a run carries: its id, the next timer, and its place in the trace. */
-  #headers(id: string | null, head: Effect | undefined): Record<string, string> {
-    const at = head && isHead(head) ? head : null;
-    const trace = at?.trace ?? '',
-      span = at?.span ?? '';
+  #headers(id: string | null, head: Effect | RunHead | undefined): Record<string, string> {
+    const trace = head !== undefined && 'trace' in head && typeof head.trace === 'string' ? head.trace : '';
+    const span = head !== undefined && 'span' in head && typeof head.span === 'string' ? head.span : '';
     return {
       'tape-request-id': id ?? crypto.randomUUID(),
       'tape-next-wake': String(this.nextWake() ?? ''),
@@ -717,7 +683,7 @@ export class Program extends DurableObject<Env> {
         status,
         headers: {
           ...this.#headers(log.id(), ran.effects[0]),
-          'tape-outcome': APPLY.applied.outcome,
+          ...encodeOutcome(APPLY.applied).headers,
           ...(type === undefined ? {} : { 'content-type': type }),
         },
       });
@@ -743,9 +709,8 @@ export class Program extends DurableObject<Env> {
   ): Response {
     const effects = effectsOf(err),
       message = messageOf(err),
-      storage = err instanceof StorageFault || /Durable Object (?:storage|reset)/i.test(message),
-      // oxlint-disable-next-line typescript/prefer-includes -- FULL is a pattern beside TRANSIENT, as the tests read them
-      transient = (storage || TRANSIENT.test(message)) && !FULL.test(message);
+      storage = storageKind(err) !== null,
+      transient = transientAtEdge(err);
     // a run that failed after a call had committed the stretches before it: the log row is that commit
     const kept = log.id() !== null;
     const failed: Failed = {
@@ -781,12 +746,12 @@ export class Program extends DurableObject<Env> {
     parent: { trace: string; parent: string } | null,
   ): { id: string; head: RunHead } {
     const head: RunHead = {
-      build: 'unstarted',
+      build: typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev',
       flags: {},
       at: Date.now(),
       took: 0,
-      trace: parent?.trace ?? hex(16),
-      span: hex(8),
+      trace: parent?.trace ?? randomHex(16),
+      span: randomHex(8),
       parent: parent?.parent ?? null,
       name: null,
       failed,
@@ -839,7 +804,7 @@ export class Program extends DurableObject<Env> {
       // was applied, nothing was kept under the call's key, and the same call may succeed when it is sent again, so it
       // answers unreachable (sent again later, with the same key), never rejected (S2: a charge refused this way was
       // compensated, then made by a racing retry of the same key, so money left a failed order).
-      const transient = e instanceof StorageFault || TRANSIENT.test(messageOf(e));
+      const transient = transientBetween(e);
       const status = transient ? 'unreachable' : 'rejected';
       const failed: Failed = { status, error: messageOf(e), rolled_back: true };
       return {
@@ -959,7 +924,7 @@ export class Program extends DurableObject<Env> {
       });
     try {
       // a storage failure keeps the timer, set for later; anything else (a trap) removes it
-      const transient = (e: unknown): boolean => e instanceof StorageFault || TRANSIENT.test(messageOf(e));
+      const transient = (e: unknown): boolean => transientBetween(e);
       const w = await app.wake(key, { transaction, transient });
       if (!w) return null;
       log.keep(w.effects, false);

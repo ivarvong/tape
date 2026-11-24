@@ -1,11 +1,13 @@
 // Every model configuration that is checked: the correct protocol (must have no violation) and each historical bug,
 // seeded by a flag (must be found, and by the invariant named). `small` bounds keep the test suite fast; the
 // default bounds are the ones a full exploration runs (node service/model/run.ts).
+import { unreachable } from '../../compiler/ast.ts';
 import { explore } from './explore.ts';
 import type { Explored } from './explore.ts';
 import * as kv from './kv.ts';
 import * as calls from './calls.ts';
 import * as wipe from './wipe.ts';
+import * as outcome from './outcome.ts';
 
 const two: calls.Bounds = { runs: ['m1', 'm1'], restarts: 1 },
   three: calls.Bounds = { runs: ['m1', 'm1', 'm2'], restarts: 1 },
@@ -23,7 +25,10 @@ type Row<M, F, B> = readonly [
   small: boolean,
 ];
 export type Config =
-  Row<'kv', kv.Flags, kv.Bounds> | Row<'calls', calls.Flags, calls.Bounds> | Row<'wipe', wipe.Flags, wipe.Bounds>;
+  | Row<'kv', kv.Flags, kv.Bounds>
+  | Row<'calls', calls.Flags, calls.Bounds>
+  | Row<'wipe', wipe.Flags, wipe.Bounds>
+  | Row<'outcome', outcome.Flags, outcome.Bounds>;
 export const CONFIGS: readonly Config[] = [
   // model, name, flags, bounds, expected violation (null: none), bug it seeds, run in the small suite
   ['kv', 'correct', {}, kv.DEFAULTS, null, null, false],
@@ -140,6 +145,17 @@ export const CONFIGS: readonly Config[] = [
     'the first delete pass as deployed',
     true,
   ],
+  ['outcome', 'correct, no key', {}, { keyed: false }, null, null, true],
+  ['outcome', 'correct, with a key', {}, { keyed: true }, null, null, true],
+  [
+    'outcome',
+    'retry-after on unknown',
+    { retryUnknown: true },
+    { keyed: false },
+    'unknown-without-a-key',
+    'retry-after on an unknown outcome: a client with no key sends the request again and it can apply twice',
+    true,
+  ],
 ];
 /** What a search came to, whatever the model's state is. */
 type Searched = Pick<Explored<unknown>, 'states' | 'transitions' | 'depth' | 'truncated'> & {
@@ -164,9 +180,27 @@ const searchWipe = ([, , flags, bounds]: Row<'wipe', wipe.Flags, wipe.Bounds>): 
   brief(
     explore({ init: wipe.init(bounds), actions: s => wipe.actions(s, flags, bounds), invariants: wipe.invariants }),
   );
+const searchOutcome = ([, , flags, bounds]: Row<'outcome', outcome.Flags, outcome.Bounds>): Searched =>
+  brief(
+    explore({
+      init: outcome.init(bounds),
+      actions: s => outcome.actions(s, flags),
+      invariants: outcome.invariants,
+    }),
+  );
 const search = (c: Config): Searched => {
-  if (c[0] === 'kv') return searchKv(c);
-  return c[0] === 'calls' ? searchCalls(c) : searchWipe(c);
+  switch (c[0]) {
+    case 'kv':
+      return searchKv(c);
+    case 'calls':
+      return searchCalls(c);
+    case 'wipe':
+      return searchWipe(c);
+    case 'outcome':
+      return searchOutcome(c);
+    default:
+      return unreachable(c, 'model');
+  }
 };
 export type Checked = Omit<Searched, 'counterexample'> & {
   model: Config[0];

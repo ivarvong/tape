@@ -1,17 +1,8 @@
 // RUNTIME-SPEC R-ANS-2: which storage failures are transient (503 at the edge; unreachable between programs)
 import { it, expect } from 'vitest';
-// program.ts is a Dynamic Worker module (it imports the loader's host.ts), so its patterns are read from its source
-import source from '../src/program.ts?raw';
-const pattern = (name: string): RegExp => {
-  const [, body = '', flags = ''] = new RegExp(`export const ${name} =\\s*/(.+)/(\\w*);`).exec(source) ?? [];
-  expect(body).not.toBe('');
-  return new RegExp(body, flags);
-};
-const TRANSIENT = pattern('TRANSIENT'),
-  FULL = pattern('FULL');
+import { transientAtEdge, transientBetween } from '../../host/failure.ts';
+
 it('a busy, locked or reset store is transient at the edge; a full database is storage but not transient; a program error is neither', () => {
-  const edge = (m: string): boolean => TRANSIENT.test(m) && !FULL.test(m),
-    between = (m: string): boolean => TRANSIENT.test(m);
   const storage = [
     'SQLITE_BUSY: database is locked',
     'SQLITE_IOERR: disk I/O error',
@@ -19,16 +10,18 @@ it('a busy, locked or reset store is transient at the edge; a full database is s
     'Durable Object reset because its code was updated.',
     'internal error',
   ];
-  expect([storage.map(edge), storage.map(between)]).toEqual([
+  expect([storage.map(transientAtEdge), storage.map(transientBetween)]).toEqual([
     [true, true, true, true, true],
     [true, true, true, true, true],
   ]);
-  expect([edge('SQLITE_FULL: database or disk is full'), between('SQLITE_FULL: database or disk is full')]).toEqual([
-    false,
-    true,
-  ]);
-  expect(['trap 4: division by zero', 'SQLITE_CONSTRAINT: UNIQUE constraint failed: t.x'].map(between)).toEqual([
-    false,
-    false,
-  ]);
+  expect([
+    transientAtEdge('SQLITE_FULL: database or disk is full'),
+    transientBetween('SQLITE_FULL: database or disk is full'),
+  ]).toEqual([false, true]);
+  expect(
+    ['trap 4: division by zero', 'SQLITE_CONSTRAINT: UNIQUE constraint failed: t.x'].map(transientBetween),
+  ).toEqual([false, false]);
+  // a code on the error is the same kind as the token in a message
+  expect(transientAtEdge({ code: 'SQLITE_BUSY' })).toBe(true);
+  expect(transientAtEdge({ kind: 'full' })).toBe(false);
 });

@@ -19,7 +19,7 @@ import { FAULTY, HOP_KINDS, decide, hopOf, planOf as faultPlanOf } from './fault
 import type { Fault, Plan as FaultPlan } from './faults.ts';
 import { diverged, planOf, sqlProblems } from './plan.ts';
 import type { Program, ServedCall } from './program.ts';
-import { APPLY } from './records.ts';
+import { APPLY, encodeOutcome } from './records.ts';
 import type {
   Apply,
   CallMeta,
@@ -189,10 +189,13 @@ const are = (list: readonly unknown[]): string => (list.length > 1 ? 'are' : 'is
 const enc = new TextEncoder();
 /** A response that is not a program's answer: it still names a request and what the request did. */
 const carry = (res: Response, outcome: Apply['outcome']): Response => {
+  const encoded = encodeOutcome(APPLY[outcome], res.status === 503);
   if (res.headers.get('tape-request-id') === null) res.headers.set('tape-request-id', crypto.randomUUID());
-  if (res.headers.get('tape-outcome') === null) res.headers.set('tape-outcome', outcome);
+  for (const [header, value] of Object.entries(encoded.headers)) res.headers.set(header, value);
   return res;
 };
+const outcomeBody = (outcome: Apply['outcome'], status: number): ReturnType<typeof encodeOutcome>['body'] =>
+  encodeOutcome(APPLY[outcome], status === 503).body;
 const htmlPage = (html: string): Response =>
   new Response(html, {
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, max-age=300' },
@@ -821,7 +824,9 @@ export class Name extends DurableObject {
   ): Promise<Response> {
     const p = this.publication();
     if (!p.published || p.latest === null)
-      return Promise.resolve(carry(reply({ error: 'no such page', ...APPLY['not applied'] }, 404), 'not applied'));
+      return Promise.resolve(
+        carry(reply({ error: 'no such page', ...outcomeBody('not applied', 404) }, 404), 'not applied'),
+      );
     // a public answer carries no trace link, so its record need not be durable before the reply; a jepsen-*
     // account's is, as its faults are checked that way
     const after = !FAULTY.test(account) && (options.fault ?? null) === null;
@@ -839,7 +844,7 @@ export class Name extends DurableObject {
         reply(
           {
             error: `${name} is being upgraded to the current program; the request did not run: send it again`,
-            ...APPLY['not applied'],
+            ...outcomeBody('not applied', 503),
             upgrading: true,
           },
           503,
@@ -940,7 +945,10 @@ export class Name extends DurableObject {
         error = retired ? `v${version} is retired` : 'no such version';
       opened();
       note({ status: retired ? 410 : 404, error });
-      return carry(reply({ error, ...APPLY['not applied'] }, retired ? 410 : 404), 'not applied');
+      return carry(
+        reply({ error, ...outcomeBody('not applied', retired ? 410 : 404) }, retired ? 410 : 404),
+        'not applied',
+      );
     }
     const unbuilt = this.#fresh(version);
     if (unbuilt) {
@@ -953,7 +961,7 @@ export class Name extends DurableObject {
             error,
             message: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
             errors: unbuilt,
-            ...APPLY['not applied'],
+            ...outcomeBody('not applied', 503),
           },
           503,
         ),

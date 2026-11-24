@@ -10,6 +10,7 @@
 // returns rollback(out) has that stretch's writes undone: the host throws out of `transaction`, so the storage
 // rolls back, and still answers with `out`; the log's first entry says `undone`.
 import { Pending, REAL_TIMERS, perform } from './call.ts';
+import { transientBetween } from './failure.ts';
 import type { Service, Timers } from './call.ts';
 import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
 import type { CallEffect, Cell, Effect, Flags, From, Head, Span, Sql, Status, TraceEvent, WakeEffect } from './log.ts';
@@ -865,19 +866,15 @@ function invariants(L: Linked, module: WebAssembly.Module, settled: boolean): Br
 export type Woken = { key: number; status: Status; body: Uint8Array; effects: Effect[] };
 const isCut = (err: unknown): boolean => typeof err === 'object' && err !== null && 'cut' in err && Boolean(err.cut);
 
-// The shapes of a storage failure (not the program's doing), as SQLite and the Durable Object runtime report them:
-// the same pattern as the service's (service/src/program.ts TRANSIENT; test/timers-transient.ts holds them equal).
-export const TRANSIENT =
-  /SQLITE_(BUSY|LOCKED|IOERR|FULL|NOMEM|CANTOPEN|PROTOCOL)|Network connection lost|Durable Object (?:storage|reset)|internal error/i;
-const transientError = (err: unknown): boolean =>
-  TRANSIENT.test(typeof err === 'object' && err !== null && 'message' in err ? String(err.message) : String(err));
+// A storage failure (not the program's doing), the same classification the service uses (host/failure.ts).
+const transientError = (err: unknown): boolean => transientBetween(err);
 /** How long a timer whose run failed on storage waits before it is tried again: `first` ms, doubling, at most `most`. */
 export const WAKE_RETRY = { first: 1000, most: 15 * 60 * 1000 };
 
 // Run `woken` for one due key, as a child span of the run that set it. Its row goes in the same transaction as
 // the run's last writes, so a run cut short (the object reset while it waited on a call) is woken again: at
 // least once, and each run continues from the data, like any request. A run that fails on storage (`transient`,
-// by default TRANSIENT on its message) keeps its timer too, set for later: WAKE_RETRY's wait, doubling with each
+// by default a storage failure) keeps its timer too, set for later: WAKE_RETRY's wait, doubling with each
 // such failure in a row. A run that traps or rolls back is not retried by the timer: it would fail the same way;
 // its row is removed and the failure is in its log. Null when the key is not due.
 async function wakeDue(

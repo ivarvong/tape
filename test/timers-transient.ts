@@ -2,10 +2,10 @@
 // a wait that doubles each time up to a cap; a run that traps loses it. Before 22 November 2026 every failure but a
 // cut removed the timer, so a transient SQLITE_BUSY lost the work for good (lab_notebook repros/wakeloss.ts).
 import '../node25.ts';
-import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
-import { TRANSIENT, WAKE_RETRY } from '../host/run.ts';
+import { transientAtEdge, transientBetween } from '../host/failure.ts';
+import { WAKE_RETRY } from '../host/run.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 import { finish, messageOf, same as T } from './harness.ts';
@@ -101,8 +101,14 @@ busy = 2;
 T('the run and its rescheduling both fail', await wake(7, Date.now() + 1), 'SQLITE_BUSY: database is locked');
 T('the timer stays, still due', wakes().length === 1 && (wakes()[0]?.[1] ?? Infinity) <= Date.now() + 1, true);
 
-// the host's storage-failure pattern is the service's (service/src/program.ts TRANSIENT, R-ANS-2)
-const service = readFileSync(new URL('../service/src/program.ts', import.meta.url), 'utf8');
-const [, body = '', flags = ''] = /export const TRANSIENT =\s*\/(.+)\/(\w*);/.exec(service) ?? [];
-T("the host's TRANSIENT is the service's", [TRANSIENT.source, TRANSIENT.flags], [body, flags]);
+// one classification (host/failure.ts): a busy store is retried, a full one is not at the edge, a trap is neither
+T(
+  'a busy store is storage, a full one is not retried at the edge, a trap is the program',
+  [
+    transientBetween('SQLITE_BUSY: database is locked'),
+    transientAtEdge('SQLITE_FULL: database or disk is full'),
+    transientBetween('trap 4: division by zero'),
+  ],
+  [true, false, false],
+);
 finish();

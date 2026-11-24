@@ -1,5 +1,5 @@
 // web.ts: what the routes and the objects share: replies, hashes, signed trace links, the operator's token.
-import { APPLY } from './records.ts';
+import { APPLY, encodeOutcome } from './records.ts';
 
 const enc = new TextEncoder();
 
@@ -23,14 +23,11 @@ export const stopped = (e: unknown): void => {
  * and a trace, so a client can correlate it and retry only with the same idempotency key. */
 export const STOPPED =
   'the program stopped before it answered; what it committed before that is kept, so the outcome is unknown';
-const hexBytes = (n: number): string =>
-  [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('');
 export const unknownStop = (reason: string, traceparent?: string): Response => {
-  const res = Response.json({ error: STOPPED, ...APPLY.unknown, reason }, { status: 503 });
+  const encoded = encodeOutcome(APPLY.unknown, false);
+  const res = Response.json({ error: STOPPED, ...encoded.body, reason }, { status: 503, headers: encoded.headers });
   res.headers.set('tape-request-id', crypto.randomUUID());
-  res.headers.set('tape-outcome', APPLY.unknown.outcome);
-  res.headers.set('traceparent', traceparent ?? `00-${hexBytes(16)}-${hexBytes(8)}-01`);
-  res.headers.set('retry-after', '1');
+  res.headers.set('traceparent', traceparent ?? `00-${randomHex(16)}-${randomHex(8)}-01`);
   return res;
 };
 export const randomHex = (bytes: number): string => hexOf(crypto.getRandomValues(new Uint8Array(bytes)));

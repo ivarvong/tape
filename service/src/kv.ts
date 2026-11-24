@@ -22,8 +22,8 @@
 // Accounts named jepsen-* can have faults injected between the router and the shards (faults.ts), at sites named
 // kv>{cluster}.{METHOD}#{key}: delay, slow_reply, drop, lost, overload, reset_callee_before, reset_callee_after. A
 // request whose outcome the router cannot know is 503 {"outcome": "unknown"}; one a shard shed because it was
-// overloaded is 503 {"overloaded": true} with retry-after: 1 (the platform does not say whether it ran, so its
-// outcome is unknown too).
+// overloaded is 503 {"overloaded": true, "outcome": "unknown"} and carries no retry-after: the platform does not
+// say whether it ran, and a header that says to send it again could apply it twice.
 import kvSource from '../../examples/kv.tape?raw';
 import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
@@ -33,6 +33,7 @@ import { RouterTrace, store } from './spans.ts';
 import type { Step } from './spans.ts';
 import { requestOtlp } from './view.ts';
 import { hex, messageOf } from './web.ts';
+import { APPLY, encodeOutcome } from './records.ts';
 
 export const MAX_SHARDS = 64;
 export const MAX_KEY = 256;
@@ -368,11 +369,11 @@ const lookedUp = async (k: Keyed, fault: Fault | null): Promise<Awaited<ReturnTy
       refused: json(
         {
           error: 'the cluster lookup failed before any shard was called: nothing was applied; send the request again',
-          outcome: 'not applied',
+          ...encodeOutcome(APPLY['not applied'], true).body,
           reason: messageOf(e),
         },
         503,
-        { 'retry-after': '1' },
+        encodeOutcome(APPLY['not applied'], true).headers,
       ),
     };
   }
@@ -392,22 +393,23 @@ const refusalOf = (e: unknown, fault: Fault | null, name: string, shard: string)
       {
         error: `shard ${name} is overloaded (its Durable Object queue is full); send fewer requests at once, or use a cluster with more shards`,
         overloaded: true,
-        outcome: 'unknown',
+        ...encodeOutcome(APPLY.unknown).body,
         shard,
       },
       503,
-      { 'retry-after': '1' },
+      encodeOutcome(APPLY.unknown).headers,
     );
   return json(
     {
       error: fault
         ? 'the shard call failed before its reply arrived; it may or may not have been applied'
         : 'a shard stopped before it answered; what it committed before that is kept, so the outcome is unknown',
-      outcome: 'unknown',
+      ...encodeOutcome(APPLY.unknown).body,
       shard,
       reason: messageOf(e),
     },
     503,
+    encodeOutcome(APPLY.unknown).headers,
   );
 };
 /** The call to the key's shard: its reply, or the refusal that stands for one that never came. */
@@ -651,10 +653,11 @@ export const kv = async (ctx: ExecutionContext, request: Request, url: URL, link
     return json(
       {
         error: 'a shard stopped before it answered; what it committed before that is kept, so the outcome is unknown',
-        outcome: 'unknown',
+        ...encodeOutcome(APPLY.unknown).body,
         reason: messageOf(e),
       },
       e instanceof Failed ? e.status : 503,
+      encodeOutcome(APPLY.unknown).headers,
     );
   }
 };
