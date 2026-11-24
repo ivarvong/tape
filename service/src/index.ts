@@ -356,7 +356,7 @@ const PUBLISHED_BEFORE: ReadonlySet<string> = new Set(['ivar/tix']);
 // Ten minutes, not the 30 s it was: a name visited less often than every 30 s asked the list on every visit, and
 // the list's object is evicted when idle like any other, so the call was 15 ms at p50 and 150 ms at p95, and was
 // made by 106 of 199 public requests, 11% of all the time they took to answer (tape 0936bbf2, 24 November 2026).
-export const PUBLISHED_TTL_MS = 600_000;
+const PUBLISHED_TTL_MS = 600_000;
 const publishedUntil = new Map<string, number>();
 const isPublished = async (ctx: ExecutionContext, key: string): Promise<boolean> => {
   const until = publishedUntil.get(key);
