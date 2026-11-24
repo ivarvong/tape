@@ -24,9 +24,14 @@ waits on a call, another may run. Three things hold for every program:
 
 ## 2. Text
 
-`//` starts a comment. Integers are decimal, from `-9223372036854775808` to `9223372036854775807`: a `-` written
-before the digits is part of the literal (`-7`, and in a pattern `-1 ->`), and a literal outside that range is
-refused (P08). A number with a point is an exact decimal, a Dec whose scale is the digits written after the point:
+`//` starts a comment. An Int runs from `-9223372036854775808` to `9223372036854775807`. Written in digits, a `-`
+before them is part of the literal (`-7`, and in a pattern `-1 ->`), and a literal outside that range is refused
+(P08). A byte is that Int written as the byte: `'*'` is 42, `' '` is 32, `'\n'` is 10 and `'\''` is 39. It is one
+source character whose code is 0 to 127, or one escape (`\' \" \\ \/ \n \r \t \b \f`); empty, two characters, a
+character past ASCII, or an unknown escape is L07, and a byte from 128 to 255 stays a decimal integer. It is an
+Int, so the compiled code is that integer's, and a `-` before it is part of the literal, as before digits
+(`-'*'` is -42). A single quote inside a migration's SQL is that SQL's quote. A number with a point is an exact
+decimal, a Dec whose scale is the digits written after the point:
 `12.30` is a `Dec[2]`, `-0.5` a `Dec[1]`, at most 18 of them (L06). A Float literal ends in `f`: `1.5f`, `2f`,
 `1e-3f`, `6.02E23f`, at most 20 significant digits and no larger than the largest Float (L06); an exponent with
 no `f` is refused (L06). Text literals are in double quotes, on one line, with the escapes
@@ -45,6 +50,29 @@ line or in parentheses (P02 says so). The formatter breaks a line that is too lo
 text literal carries the text on after the next line's indentation. An expression or a pattern stands at most 1000
 deep, each bracket, call, lambda and operator it is inside counted once, each `|>` twice and each match four times
 (P09): a deeper one is named with `let` or moved into a function of its own.
+
+```tape gives
+fn mark(b: Int) -> Int {
+  match b {
+    '*' -> 1
+    '`' -> 2
+    _ -> 0
+  }
+}
+
+fn punct(b: Int) -> Int {
+  match {
+    b == '*' or b == '`' -> 1
+    else -> 0
+  }
+}
+
+// mark(42) is 1
+// mark(96) is 2
+// mark(65) is 0
+// punct(42) is 1
+// punct(65) is 0
+```
 
 Reserved words: `fn export type schema migration match with let do if else and or not`. Words with a meaning
 only where they stand: `interface flag machine invariant where contract settled private final read write`. A reserved
@@ -245,7 +273,7 @@ A pattern can fail, and binds what it proves.
 | Pattern | Matches |
 |---|---|
 | `Ctor(field, other: P)` | that constructor; a field named bare is bound, fields left out are not looked at. A field given a pattern binds its own name too, where the arm reads it and nothing else binds it: `Some(value: Account(balance: 0)) -> value.id` |
-| `"text"`, `42`, `-1`, `True` | that value. A Dec or a Float has no literal pattern (C19): bind it and compare in a guard |
+| `"text"`, `42`, `'*'`, `-1`, `True` | that value. A byte literal is the Int it spells (`'*'` is 42). A Dec or a Float has no literal pattern (C19): bind it and compare in a guard |
 | `"prefix" ++ rest` | bytes that start so; `rest` is matched against what follows |
 | `Some("")`, `Some(decimal(n))` | a constructor of one field, with a pattern for that field: as its one argument is passed bare, its one pattern needs no name. A constructor of two or more fields names each (C10) |
 | `Key(k)` | a value for which the refined type's condition holds; `k` has the type |

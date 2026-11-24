@@ -165,6 +165,20 @@ literal, `"prefix" ++ rest`, a refined type, or a function returning `Option`.
 | `Some(value: order = Order(state: "done"))` | a present, finished order | `order` |
 | `Link(head, tail: rest = Link(head: second))` | a list of at least two | `head`, `rest`, `second` |
 
+A byte in a pattern is the Int that byte is. `'*'` is 42 and `'\n'` is 10: one source character whose code is 0 to
+127, or one text escape, and L07 otherwise. `'*' ->` compiles to the same comparison as `42 ->`. Writing the byte
+as `"*"[0]` is an expression, so as a pattern it is P01 and the fix names the literal.
+
+```tape
+fn mark(b: Int) -> Int {
+  match b {
+    '*' -> 1
+    '`' -> 2
+    _ -> 0
+  }
+}
+```
+
 `name = Pattern` is how an arm keeps the whole value it took apart. `examples/fulfillment.tape` used to read a
 finished order from SQLite a second time just to show it, because its arm could match `state: "done"` but not
 bind the order:

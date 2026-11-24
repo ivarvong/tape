@@ -19,7 +19,7 @@ import type {
 } from '../ast.ts';
 import { decText, fail, utf8 } from '../common.ts';
 import { numbered } from '../sqltext.ts';
-import { KEYWORDS } from '../lex.ts';
+import { KEYWORDS, spelledByte } from '../lex.ts';
 import { Cursor, shown } from './cursor.ts';
 
 // how tightly each operator binds; `|>` is read here and becomes a call
@@ -479,7 +479,7 @@ function patArm(c: Cursor): PatArm {
       c.peek(),
       'P01',
       'a pattern is a literal, a name or a constructor, not an expression to compute',
-      `${byte === undefined ? 'Write the value itself' : `Write the byte's number, \`${byte} ->\``}, or bind it and compare in a guard: \`b if b == … -> …\`.`,
+      `${byte === undefined ? 'Write the value itself' : `Write \`${spelledByte(byte)} ->\``}, or bind it and compare in a guard: \`b if b == … -> …\`.`,
     );
   }
   c.expect('op', '->', 'An arm is `pattern -> expression`.');

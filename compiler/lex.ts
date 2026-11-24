@@ -51,6 +51,23 @@ const OPS = [
   '_',
 ];
 const ESC: Readonly<Record<string, number>> = { '"': 34, '\\': 92, '/': 47, n: 10, r: 13, t: 9, b: 8, f: 12 };
+/** The escapes of a byte literal: text's, and `\'` for the quote that would otherwise close it. */
+export const BYTE_ESC: Readonly<Record<string, number>> = { ...ESC, "'": 39 };
+/**
+ * How a fix spells a byte: a letter escape or the quote and the backslash, taken from {@link BYTE_ESC}, else the
+ * character when it prints, else the decimal digits. The numbers are the lexer's, so a new escape is a spelling too.
+ */
+export function spelledByte(n: number): string {
+  for (const [ch, byte] of Object.entries(BYTE_ESC)) {
+    if (byte === n && ch >= 'a' && ch <= 'z') return `'\\${ch}'`;
+  }
+  if (n === BYTE_ESC['\\']) return "'\\\\'";
+  if (n === BYTE_ESC["'"]) return "'\\''";
+  if (n > 31 && n < 127) return `'${String.fromCodePoint(n)}'`;
+  return String(n);
+}
+const BYTE_ONE =
+  "A byte literal holds one byte, an Int: `'*'` is 42 and `'\\n'` is 10. Text is in double quotes, `\"text\"`.";
 // where a scan stands: the tokens so far, the brackets that are open, the offset and the line
 type Scan = { readonly file: string; readonly text: string; toks: Token[]; open: string[]; i: number; line: number };
 const here = (sc: Scan): { line: number; file: string } => ({ line: sc.line, file: sc.file });
@@ -161,6 +178,48 @@ function text(sc: Scan): void {
   if (parts.length === 0) sc.toks.push({ t: 'str', v: bytes, ...here(sc) });
   else sc.toks.push({ t: 'interp', v: [...parts, { text: bytes }], ...here(sc) });
 }
+// A byte literal, from its opening quote: one byte, written as the Int it is (`'*'` is 42). Checked here, so a
+// pattern, a comparison and an operand are the digits' own and the code is that Int's.
+function byteLiteral(sc: Scan): void {
+  const at = sc.text[sc.i + 1];
+  if (at === undefined || at === '\n')
+    fail(here(sc), 'L07', 'a byte literal is not closed', `Close it with a single quote. ${BYTE_ONE}`);
+  let byte = 0;
+  if (at === '\\') {
+    const next = sc.text[sc.i + 2] ?? '';
+    if (next === '' || next === '\n')
+      fail(here(sc), 'L07', 'a byte literal is not closed', `Close it with a single quote. ${BYTE_ONE}`);
+    const known = BYTE_ESC[next];
+    if (known === undefined)
+      fail(
+        here(sc),
+        'L07',
+        `unknown escape \\${next} in a byte literal`,
+        'A byte literal allows \\\' \\\\ \\/ \\n \\r \\t \\b \\f and \\", the same escapes as text.',
+      );
+    else byte = known;
+    sc.i += 3;
+  } else if (at === "'") fail(here(sc), 'L07', 'a byte literal holds one byte', BYTE_ONE);
+  else {
+    // A code past 127 is more than one UTF-8 byte. A code at most 127 is one UTF-16 unit, so the closer is the
+    // next character: there is nothing to ask `fromCodePoint` how long.
+    const cp = sc.text.codePointAt(sc.i + 1) ?? 0;
+    if (cp > 127) fail(here(sc), 'L07', 'a byte literal holds one byte', BYTE_ONE);
+    byte = cp;
+    sc.i += 2;
+  }
+  const close = sc.text[sc.i];
+  if (close === "'") {
+    sc.i++;
+    sc.toks.push({ t: 'int', v: BigInt(byte), ...here(sc) });
+  } else
+    fail(
+      here(sc),
+      'L07',
+      close === undefined || close === '\n' ? 'a byte literal is not closed' : 'a byte literal holds one byte',
+      close === undefined || close === '\n' ? `Close it with a single quote. ${BYTE_ONE}` : BYTE_ONE,
+    );
+}
 const digit = (c: string | undefined): boolean => c !== undefined && c >= '0' && c <= '9';
 /**
  * A number: digits, then `.` and digits, then an exponent, then `f` for a Float (`1.5f`, `2f`, `1e-3f`); digits
@@ -260,11 +319,7 @@ function sql(sc: Scan): void {
 const MEANT: Readonly<Record<string, [string, string]>> = {
   '`': [
     'a backtick: Tape has no quoted names',
-    'A name is written as it is, a reserved word too where it names a field (`Event(type: View)`, `e.type`); text is in double quotes, `"…"`.',
-  ],
-  "'": [
-    'a single quote: Tape text is in double quotes',
-    'Text is in double quotes: `"text"`. Single quotes are for SQL text inside a query.',
+    'A name is written as it is, a reserved word too where it names a field (`Event(type: View)`, `e.type`); text is in double quotes, `"…"`. A byte is one character in single quotes, `\'*\'`.',
   ],
   ';': ['a semicolon: a new line ends a step in Tape', 'Put the next step on its own line.'],
   '!': ['a `!`: Tape negates with `not`', 'Write `not` for negation, and `!=` for not equal: `not done`, `n != 0`.'],
@@ -307,6 +362,7 @@ function step(sc: Scan): void {
   else if (ch === ' ' || ch === '\t' || ch === '\r') sc.i++;
   else if (ch === '/' && next === '/') sc.i = runEnd(sc.text, sc.i, c => c !== '\n');
   else if (ch === '"') text(sc);
+  else if (ch === "'") byteLiteral(sc);
   else if (digit(ch)) number(sc);
   else if (/[A-Za-z]/.test(ch) || (ch === '_' && wordChar(next))) word(sc);
   else if (ch === '{' && opensSql(sc.toks)) sql(sc);

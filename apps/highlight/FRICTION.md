@@ -12,7 +12,7 @@ in 129 files, and on 6,000 generated sources (`test.ts`).
 
 | # | What | Class | Resolution |
 |---|---|---|---|
-| 1 | No byte or character literals. Every comparison is against an ASCII code: `ch == 34` for `"`, `92` for `\`, `123` for `{`, and the operator table is 21 arms of numbers (`single`). There is no hex literal either (`192` for `0xC0`). This was the largest readability cost in the program, and the place a wrong digit would hide. | missing feature | numbers with comments where it mattered. **Open**: a byte literal (`'"'`, or `b"\""`) would remove most of the magic numbers |
+| 1 | No byte or character literals. Every comparison is against an ASCII code: `ch == 34` for `"`, `92` for `\`, `123` for `{`, and the operator table is 21 arms of numbers (`single`). There is no hex literal either (`192` for `0xC0`). This was the largest readability cost in the program, and the place a wrong digit would hide. | missing feature | landed 24 November 2026: `'*'` is the Int 42, one byte, checked as it is lexed. `single`, `escape` and `escaped` are written that way, and their code is the digits' own. `b"..."` was not taken: a name and then a text. Hex was not taken either: a second spelling of every Int |
 | 2 | A Buf can be at most half of memory. With 64 MB, the output Buf grows by doubling, so the largest output that fits is 32 MB: the highlighter handles 5,657,152 bytes of source (33,553,302 bytes out, 24.8 M steps: half the step budget) and traps with "out of memory" at 5,658,160 bytes. The memory limit binds long before the step limit. | limit (runtime) | measured with `test.ts --max`; recorded. A program that knows its output size cannot ask for it up front (no `buf(capacity)`) |
 | 3 | A stack is costly. lex.ts keeps a stack of open brackets (a `)` or `]` on top means a line break is not a token). A `List[Int]` would allocate, and any allocation after the output Buf stops it growing in place (`compiler/gen/runtime.ts`: only the last thing in the arena grows where it is), so growing it would mean copying it (not measured: a List version was not built). | workaround | the stack is one `Int`, a bit per bracket, plus a depth. **Deliberate difference**: past 63 open brackets the oldest bits are lost; no file in the repository comes close |
 | 4 | A match condition cannot bind what it computed. `ch == 47 and next == 47 -> scan(at: find(…), out: span(…, to: find(…)))` calls `find` twice; `keyword_at` calls `upper_end` three times. A block arm (`-> { let end = … }`) can bind for the result, but not for the condition. | missing feature (mild) | recomputed; the highlighter costs 4.4 steps per byte on the corpus; how much of that is recomputation is not measured. A guard that binds (`decimal(n)`-style patterns do this for one-parameter functions) would fix it |
@@ -31,8 +31,8 @@ in 129 files, and on 6,000 generated sources (`test.ts`).
 - A text literal that starts like a statement (`SELECT `, `INSERT `, …) is `s q`, with `sk` spans on capitalised
   words inside. It is still one `s` token.
 - After an error lex.ts stops; the highlighter marks it (`x`, `s x`, `e x`, `q x`) and goes on. For a source
-  lex.ts refuses, the test checks that the first marked span is the kind refused (L01 to L06; a refused number is `n x`), on the line lex.ts
-  reports.
+  lex.ts refuses, the test checks that the first marked span is the kind refused (L01 to L07; a refused number or
+  byte literal is `n x`), on the line lex.ts reports.
 - The bracket stack past 63 levels (entry 3).
 
 ## What went well

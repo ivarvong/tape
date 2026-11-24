@@ -4,7 +4,8 @@
 // reads characters, and decides the same token boundaries.
 //
 // Classes: c comment, s text literal (e an escape inside one, or the backslash that carries it on to the next
-// line; h a hole, `\(…)`, whose expression inside is highlighted as code between two hd delimiters), n number,
+// line; h a hole, `\(…)`, whose expression inside is highlighted as code between two hd delimiters), n number
+// (a byte literal `'*'` is a number too: it is the Int it spells),
 // k reserved word, w a word with a meaning only where it stands, t a type or constructor name, i any other name,
 // o operator or punctuation, q SQL (a migration's or an invariant's body, or a text literal that starts like a
 // statement; inside it, sk an SQL keyword, sp a named placeholder and ss quoted SQL text), x what the compiler would refuse.
@@ -51,6 +52,7 @@ fn token(src: View, at: Int, out: Buf, state: Scan, ch: Int) -> Buf {
         state
       )
     ch == 34 -> text(src, at, out, state, end: text_end(src, at: at + 1))
+    ch == '\'' -> byte_literal(src, at, out, state)
     ch >= 48 and ch <= 57 -> number(src, at, out, state, end: number_end(src, at))
     letter(b: ch)
       or (ch == 95 and word_byte(b: byte_at(src, at: at + 1))) -> word(
@@ -456,29 +458,82 @@ fn two(p: View) -> Bool {
 
 fn single(b: Int) -> Bool {
   match b {
-    40 -> True
-    41 -> True
-    123 -> True
-    125 -> True
-    91 -> True
-    93 -> True
-    44 -> True
-    58 -> True
-    46 -> True
-    61 -> True
-    60 -> True
-    62 -> True
-    43 -> True
-    45 -> True
-    42 -> True
-    47 -> True
-    37 -> True
-    38 -> True
-    124 -> True
-    94 -> True
-    95 -> True
+    '(' -> True
+    ')' -> True
+    '{' -> True
+    '}' -> True
+    '[' -> True
+    ']' -> True
+    ',' -> True
+    ':' -> True
+    '.' -> True
+    '=' -> True
+    '<' -> True
+    '>' -> True
+    '+' -> True
+    '-' -> True
+    '*' -> True
+    '/' -> True
+    '%' -> True
+    '&' -> True
+    '|' -> True
+    '^' -> True
+    '_' -> True
     _ -> False
   }
+}
+
+// A byte literal, from its opening quote (lex.ts): one byte, an Int. Closed just after the closing quote when
+// it is one; Open where a refused one ends, so the span is `n` or `n x` (L07).
+fn byte_literal(src: View, at: Int, out: Buf, state: Scan) -> Buf {
+  match byte_end(src, at) {
+    Closed(at: to) -> scan(
+      src,
+      at: to,
+      out: span(out, class: "n", src, from: at, to),
+      state: pushed(state, kind: 0)
+    )
+    Open(at: to) -> scan(
+      src,
+      at: to,
+      out: span(out, class: "n x", src, from: at, to),
+      state: pushed(state, kind: 0)
+    )
+  }
+}
+
+fn byte_end(src: View, at: Int) -> End {
+  let i = at + 1
+  match {
+    i >= len(src) or src[i] == '\n' -> Open(at: i)
+    src[i] == '\\' -> escaped_byte(src, at: i)
+    src[i] == '\'' -> Open(at: stop_byte(src, at: i))
+    src[i] < 128 and byte_at(src, at: i + 1) == '\'' -> Closed(at: i + 2)
+    else -> Open(at: stop_byte(src, at: i))
+  }
+}
+
+fn escaped_byte(src: View, at: Int) -> End {
+  let n = byte_at(src, at: at + 1)
+  match {
+    n < 0 or n == '\n' -> Open(at: at + 1)
+    byte_escape(n) and byte_at(src, at: at + 2) == '\'' -> Closed(at: at + 3)
+    else -> Open(at: stop_byte(src, at))
+  }
+}
+
+// where a refused byte literal ends: the line break, or just after its closing quote
+fn stop_byte(src: View, at: Int) -> Int {
+  match {
+    at >= len(src) or src[at] == '\n' -> at
+    src[at] == '\'' -> at + 1
+    src[at] >= 128 -> stop_byte(src, at: utf8_end(src, at: at + 1))
+    else -> stop_byte(src, at: at + 1)
+  }
+}
+
+fn byte_escape(b: Int) -> Bool {
+  escape(b) or b == '\''
 }
 
 // A refused byte takes the UTF-8 continuation bytes after it, so a span never splits a character.
@@ -712,14 +767,14 @@ fn hole(src: View, at: Int, out: Buf, end: End) -> Buf {
 
 fn escape(b: Int) -> Bool {
   match b {
-    34 -> True
-    92 -> True
-    47 -> True
-    110 -> True
-    114 -> True
-    116 -> True
-    98 -> True
-    102 -> True
+    '"' -> True
+    '\\' -> True
+    '/' -> True
+    'n' -> True
+    'r' -> True
+    't' -> True
+    'b' -> True
+    'f' -> True
     _ -> False
   }
 }
@@ -850,10 +905,10 @@ fn copy(out: Buf, src: View, at: Int, to: Int) -> Buf {
 
 fn escaped(out: Buf, b: Int) -> Buf {
   match b {
-    38 -> append(buf: out, view: "&amp;")
-    60 -> append(buf: out, view: "&lt;")
-    62 -> append(buf: out, view: "&gt;")
-    34 -> append(buf: out, view: "&quot;")
+    '&' -> append(buf: out, view: "&amp;")
+    '<' -> append(buf: out, view: "&lt;")
+    '>' -> append(buf: out, view: "&gt;")
+    '"' -> append(buf: out, view: "&quot;")
     _ -> push(buf: out, byte: b)
   }
 }

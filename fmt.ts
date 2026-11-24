@@ -14,7 +14,7 @@
 // A file that does not parse is not formatted: the parse error is thrown, as the compiler reports it.
 import { readFileSync } from 'node:fs';
 import { parseProgram } from './compiler.ts';
-import { CONTINUES } from './compiler/lex.ts';
+import { BYTE_ESC, CONTINUES } from './compiler/lex.ts';
 
 // longest first, so `->` is not read as `-`
 const OPS = [
@@ -123,6 +123,14 @@ function tokenAt(text: string, i: number, out: readonly Tok[]): [Tok | null, num
     while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
     // a text carried over lines (a backslash ends each): kept without the indentation, which is fmt's to give
     return [{ t: 'str', v: text.slice(i, j + 1).replaceAll(/\\\n[ \t]*/g, CARRY) }, j + 1];
+  }
+  // a byte literal, kept as written: one character, or a backslash and an escape, then the closing quote
+  if (ch === "'") {
+    const escaped = text[i + 1] === '\\';
+    const end = i + (escaped ? 4 : 3);
+    if (text[end - 1] !== "'" || (escaped && !Object.hasOwn(BYTE_ESC, text[i + 2] ?? '')))
+      throw new Error(`fmt: the character ${JSON.stringify(ch)} is not Tape`);
+    return [{ t: 'num', v: text.slice(i, end) }, end];
   }
   if (ch >= '0' && ch <= '9') {
     // an Int, or a Float: `1.5f`, `1e-3f` (the lexer refuses the forms between)

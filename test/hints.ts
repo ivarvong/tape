@@ -200,13 +200,16 @@ same(
     'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    "*"[0] -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
   );
   same(
-    'a computed byte as a pattern: P01, with the byte its text is',
-    [code(s4), hint(s4).includes('`42 ->`')],
+    'a computed byte as a pattern: P01, and the fix names the byte literal',
+    [code(s4), hint(s4).includes("'*' ->")],
     ['P01:3', true],
   );
   same(
-    '…and the number, or a guard, compiles',
+    '…and the byte literal, the number, or a guard, compiles',
     [
+      said(
+        "fn handle(raw: View) -> Buf {\n  match raw[0] {\n    '*' -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n",
+      ),
       said(
         'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    42 -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
       ),
@@ -214,7 +217,7 @@ same(
         'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    b if b == "*"[0] -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
       ),
     ],
-    ['compiled', 'compiled'],
+    ['compiled', 'compiled', 'compiled'],
   );
   const s5 = said(fn('  match (a, b) {\n    _ -> 0\n  }'));
   same(

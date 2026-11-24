@@ -263,7 +263,7 @@ function compareTokens(
             h.to - 1,
           );
       });
-    } else if (t.t === 'int') value = /^[0-9]+$/.test(str(s)) && BigInt(str(s)) === t.v;
+    } else if (t.t === 'int') value = (/^[0-9]+$/.test(str(s)) && BigInt(str(s)) === t.v) || byteOf(str(s)) === t.v;
     // a Float's span is the whole literal, its f included
     // a Dec's span is its digits and point: the count of its last place, and that many digits after the point
     else if (t.t === 'dec')
@@ -290,7 +290,29 @@ function compareTokens(
 // A source lex() refuses: the first span marked x must be the kind of thing refused, on the same line. Where a
 // span's fault is: an unclosed text literal at its end (the line break or the end of the source), anything
 // else at its start (lex.ts reports an unclosed migration at its opening line).
-const REFUSAL: Record<string, string> = { L01: 'x', L02: 's', L03: 'e', L04: 'q', L05: 'h', L06: 'n' };
+const REFUSAL: Record<string, string> = { L01: 'x', L02: 's', L03: 'e', L04: 'q', L05: 'h', L06: 'n', L07: 'n' };
+/** The Int a byte literal spells, or null when the span is not one (`'*'` is 42, `'\n'` is 10). */
+function byteOf(s: string): bigint | null {
+  if (!s.startsWith("'") || !s.endsWith("'") || s.length < 3) return null;
+  const inner = s.slice(1, -1);
+  const esc: Readonly<Record<string, number>> = {
+    '"': 34,
+    '\\': 92,
+    '/': 47,
+    n: 10,
+    r: 13,
+    t: 9,
+    b: 8,
+    f: 12,
+    "'": 39,
+  };
+  if (inner.startsWith('\\')) {
+    const b = inner.length === 2 ? esc[inner[1] ?? ''] : undefined;
+    return b === undefined ? null : BigInt(b);
+  }
+  const cp = inner.codePointAt(0) ?? -1;
+  return cp >= 0 && cp < 128 && inner.length === String.fromCodePoint(cp).length ? BigInt(cp) : null;
+}
 const fault = (s: Span): number => (s.cls.startsWith('s ') ? s.to : s.from);
 function refused(e: CompileError, input: Uint8Array, p: Parsed): string[] {
   const all = p.tops
@@ -571,6 +593,16 @@ const EDGES: [string, string][] = [
     'migration x\n|> y { a }',
     `${sp('k', 'migration')} ${sp('i', 'x')}\n${sp('o', '|&gt;')} ${sp('i', 'y')} ${sp('q', '{ a }')}`,
   ],
+  // a byte literal is a number, the Int it spells; none, two, or a character past ASCII is refused (L07)
+  ["'*' '\\n' '\\\\'", `${sp('n', "'*'")} ${sp('n', "'\\n'")} ${sp('n', "'\\\\'")}`],
+  ["'\"'", sp('n', "'&quot;'")],
+  ["b == '*'", `${sp('i', 'b')} ${sp('o', '==')} ${sp('n', "'*'")}`],
+  [`"\\('*')"`, sp('s', `&quot;${hole(sp('n', "'*'"))}&quot;`)],
+  ["''", sp('n x', "''")],
+  ["'ab'", sp('n x', "'ab'")],
+  ["'", sp('n x', "'")],
+  ["'\\q'", sp('n x', "'\\q'")],
+  ["'é'", sp('n x', "'é'")],
 ];
 
 // Random sources from a few dozen fragments, against lex(): when it accepts, the same tokens; when it refuses,
@@ -617,6 +649,11 @@ function fuzz(h: Highlighter): { cases: number; refused: number; bad: string[] }
     '\ninvariant "i" {',
     'invariant "i" settled {',
     "'q'",
+    "'*'",
+    "'\\n'",
+    "'\\\\'",
+    "'\\''",
+    "'\"'",
     '"{"',
     '"a\\(x)b"',
     '"\\(f(1, y.z))"',
@@ -626,7 +663,7 @@ function fuzz(h: Highlighter): { cases: number; refused: number; bad: string[] }
     '\n|> ',
   ];
   // a hole that breaks does so at its end (a quote, a line break), so no fragment after it lands inside it
-  const broken = ["'", '"', '!', '\\', 'é', '"\\q"', '#', '"\\(x"', '"\\(x\n', '"a \\'];
+  const broken = ["'", '"', '!', '\\', 'é', '"\\q"', '#', '"\\(x"', '"\\(x\n', '"a \\', "''", "'ab'", "'\\q'"];
   // the numbers, in cases of their own (after the first 6000, so those stay the sources they were): pieces of
   // literals lex() accepts alone, which joined make more (`1` `.` `5` `f`), then ones it refuses: an exponent
   // with no f, a Dec with more than 18 digits after its point, a Float with too many digits or too large
@@ -701,8 +738,8 @@ const PLANTS: { gate: string; what: string; from: string; to: string }[] = [
   {
     gate: 'round trip',
     what: '> is escaped without its semicolon',
-    from: '62 -> append(buf: out, view: "&gt;")',
-    to: '62 -> append(buf: out, view: "&gt")',
+    from: `'>' -> append(buf: out, view: "&gt;")`,
+    to: `'>' -> append(buf: out, view: "&gt")`,
   },
   { gate: 'lexer agreement', what: '<< is not an operator (it lexes as two <)', from: '    "<<" -> True\n', to: '' },
   {
