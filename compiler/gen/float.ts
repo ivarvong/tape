@@ -10,6 +10,7 @@ import type { Type } from '../types.ts';
 import { fresh, get, mathIndex, need, set, trapIf } from './fn.ts';
 import type { Build, Ctx } from './fn.ts';
 import type { Compiled } from './assemble.ts';
+import { FORM_SCAN } from '../formscan.ts';
 import { PUBLIC, defOf } from '../math/library.ts';
 import { assembleBody } from '../math/wasm.ts';
 
@@ -104,8 +105,10 @@ export function emitFloatBin(c: Ctx, e: Bin): Type {
 // ---- the math library (compiler/math): sin, cos, atan2, exp, log and pow, as Wasm functions of the module
 
 export function compileMath(B: Build, n: string): Compiled {
-  const def = defOf(n);
   const link = { index: (m: string) => mathIndex(B, m), data: B.constData, scratch: B.room };
+  // form_scan is not one of the math functions. form_raw names it, so a module holds the scan only when a
+  // program reaches form_raw, the same way it holds sin only when a program reaches sin.
+  const def = n === 'form_scan' ? FORM_SCAN : defOf(n);
   return { sig: B.sig(def.params, def.results), body: assembleBody(def, link) };
 }
 // what can come out NaN or infinite: exp and pow overflow, log of 0 or less, pow of a negative to a fraction

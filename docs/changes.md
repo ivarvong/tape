@@ -11,6 +11,7 @@ went](#what-went), below, has the forms each replaced.
 
 | When | Change |
 |---|---|
+| 24 November 2026 | std `form_field` finds its field in one pass (`form_raw`, in the module). Reading every field of an n-field form walked the form again from the start, so the steps grew as n² (n = 256: 460,899; n = 1,024: 7,738,976; n = 4,096 passed the 50,000,000-step budget). The same reads are now linear (2,414; 10,151; 47,015; the fitted exponent from 256 to 4,096 is 1.07). The answers are unchanged, and so is the memory |
 | 24 November 2026 | `scan(v, at, set)` is the first byte at or after `at` in a text literal of bytes, read 16 at a time; `scan_plain` is that scan for the bytes that end a JSON string's plain run. One step per 16 bytes read, rounded up. A computed set is C93 (C89 to C92 are the Float rules). The charge is step version 2: decoding `{"n":7}` is 48 steps, where version 1 counted 47 |
 | 24 November 2026 | a step count names the accounting that produced it (`step_version` 1: one entry into a recursive function, after inlining). It is on a run's JSON, its log, `tape.step_version`, the `tape-step-version` header and the module. The number changes only when that accounting changes (`test/step-version.ts`) |
 | 24 November 2026 | the definition says a name is the first file's, and a later file's is `file.name`: `handle` is that name, so the first file's serves requests and a later file's is `file.handle`. It was already so (`compiler/parse/decl.ts`) and unwritten, which is why a program of two files had to say that the first file's `handle` wins |

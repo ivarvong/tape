@@ -236,7 +236,8 @@ fn content_type(content: Content) -> View {
 }
 
 // One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and
-// %XX a byte. None when the form has no such field; the first one when it has several.
+// %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is one
+// pass in the module (`form_raw`), not a step per byte of the fields it passes; only the value found is decoded.
 //
 //   > form_field(body: "qty=2&buyer=ada+l%C3%B6", name: "buyer")
 //   Some(value: "ada lö")
@@ -245,38 +246,9 @@ fn content_type(content: Content) -> View {
 //   > form_field(body: "x=1&done", name: "done")
 //   Some(value: "")
 fn form_field(body: View, name: View) -> Option[View] {
-  form_from(body, name, at: 0)
-}
-
-// Internal: form_field, from the pair that starts at `at`. The pair's name is compared with `name` as it is
-// decoded, in place: a lookup makes nothing for the pairs it passes, only the value it finds.
-fn form_from(body: View, name: View, at: Int) -> Option[View] {
-  let end = find(v: body, byte: 38, at)
-  let pair = slice(v: body, from: at, to: end)
-  match {
-    form_named(
-      raw: until(v: pair, byte: 61),
-      name,
-      at: 0,
-      n: 0
-    ) -> Some(value: form_decoded(raw: after(v: pair, byte: 61)))
-    end >= len(body) -> None
-    else -> form_from(body, name, at: end + 1)
-  }
-}
-
-// Internal: whether raw[at..], `+` and %XX decoded as form_bytes decodes them, is name[n..].
-fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
-  match {
-    at >= len(raw) -> n == len(name)
-    n >= len(name) -> False
-    raw[at] == 43 -> name[n] == 32 and form_named(raw, name, at: at + 1, n: n + 1)
-    raw[at] == 37
-      and at + 2 < len(raw)
-      and is_hex(raw[at + 1])
-      and is_hex(raw[at + 2]) -> name[n] == (hex(raw[at + 1]) << 4) | hex(raw[at + 2])
-      and form_named(raw, name, at: at + 3, n: n + 1)
-    else -> name[n] == raw[at] and form_named(raw, name, at: at + 1, n: n + 1)
+  match form_raw(body, name) {
+    Some(value: raw) -> Some(value: form_decoded(raw))
+    None -> None
   }
 }
 

@@ -238,6 +238,11 @@ const BUILT_INS: BuiltIn[] = [
     sig: 'scan(v: View, at: Int, set: View) -> Int',
     doc: 'The first position at or after `at` whose byte is one of `set`; `len(v)` when none is. `set` is a text literal: its bytes, escapes included (`\\n` is byte 10), and a character\'s UTF-8 bytes are each members (`"é"` is bytes 195 and 169). The same byte twice is one member. Reads 16 bytes at a time (Wasm SIMD when the set has at most 16 bytes, or the JSON set of `scan_plain(v:, at:)`). One step per 16 bytes read, rounded up: every byte from `at` through the one it stops on, or from `at` to the end when it does not stop; `at` equal to `len(v)` reads nothing and costs nothing. `at` outside 0 to `len(v)` traps (trap 3).',
   },
+  {
+    name: 'form_raw',
+    sig: 'form_raw(body: View, name: View) -> Option[View]',
+    doc: 'The still-encoded value (a `+` and a %XX left as written) of the first field of an application/x-www-form-urlencoded body whose name decodes to `name`, or `None`. `form_field` decodes that value. One pass in the module, not a step per byte of the fields it passes.',
+  },
   { name: 'push', sig: 'push(buf: Buf, byte: Int) -> Buf', doc: 'Appends one byte.' },
   { name: 'append', sig: 'append(buf: Buf, view: View) -> Buf', doc: 'Appends text.' },
   { name: 'freeze', sig: 'freeze(buf: Buf) -> View', doc: 'The bytes written so far, as a View.' },

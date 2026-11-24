@@ -17,6 +17,7 @@ import { refinedPattern } from '../compiler/shadow.ts';
 import { type Host, Trap } from './host.ts';
 import { Unsupported } from './json.ts';
 import { finite, floatArithmetic, mathFn, truncToInt } from './float.ts';
+import { formRaw } from './form.ts';
 import * as D from './dec.ts';
 import {
   type Env,
@@ -303,6 +304,7 @@ const INTRINSIC = {
   pow: ['x', 'y'],
   scan_plain: ['v', 'at'],
   scan: ['v', 'at', 'set'],
+  form_raw: ['body', 'name'],
   parse_float: ['text'],
   rescale: ['x', 'to'],
   round: ['x', 'to', 'rounding'],
@@ -411,6 +413,11 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'scan': {
       const set = a[2] ?? stop('scan set');
       return scanAt(asBytes(a[0]), asInt(a[1]), byteSet(asBytes(set)));
+    }
+    // the compiled module's own scan (compiler/formscan.ts): the raw value, still + and %XX
+    case 'form_raw': {
+      const raw = formRaw(asBytes(a[0]), asBytes(a[1]));
+      return raw === null ? adt('None') : adt('Some', { value: raw });
     }
     case 'rescale':
       return D.rescale(asDec(a[0]), Number(asInt(a[1])));
