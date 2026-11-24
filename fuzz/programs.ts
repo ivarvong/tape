@@ -96,10 +96,10 @@ export function check(text: string, inputs: Uint8Array[], extra: Partial<Options
   for (const entry of entries)
     for (const input of inputs) {
       const got = runs.map(([name, r]) => [name, handled(r, input, entry)] as const);
-      // a run the builds stopped on steps is one the interpreter, which counts none, would run to its end, at a
-      // thousandth of the speed: it is not asked (the builds are still held to each other)
+      // a run the builds stopped on steps (trap 2) or on memory (trap 1, 64 MB) is one the interpreter, which counts
+      // neither, would run to its end, slowly: it is not asked (the builds are still held to each other)
       let want: string | null = null;
-      if (!got.some(([, g]) => g.out === 'trap 2'))
+      if (!got.some(([, g]) => g.out === 'trap 2' || g.out === 'trap 1'))
         try {
           const out = it.call(entry, [input]);
           want = out instanceof Uint8Array ? lat(out) : `not bytes: ${typeof out}`;
@@ -127,7 +127,7 @@ export function check(text: string, inputs: Uint8Array[], extra: Partial<Options
           traps,
         );
       const engine = false;
-      const steps = got.some(([, g]) => g.out === 'trap 2');
+      const steps = got.some(([, g]) => g.out === 'trap 2' || g.out === 'trap 1');
       for (const [name, g] of got) {
         if (want !== null && !engine && !steps && g.out !== want)
           return fail(
