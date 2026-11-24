@@ -12,6 +12,7 @@ import hostSchema from '../../host/schema.ts?erased';
 import programSrc from './program.ts?erased';
 import recordsSrc from './records.ts?erased';
 import type { CallEffect } from '../../host/log.ts';
+import type { MachineSpec } from '../../host/schema.ts';
 import { COMPILER, build, failing, isRefusal, machinesFor, rulesNow } from './build.ts';
 import type { Note, Refusal, Reported, Stored, VersionRow } from './build.ts';
 import { FAULTY, HOP_KINDS, decide, hopOf, planOf as faultPlanOf } from './faults.ts';
@@ -77,6 +78,19 @@ const chainIn = (text: unknown): Chain =>
       contract: m.contract === true,
       statements: Array.isArray(m.statements) ? m.statements.filter(x => typeof x === 'string') : [],
       hash: str(m.hash),
+    }));
+const textsIn = (v: unknown): string[] => (Array.isArray(v) ? v.filter(x => typeof x === 'string') : []);
+/** The machines of a plan, stored as JSON text. */
+const machinesIn = (text: unknown): MachineSpec[] =>
+  listIn(text)
+    .map(fieldsOf)
+    .map(m => ({
+      table: str(m.table),
+      column: str(m.column),
+      start: strOrNull(m.start),
+      ...(Array.isArray(m.starts) ? { starts: m.starts.map(strOrNull) } : {}),
+      ...(Array.isArray(m.states) ? { states: textsIn(m.states) } : {}),
+      moves: (Array.isArray(m.moves) ? m.moves : []).map(textsIn),
     }));
 /** Run a statement that may already have been run: adding a column that is there. */
 /** How long timers wait when the latest version cannot be rebuilt (alarm). */
@@ -285,6 +299,10 @@ export class Name extends DurableObject {
       attempt(() => sql.exec(`ALTER TABLE _tape_versions ADD COLUMN ${col}`));
     sql.exec('CREATE TABLE IF NOT EXISTS _tape_chain(version INTEGER PRIMARY KEY, migrations TEXT NOT NULL)');
     sql.exec('CREATE TABLE IF NOT EXISTS _tape_retired(version INTEGER PRIMARY KEY, at INTEGER NOT NULL)');
+    // the machines of the live versions, with the compiler and the versions they were made for (#machinesOf)
+    sql.exec(
+      'CREATE TABLE IF NOT EXISTS _tape_machines(one INTEGER PRIMARY KEY CHECK (one = 1), compiler TEXT NOT NULL, live TEXT NOT NULL, machines TEXT NOT NULL)',
+    );
     // timers: which account/name this object is (an alarm arrives with neither), and the woken runs it started
     sql.exec('CREATE TABLE IF NOT EXISTS _tape_self(account TEXT NOT NULL, name TEXT NOT NULL)');
     sql.exec(
@@ -430,11 +448,29 @@ export class Name extends DurableObject {
   // drops it; between them every request reads it from memory.
   #plan: Required<Plan> | null = null;
   plan(): Required<Plan> {
-    this.#plan ??= {
-      ...planOf(this.live(), this.chains()),
-      machines: this.machines().machines.map(({ by: _by, ...m }) => m),
-    };
+    if (this.#plan) return this.#plan;
+    const live = this.live();
+    this.#plan = { ...planOf(live, this.chains()), machines: this.#machinesOf(live) };
     return this.#plan;
+  }
+  // The machines of the live versions, as the plan holds them. Making them parses every live version's source with
+  // the standard library (machines(), build.ts machinesFor), which a new instance of this object did on its first
+  // request: 122 to 364 ms of CPU for one to four live versions, inside a cold public request (tape 0936bbf2, n=8,
+  // the invokePublished invocation's cpuTimeMs). They depend only on the live versions' sources and the compiler
+  // (rules/plan.ts is in COMPILER, scripts/sha.ts), so they are kept in a row with both, and made again only for
+  // another compiler or another set of live versions.
+  #machinesOf(live: readonly number[]): MachineSpec[] {
+    if (live.length === 0) return [];
+    const [row] = this.#sql.exec('SELECT compiler, live, machines FROM _tape_machines').toArray();
+    if (row?.compiler === COMPILER && row.live === live.join(',')) return machinesIn(row.machines);
+    const machines = this.machines().machines.map(({ by: _by, ...m }) => m);
+    this.#sql.exec(
+      'INSERT INTO _tape_machines(one, compiler, live, machines) VALUES (1, ?1, ?2, ?3) ON CONFLICT(one) DO UPDATE SET compiler = excluded.compiler, live = excluded.live, machines = excluded.machines',
+      COMPILER,
+      live.join(','),
+      JSON.stringify(machines),
+    );
+    return machines;
   }
   // The machine plan of the live versions (and a candidate's, at upload: { version, hash, source }).
   machines(candidate: VersionRow | null = null): ReturnType<typeof machinesFor> {
@@ -668,6 +704,8 @@ export class Name extends DurableObject {
         failures.push({ version: v, code: first?.code ?? '', message: (first?.message ?? '').slice(0, 160) });
       } else if (stale) rebuilt++;
     }
+    // and the plan's machines, made and kept now for this compiler (#machinesOf), not by the first request
+    this.plan();
     return { live: live.length, rebuilt, failed: failures.length, failures };
   }
   /** The live versions whose builds are current (each made current first, #fresh), and what names their builds. */
