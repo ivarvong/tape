@@ -167,23 +167,25 @@ describe('traces: a routed request is one tree', () => {
     expect(spans.length).toBe(4);
     const byId = spansOf(await got(`/trc/hi/traces/${trace}`));
     expect(byId.length).toBe(4);
-    // the run's span says what the run used, memory and steps, as the hosted runner counts them for the same
-    // program and request (mcp/src/runner.ts reads the module's `cost` itself); the log and the trace page say so too
+    // the run's span says what the run used. Steps: what the hosted runner counts for the same program and request
+    // (mcp/src/runner.ts reads the module's `cost` itself). Memory: the hosted run's, and the 40 bytes more the
+    // request takes here, held in words of 8 (7 bytes there, and 34 more with the host's tape-base header). The
+    // log and the trace page say the same.
     const hosted = await anyone('/v1/run', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'cf-connecting-ip': '198.51.100.9' },
       body: JSON.stringify({ files: [{ name: 'hi.tape', text: hello }], requests: ['GET /x'] }),
     });
-    const [ran] = list(at(await json(hosted), 'results'));
-    expect(Number(at(ran, 'steps'))).toBeGreaterThan(0);
-    expect([attr(run, 'tape.steps'), attr(run, 'tape.memory_bytes')]).toEqual([
-      at(ran, 'steps'),
-      at(ran, 'memory_bytes'),
-    ]);
+    const [ran] = list(at(await json(hosted), 'results')),
+      steps = Number(at(ran, 'steps')),
+      bytes = Number(at(ran, 'memory_bytes')) + 40;
+    expect(steps).toBeGreaterThan(0);
+    expect('\rtape-base: http://tape/trc/hi/v/1'.length).toBe(34);
+    expect([attr(run, 'tape.steps'), attr(run, 'tape.memory_bytes')]).toEqual([steps, bytes]);
     const id = r.headers.get('tape-request-id') ?? '';
-    expect(at(await got(`/trc/hi/log/1/${id}`), 'effects', 0, 'steps')).toBe(at(ran, 'steps'));
+    expect(at(await got(`/trc/hi/log/1/${id}`), 'effects', 0, 'steps')).toBe(steps);
     expect(await (await call(`/trc/hi/trace/1/${id}?format=html`)).text()).toContain(
-      `${String(at(ran, 'memory_bytes'))} bytes of memory, ${String(at(ran, 'steps'))} steps`,
+      `${bytes} bytes of memory, ${steps} steps`,
     );
   });
 });

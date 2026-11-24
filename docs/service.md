@@ -71,14 +71,20 @@ with `retry-after: 1` and says whether anything was kept (`applied`); a trap ans
 ### What a program answers
 
 A program answers `STATUS LF BODY` (`respond(status)`, served as `text/plain`) or `STATUS SP TYPE LF BODY`
-(`respond_as(status: …, content: Html)`; `Json`, `Text`, `Css`, `Svg` and `Csv` too). The type is from a closed list; other
-headers follow the status line, each after a carriage return (`header(name:, value:)`: `Location`, `cache-control`),
-and the host refuses those it sets itself (content-type, set-cookie, the security headers) with a 500 that says why.
-A first line that is neither form is all body. A program reads the request headers the host passes with `header_of`. They are an
-allow-list: accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key,
-user-agent, the Standard Webhooks headers (webhook-id, webhook-timestamp, webhook-signature) and the client's own
-x-… headers (but not x-forwarded-… or x-real-ip); never cookie, authorization, the client's address or anything
-Cloudflare adds. At most 32 are passed, each value cut at 1,024 characters.
+(`respond_as(status: …, content: Html)`; `Json`, `Text`, `Css`, `Svg` and `Csv` too). The type is from a closed
+list; other headers follow the status line, each after a carriage return (`header(name:, value:)`: `Location`,
+`cache-control`), and the host refuses those it sets itself (content-type, set-cookie, the security headers) with a
+500 that says why. A first line that is neither form is all body.
+
+A program reads the request headers the host passes with `header_of`. They are an allow-list: accept,
+accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, the Standard
+Webhooks headers (webhook-id, webhook-timestamp, webhook-signature) and the client's own x-… headers (but not
+x-forwarded-… or x-real-ip); never cookie, authorization, the client's address or anything Cloudflare adds. At most
+32 are passed, each value cut at 1,024 characters. Before them the host puts one of its own, `tape-base`: the URL
+the program's `/` is at, without the last slash (`https://tape.ivar.workers.dev/p/me/hello` on the public route,
+`…/me/hello/v/3` on the operator's), so a program writes a link or a redirect to another of its pages as `tape-base`
+and the path, wherever it is mounted. A client cannot set it, and a request that does not come through the service
+(`tape`, `tape sim`, the hosted runner) has none.
 
 ### Public routes
 

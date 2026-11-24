@@ -139,6 +139,30 @@ describe('request headers', () => {
   });
 });
 
+describe('where a program is mounted', () => {
+  it('says so in tape-base, on the operator route and the public one, whatever the client sends', async () => {
+    const based = `fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  let base = match header_of(request: r, name: "tape-base") {
+    Some(value) -> value
+    None -> "none"
+  }
+  respond(status: 200) |> append(view: base) |> append(view: " ") |> append(view: r.path)
+}
+`;
+    expect((await call('/ivar/based', { method: 'POST', body: based })).status).toBe(201);
+    expect((await call('/_public/ivar/based', { method: 'PUT', body: '{"published":true}' })).status).toBe(200);
+    const said = async (r: Promise<Response>): Promise<string> => (await r).text();
+    expect(await said(call('/ivar/based/v/1/a/b?x=1'))).toBe('http://tape/ivar/based/v/1 /a/b');
+    expect(await said(anyone('/p/ivar/based/a/b?x=1'))).toBe('http://tape/p/ivar/based /a/b');
+    expect(await said(anyone('/p/ivar/based'))).toBe('http://tape/p/ivar/based /');
+    // the host's, first and only: a client's own tape-base is not passed
+    expect(await said(anyone('/p/ivar/based/', { headers: { 'tape-base': 'http://elsewhere' } }))).toBe(
+      'http://tape/p/ivar/based /',
+    );
+  });
+});
+
 describe('public route', () => {
   it('answers 404 until the operator publishes the name, and only with a token may it be published', async () => {
     await call('/ivar/pub', { method: 'POST', body: page });

@@ -193,7 +193,7 @@ Uses: [`every_byte`](#fn-every_byte), [`is_lower`](#fn-is_lower), [`is_digit`](#
 
 ### Read a request header, set a response header
 
-`header_of(request: r, name: "if-none-match")` is the header's value, `None` when it was not sent (the service passes accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, webhook-id, webhook-timestamp, webhook-signature and x-… (but not x-forwarded-… or x-real-ip), never cookie or authorization). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`'s.
+`header_of(request: r, name: "if-none-match")` is the header's value, `None` when it was not sent (the service passes accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, webhook-id, webhook-timestamp, webhook-signature and x-… (but not x-forwarded-… or x-real-ip), never cookie or authorization; and its own `tape-base`, the URL the program's `/` is at, without the last slash, for links and redirects to its other pages). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`'s.
 
 ```tape
 fn handle(raw: View) -> Buf {
@@ -1297,7 +1297,7 @@ Some(value: "text/html")
 fn header_of(request: Request, name: View) -> Option[View]
 ```
 
-The value of a request header, by its name in any case; the first one when there are several. A host passes only the headers it means a program to see (the service: accept, content-type, if-match, if-none-match, idempotency-key and x-…, never cookie or authorization).
+The value of a request header, by its name in any case; the first one when there are several. A host passes only the headers it means a program to see (the service's list is in docs/service.md: never cookie or authorization), and the service adds one of its own, tape-base: where the program is mounted.
 
 ```
 > request(raw: "POST /\rcontent-type: text/csv\ridempotency-key: 7\nbody") |> header_of(name: "Idempotency-Key")

@@ -156,7 +156,8 @@ export async function run(
   { version, path, via, published = false }: Target,
 ): Promise<Response> {
   const open = via !== null && via !== '';
-  const bytes = await tapeRequest(request, path, url.search, via);
+  const mount = open ? `/p/${account}/${name}` : `/${account}/${name}/v/${version}`;
+  const bytes = await tapeRequest(request, path, url.search, via, `${url.origin}${mount}`);
   if (bytes === null) return tooLarge("a request's body", BODY_MAX);
   // the Worker's span for this request, and its call to the object (spans.ts); stored there before the reply
   const rt = await new RouterTrace(

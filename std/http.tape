@@ -51,8 +51,8 @@ fn request(raw: View) -> Request {
 }
 
 // The value of a request header, by its name in any case; the first one when there are several. A host passes
-// only the headers it means a program to see (the service: accept, content-type, if-match, if-none-match,
-// idempotency-key and x-…, never cookie or authorization).
+// only the headers it means a program to see (the service's list is in docs/service.md: never cookie or
+// authorization), and the service adds one of its own, tape-base: where the program is mounted.
 //
 //   > request(raw: "POST /\rcontent-type: text/csv\ridempotency-key: 7\nbody") |> header_of(name: "Idempotency-Key")
 //   Some(value: "7")
