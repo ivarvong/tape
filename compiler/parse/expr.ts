@@ -258,6 +258,7 @@ function unary(c: Cursor): Expr {
     c.next();
     return { k: 'dec', v: decLiteral(t, -n.v, n.s), s: n.s, ...c.at(t) };
   }
+  deeper(c);
   return { k: 'neg', e: unary(c), ...c.at(t) };
 }
 // a |> f(b: 1) is f(<f's first parameter>: a, b: 1). The right side is one call (or a function's name, for a call
@@ -277,8 +278,36 @@ function pipe(c: Cursor, l: Expr, t: Token): Expr {
       : "Write `value |> f(other: …)`: the value becomes f's first parameter. To use the result in arithmetic or a comparison, put the pipe in parentheses.",
   );
 }
+/**
+ * How deep an expression may stand, counting each bracket, call, match, lambda and operator it is inside. The tree
+ * of an expression is walked by recursive functions (the parser itself, the checks, the code generator), so one too
+ * deep for the engine's stack threw RangeError out of compile(): 800 nested lambdas, 1,600 nested matches, 3,200
+ * nested parentheses or a chain of 3,200 `+` (fuzz/compile.ts, 23 November 2026). Workers give a smaller stack than
+ * Node, so the bound is well under where Node failed.
+ */
+export const MAX_DEPTH = 256;
 /** an expression whose operators all bind at least as tightly as `min` */
 export function binary(c: Cursor, min: number): Expr {
+  const outer = c.depth;
+  try {
+    return operators(c, min);
+  } finally {
+    c.depth = outer;
+  }
+}
+function deeper(c: Cursor): void {
+  // the decoders compiler/wire.ts writes for a type nest as deep as it has fields: a program's own type is not refused
+  // for its size
+  if (++c.depth > MAX_DEPTH && c.file !== 'wire')
+    fail(
+      c.peek(),
+      'P09',
+      `this expression stands more than ${MAX_DEPTH} deep (brackets, calls, matches and operators inside one another)`,
+      'Name a part of it with `let`, or move a part into a function of its own.',
+    );
+}
+function operators(c: Cursor, min: number): Expr {
+  deeper(c);
   const not = c.eat('kw', 'not');
   let l: Expr = not ? { k: 'not', e: binary(c, 3), ...c.at(not) } : unary(c);
   for (;;) {
@@ -286,6 +315,8 @@ export function binary(c: Cursor, min: number): Expr {
       prec = t.t === 'op' || t.t === 'kw' ? PREC.get(t.v) : undefined;
     if (prec === undefined || prec < min || (t.t !== 'op' && t.t !== 'kw')) return l;
     c.next();
+    // each operator of a chain puts what came before it one deeper in the tree
+    deeper(c);
     if (!isBinOp(t.v)) {
       l = pipe(c, l, t);
       continue;
@@ -315,6 +346,15 @@ export function expr(c: Cursor): Expr {
 /** A pattern. `inLet`: it is a `let`'s, so an `=` outside brackets ends it (`let head ++ "," ++ rest = text`)
  * rather than binding the whole value (`name = Pattern`, which stands inside brackets there). */
 export function pattern(c: Cursor, inLet = false): Pattern {
+  const outer = c.depth;
+  try {
+    deeper(c);
+    return patternIn(c, inLet);
+  } finally {
+    c.depth = outer;
+  }
+}
+function patternIn(c: Cursor, inLet: boolean): Pattern {
   const head = simplePattern(c, inLet);
   if (head.k === 'str' || head.k === 'prefix' || !c.is('op', '++')) return head;
   const at = c.at(c.next());

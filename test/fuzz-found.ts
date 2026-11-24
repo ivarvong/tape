@@ -253,4 +253,65 @@ fn handle(raw: View, db: Sql) -> Buf {
   same('a query with a character that is not SQL is refused, not thrown', got, 'refused C67');
 }
 
+// fuzz/compile.ts --scales, 23 November 2026: an expression nested deeper than the engine's stack goes threw
+// RangeError ("Maximum call stack size exceeded") out of compile(), from the parser or from a pass that walks the
+// tree: 3,200 nested parentheses, a chain of 3,200 `+`, 800 nested lambdas, 1,600 nested matches, 3,200 nested
+// constructors. An expression more than 256 deep is refused, P09.
+{
+  const deep: [string, string][] = [
+    ['nested parentheses', `fn f(n: Int) -> Int {\n  ${'('.repeat(3200)}n${')'.repeat(3200)}\n}\n`],
+    ['a chain of +', `fn f(n: Int) -> Int {\n  n${' + n'.repeat(3200)}\n}\n`],
+    [
+      'nested lambdas',
+      `fn f(n: Int) -> Int {\n  ${'fold(list: range(from: 0, to: 2), from: n, by: fn(a: Int, k: Int) -> Int { '.repeat(800)}n${' })'.repeat(800)}\n}\n`,
+    ],
+    [
+      'nested constructors',
+      `fn f(n: Int) -> List[Int] {\n  ${'Cons(head: n, tail: '.repeat(3200)}Nil${')'.repeat(3200)}\n}\n`,
+    ],
+    [
+      'nested patterns',
+      `fn f(o: Option[Int]) -> Int {\n  match o {\n    ${'Some(value: '.repeat(3200)}_${')'.repeat(3200)} -> 1\n    _ -> 0\n  }\n}\n`,
+    ],
+  ];
+  const refused = deep.map(([what, text]) => {
+    try {
+      const b = compile([...std, { name: 'deep.tape', text }], { exports: ['f'] });
+      return `${what}: ${b.wasm === null ? (b.errors[0]?.code ?? '?') : 'compiled'}`;
+    } catch (e) {
+      return `${what}: threw ${e instanceof Error ? e.constructor.name : String(e)}`;
+    }
+  });
+  same(
+    'an expression nested past the bound is refused, P09, not thrown',
+    refused,
+    deep.map(([what]) => `${what}: P09`),
+  );
+  const fine = compile(
+    [
+      ...std,
+      {
+        name: 'deep.tape',
+        text: `fn f(n: Int) -> Int {\n  ${'('.repeat(100)}n${' + 1'.repeat(100)}${')'.repeat(100)}\n}\n`,
+      },
+    ],
+    {
+      exports: ['f'],
+    },
+  );
+  same('and one 100 deep, with a chain of 100 `+`, compiles', fine.wasm !== null, true);
+  // the decoders compiler/wire.ts writes nest as deep as a type has fields, and are not held to the bound
+  const wide = compile(
+    [
+      ...std,
+      {
+        name: 'wide.tape',
+        text: `type R {\n  R(${Array.from({ length: 300 }, (_, i) => `f${i}: Int`).join(', ')})\n}\n\nfn f(n: Int) -> Int {\n  R(${Array.from({ length: 300 }, (_, i) => `f${i}: n`).join(', ')}).f0\n}\n`,
+      },
+    ],
+    { exports: ['f'] },
+  );
+  same('a record of 300 fields compiles', wide.wasm === null ? wide.errors[0]?.code : 'compiled', 'compiled');
+}
+
 finish();

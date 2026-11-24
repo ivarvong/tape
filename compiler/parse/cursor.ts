@@ -38,6 +38,8 @@ export class Cursor {
   private readonly text: string;
   private readonly end: Token;
   pos = 0;
+  /** how deep the expression being read stands: its brackets, calls, matches and operators (parse/expr.ts binary) */
+  depth = 0;
   /** over a file's text, or over tokens already read (a hole of a text literal) */
   constructor(file: string, text: string | readonly Token[]) {
     this.file = file;
