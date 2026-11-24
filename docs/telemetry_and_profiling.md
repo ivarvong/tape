@@ -123,7 +123,12 @@ go tool pprof -http=: profiles/<file>.sym.pb              # flame graph
   when it began. No tail line appeared in the local workerd suite (mcp/test), so the tail is checked on prod.
 - **The profiled isolate serves real traffic too**: a few % of samples can come from other clients' calls.
 - **~3-20 % of wall is sampled CPU**; compare profiles only under the same load. For A/B numbers use cpu.ts.
-- `compile_ms` in the log reads 0: a Worker's clock does not move during compute. CPU per call is cpuTimeMs.
+- `compile_ms` is whole milliseconds of `Date.now` around the compile (resolution 1 ms). The log line reports it,
+  and `/v1/compile`, `/v1/run` and the MCP `compile` and `run` results return the same number beside `cached`. On a
+  production Worker the clock does not advance during compute (`Date.now()` and `performance.now()` stay at the
+  last I/O), and a compile awaits nothing, so `compile_ms` reads 0 for a cache hit and for a cache miss. It is not
+  CPU time; `cached` is what distinguishes the hit. CPU per call is cpuTimeMs. Where the clock does move (Node, and
+  the local workerd `mcp`'s tests run) a miss is the compile's wall time and a hit is the lookup.
 
 ## Where hosted time goes (2026-11-23, tape dddd2c92)
 

@@ -145,6 +145,15 @@ const DIAGNOSTICS_SCHEMA = {
   },
 };
 const refusalFields = { error: { type: 'string' }, reason: { type: 'string' } };
+/**
+ * compile_ms on compile's and run's output schemas. Whole milliseconds of Date.now, the log line's number.
+ * Resolution is 1 ms. On a production Worker the clock does not advance during CPU, so a compile reads 0.
+ */
+const COMPILE_MS_SCHEMA = {
+  type: 'integer',
+  description:
+    'Whole milliseconds Date.now advanced during the compile, the same number the log line reports. Resolution is 1 ms. On a production Worker the clock does not advance during CPU and a compile does no I/O, so this is 0 for a hit and a miss. It is not CPU time. cached is true on a hit.',
+} as const;
 
 const DOCS = 'https://github.com/ivarvong/tape/blob/main/docs';
 /**
@@ -174,7 +183,7 @@ export function listing(deps: Deps): Fields[] {
     {
       name: 'compile',
       title: 'Compile a Tape program',
-      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size and its SQL statement count. \`run\` compiles too, and runs requests.
+      description: `Compile a Tape program (https://github.com/ivarvong/tape: a small language for durable services, compiled to WebAssembly, that runs in the browser, in Node and on Cloudflare Workers; its compiler refuses writes a retried request would apply twice). Returns ok, each diagnostic as {file, line, code, message, fix} (the fix says what to write instead), the module's size, its SQL statement count, cached (true when this server's compile cache answered) and compile_ms (whole milliseconds Date.now advanced during the compile, the same number the log line reports; on a production Worker the clock does not advance during CPU and a compile does no I/O, so it is 0 there, and it is not CPU time). \`run\` compiles too, and runs requests.
 
 To check it works: compile with no arguments gives {"ok": true, "diagnostics": []}. Send hello.tape with the line \`repeat: True,\` taken out, and it gives ok: false and one diagnostic, code C54 at hello.tape line 11: the INSERT … DO UPDATE SET n = n + 1 would apply twice if the request were run twice.
 
@@ -191,6 +200,7 @@ ${limits}`,
           diagnostics: DIAGNOSTICS_SCHEMA,
           wasm_bytes: { type: ['integer', 'null'] },
           cached: { type: 'boolean' },
+          compile_ms: COMPILE_MS_SCHEMA,
           statements: { type: ['integer', 'null'] },
           ...refusalFields,
         },
@@ -203,7 +213,7 @@ ${limits}`,
       title: 'Run HTTP requests against a Tape program',
       description: `Compile a Tape program and send it HTTP requests, in order, on a fresh in-memory SQLite database. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} on the run's own clock: now() is its start plus at_ms (none: the time before), and each timer due by then runs first, as a result of its own (woken).
 
-Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects, the effect log (each SQL statement as written, its params, rows_written or rows_returned, and rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay of that log gave the same bytes; steps; trace: "lines" (each arm tried, ✓ or ✗, at its file:line, with its effects; at most ${TRACE_LINES} lines; default for one request), "full" (OTLP) or "none" (default for several). If it does not compile: ok false, with diagnostics. random() starts from one seed each call, going on across its requests. Calls to other programs answer Unreachable, or as \`remotes\` says.
+Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects (SQL as written, params, rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay of that log gave the same bytes; steps; trace: "lines" (at most ${TRACE_LINES} lines; default for one request), "full" (OTLP) or "none" (default for several). If it does not compile: ok false, with diagnostics. compile_ms (Date.now ms; a production Worker clock does not advance during CPU, so 0) and cached (a hit). random() starts from one seed each call, going on across its requests. Calls to other programs answer Unreachable, or as \`remotes\` says.
 
 ${CHEAT_SHEET}
 
@@ -219,6 +229,7 @@ ${limits}`,
           ok: { type: 'boolean' },
           diagnostics: DIAGNOSTICS_SCHEMA,
           cached: { type: 'boolean' },
+          compile_ms: COMPILE_MS_SCHEMA,
           results: { type: 'array', items: { type: 'object' } },
           timers: { type: 'object' },
           ...refusalFields,

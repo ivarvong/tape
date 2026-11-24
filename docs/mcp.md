@@ -80,7 +80,7 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
   "diagnostics": [{ "file": "hello.tape", "line": 11, "code": "C54",
                     "message": "run twice (a retried request, a timer that fires again), this write applies twice: …",
                     "fix": "Make the second run a no-op: … If every attempt is meant to count, say so in the call: `repeat: True`." }],
-  "wasm_bytes": null, "statements": null }
+  "wasm_bytes": null, "statements": null, "cached": false, "compile_ms": 0 }
 ```
 
 `ok` is true when the program compiles; then `diagnostics` is empty, `wasm_bytes` is the size of its module and
@@ -88,8 +88,20 @@ the tool does not take is refused, so a misspelt one is not silently ignored.
 
 `cached` (compile, run and test) is true when the compiler's answer came from the server's cache: the same files
 (names and text) were compiled before by the same compiler, on the same server instance, so they were not compiled
-again. The answer is the same either way. The cache is per instance and bounded, so a program sent again can still
-be compiled again (`cached: false`).
+again. The rest of the answer is the same either way. The cache is per instance and bounded, so a program sent again
+can still be compiled again (`cached: false`).
+
+`compile_ms` (compile and run) is how long that compile took, in whole milliseconds: `Date.now()` after it minus
+`Date.now()` before it. The call's log line reports the same number under the same name. The resolution is one
+millisecond. A cache hit is the time to find the kept build. Where the clock moves during the compile (Node, and
+the local workerd the mcp tests run) a miss is the compile's wall time and a hit is the lookup, so the two
+separate a slow compile from a cache hit. On a production Cloudflare Worker the clock does not advance while code
+runs: `Date.now()` and `performance.now()` stay at the time of the last I/O, which is how the runtime closes a
+timing side channel
+([Workers performance](https://developers.cloudflare.com/workers/runtime-apis/performance/)). A compile awaits
+nothing, so `compile_ms` is 0 there for a hit and for a miss. It is not CPU time. `cached` is what separates them
+on that clock. A client's own clock still includes the compile. The example above shows the 0 a production Worker
+returns.
 
 ### run
 
@@ -103,7 +115,7 @@ mode.
 The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"`:
 
 ```json
-{ "ok": true, "diagnostics": [],
+{ "ok": true, "diagnostics": [], "cached": false, "compile_ms": 0,
   "results": [{
     "request": "GET /hello/ada", "status": 200, "content_type": "text/plain; charset=utf-8",
     "body": "Hello again, ada #2!", "body_bytes": 20, "truncated": false, "error": null,
@@ -163,7 +175,8 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
 - A request that traps (the step budget, the 64 MB arena, a division by zero) is status 500 with `error` set; its
   writes are rolled back and the next request runs on.
 - `ok` is true when the program compiled and every request answered without a trap and replayed. If it does not
-  compile, `ok` is false, `diagnostics` says why and nothing runs.
+  compile, `ok` is false, `diagnostics` says why and nothing runs. `compile_ms` and `cached` are still there: they
+  are the compile's, as [compile](#compile) reports them, including when the program does not compile.
 
 The same input gives the same output except trace ids and times. On purpose, `random(from: entropy)` starts
 from the same seed on every call, and its stream goes on across the call's requests (the second request's draws
@@ -277,7 +290,8 @@ browsers, so a web page cannot use its visitors as clients.
 
 One line per call (feedback too) to Workers Observability, kept for 7 days (Workers Logs on the Workers Paid plan): the route and MCP method, the tool, whether it was ok or refused and
 why, the HTTP status, the diagnostic codes, the number of files, the source's size in bytes, the number of
-requests and their statuses, the steps used, the compile, run and total times, a hash of the client's address, the
+requests and their statuses, the steps used, the compile, run and total times (`compile_ms` in the log is the same
+number compile and run return), a hash of the client's address, the
 user agent, and whether it was rate limited. Not the program's source, the requests' bodies or headers, or the
 responses. We use it to improve Tape and the service ([`TERMS.md`](../TERMS.md)).
 
@@ -328,6 +342,6 @@ retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-v
 (cd service && npm ci) && (cd mcp && npm ci)
 printf 'IP_SALT=dev-salt\nTOKEN=dev-token\n' > service/.dev.vars   # your own copy's secrets (.dev.vars is not tracked)
 (cd service && npm run site && npx cf dev)   # the tape Worker; then POST to /mcp at the address it prints
-node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 50 bugs, each caught
+node mcp/test.ts            # the tools and the HTTP face in Node; --plants plants 51 bugs, each caught
 (cd mcp && npx vitest run)  # mcp/src in workerd, with the real Loader and rate limiter
 ```

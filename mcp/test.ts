@@ -218,6 +218,20 @@ function stable(v: unknown): unknown {
   );
 }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(stable(a)) === JSON.stringify(stable(b));
+/**
+ * compile_ms on a compile or run answer: a whole number of milliseconds, the same number the log line reports.
+ * cached is the hit or the miss beside it. Node's clock moves, so a miss outlasts a hit (the cache test). A
+ * production Worker's clock does not advance during CPU, so both read 0 there (docs/mcp.md).
+ */
+const timingProblems = (where: string, body: Fields, line: Fields | undefined): string[] => {
+  const ms = body['compile_ms'];
+  const out: string[] = [];
+  if (typeof ms !== 'number' || !Number.isInteger(ms) || ms < 0) out.push(`${where}: compile_ms ${String(ms)}`);
+  else if (line?.['compile_ms'] !== ms)
+    out.push(`${where}: compile_ms ${String(ms)} is not the log's ${String(line?.['compile_ms'])}`);
+  if (typeof body['cached'] !== 'boolean') out.push(`${where}: cached ${String(body['cached'])}`);
+  return out;
+};
 
 /** The playground's own run of the same requests: its OTLP for each. */
 async function workbenchOtlp(name: string, text: string, requests: readonly string[]): Promise<unknown[]> {
@@ -604,6 +618,14 @@ const tests: Test[] = [
       if (JSON.stringify(F(props['trace'])['enum']) !== '["lines","full","none"]') out.push('run: no trace enum');
       if (JSON.stringify(F(props['effects'])['enum']) !== '["compact","full"]') out.push('run: no effects enum');
       if (!String(compile?.['description']).includes('C54')) out.push('compile: its description does not say C54');
+      // compile_ms is on the answer and in the description, with the Worker clock's precision (docs/mcp.md)
+      for (const t of [compile, run]) {
+        const d = String(t?.['description']);
+        if (!d.includes('compile_ms') || !d.includes('does not advance during CPU'))
+          out.push(`${String(t?.['name'])}: its description does not say compile_ms, or the Worker clock`);
+        if (F(F(F(t?.['outputSchema'])['properties'])['compile_ms'])['type'] !== 'integer')
+          out.push(`${String(t?.['name'])}: outputSchema has no integer compile_ms`);
+      }
       if (!String(run?.['description']).includes('Hello again, ada #2!'))
         out.push('run: its description does not give the second body');
       const req = F(F(run?.['inputSchema'])['properties'])['requests'];
@@ -757,15 +779,18 @@ const tests: Test[] = [
     name: 'compile',
     run: async m => {
       const out: string[] = [];
-      const { out: ok, isError } = await tool(m, 'compile', {});
+      const { out: ok, isError, answer } = await tool(m, 'compile', {});
       if (isError || ok['ok'] !== true || L(ok['diagnostics']).length > 0) out.push(`hello: ${JSON.stringify(ok)}`);
       const size = ok['wasm_bytes'];
       if (typeof size !== 'number' || size < 1000) out.push(`wasm_bytes ${String(ok['wasm_bytes'])}`);
       // hello.tape has one statement, the INSERT (README.md's log)
       if (ok['statements'] !== 1) out.push(`statements ${String(ok['statements'])}, not 1`);
+      out.push(...timingProblems('compile', ok, answer.logs[0]));
       const http = await post(m, '/v1/compile', JSON.stringify({ files: [{ name: 'hello.tape', text: HELLO }] }));
-      if (http.status !== 200 || JSON.stringify(http.body) !== JSON.stringify(ok))
+      // same() ignores compile_ms (a time) and cached (the second call may hit): the rest of the answer matches
+      if (http.status !== 200 || !same(http.body, ok))
         out.push(`POST /v1/compile: ${http.status} ${http.text.slice(0, 200)}`);
+      out.push(...timingProblems('POST /v1/compile', F(http.body), http.logs[0]));
       return out;
     },
   },
@@ -785,6 +810,10 @@ const tests: Test[] = [
       if (typeof fix !== 'string' || !fix.includes('repeat'))
         out.push(`its fix ${JSON.stringify(c?.['fix'])} does not say what to write`);
       if (r['wasm_bytes'] !== null) out.push('a refused program has wasm_bytes');
+      if (typeof r['compile_ms'] !== 'number' || typeof r['cached'] !== 'boolean')
+        out.push(
+          `a program that does not compile: compile_ms ${String(r['compile_ms'])} cached ${String(r['cached'])}`,
+        );
       // run says the same, and runs nothing
       const { out: ran } = await tool(m, 'run', {
         files: [{ name: 'hello.tape', text: WITHOUT_REPEAT }],
@@ -792,6 +821,8 @@ const tests: Test[] = [
       });
       if (ran['ok'] !== false || L(ran['results']).length > 0 || F(L(ran['diagnostics'])[0])['code'] !== 'C54')
         out.push(`run: ${JSON.stringify(ran).slice(0, 200)}`);
+      if (typeof ran['compile_ms'] !== 'number' || typeof ran['cached'] !== 'boolean')
+        out.push(`run of a program that does not compile: compile_ms ${String(ran['compile_ms'])}`);
       return out;
     },
   },
@@ -799,7 +830,13 @@ const tests: Test[] = [
     name: 'run',
     run: async m => {
       const out: string[] = [];
-      const { out: r, isError } = await tool(m, 'run', { requests: ['GET /hello/ada', 'GET /hello/ada', 'GET /nope'] });
+      const {
+        out: r,
+        isError,
+        answer,
+      } = await tool(m, 'run', {
+        requests: ['GET /hello/ada', 'GET /hello/ada', 'GET /nope'],
+      });
       const [a, b, c] = RESULTS(r);
       if (isError || r['ok'] !== true) out.push(`ok ${String(r['ok'])}`);
       if (a?.['status'] !== 200 || a['body'] !== 'Hello, ada')
@@ -810,6 +847,7 @@ const tests: Test[] = [
         out.push(`third: ${String(c?.['status'])} ${JSON.stringify(c?.['body'])}`);
       if (a?.['content_type'] !== 'text/plain; charset=utf-8' || a['truncated'] !== false)
         out.push(`first: ${JSON.stringify(a?.['content_type'])} truncated ${String(a?.['truncated'])}`);
+      out.push(...timingProblems('run', r, answer.logs[0]));
       const http = await post(
         m,
         '/v1/run',
@@ -817,6 +855,7 @@ const tests: Test[] = [
       );
       if (http.status !== 200 || !same(http.body, r))
         out.push(`POST /v1/run is not what the tool gives: ${http.status}`);
+      out.push(...timingProblems('POST /v1/run', F(http.body), http.logs[0]));
       return out;
     },
   },
@@ -858,6 +897,16 @@ const tests: Test[] = [
       const [c1, c2] = await compileTwice(files);
       if (body(c1.body)['cached'] !== false || body(c2.body)['cached'] !== true)
         out.push(`compile: cached ${String(body(c1.body)['cached'])} then ${String(body(c2.body)['cached'])}`);
+      // Node's clock moves, so a miss (the compile) takes longer than a hit (the lookup). compile_ms is that
+      // duration, and the log line's compile_ms is the same number. A production Worker reads 0 for both.
+      const miss = body(c1.body)['compile_ms'],
+        hit = body(c2.body)['compile_ms'];
+      if (typeof miss !== 'number' || typeof hit !== 'number' || miss <= hit)
+        out.push(`compile_ms ${String(miss)} then ${String(hit)}: a miss should outlast the lookup`);
+      if (c1.logs[0]?.['compile_ms'] !== miss || c2.logs[0]?.['compile_ms'] !== hit)
+        out.push(
+          `compile_ms is not the log's: ${String(c1.logs[0]?.['compile_ms'])}, ${String(c2.logs[0]?.['compile_ms'])}`,
+        );
       if (!same(c1.body, c2.body)) out.push('compile: the cached answer is not the first');
       if (c1.logs[0]?.['cached'] !== false || c2.logs[0]?.['cached'] !== true)
         out.push(`log lines: cached ${String(c1.logs[0]?.['cached'])} then ${String(c2.logs[0]?.['cached'])}`);
@@ -899,6 +948,10 @@ const tests: Test[] = [
         r2 = await run();
       if (r1['cached'] !== false || r2['cached'] !== true)
         out.push(`run with a line trace: cached ${String(r1['cached'])} then ${String(r2['cached'])}`);
+      const runMiss = r1['compile_ms'],
+        runHit = r2['compile_ms'];
+      if (typeof runMiss !== 'number' || typeof runHit !== 'number' || runMiss <= runHit)
+        out.push(`run compile_ms ${String(runMiss)} then ${String(runHit)}`);
       if (!same(r1, r2)) out.push(`run: the cached build's results differ: ${JSON.stringify(r2).slice(0, 200)}`);
       if (typeof RESULTS(r2)[0]?.['trace'] !== 'string') out.push('run from the cache has no line trace');
       if ((await run('none'))['cached'] !== true) out.push('run with no trace did not use the build compile kept');
@@ -1833,6 +1886,13 @@ const PLANTS: Plant[] = [
     file: 'tools.ts',
     from: 'wasm_bytes: c.built?.wasm.length ?? null,',
     to: 'wasm_bytes: null,',
+  },
+  {
+    test: 'compile',
+    what: 'the compile time is left out of the answer',
+    file: 'tools.ts',
+    from: 'cached: c.cached,\n  compile_ms: c.ms,',
+    to: 'cached: c.cached,',
   },
   {
     test: 'c54',

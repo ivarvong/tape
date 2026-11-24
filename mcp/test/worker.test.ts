@@ -79,6 +79,38 @@ describe('tape-mcp in workerd', () => {
     expect(String(tools[1]?.['description'])).toContain('Hello again, ada #2!');
   });
 
+  it('reports compile_ms beside cached, and a miss outlasts a hit', async () => {
+    // This workerd's Date.now moves during CPU, so compile_ms is the compile's wall time at a resolution of 1 ms
+    // (a production Worker does not: the clock stays at the last I/O, and a compile reads 0; docs/mcp.md). A
+    // program this isolate has not compiled is a miss, and the next call a hit: the miss outlasts the lookup.
+    const wholeMs = (j: Fields): number => {
+      const n = j['compile_ms'];
+      expect(typeof n).toBe('number');
+      expect(Number.isInteger(n)).toBe(true);
+      expect(n).toBeGreaterThanOrEqual(0);
+      return typeof n === 'number' ? n : 0;
+    };
+    const files = [{ name: 'hello.tape', text: `// ${Math.random()}\n${hello}` }];
+    const miss = await post('/v1/compile', { files });
+    const hit = await post('/v1/compile', { files });
+    expect(miss.status).toBe(200);
+    expect([miss.json['ok'], miss.json['cached']]).toEqual([true, false]);
+    expect(hit.json['cached']).toBe(true);
+    expect(wholeMs(miss.json)).toBeGreaterThan(wholeMs(hit.json));
+    const viaMcp = await call('compile', { files });
+    expect(viaMcp.isError).toBe(false);
+    expect(viaMcp.out['cached']).toBe(true);
+    expect(wholeMs(viaMcp.out)).toBeGreaterThanOrEqual(0);
+    const ran = await post('/v1/run', {
+      files: [{ name: 'hello.tape', text: `// run ${Math.random()}\n${hello}` }],
+      requests: ['GET /hello/ada'],
+      trace: 'none',
+    });
+    expect(ran.status).toBe(200);
+    expect([ran.json['ok'], ran.json['cached']]).toEqual([true, false]);
+    expect(wholeMs(ran.json)).toBeGreaterThan(0);
+  });
+
   it('runs the doc examples in a Dynamic Worker, each as test/forms.ts says it comes out', async () => {
     const { out, isError } = await call('test', { files: [{ name: 'doctest-failures.tape', text: failures }] });
     expect(isError).toBe(false);

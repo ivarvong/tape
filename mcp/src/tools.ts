@@ -73,15 +73,28 @@ export type Deps = {
 };
 
 export type Diagnostic = { file: string; line: number; code: string; message: string; fix: string };
+/**
+ * Whether a compile was a cache hit, and how long it took. compile and run put both on the JSON a client sees,
+ * and the log line reports the same two numbers (`cached`, `compile_ms`).
+ */
+export type CompileTime = {
+  /** the compiler's answer came from this isolate's cache of programs compiled here before */
+  cached: boolean;
+  /**
+   * Whole milliseconds `Date.now` advanced across the compile. The resolution is 1 ms. Where the clock moves during
+   * CPU (Node, and the local workerd the mcp tests run) this is the compile's wall time, and a hit is the lookup.
+   * On a production Worker the clock stays at the last I/O and does not advance while code runs, and a compile
+   * awaits nothing, so this is 0 there for a hit and for a miss. It is not CPU time.
+   */
+  compile_ms: number;
+};
 export type CompileResult = {
   ok: boolean;
   diagnostics: Diagnostic[];
   wasm_bytes: number | null;
   /** the SQL statements the program can run */
   statements: number | null;
-  /** the compiler's answer came from this isolate's cache of programs compiled here before */
-  cached: boolean;
-};
+} & CompileTime;
 export type EffectOut =
   | {
       kind: 'sql';
@@ -135,16 +148,14 @@ export type RunResultOne = {
 export type RunResult = {
   ok: boolean;
   diagnostics: Diagnostic[];
-  /** the build came from this isolate's cache (CompileResult.cached) */
-  cached: boolean;
   error?: string;
   results: RunResultOne[];
   /** on the run's own clock: the timers that ran, and those still set at the end */
   timers?: { fired: number; pending: number };
-};
+} & CompileTime;
 /** What the log line says of a call, beside what serve.ts knows (serve.ts, logLine). */
 export type Usage = {
-  /** the build came from the compile cache: compile_ms is the lookup's */
+  /** the build came from the compile cache: compile_ms is then the lookup's */
   cached: boolean;
   /** this isolate (a random id, made on its first call) and its compile cache after the call: occupancy on prod */
   isolate: string;
@@ -156,6 +167,7 @@ export type Usage = {
   requests: number;
   statuses: number[];
   steps: number;
+  /** the answer's compile_ms (CompileTime): the same number, including a hit's lookup */
   compile_ms: number;
   run_ms: number;
   /**
@@ -428,7 +440,7 @@ type Compiled = {
   traced: Built | null;
   diagnostics: Diagnostic[];
   files: Source[];
-  /** what the compile took (Date.now: in a Worker, the clock does not move while code runs); 0 when cached */
+  /** Date.now() after the compile minus Date.now() before it (CompileTime.compile_ms) */
   ms: number;
   /** the builds came from this isolate's cache: the same program was compiled here before */
   cached: boolean;
@@ -518,8 +530,13 @@ function compiled(args: Fields, deps: Deps, known: readonly string[], traced = f
   );
   return { ...made, files, ms: Date.now() - t0, cached: false };
 }
-const usageOf = (c: Compiled, requests = 0): Usage => ({
+/** The hit and the duration, once: the answer and the log line both spread this, so they cannot disagree. */
+const compileTime = (c: Compiled): CompileTime => ({
   cached: c.cached,
+  compile_ms: c.ms,
+});
+const usageOf = (c: Compiled, requests = 0): Usage => ({
+  ...compileTime(c),
   ...occupancy(),
   codes: c.diagnostics.map(d => d.code),
   files: c.files.length,
@@ -527,7 +544,6 @@ const usageOf = (c: Compiled, requests = 0): Usage => ({
   requests,
   statuses: [],
   steps: 0,
-  compile_ms: c.ms,
   run_ms: 0,
 });
 
@@ -543,7 +559,7 @@ export function compileTool(args: unknown, deps: Deps): { result: CompileResult 
       diagnostics: c.diagnostics,
       wasm_bytes: c.built?.wasm.length ?? null,
       statements: c.built?.queries.length ?? null,
-      cached: c.cached,
+      ...compileTime(c),
     },
     usage: usageOf(c),
   };
@@ -810,7 +826,7 @@ export async function runTool(
   if (isRefusal(remotes)) return { result: remotes, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
-  if (!built) return { result: { ok: false, diagnostics: c.diagnostics, cached: c.cached, results: [] }, usage };
+  if (!built) return { result: { ok: false, diagnostics: c.diagnostics, ...compileTime(c), results: [] }, usage };
   // the line trace: the same program built with { trace: true }, each request replayed through it from its log
   const traced = c.traced;
   const tracedWasm = traced?.wasm ?? null;
@@ -847,7 +863,7 @@ export async function runTool(
       usage,
     };
   if (!all.ok)
-    return { result: { ok: false, diagnostics: [], cached: c.cached, error: all.error, results: [] }, usage };
+    return { result: { ok: false, diagnostics: [], ...compileTime(c), error: all.error, results: [] }, usage };
   const names = namesOf(c.files);
   const tracedBuilt = traced?.wasm ? traced : null;
   const results = all.runs.map(ran => resultOf(built, tracedBuilt, c.files, ran, names, { trace, effects }));
@@ -857,7 +873,7 @@ export async function runTool(
     result: {
       ok: results.every(r => r.error === null && r.replayed !== false),
       diagnostics: [],
-      cached: c.cached,
+      ...compileTime(c),
       results,
       ...(all.timers ? { timers: all.timers } : {}),
     },
