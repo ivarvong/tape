@@ -108,7 +108,11 @@ describe('POST /_rebuild', () => {
     const mine = await got('/rbw/one');
     expect(at(list(mine)[0], 'rebuilt_from')).toBe('unknown');
     expect(at(list(await got('/rbw/two'))[0], 'rebuilt_from')).toBe('unknown');
-    expect(at(r, 'errors')).toEqual([]);
+    expect([at(r, 'errors'), at(r, 'older')]).toEqual([[], 0]);
+    // the versions it could not build are named, with the compiler's first error: here the other tests' refused sources
+    const failures = list(at(r, 'failures'));
+    expect(failures.length).toBe(at(r, 'failed'));
+    for (const f of failures) expect(String(at(f, 'code'))).toMatch(/^C\d+$/);
     expect(Number(at(r, 'rebuilt'))).toBeGreaterThanOrEqual(2);
     expect(Number(at(r, 'names'))).toBeGreaterThanOrEqual(2);
     // a second walk finds nothing stale

@@ -649,18 +649,26 @@ export class Name extends DurableObject {
   }
   /** Every live version's build made current (#fresh) now, not on the first request after a deploy that changed the
    * compiler (1.2-4 s on prod, 2026-11-23): what POST /_rebuild calls for each name. */
-  rebuild(): { live: number; rebuilt: number; failed: number } {
-    if (!this.#has('_tape_versions')) return { live: 0, rebuilt: 0, failed: 0 };
+  rebuild(): {
+    live: number;
+    rebuilt: number;
+    failed: number;
+    failures: { version: number; code: string; message: string }[];
+  } {
+    if (!this.#has('_tape_versions')) return { live: 0, rebuilt: 0, failed: 0, failures: [] };
     const live = this.live();
-    let rebuilt = 0,
-      failed = 0;
+    let rebuilt = 0;
+    const failures: { version: number; code: string; message: string }[] = [];
     for (const v of live) {
       const [row] = this.#sql.exec('SELECT compiler FROM _tape_versions WHERE version = ?1', v).toArray();
       const stale = row?.compiler !== COMPILER;
-      if (this.#fresh(v) !== null) failed++;
-      else if (stale) rebuilt++;
+      const errors = this.#fresh(v);
+      if (errors !== null) {
+        const [first] = errors;
+        failures.push({ version: v, code: first?.code ?? '', message: (first?.message ?? '').slice(0, 160) });
+      } else if (stale) rebuilt++;
     }
-    return { live: live.length, rebuilt, failed };
+    return { live: live.length, rebuilt, failed: failures.length, failures };
   }
   /** The live versions whose builds are current (each made current first, #fresh), and what names their builds. */
   #current(live: readonly number[]): { built: number[]; key: string } {

@@ -220,14 +220,17 @@ done
 # A compiler change made the first request to each name rebuild it from source, 1.2-4 s on prod (2026-11-23). It
 # is recorded, not a reason to roll back: a name it misses still rebuilds on its first request, as before.
 TOKEN_FILE=${TAPE_TOKEN_FILE:-$HOME/.config/tape/operator-token}
+# An object still on the version before answers "does not implement" (counted as `older`; the first call of 764f3a70's
+# run threw on one): the walk is made again 30 s later, once, when the call failed or met one.
+rebuild_call() {
+  curl -sS --max-time 900 -X POST -H "authorization: Bearer $(cat "$TOKEN_FILE")" -H 'content-type: application/json' \
+    --data '{"concurrency": 4, "accounts": ["ivar", "demo"]}' "$BASE/_rebuild" > "$STATE/rebuild.out" 2>&1 &&
+    json < "$STATE/rebuild.out" 'sys.exit(0 if d.get("older", 0) == 0 else 1)' 2>/dev/null
+}
 if [ -r "$TOKEN_FILE" ]; then
   say "rebuild: every live name with tape $NEW_tape's compiler"
-  if curl -sS --max-time 900 -X POST -H "authorization: Bearer $(cat "$TOKEN_FILE")" -H 'content-type: application/json' \
-      --data '{"concurrency": 4, "accounts": ["ivar", "demo"]}' "$BASE/_rebuild" > "$STATE/rebuild.out" 2>&1; then
-    note "rebuild: $(json < "$STATE/rebuild.out" 'print("%d names (%d accounts), %d versions: %d rebuilt, %d failed, %d errors, %.1f s; slowest %s" % (d["names"], d["accounts"], d["versions"], d["rebuilt"], d["failed"], len(d["errors"]), d["ms"] / 1000, ", ".join("%s %d ms" % (x["name"], x["ms"]) for x in d["slowest"][:3])))' 2>&1 || head -c 300 "$STATE/rebuild.out")"
-  else
-    note "rebuild: the call failed: $(head -c 300 "$STATE/rebuild.out")"
-  fi
+  if rebuild_call || { sleep 30; say "rebuild: again"; rebuild_call; }; then :; fi
+  note "rebuild: $(json < "$STATE/rebuild.out" 'print("%d names (%d accounts), %d versions: %d rebuilt, %d failed (%s), %d older, %d errors, %.1f s; slowest %s" % (d["names"], d["accounts"], d["versions"], d["rebuilt"], d["failed"], ", ".join(sorted(set(f["name"] for f in d.get("failures", [])))) or "none", d.get("older", 0), len(d["errors"]), d["ms"] / 1000, ", ".join("%s %d ms" % (x["name"], x["ms"]) for x in d["slowest"][:3])))' 2>&1 || head -c 300 "$STATE/rebuild.out")"
 else
   note "rebuild: skipped, no operator token at $TOKEN_FILE"
 fi

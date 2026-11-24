@@ -480,29 +480,51 @@ const idsRoute = async (request: Request, ctx: ExecutionContext): Promise<Respon
 // all traffic: a deploy that changes the compiler made the first request to each name rebuild it from source,
 // 1.2-4 s on prod (2026-11-23). The names are each account's registry; the accounts are those that uploaded a program
 // since the list was kept (ACCOUNTS), those with a published name, and any given. n names at a time (default 4).
+// Right after a deploy an object may still run the version before (an object keeps the version it started with until
+// it restarts): its answer "does not implement the method" is not an error of the walk. That is what the first call
+// of tape 764f3a70's ship run hit (the published list's object had no publishedKeys yet; the Worker threw, 1101);
+// such a step is skipped and counted as `older`, and ship.sh calls again. A name's failure stays that name's.
+const OLDER = 'does not implement the method';
+const orOlder = async <T, U>(f: () => Promise<T>, none: U, older: { n: number }): Promise<T | U> => {
+  try {
+    return await f();
+  } catch (e) {
+    if (!messageOf(e).includes(OLDER)) throw e;
+    older.n++;
+    return none;
+  }
+};
 const rebuildRoute = async (request: Request, ctx: ExecutionContext): Promise<Response> => {
   const asked = fieldsOf(await request.json().catch(() => ({})));
   const given = Array.isArray(asked.accounts) ? asked.accounts.filter((a): a is string => typeof a === 'string') : [];
   const n = typeof asked.concurrency === 'number' ? Math.max(1, Math.min(16, Math.floor(asked.concurrency))) : 4;
   const t0 = Date.now();
-  const listed = await ctx.exports.Name.getByName(ACCOUNTS).accounts(),
-    published = (await ctx.exports.Name.getByName(PUBLISHED).publishedKeys()).map(k => k.split('/')[0] ?? '');
+  const older = { n: 0 };
+  const listed = await orOlder(() => ctx.exports.Name.getByName(ACCOUNTS).accounts(), [], older),
+    keys = await orOlder(() => ctx.exports.Name.getByName(PUBLISHED).publishedKeys(), [], older),
+    published = keys.map(k => k.split('/')[0] ?? '');
   const accounts = [...new Set([...listed, ...published, ...given])].filter(a => SEGMENT.test(a)).toSorted();
   const names: string[] = [];
   for (const account of accounts)
-    for (const r of await ctx.exports.Name.getByName(`${account}/~registry`).registered())
+    for (const r of await orOlder(() => ctx.exports.Name.getByName(`${account}/~registry`).registered(), [], older))
       if (r.kind === 'program' && !r.name.startsWith('~')) names.push(`${account}/${r.name}`);
-  const done: { name: string; live: number; rebuilt: number; failed: number; ms: number; error?: string }[] = [];
+  type Done = Awaited<ReturnType<Name['rebuild']>> & { name: string; ms: number; error?: string };
+  const done: Done[] = [];
   let next = 0;
+  // each name is rebuilt by its own object, in its own call: the front only waits, n at a time
   const worker = async (): Promise<void> => {
     for (let i = next++; i < names.length; i = next++) {
       const name = names[i] ?? '',
         t = Date.now();
       try {
-        const r = await ctx.exports.Name.getByName(name).rebuild();
+        const r = await orOlder(
+          () => ctx.exports.Name.getByName(name).rebuild(),
+          { live: 0, rebuilt: 0, failed: 0, failures: [] },
+          older,
+        );
         done.push({ name, ...r, ms: Date.now() - t });
       } catch (e) {
-        done.push({ name, live: 0, rebuilt: 0, failed: 0, ms: Date.now() - t, error: messageOf(e) });
+        done.push({ name, live: 0, rebuilt: 0, failed: 0, failures: [], ms: Date.now() - t, error: messageOf(e) });
       }
     }
   };
@@ -514,6 +536,9 @@ const rebuildRoute = async (request: Request, ctx: ExecutionContext): Promise<Re
     versions: sum('live'),
     rebuilt: sum('rebuilt'),
     failed: sum('failed'),
+    // a version whose source today's compiler refuses (it answers 503 rebuild_failed), by name, with the first error
+    failures: done.flatMap(d => d.failures.map(f => ({ name: d.name, ...f }))).slice(0, 100),
+    older: older.n,
     errors: done.filter(d => d.error !== undefined).map(d => ({ name: d.name, error: d.error })),
     slowest: done
       .toSorted((a, b) => b.ms - a.ms)
