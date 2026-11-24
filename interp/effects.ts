@@ -25,7 +25,8 @@ const EFFECTS = [
   ...(['wake', 'now', 'random', 'call', 'ask', 'rollback', 'remote'] as const),
 ];
 type Effect = (typeof EFFECTS)[number];
-const utf8 = new TextDecoder();
+// a leading U+FEFF is part of the text: a decoder's default drops it
+const utf8 = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
 const fail = (err: Error): never => {
   throw err;
 };

@@ -97,7 +97,8 @@ export const isNow = (e: Effect): e is NowEffect => 'now' in e;
 export const isRandom = (e: Effect): e is RandomEffect => 'random' in e;
 export const isWake = (e: Effect): e is WakeEffect => 'wake' in e;
 
-const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+// a leading U+FEFF is kept: it is part of the bytes (host/memory.ts)
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const enc = new TextEncoder();
 export const pack = (b: Uint8Array): Packed => {
   try {

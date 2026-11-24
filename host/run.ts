@@ -31,7 +31,8 @@ import type { Transaction } from './schema.ts';
 import { cellText } from './log.ts';
 
 const enc = new TextEncoder();
-const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+// a leading U+FEFF is kept: it is part of the bytes (host/memory.ts)
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const TRAPS: Readonly<Record<number, string>> = {
   1: 'out of memory',
   2: 'reduction budget exceeded',

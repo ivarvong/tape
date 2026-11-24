@@ -14,7 +14,9 @@ export type Mem = { readonly memory: WebAssembly.Memory; readonly alloc: (size: 
 export type Query = { sql: string; params: string; row: string | null; columns: string[] | null; run?: string };
 export type FlagDecl = { name: string; type: string; default: number | boolean; at: number; pinned?: unknown };
 
-const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false });
+// ignoreBOM: true keeps a leading U+FEFF (EF BB BF) in the text, where it is a character of the View; the default
+// drops it, and a View that began with one lost it on its way to SQL and into the effect log (fuzz, 23 November 2026)
+const utf8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const enc = new TextEncoder();
 // The views over a module's memory, made again only when its buffer changes (memory.grow detaches the old one).
 // A host call makes one or two of these per statement, so a fresh DataView each time was measurable (1.9% of ledger).
@@ -51,10 +53,9 @@ export const textIn = (m: Mem, ptr: number, len: number): string => utf8.decode(
 export const floatOf = (m: Mem, ptr: number, len: number): number => floatOfBytes(views(m).u.subarray(ptr, ptr + len));
 /** float_of of bytes, for the hosts tests stand up. */
 export const floatOfBytes = (b: Uint8Array): number => {
-  const text = withBom.decode(b);
+  const text = utf8.decode(b);
   return JSON_NUMBER.test(text) ? Number(text) : NaN;
 };
-const withBom = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 const JSON_NUMBER = /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/;
 /** Bytes copied into new room in the module; where they are. */
 export function copyIn(m: Mem, data: Uint8Array): number {

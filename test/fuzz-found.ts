@@ -4,6 +4,9 @@
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
+import { instantiate, isEffect, replay } from '../host.ts';
+import { pack, unpack } from '../host/log.ts';
+import { nodeSql } from '../nodesql.ts';
 import { bare, finish, handleBare, same, std } from './harness.ts';
 
 const enc = new TextEncoder(),
@@ -75,7 +78,7 @@ same(
 // and white space as 0 and reads 0x, 0b and 0o in their bases: parse_float("") was Some(0f), " 12 " Some(12f),
 // "0x1F" Some(31f). It reads a number in JSON's syntax, as parse_dec does, and nothing else.
 {
-  const texts = ['', ' 12 ', '\t2', '0x1F', '0b11', '0o7', '+1', '.5', '5.', '05', '-', 'Infinity', '﻿1', '1e5'];
+  const texts = ['', ' 12 ', '\t2', '0x1F', '0b11', '0o7', '+1', '.5', '5.', '05', '-', 'Infinity', '\uFEFF1', '1e5'];
   same(
     'parse_float of text that is not a number in JSON syntax is None, compiled and interpreted',
     both(
@@ -89,6 +92,69 @@ same(
       texts,
     ),
     texts.map(t => (t === '1e5' ? ['100000', '100000'] : ['none', 'none'])),
+  );
+}
+
+// fuzz/numbers.ts and fuzz/replay.ts, 23 November 2026: the host read text out of the module with a TextDecoder whose
+// default drops a leading U+FEFF (EF BB BF), so a View that began with one lost it on its way to SQL (6 bytes
+// written, 3 stored), in the effect log (pack: a request or a call's message of BOM + "hi" was logged as "hi", and
+// replayed as 2 bytes), and in the interpreter's parse_dec, which read "\uFEFF1.5" as 1.5 where the module says None.
+{
+  const text = `migration 1 "notes" {
+  CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL)
+}
+
+type Note {
+  Note(id: Int, body: View)
+}
+
+fn handle(raw: View, db: Sql) -> Buf {
+  let Some(value: n) = sql_first(
+    row: Note,
+    query: "INSERT INTO notes(body) VALUES (:raw) RETURNING *",
+    raw,
+    repeat: True
+  ) else -> buf()
+  buf() |> append(view: n.body)
+}
+`;
+  const b = compile([...std, { name: 'bom.tape', text }]);
+  if (b.wasm === null) throw new Error(b.errors[0]?.message);
+  const module = new WebAssembly.Module(b.wasm),
+    sql = nodeSql(),
+    app = instantiate(module, { sql });
+  const sent = ['\uFEFFabc', '\uFEFF', 'a\uFEFFb'].map(t => enc.encode(t));
+  const ran = await Promise.all(sent.map(s => app.runLogged(s, { transaction: f => sql.transaction(f) })));
+  same(
+    'a View that starts with U+FEFF is stored and read back whole',
+    ran.map(r => [...r.out]),
+    sent.map(s => [...s]),
+  );
+  same(
+    'and its log, through JSON as the service stores it, replays to the same bytes',
+    ran.map((r, i): number[] => {
+      const effects: unknown = JSON.parse(JSON.stringify(r.effects));
+      return Array.isArray(effects) ? [...replay(module, sent[i] ?? null, effects.filter(isEffect))] : [];
+    }),
+    sent.map(s => [...s]),
+  );
+  same('pack and unpack keep a leading U+FEFF', [...unpack(pack(enc.encode('\uFEFFhi')))], [...enc.encode('\uFEFFhi')]);
+  same(
+    'parse_dec of a text that starts with U+FEFF is None, compiled and interpreted',
+    both(
+      `fn handle(raw: View) -> Buf {
+  match parse_dec(text: raw, scale: 1) {
+    Some(value: d) -> buf() |> write_dec(value: d)
+    None -> buf() |> append(view: "none")
+  }
+}
+`,
+      ['\uFEFF1.5', '1.5'],
+    ),
+    [
+      ['none', 'none'],
+      ['1.5', '1.5'],
+    ],
   );
 }
 

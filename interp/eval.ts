@@ -420,7 +420,10 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     case 'to_dec':
       return D.ofFloat(asFloat(a[0]), Number(asInt(a[1])), asAdt(a[2]).c);
     case 'parse_dec': {
-      const d = D.parse(new TextDecoder().decode(asBytes(a[0])), Number(asInt(a[1])));
+      const d = D.parse(
+        new TextDecoder('utf-8', { fatal: false, ignoreBOM: true }).decode(asBytes(a[0])),
+        Number(asInt(a[1])),
+      );
       return d ? adt('Some', { value: d }) : adt('None');
     }
     case 'write_dec': {
