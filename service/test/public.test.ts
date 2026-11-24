@@ -1,6 +1,7 @@
 // Runs in workerd: content types from the status line (host.ts responseOf), and a published name's public route
 // (/p/:account/:name/…): no token, the latest live version, `public` on the request line (std/http caller Anyone).
 import { describe, expect, it } from 'vitest';
+import feed from './fixtures/feed.tape?raw';
 import page from './fixtures/page.tape?raw';
 import redirect from './fixtures/redirect.tape?raw';
 import hello from '../../examples/hello.tape?raw';
@@ -20,9 +21,24 @@ describe('content types', () => {
     expect(head('201\n{}')).toEqual([201, 'text/plain; charset=utf-8', '{}']);
     expect(head('200 text/html\n<p>')).toEqual([200, 'text/html; charset=utf-8', '<p>']);
     expect(head('404 application/json\n{}')).toEqual([404, 'application/json', '{}']);
-    // anything else is all body, as before: an unknown type, a header smuggled into the type, no status line
+    expect(head('200 application/atom+xml\n<feed/>')).toEqual([200, 'application/atom+xml; charset=utf-8', '<feed/>']);
+    expect(head('200 application/rss+xml\n<rss/>')).toEqual([200, 'application/rss+xml; charset=utf-8', '<rss/>']);
+    expect(head('200 application/xml\n<doc/>')).toEqual([200, 'application/xml; charset=utf-8', '<doc/>']);
+    // anything else is all body, as before: an unknown type, a header smuggled into the type, no status line.
+    // xhtml is a page; text/xml was sniffed; a parameter on the token would let a program write the header itself
     expect(head('200 text/javascript\nx')).toEqual([200, 'text/plain; charset=utf-8', '200 text/javascript\nx']);
     expect(head('200 text/html; x: y\nx')).toEqual([200, 'text/plain; charset=utf-8', '200 text/html; x: y\nx']);
+    expect(head('200 application/xhtml+xml\n<html/>')).toEqual([
+      200,
+      'text/plain; charset=utf-8',
+      '200 application/xhtml+xml\n<html/>',
+    ]);
+    expect(head('200 text/xml\n<a/>')).toEqual([200, 'text/plain; charset=utf-8', '200 text/xml\n<a/>']);
+    expect(head('200 application/atom+xml; charset=utf-8\n<feed/>')).toEqual([
+      200,
+      'text/plain; charset=utf-8',
+      '200 application/atom+xml; charset=utf-8\n<feed/>',
+    ]);
     expect(head('hello')).toEqual([200, 'text/plain; charset=utf-8', 'hello']);
     expect(head('99\nx')).toEqual([200, 'text/plain; charset=utf-8', '99\nx']);
   });
@@ -41,6 +57,31 @@ describe('content types', () => {
     // an older program's plain status line is still text/plain
     await call('/ivar/hello', { method: 'POST', body: hello });
     expect((await call('/ivar/hello/v/1/hello/ada')).headers.get('content-type')).toBe('text/plain; charset=utf-8');
+  });
+
+  it('serves a published feed as Atom, and RSS and XML as those types', async () => {
+    await call('/ivar/atom', { method: 'POST', body: feed });
+    await call('/_public/ivar/atom', { method: 'PUT', body: '{"published":true}' });
+    const docs = [
+      [
+        '/feed.xml',
+        'application/atom+xml; charset=utf-8',
+        '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"/>',
+      ],
+      ['/rss.xml', 'application/rss+xml; charset=utf-8', '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"/>'],
+      ['/doc.xml', 'application/xml; charset=utf-8', '<?xml version="1.0" encoding="utf-8"?><doc/>'],
+    ] as const;
+    for (const [path, type, body] of docs) {
+      const op = await call(`/ivar/atom/v/1${path}`);
+      const pub = await anyone(`/p/ivar/atom${path}`);
+      expect([op.status, op.headers.get('content-type'), await op.text()]).toEqual([200, type, body]);
+      expect([
+        pub.status,
+        pub.headers.get('content-type'),
+        pub.headers.get('x-content-type-options'),
+        await pub.text(),
+      ]).toEqual([200, type, 'nosniff', body]);
+    }
   });
 });
 

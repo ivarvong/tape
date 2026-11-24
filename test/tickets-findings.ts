@@ -181,6 +181,27 @@ T(
     [200, 'text/plain; charset=utf-8'],
   ],
 );
+T(
+  'responseOf: Atom, RSS and XML are those types, with charset=utf-8',
+  [
+    head('200 application/atom+xml\n<feed/>'),
+    head('200 application/rss+xml\n<rss/>'),
+    head('200 application/xml\n<doc/>'),
+  ],
+  [
+    [200, 'application/atom+xml; charset=utf-8'],
+    [200, 'application/rss+xml; charset=utf-8'],
+    [200, 'application/xml; charset=utf-8'],
+  ],
+);
+T(
+  'responseOf: a page type and an obsolete XML type are all body, 200',
+  [head('200 application/xhtml+xml\n<html/>'), head('200 text/xml\n<a/>')],
+  [
+    [200, 'text/plain; charset=utf-8'],
+    [200, 'text/plain; charset=utf-8'],
+  ],
+);
 // 0.3: a carriage return on the status line opens a header (std/http's header); an empty one is refused, 500
 T(
   'responseOf: a header that is not `name: value` is refused, 500',

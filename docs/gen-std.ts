@@ -340,6 +340,19 @@ fn handle(raw: View) -> Buf {
 `,
   },
   {
+    title: 'Respond with an Atom feed',
+    uses: ['fn respond_as', 'type Content', 'fn respond'],
+    text: '`respond_as(status: 200, content: Atom)` answers `application/atom+xml`; the host adds `charset=utf-8`. `Rss` is `application/rss+xml` and `Xml` is `application/xml`. These are documents, not pages.',
+    program: `fn handle(raw: View) -> Buf {
+  match request(raw) {
+    Request(method: "GET", path: "/feed.xml") -> respond_as(status: 200, content: Atom)
+      |> append(view: "<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
+    _ -> respond(status: 404)
+  }
+}
+`,
+  },
+  {
     title: 'Read query parameters',
     uses: ['type Request', 'fn form_field', 'fn decimal'],
     text: '`Request(query)` is the raw text after `?` (`None` when there is no `?`). A query string is encoded as a form is, so `form_field(body: query, name: "limit")` reads one parameter, decoded (`+` and `%XX`). The path never holds the query.',

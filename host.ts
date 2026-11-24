@@ -46,7 +46,13 @@ export type { MachineSpec, Migrated, Transaction } from './host/schema.ts';
 // respond_as), and either with headers on the same line, each after a carriage return: `STATUS CR name: value LF
 // BODY` (std/http's header). Output whose first line is not one of those is all body, with status 200 (as before
 // content types). The type is a closed list, so a program cannot send a header the service does not mean to send
-// (no `text/html; x-injected: …`, no types a browser runs as script beyond the page itself), and the headers are
+// (no `text/html; x-injected: …`, no types a browser runs as script beyond the page itself). Atom, RSS and XML are
+// on the list: a feed reader asks for application/atom+xml by name, and a browser does not run that,
+// application/rss+xml or application/xml as a page when the response is nosniff. application/xhtml+xml is not,
+// because a browser would run it as a page; text/xml is not, because it is obsolete and was sniffed. Text types
+// and these three XML documents are labeled charset=utf-8 (the host's bytes are UTF-8, and RFC 7303 asks an XML
+// type to say so). application/json and image/svg+xml carry no charset (RFC 8259; SVG is an image). The program
+// names the token and the host writes the header, so a type cannot carry a parameter of its own. The headers are
 // checked here, for every host alike: a name of token characters, a value with no CR, LF or NUL, within the
 // limits below, and none of those the host sets itself. A head with a header that fails is answered 500, and says
 // why: a program that means to redirect and cannot should not answer as if it had.
@@ -57,6 +63,9 @@ export const CONTENT_TYPES = new Map([
   ['text/css', 'text/css; charset=utf-8'],
   ['image/svg+xml', 'image/svg+xml'],
   ['text/csv', 'text/csv; charset=utf-8'],
+  ['application/atom+xml', 'application/atom+xml; charset=utf-8'],
+  ['application/rss+xml', 'application/rss+xml; charset=utf-8'],
+  ['application/xml', 'application/xml; charset=utf-8'],
 ]);
 /** The most headers an answer may set, the longest name and value, and the longest head. */
 export const HEADER_LIMITS = { count: 32, name: 64, value: 4096, head: 16384 } as const;

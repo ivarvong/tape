@@ -195,7 +195,10 @@ fn value_byte(b: Int) -> Bool {
   b != 0 and b != 10 and b != 13
 }
 
-// The content types the service serves: respond_as(status: 200, content: Html) answers text/html.
+// The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and
+// Xml answer application/atom+xml, application/rss+xml and application/xml: a feed or an XML document, not a page.
+// The host labels those three, and the text types, charset=utf-8. application/xhtml+xml is not a Content, because
+// a browser would run it as a page.
 type Content {
   Html
   Json
@@ -203,13 +206,18 @@ type Content {
   Css
   Svg
   Csv
+  Atom
+  Rss
+  Xml
 }
 
 // A response with a content type: the status, then the body written by the caller. respond_as(status: 200,
-// content: Json) answers application/json; `respond` answers text/plain.
+// content: Json) answers application/json; `respond` answers text/plain. Atom is a feed.
 //
 //   > respond_as(status: 201, content: Json) |> append(view: "{}") |> freeze
 //   "201 application/json\n{}"
+//   > respond_as(status: 200, content: Atom) |> append(view: "<feed/>") |> freeze
+//   "200 application/atom+xml\n<feed/>"
 fn respond_as(status: Int, content: Content) -> Buf {
   push(
     buf: append(
@@ -220,10 +228,16 @@ fn respond_as(status: Int, content: Content) -> Buf {
   )
 }
 
-// The media type a Content is served as.
+// The media type a Content is served as. The host writes the Content-Type header from this token.
 //
 //   > content_type(content: Json)
 //   "application/json"
+//   > content_type(content: Atom)
+//   "application/atom+xml"
+//   > content_type(content: Rss)
+//   "application/rss+xml"
+//   > content_type(content: Xml)
+//   "application/xml"
 fn content_type(content: Content) -> View {
   match content {
     Html -> "text/html"
@@ -232,6 +246,9 @@ fn content_type(content: Content) -> View {
     Css -> "text/css"
     Svg -> "image/svg+xml"
     Csv -> "text/csv"
+    Atom -> "application/atom+xml"
+    Rss -> "application/rss+xml"
+    Xml -> "application/xml"
   }
 }
 

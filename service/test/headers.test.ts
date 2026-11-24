@@ -1,6 +1,7 @@
 // Runs in workerd: every response the Worker gives, a 401 and a 404 too, carries the headers that keep it from being
 // sniffed, framed or indexed; the API's answers and trace pages are sandboxed, and so is a program's own HTML.
 import { describe, expect, it } from 'vitest';
+import feed from './fixtures/feed.tape?raw';
 import page from './fixtures/page.tape?raw';
 import hello from '../../examples/hello.tape?raw';
 import { anyone, call } from './help.ts';
@@ -61,6 +62,25 @@ describe('security headers', () => {
       // a page may show an image of its own (another of the program's routes, an Svg) or a data: URL, and no
       // other: nothing is fetched from another origin
       expect(csp.split('; ').filter(d => d.startsWith('img-src'))).toEqual(["img-src 'self' data:"]);
+    }
+  });
+
+  it("serves a program's Atom, RSS and XML under the API policy, not as a page", async () => {
+    await call('/ivar/xml', { method: 'POST', body: feed });
+    await call('/_public/ivar/xml', { method: 'PUT', body: '{"published":true}' });
+    const pages = [
+      ['/ivar/xml/v/1/feed.xml', 'application/atom+xml; charset=utf-8'],
+      ['/ivar/xml/v/1/rss.xml', 'application/rss+xml; charset=utf-8'],
+      ['/ivar/xml/v/1/doc.xml', 'application/xml; charset=utf-8'],
+      ['/p/ivar/xml/feed.xml', 'application/atom+xml; charset=utf-8'],
+      ['/p/ivar/xml/rss.xml', 'application/rss+xml; charset=utf-8'],
+      ['/p/ivar/xml/doc.xml', 'application/xml; charset=utf-8'],
+    ] as const;
+    for (const [path, type] of pages) {
+      const r = path.startsWith('/p/') ? await anyone(path) : await call(path);
+      expect([r.status, r.headers.get('content-type')]).toEqual([200, type]);
+      expect(headersOf(r)).toEqual(BASE);
+      expect(r.headers.get('content-security-policy')).toBe(API_CSP);
     }
   });
 });

@@ -32,6 +32,22 @@ fn handle(raw: View) -> Buf {
 
 Uses: [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`write_json`](#builtin-write_json), [`write_rows`](#fn-write_rows), [`respond`](#fn-respond).
 
+### Respond with an Atom feed
+
+`respond_as(status: 200, content: Atom)` answers `application/atom+xml`; the host adds `charset=utf-8`. `Rss` is `application/rss+xml` and `Xml` is `application/xml`. These are documents, not pages.
+
+```tape
+fn handle(raw: View) -> Buf {
+  match request(raw) {
+    Request(method: "GET", path: "/feed.xml") -> respond_as(status: 200, content: Atom)
+      |> append(view: "<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
+    _ -> respond(status: 404)
+  }
+}
+```
+
+Uses: [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`respond`](#fn-respond).
+
 ### Read query parameters
 
 `Request(query)` is the raw text after `?` (`None` when there is no `?`). A query string is encoded as a form is, so `form_field(body: query, name: "limit")` reads one parameter, decoded (`+` and `%XX`). The path never holds the query.
@@ -1382,10 +1398,13 @@ type Content {
   Css
   Svg
   Csv
+  Atom
+  Rss
+  Xml
 }
 ```
 
-The content types the service serves: respond_as(status: 200, content: Html) answers text/html.
+The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml: a feed or an XML document, not a page. The host labels those three, and the text types, charset=utf-8. application/xhtml+xml is not a Content, because a browser would run it as a page.
 
 ### fn respond_as
 
@@ -1393,11 +1412,13 @@ The content types the service serves: respond_as(status: 200, content: Html) ans
 fn respond_as(status: Int, content: Content) -> Buf
 ```
 
-A response with a content type: the status, then the body written by the caller. respond_as(status: 200, content: Json) answers application/json; `respond` answers text/plain.
+A response with a content type: the status, then the body written by the caller. respond_as(status: 200, content: Json) answers application/json; `respond` answers text/plain. Atom is a feed.
 
 ```
 > respond_as(status: 201, content: Json) |> append(view: "{}") |> freeze
 "201 application/json\n{}"
+> respond_as(status: 200, content: Atom) |> append(view: "<feed/>") |> freeze
+"200 application/atom+xml\n<feed/>"
 ```
 
 ### fn content_type
@@ -1406,11 +1427,17 @@ A response with a content type: the status, then the body written by the caller.
 fn content_type(content: Content) -> View
 ```
 
-The media type a Content is served as.
+The media type a Content is served as. The host writes the Content-Type header from this token.
 
 ```
 > content_type(content: Json)
 "application/json"
+> content_type(content: Atom)
+"application/atom+xml"
+> content_type(content: Rss)
+"application/rss+xml"
+> content_type(content: Xml)
+"application/xml"
 ```
 
 ### fn form_field

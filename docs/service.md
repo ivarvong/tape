@@ -73,14 +73,16 @@ kept (`applied`); a trap answers 500.
 ### What a program answers
 
 A program answers `STATUS LF BODY` (`respond(status)`, served as `text/plain`) or `STATUS SP TYPE LF BODY`
-(`respond_as(status: …, content: Html)`; `Json`, `Text`, `Css`, `Svg` and `Csv` too). The type is from a closed
-list; other headers follow the status line, each after a carriage return (`header(name:, value:)`: `Location`,
-`cache-control`), and the host refuses those it sets itself (content-type, set-cookie, the security headers) with a
-500 that says why. A first line that is neither form is all body.
+(`respond_as(status: …, content: Html)`; `Json`, `Text`, `Css`, `Svg`, `Csv`, `Atom`, `Rss` and `Xml` too). The type
+is from a closed list; other headers follow the status line, each after a carriage return (`header(name:, value:)`:
+`Location`, `cache-control`), and the host refuses those it sets itself (content-type, set-cookie, the security
+headers) with a 500 that says why. A first line that is neither form is all body.
 
 A program's HTML or SVG is served sandboxed (`content-security-policy`): no script runs, style is inline, a form
 posts to the service's own origin, and an image is one of this origin's (another route of the program that answers
-`Svg`: `<img src="chart">`) or a `data:` URL; nothing is loaded from another origin.
+`Svg`: `<img src="chart">`) or a `data:` URL; nothing is loaded from another origin. Atom, RSS and XML
+(`application/atom+xml`, `application/rss+xml`, `application/xml`, each with `charset=utf-8`) are documents, not
+pages: they take the same policy as JSON. `application/xhtml+xml` is not a type a program can name.
 
 A program reads the request headers the host passes with `header_of`. They are an allow-list: accept,
 accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, the Standard

@@ -3,8 +3,11 @@
 // indexed, and nothing runs script: the API's JSON and text are sandboxed with nothing allowed; a trace page may use
 // its own inline style; a program's own HTML or SVG (its operator route and its public route) may use inline style,
 // show images from this origin and data: URLs, and post its forms to itself, and runs sandboxed, so it has no
-// origin and runs no script. An image from this origin is what a page needs to show a chart another of its routes
-// draws (`<img src="chart">`, apps/products/FRICTION.md #16); it makes nothing active: an image runs no script (an
+// origin and runs no script. A program's Atom, RSS or XML is a document, not a page, so it takes the API's policy,
+// the same as JSON: an xml-stylesheet processing instruction cannot fetch anything. application/xhtml+xml is not a
+// type a program can name, because a browser would run it as a page. An image from this origin is what a page needs
+// to show a chart another of its routes draws (`<img src="chart">`, apps/products/FRICTION.md #16); it makes nothing
+// active: an image runs no script (an
 // SVG's is not run in an <img>: Chrome 131, 24 November 2026), every response here is nosniff, a route that needs
 // a token gets none from a page (there are no cookies), and a GET of a public route is what any page anywhere can
 // already cause. Nothing is fetched from another origin. Every response names the commit it was built from
@@ -25,6 +28,7 @@ export const secured = (res: Response, path: string, version?: string): Response
   const out = new Response(res.body, res),
     h = out.headers,
     type = h.get('content-type') ?? '',
+    // HTML and SVG are rendered. XML documents (Atom, RSS, application/xml) are not: they stay on the API policy.
     active = /^(text\/html|image\/svg\+xml)\b/.test(type);
   h.set('tape-version', SHA);
   h.set('tape-step-version', String(STEP_VERSION));

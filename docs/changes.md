@@ -11,6 +11,7 @@ went](#what-went), below, has the forms each replaced.
 
 | When | Change |
 |---|---|
+| 24 November 2026 | `respond_as(status, content: Atom)` answers `application/atom+xml` with `charset=utf-8` (`Rss` is `application/rss+xml`, `Xml` is `application/xml`). A feed was `text/plain`, which a reader may reject. `application/xhtml+xml` and `text/xml` stay off the list |
 | 24 November 2026 | `form_field` finds its field with `scan` of `&` and `=`, one step per 16 bytes read. There is no `form_raw`: a built-in is not free (LANGUAGE.md §10). Calling it once a field still walks the form from the start. One pass, each byte in one scan, is 2,267 steps at 256 fields and 39,932 at 4,096 (fitted exponent 1.04, test/form-field.ts). The answers are unchanged |
 | 24 November 2026 | `scan(v, at, set)` is the first byte at or after `at` in a text literal of bytes, read 16 at a time; `scan_plain` is that scan for the bytes that end a JSON string's plain run. One step per 16 bytes read, rounded up. A computed set is C93 (C89 to C92 are the Float rules). The charge is step version 2: decoding `{"n":7}` is 48 steps, where version 1 counted 47 |
 | 24 November 2026 | a step count names the accounting that produced it (`step_version` 1: one entry into a recursive function, after inlining). It is on a run's JSON, its log, `tape.step_version`, the `tape-step-version` header and the module. The number changes only when that accounting changes (`test/step-version.ts`) |

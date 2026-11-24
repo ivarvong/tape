@@ -3,11 +3,11 @@
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { std } from '../std.ts';
-import { instantiate, responseOf } from '../host.ts';
+import { CONTENT_TYPES, instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { effectLine, queryNames } from '../apps/playground/src/lines.ts';
 import { nodeSql } from '../nodesql.ts';
-import { bare, built, call, finish, same } from './harness.ts';
+import { bare, built, call, finish, read, same } from './harness.ts';
 
 const said = (text: string): string => {
   const [e] = compile([...std, { name: 't.tape', text }], { exports: ['f'] }).errors;
@@ -190,6 +190,60 @@ fn handle(raw: View) -> Buf {
     'respond_as(content: Csv) is served as text/csv',
     got ? [got.status, got.type, new TextDecoder().decode(got.body)] : r.errors.map(e => e.message),
     [200, 'text/csv; charset=utf-8', 'day,total\n1,5\n'],
+  );
+}
+
+// ---- Atom, RSS and XML are content types (a published /feed.xml was text/plain, and a reader may reject that).
+// The token list is std/http's content_type, and the header is host.ts. A type a browser would run as a page
+// (application/xhtml+xml), an obsolete one that was sniffed (text/xml), and a parameter smuggled onto a token are
+// not on the list: the line is all body.
+{
+  const http = std.find(s => s.name === 'std/http.tape')?.text ?? '';
+  const start = http.indexOf('fn content_type');
+  const end = http.indexOf('\nfn ', start + 1);
+  const body = start < 0 || end < 0 ? '' : http.slice(start, end);
+  const arms = [...body.matchAll(/^    ([A-Z][A-Za-z]*) -> "([^"]*)"$/gm)].map(m => m[2] ?? '');
+  const keys = [...CONTENT_TYPES.keys()];
+  same("content_type's arms are CONTENT_TYPES, and each key has an arm", arms.toSorted(), keys.toSorted());
+  const xmlDoc = (token: string): boolean =>
+    token === 'application/xml' || token === 'application/atom+xml' || token === 'application/rss+xml';
+  same(
+    'text types and the XML documents carry charset=utf-8; JSON and SVG do not',
+    keys.map(token => CONTENT_TYPES.get(token)),
+    keys.map(token => (token.startsWith('text/') || xmlDoc(token) ? `${token}; charset=utf-8` : token)),
+  );
+  const feed = compile([...std, { name: 'feed.tape', text: read('service/test/fixtures/feed.tape') }]);
+  const app = feed.wasm ? instantiate(new WebAssembly.Module(feed.wasm), {}) : null;
+  const ask = (path: string): unknown => {
+    if (!app) return feed.errors.map(e => `${e.code} ${e.message}`);
+    const out = responseOf(app.handle(new TextEncoder().encode(`GET ${path}\n`)));
+    return [out.status, out.type, new TextDecoder().decode(out.body)];
+  };
+  const ATOM = '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"/>';
+  const RSS = '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"/>';
+  const XML = '<?xml version="1.0" encoding="utf-8"?><doc/>';
+  same('a feed is application/atom+xml', ask('/feed.xml'), [200, 'application/atom+xml; charset=utf-8', ATOM]);
+  same('an RSS document is application/rss+xml', ask('/rss.xml'), [200, 'application/rss+xml; charset=utf-8', RSS]);
+  same('an XML document is application/xml', ask('/doc.xml'), [200, 'application/xml; charset=utf-8', XML]);
+  const plain = 'text/plain; charset=utf-8';
+  const head = (s: string): [number, string | undefined, string] => {
+    const out = responseOf(new TextEncoder().encode(s));
+    return [out.status, out.type, new TextDecoder().decode(out.body)];
+  };
+  same(
+    'a page type, an obsolete XML type, or a parameter on the token is all body',
+    [
+      head('200 application/xhtml+xml\n<html/>'),
+      head('200 text/xml\n<a/>'),
+      head('200 application/atom+xml; charset=utf-8\n<feed/>'),
+      head('200 text/javascript\nalert(1)'),
+    ],
+    [
+      [200, plain, '200 application/xhtml+xml\n<html/>'],
+      [200, plain, '200 text/xml\n<a/>'],
+      [200, plain, '200 application/atom+xml; charset=utf-8\n<feed/>'],
+      [200, plain, '200 text/javascript\nalert(1)'],
+    ],
   );
 }
 
