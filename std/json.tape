@@ -367,7 +367,8 @@ fn hex(b: Int) -> Int {
 
 // ---------- writing ----------
 
-// Appends text as a JSON string, escaped exactly as JSON.stringify escapes it.
+// Appends text as a JSON string, escaped exactly as JSON.stringify escapes it; bytes that are not UTF-8 are written
+// as U+FFFD, one for each maximal part, as TextDecoder reads them, so what is written is always JSON.
 //
 //   > buf() |> write_json_string(text: "a\nb") |> freeze
 //   "\"a\\nb\""
@@ -375,10 +376,27 @@ fn write_json_string(out: Buf, text: View) -> Buf {
   push(buf: write_chars(out: push(buf: out, byte: 34), text, from: 0, at: 0), byte: 34)
 }
 
-// Internal: Copies runs of plain bytes whole; `from` is the start of the current run.
+// Internal: Copies runs of plain bytes whole; `from` is the start of the current run. A byte of 128 or more starts
+// a UTF-8 sequence, copied with the run, or bytes that are not UTF-8, each maximal part of which is written as U+FFFD
+// (EF BF BD), as a WHATWG decoder reads them: what is written is always JSON.
 fn write_chars(out: Buf, text: View, from: Int, at: Int) -> Buf {
   match {
     at >= len(text) -> append(buf: out, view: slice(v: text, from, to: at))
+    text[at] >= 128 -> {
+      let end = utf8_end(v: text, at)
+      match {
+        end > 0 -> write_chars(out, text, from, at: end)
+        else -> write_chars(
+          out: append(buf: out, view: slice(v: text, from, to: at))
+            |> push(byte: 239)
+            |> push(byte: 191)
+            |> push(byte: 189),
+          text,
+          from: 0 - end,
+          at: 0 - end
+        )
+      }
+    }
     text[at] >= 32 and text[at] != 34 and text[at] != 92 -> write_chars(out, text, from, at: at + 1)
     else -> write_chars(
       out: write_escape(out: append(buf: out, view: slice(v: text, from, to: at)), b: text[at]),

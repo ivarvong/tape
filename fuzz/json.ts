@@ -31,7 +31,7 @@ type Decl = { name: string; ctors: Ctor[] };
 type JV =
   | { k: 'int'; v: bigint }
   | { k: 'bool'; v: boolean }
-  | { k: 'text'; v: string }
+  | { k: 'text'; v: string; raw?: number[] }
   | { k: 'float'; v: number }
   | { k: 'dec'; m: bigint; s: number }
   | { k: 'none' }
@@ -39,6 +39,7 @@ type JV =
   | { k: 'list'; v: JV[] }
   | { k: 'rec'; type: Decl; ctor: Ctor; v: JV[] };
 
+const replaced = new TextDecoder('utf-8', { ignoreBOM: true });
 const tname = (t: JT): string =>
   t.k === 'Dec'
     ? `Dec[${t.s}]`
@@ -161,6 +162,16 @@ function valueOf(r: Rng, t: JT, decls: Decl[], depth: number): JV {
     case 'Bool':
       return { k: 'bool', v: r.chance(2) };
     case 'View':
+      if (r.chance(3)) {
+        // bytes that are not all UTF-8: write_json writes U+FFFD for each bad part, as TextDecoder reads them
+        const raw = Array.from({ length: r.between(1, 6) }, () =>
+          r.one([
+            0x61, 0x22, 0x5c, 0x0a, 0x80, 0xbf, 0xc0, 0xc3, 0xa9, 0xe2, 0x82, 0xac, 0xed, 0xa0, 0xf0, 0x9f, 0x98, 0xf4,
+            0x90, 0xff,
+          ]),
+        );
+        return { k: 'text', v: replaced.decode(Uint8Array.from(raw)), raw };
+      }
       return { k: 'text', v: Array.from({ length: r.int(8) }, () => r.one(CHARS)).join('') };
     case 'Float': {
       const x = r.one([
@@ -238,7 +249,7 @@ function expr(v: JV, t: JT): string {
     case 'bool':
       return v.v ? 'True' : 'False';
     case 'text':
-      return tapeText(v.v);
+      return v.raw ? v.raw.map(b => `ctl(${b})`).join(' ++ ') : tapeText(v.v);
     case 'float':
       // -0f is the literal 0f negated
       return Object.is(v.v, -0) ? '(-zero())' : floatText(v.v);
@@ -394,6 +405,7 @@ export function jsonCase(seed: number): JsonVerdict {
     top = decls.at(-1) ?? { name: 'T0', ctors: [] };
   const v = valueOf(r, { k: 'Ref', name: top.name }, decls, 0);
   const text = programOf(decls, top.name, expr(v, { k: 'Ref', name: top.name }));
+  if (process.env['FUZZ_PRINT']) console.log(text);
   const sources = [...std, { name: 'j.tape', text }];
   const b = compile(sources);
   if (b.wasm === null)
@@ -406,7 +418,13 @@ export function jsonCase(seed: number): JsonVerdict {
     const doc = sent(r, v);
     const got = handled(run, enc.encode(doc)).out;
     docs++;
-    const lines = Buffer.from(got, 'latin1').toString('utf8').split('\n');
+    // compared as bytes: a decoder would replace bytes that are not UTF-8 and hide what write_json wrote
+    const lines = got.split('\n').map(l => Buffer.from(l, 'latin1').toString('utf8'));
+    if (
+      Buffer.from(got, 'latin1').toString('latin1') !==
+      Buffer.from(Buffer.from(got, 'latin1').toString('utf8')).toString('latin1')
+    )
+      return { docs, bad: `the program wrote bytes that are not UTF-8: ${JSON.stringify(got.slice(0, 300))}\n${text}` };
     const [w, again, read] = lines;
     if (lines.length !== 3) return { docs, bad: `the program answered ${JSON.stringify(got.slice(0, 300))}\n${text}` };
     if (w !== want) return { docs, bad: `write_json wrote ${w}, the reference ${want}\n${text}` };

@@ -8,6 +8,7 @@ import { instantiate, isEffect, replay } from '../host.ts';
 import { pack, unpack } from '../host/log.ts';
 import { nodeSql } from '../nodesql.ts';
 import { format } from '../fmt.ts';
+import { handled, instance } from '../fuzz/run.ts';
 import { bare, finish, handleBare, same, std } from './harness.ts';
 
 const enc = new TextEncoder(),
@@ -332,6 +333,61 @@ fn f(n: Int) -> Int {
   const once = format(text, 'carry.tape');
   same('fmt of SQL with a backslash at the end of a line is a fixed point', format(once, 'carry.tape'), once);
   same('and the SQL is left as written', once.includes('PRIMARY KEY, \\\n    a TEXT NOT NULL)'), true);
+}
+
+// fuzz/json.ts, 23 November 2026: write_json of a View that is not UTF-8 copied its bytes as they were, so it wrote
+// text that is not JSON, and decode of what write_json wrote was "not JSON". Each sequence that is not UTF-8 is
+// written as U+FFFD, one for each maximal part of it, as a WHATWG decoder (TextDecoder) reads the bytes: what
+// write_json writes is always JSON, and decode of it gives the replaced text.
+{
+  const text = `type R {
+  R(b: View)
+}
+
+fn handle(raw: View) -> Buf {
+  let w = freeze(buf: buf() |> write_json(value: R(b: raw)))
+  match decode(json: w, as: R) {
+    Ok(value) -> buf() |> append(view: w) |> push(byte: 10) |> append(view: value.b)
+    Err(error) -> buf() |> append(view: "decode: ") |> append(view: error)
+  }
+}
+`;
+  const sources = [...std, { name: 'fffd.tape', text }];
+  const b = compile(sources);
+  if (b.wasm === null) throw new Error(b.errors[0]?.message);
+  // the module's bytes as they are (handleBare decodes them, and a decoder would replace what this is about)
+  const run = instance(new WebAssembly.Module(b.wasm)),
+    it = interpret(sources);
+  const latin = (u: Uint8Array): string => Buffer.from(u).toString('latin1');
+  const replaced = new TextDecoder('utf-8', { ignoreBOM: true });
+  const inputs = [
+    [0x61, 0xff, 0x62],
+    [0xc3],
+    [0xc3, 0x28],
+    [0xe2, 0x82],
+    [0xe2, 0x82, 0x28],
+    [0xed, 0xa0, 0x80],
+    [0xf0, 0x9f, 0x98],
+    [0xf0, 0x9f, 0x98, 0x80],
+    [0xf4, 0x90, 0x80, 0x80],
+    [0xc0, 0xaf],
+    [0xe0, 0x80, 0xaf],
+    [0x80, 0xbf, 0xfe],
+    [0xef, 0xbb, 0xbf, 0x22, 0x5c],
+  ].map(x => Uint8Array.from(x));
+  // the reference: the bytes as TextDecoder replaces them, then JSON.stringify, and the replaced text read back
+  const want = inputs.map(i => {
+    const t = replaced.decode(i);
+    return latin(enc.encode(`{"b":${JSON.stringify(t)}}\n${t}`));
+  });
+  same(
+    'write_json of bytes that are not UTF-8 writes U+FFFD for each bad part, and decode reads it back',
+    inputs.map(i => {
+      const meant = it.call('handle', [i]);
+      return [handled(run, i).out, meant instanceof Uint8Array ? latin(meant) : 'not bytes'];
+    }),
+    want.map(w => [w, w]),
+  );
 }
 
 finish();

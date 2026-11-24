@@ -1191,7 +1191,7 @@ The value of a hex digit (is_hex(b) must hold).
 fn write_json_string(out: Buf, text: View) -> Buf
 ```
 
-Appends text as a JSON string, escaped exactly as JSON.stringify escapes it.
+Appends text as a JSON string, escaped exactly as JSON.stringify escapes it; bytes that are not UTF-8 are written as U+FFFD, one for each maximal part, as TextDecoder reads them, so what is written is always JSON.
 
 ```
 > buf() |> write_json_string(text: "a\nb") |> freeze

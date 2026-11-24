@@ -310,6 +310,11 @@ A count beyond ±2^53 stops the request rather than reach the database rounded. 
 (`12.3` and `"12.300"` for a `Dec[2]`, but not `12.345`: `amount: expected a number with at most 2 decimals`).
 `parse_dec(text: …, scale: 2)` reads one from text the same way, as an `Option`.
 
+In JSON a View is a string, escaped as `JSON.stringify` escapes one. A View is bytes, and bytes that are not UTF-8
+have no JSON: `write_json` writes U+FFFD for each maximal part of them, as a WHATWG decoder (`TextDecoder`) reads
+the same bytes, so what it writes is always JSON, and `decode` of it gives the text with those parts replaced. A
+View that is UTF-8 comes back as it was.
+
 **Why decode refuses.** `decode`'s `Err` is one line, the same from every host, made to be sent back as a 400
 as it is: `<path>: <problem>`. The path names the value from the top, a field by its name and an element by its
 index: `key`, `venue.city`, `items[2].price`, `grid[1][0]`. The problem is one of four:

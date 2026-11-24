@@ -383,6 +383,28 @@ fn utf8_at(v: View, at: Int) -> Utf8 {
   }
 }
 
+// Internal: where the UTF-8 sequence at `at` (a byte of 128 or more) ends; when the bytes there are not UTF-8,
+// minus where their maximal part ends: the longest start of a sequence that is right so far, at least one byte, the
+// bytes a WHATWG decoder replaces with one U+FFFD.
+fn utf8_end(v: View, at: Int) -> Int {
+  match utf8_at(v, at) {
+    Utf8(next) -> next
+    BadUtf8 -> 0 - at - utf8_bad(v, at, b: v[at])
+  }
+}
+
+// Internal: how many bytes from `at` one U+FFFD stands for.
+fn utf8_bad(v: View, at: Int, b: Int) -> Int {
+  match {
+    b >= 224 and b < 240 and cont(v, at: at + 1) and second_of_3(b, c: v[at + 1]) -> 2
+    b >= 240 and b <= 244 and cont(v, at: at + 1) and second_of_4(b, c: v[at + 1]) -> match {
+      cont(v, at: at + 2) -> 3
+      else -> 2
+    }
+    else -> 1
+  }
+}
+
 // Internal: is the byte at `at` a UTF-8 continuation byte?
 fn cont(v: View, at: Int) -> Bool {
   at < len(v) and (v[at] & 192) == 128
