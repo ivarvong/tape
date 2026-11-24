@@ -46,8 +46,18 @@ const MODULES = {
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
 };
-/** sql.js's Wasm, for the Dynamic Worker's modules: decoded once per isolate. */
-const sqlite3 = Uint8Array.from(atob(sqlite3Base64), c => c.codePointAt(0) ?? 0);
+// sql.js's Wasm, for the Dynamic Worker's modules: decoded once per isolate, when a run first needs it. Decoded at
+// the top level (and by a callback per byte) it was 34 of the 53 ms this Worker's module takes to start, in every
+// isolate, a Durable Object's too, which never runs it.
+let sqlite3Bytes: Uint8Array | null = null;
+const sqlite3 = (): Uint8Array => {
+  if (sqlite3Bytes) return sqlite3Bytes;
+  const text = atob(sqlite3Base64),
+    bytes = new Uint8Array(text.length);
+  for (let i = 0; i < text.length; i++) bytes[i] = text.codePointAt(i) ?? 0;
+  sqlite3Bytes = bytes;
+  return bytes;
+};
 const enc = new TextEncoder();
 const hexOf = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 /** The runner's own code, hashed once per isolate: a Loader name changes when the code it would load does. */
@@ -72,7 +82,7 @@ async function runnerOf(env: Env, ctx: ExecutionContext, program: Uint8Array, tr
     tails: [ctx.exports.RunTail({})],
     modules: {
       ...MODULES,
-      'sqlite3.wasm': { wasm: sqlite3 },
+      'sqlite3.wasm': { wasm: sqlite3() },
       'program.wasm': { wasm: program },
       'traced.wasm': { wasm: traced },
     },
