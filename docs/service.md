@@ -100,8 +100,8 @@ For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(
 box office served this way.
 
 `{"published": false}` takes effect at once: the name's own object checks that it is published in the same call that
-runs each public request. The Worker keeps a name's "published" from the account-wide list for up to 30 seconds per
-isolate, which only saves that lookup; for those 30 seconds an unpublished name's object is asked and answers 404 itself.
+runs each public request. The Worker keeps a name's "published" from the account-wide list for up to ten minutes per
+isolate, which only saves that lookup; for those ten minutes an unpublished name's object is asked and answers 404 itself.
 
 ## Tools for agents
 
