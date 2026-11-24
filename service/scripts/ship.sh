@@ -17,7 +17,8 @@
 #  4. 0% -> pinned smoke, pinned MCP smoke (/mcp on NEW, every answer naming NEW in tape-mcp-version), and parity
 #     (scripts/parity.ts: the playground NEW serves and /mcp on NEW name the same commit and compiler and compile
 #     alike) -> telemetry at 0% -> 100% (fast) or the ramp
-#  5. at 100%: unpinned requests answer from NEW; the prod smokes (and /mcp); the telemetry gate over the run
+#  5. at 100%: unpinned requests answer from NEW; the prod smokes (and /mcp, and visual-smoke.ts in headless Chrome);
+#     the telemetry gate over the run
 # A failure in 4-5 rolls back to PREV, only while the deployment is still the one this run last wrote. One entry per
 # run in $DEPLOY_LOG, with NEW and PREV and the step times.
 set -euo pipefail
@@ -244,9 +245,17 @@ node scripts/mcp-smoke.ts "$BASE/mcp" --mcp-version "$NEW_tape" > "$STATE/smoke-
 S3=$!
 node scripts/parity.ts "$BASE" --sha "$SHA" > "$STATE/parity.out" 2>&1 &
 S4=$!
+# the site as a browser draws it (visual-smoke.ts): a failed check rolls back; no Chrome on this machine (exit 2) is noted
+node scripts/visual-smoke.ts "$BASE" --shots "$STATE/shots" > "$STATE/visual.out" 2>&1 &
+S5=$!
 wait $S1 || { cat "$STATE/smoke.out"; back "tape prod smoke"; }
 wait $S3 || { cat "$STATE/smoke-binding.out"; back "prod MCP smoke"; }
 wait $S4 || { cat "$STATE/parity.out"; back "prod parity"; }
+VISUAL=0
+wait $S5 || VISUAL=$?
+if [ "$VISUAL" = 2 ]; then note "visual smoke skipped: no Chrome"
+elif [ "$VISUAL" != 0 ]; then cat "$STATE/visual.out"; back "prod visual smoke"
+else note "visual: $(tail -1 "$STATE/visual.out")"; fi
 note "prod smoke: $(tail -1 "$STATE/smoke.out"); MCP: $(tail -1 "$STATE/smoke-binding.out"); parity: $(tail -1 "$STATE/parity.out")"
 node scripts/telemetry.ts "$NEW_tape" "$T0" --min 10 --prev "$PREV_tape" > "$STATE/telemetry.out" 2>&1 || { cat "$STATE/telemetry.out"; back "tape telemetry over the run"; }
 note "tape run: $(grep '^telemetry ' "$STATE/telemetry.out"); $(grep 'durable object' "$STATE/telemetry.out" | sed 's/^ *//')"
