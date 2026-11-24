@@ -9,8 +9,6 @@
 // call gets more than what remains of it, and each service is told its budget so it can pass it on. A handler that
 // returns rollback(out) has that stretch's writes undone: the host throws out of `transaction`, so the storage
 // rolls back, and still answers with `out`; the log's first entry says `undone`.
-import { isStepVersion } from '../compiler/step-version.ts';
-import type { StepVersion } from '../compiler/step-version.ts';
 import { Pending, REAL_TIMERS, perform } from './call.ts';
 import type { Service, Timers } from './call.ts';
 import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
@@ -109,10 +107,11 @@ export function section(module: WebAssembly.Module, n: string): unknown {
   const [s] = WebAssembly.Module.customSections(module, n);
   return s ? JSON.parse(new TextDecoder().decode(s)) : [];
 }
-/** The step accounting a module was built for, or null when the module predates the tag. */
-export function stepVersionOf(module: WebAssembly.Module): StepVersion | null {
+/** The step accounting a module was built for, or null when the module predates the tag. A positive integer, read
+ * as the section wrote it: the host does not import the compiler's list, so a later accounting still reports. */
+export function stepVersionOf(module: WebAssembly.Module): number | null {
   const v = section(module, 'step_version');
-  return isStepVersion(v) ? v : null;
+  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null;
 }
 /**
  * A custom section that is a list. The compiler wrote it (compiler/gen/assemble.ts), and the host takes its
@@ -183,7 +182,7 @@ type Linked = {
   readonly mem: Mem;
   readonly raw: Record<string, WebAssembly.ExportValue>;
   /** the step accounting the module was built for; null when the module predates the tag */
-  readonly stepVersion: StepVersion | null;
+  readonly stepVersion: number | null;
   readonly flagNow: Flags;
   target: Target;
   remotes: string[];

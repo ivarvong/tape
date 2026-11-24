@@ -39,8 +39,7 @@ function declareParams(c: Ctx): void {
   });
 }
 
-/** A recursive function counts each entry, and stops when the count passes the limit. An entry is one step of the
- * current step version (compiler/step-version.ts): change what is counted only by appending a version. */
+/** A recursive function counts each entry, and stops when the count passes the limit. */
 function countEntry(c: Ctx): void {
   const { B, f } = c;
   // a copy of a generic function is recursive when the function it was made from is

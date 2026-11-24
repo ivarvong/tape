@@ -1,6 +1,5 @@
 // host/log.ts: the effect log. Every call a program makes of its host is written down, so the same request can
 // be run again from the log alone and give the same answer.
-import type { StepVersion } from '../compiler/step-version.ts';
 
 /** A value read from a row: node:sqlite gives bytes as a Uint8Array, Durable Object SQLite as an ArrayBuffer. */
 export type Cell = string | number | bigint | null | Uint8Array | ArrayBuffer;
@@ -56,8 +55,9 @@ export type Head = Partial<Span> & {
   bytes?: number;
   /** the steps the run took, of the 50,000,000 a run may take: the module's `cost` when it ended, or stopped */
   steps?: number;
-  /** which step accounting produced `steps` (compiler/step-version.ts); absent in a log from before the tag */
-  step_version?: StepVersion;
+  /** which step accounting produced `steps`; absent in a log from before the tag. A positive integer the module
+   * carried, not the compiler's list: the host does not import the compiler. */
+  step_version?: number;
   undone?: true;
   woke?: { key: number; due: number };
 };

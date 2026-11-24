@@ -38,6 +38,16 @@ const FACT = `fn fact(n: Int) -> Int {
   }
 }
 `;
+// decode walks a JSON string. A change to that metering (a scan that charges by the bytes it reads) moves this
+// count, which is why it is pinned beside the folds: the four small programs do not touch JSON.
+const JSON_READ = `type Box { Box(n: Int) }
+fn read() -> Int {
+  match decode(json: "{\\"n\\":7}", as: Box) {
+    Ok(value: Box(n)) -> n
+    Err(error) -> -1
+  }
+}
+`;
 const GET = `fn handle(raw: View) -> Buf {
   match request(raw) {
     Request(method: "GET", path: "/") -> respond(status: 200) |> append(view: "ok")
@@ -46,10 +56,16 @@ const GET = `fn handle(raw: View) -> Buf {
 }
 `;
 
-type Sample = { readonly fold: number; readonly tail: number; readonly helper: number; readonly fact: number };
+type Sample = {
+  readonly fold: number;
+  readonly tail: number;
+  readonly helper: number;
+  readonly fact: number;
+  readonly json: number;
+};
 type Recorded = Sample & { readonly inlineOffMatches: boolean };
 const COUNTS = {
-  1: { fold: 1001, tail: 101, helper: 101, fact: 10, inlineOffMatches: true },
+  1: { fold: 1001, tail: 101, helper: 101, fact: 10, json: 47, inlineOffMatches: true },
 } satisfies Record<StepVersion, Recorded>;
 
 function stepsOf(text: string, fn: string, args: readonly bigint[], options: Partial<Options>): number {
@@ -68,6 +84,7 @@ const measure = (options: Partial<Options> = {}): Sample => ({
   tail: stepsOf(TAIL, 'up', [0n], options),
   helper: stepsOf(HELPER, 'up', [0n], options),
   fact: stepsOf(FACT, 'fact', [10n], options),
+  json: stepsOf(JSON_READ, 'read', [], options),
 });
 
 const want = COUNTS[STEP_VERSION];
@@ -75,7 +92,7 @@ const got = measure();
 same(
   `steps of step version ${STEP_VERSION} (a metering change appends a definition and records its counts; it does not edit this row)`,
   got,
-  { fold: want.fold, tail: want.tail, helper: want.helper, fact: want.fact },
+  { fold: want.fold, tail: want.tail, helper: want.helper, fact: want.fact, json: want.json },
 );
 if (want.inlineOffMatches)
   same('inlining and the local step counter leave these step counts unchanged', measure(OFF), got);
