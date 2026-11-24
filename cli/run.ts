@@ -17,12 +17,15 @@ const answer = (e: { rows?: Cell[][] | undefined; r?: number | undefined }): str
 
 /** One entry of the effect log, as a line. */
 function effectLine(plain: Built, e: Effect): string {
-  if (isHead(e)) return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${e.bytes} bytes of memory`;
+  // a write or a timer that the run's rollback(out) or trap undid, and the run that did it
+  const undone = 'undone' in e && e.undone ? '  (undone)' : '';
+  if (isHead(e))
+    return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${e.bytes} bytes of memory${undone}`;
   if (isCall(e)) return `call    ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`;
-  if (isWake(e)) return `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})`;
+  if (isWake(e)) return `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})${undone}`;
   if (isNow(e)) return `now     -> ${e.now}`;
   if (isRandom(e)) return `random  -> ${e.random}`;
-  return `sql     ${plain.queries[e.q]?.sql ?? e.q}  ${JSON.stringify(e.p)} -> ${answer(e)}`;
+  return `sql     ${plain.queries[e.q]?.sql ?? e.q}  ${JSON.stringify(e.p)} -> ${answer(e)}${undone}`;
 }
 
 /** What the host did between two sites of a trace; null for what the trace does not show. */
@@ -71,11 +74,19 @@ export async function runRequests(file: string, requests: readonly string[]): Pr
   const lines = text.split('\n');
   const { plain, traced } = compiled(file, text);
   const tmod = new WebAssembly.Module(traced.wasm);
-  const app = instantiate(new WebAssembly.Module(plain.wasm), { sql: nodeSql(), name: 'cli' });
+  const db = nodeSql();
+  const app = instantiate(new WebAssembly.Module(plain.wasm), { sql: db, name: 'cli' });
   console.log(`${file}: ${plain.wasm.length} bytes of Wasm, ${plain.functions.length} functions`);
   for (const r of requests.length > 0 ? requests : ['']) {
-    const req = enc.encode(r.replaceAll(String.raw`\n`, '\n').replace(/^([A-Z]+ \S+)$/, '$1\n'));
-    const ran = await app.runLogged(req);
+    // `\n` ends the request line and `\r` starts a header on it (`'POST /x\rcontent-type: text/csv\nbody'`)
+    const req = enc.encode(
+      r
+        .replaceAll(String.raw`\n`, '\n')
+        .replaceAll(String.raw`\r`, '\r')
+        .replace(/^([A-Z]+ \S+)$/, '$1\n'),
+    );
+    // each stretch of the run in a transaction, as the service runs it: a rollback(out) or a trap undoes its writes
+    const ran = await app.runLogged(req, { transaction: f => db.transaction(f) });
     // a header the program set stands on the status line after a carriage return: shown as ␍
     console.log(`\n→ ${r}\n← ${dec.decode(ran.out).replaceAll('\r', ' ␍ ').replaceAll('\n', ' ⏎ ')}\n\n  effect log`);
     for (const e of ran.effects) console.log(`    ${effectLine(plain, e)}`);

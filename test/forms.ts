@@ -537,6 +537,32 @@ T(
   })(),
   [1, 0],
 );
+{
+  // `node tape.ts program 'REQUEST' …` runs each request in a transaction, as the service does: a rollback(out)
+  // undoes the claim made before it, and the log says so (it ran with none, and the claim stayed)
+  const printed = execFileSync(
+    process.execPath,
+    [
+      here('tape.ts').pathname,
+      here('testdata/rollback.tape').pathname,
+      'POST /a',
+      'GET /',
+      'GET /type\\rcontent-type: text/csv',
+    ],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+  );
+  T(
+    "tape run: a rollback undoes the request's writes, marked (undone) in the log; `\\r` in a request starts a header",
+    [
+      printed.split('\n').filter(l => l.startsWith('←')),
+      printed
+        .split('\n')
+        .filter(l => l.includes('INSERT INTO claims'))
+        .map(l => l.endsWith('(undone)')),
+    ],
+    [['← 409 ⏎ ', '← 200 ⏎ []', '← 200 ⏎ text/csv'], [true]],
+  );
+}
 
 // ---- 3. doc tests: `//   > expression` and, on the next comment line, the pattern it should match
 {
