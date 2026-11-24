@@ -120,6 +120,47 @@ same(
   [0, 2],
 );
 
+// The stand-in's rowsWritten is how far total_changes() moved while the statement ran. It reads the statement's own
+// count instead until a trigger or a foreign key is made; the same statements on a second database, total_changes()
+// asked around each, give the same numbers before and after one is (a trigger's writes and a cascade's count too).
+{
+  const stand = nodeSql(),
+    db = new DatabaseSync(':memory:');
+  const total = (): number => Number(db.prepare('SELECT total_changes() AS n').get()?.['n']);
+  const statements: [string, ...(string | number)[]][] = [
+    ['CREATE TABLE a(k TEXT PRIMARY KEY NOT NULL, v INTEGER NOT NULL)'],
+    ["INSERT INTO a VALUES ('x', 1), ('y', 2)"],
+    ['INSERT INTO a VALUES (?1, 3) ON CONFLICT(k) DO NOTHING', 'x'],
+    ['INSERT OR REPLACE INTO a VALUES (?1, 4)', 'x'],
+    ['UPDATE a SET v = v + 1'],
+    ['SELECT * FROM a'],
+    ["INSERT INTO a VALUES ('z', 5) RETURNING k"],
+    ['CREATE TABLE log(n INTEGER)'],
+    ['CREATE TRIGGER t AFTER UPDATE ON a BEGIN INSERT INTO log VALUES (new.v); END'],
+    ['UPDATE a SET v = v + 1'],
+    ['CREATE TABLE child(k TEXT NOT NULL REFERENCES a(k) ON DELETE CASCADE)'],
+    ["INSERT INTO child VALUES ('y'), ('y')"],
+    ["DELETE FROM a WHERE k = 'y'"],
+    ['SELECT count(*) AS n FROM child'],
+  ];
+  const got: number[] = [],
+    want: number[] = [];
+  for (const [q, ...p] of statements) {
+    got.push(stand.exec(q, ...p).rowsWritten);
+    const before = total(),
+      st = db.prepare(q);
+    if (st.columns().length > 0) st.all(...p);
+    else st.run(...p);
+    want.push(total() - before);
+  }
+  same(
+    "the stand-in's rowsWritten is how far total_changes() moved, before and after a trigger or a foreign key",
+    got,
+    want,
+  );
+  same("the trigger and the cascade write rows that are not their statement's own", [want[9], want[12]], [6, 3]);
+}
+
 // a write SQLite counts as having changed rows: the oracle itself says so, so the test above is not vacuous
 same('the oracle counts the upsert and the two-row insert', [written(steps[0]?.[1] ?? '', ['z']), count()], [1, 3]);
 
