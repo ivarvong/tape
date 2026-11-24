@@ -259,6 +259,24 @@ ok(
   [...new Set(t.errors.map(e => e.code))].toSorted().join(',') === 'C83,C84,C85',
   codes(t),
 );
+// a value `do` cannot drop (C82): C83's hint says what to write instead of `do`, which would only be refused
+const unreadMove = build(
+  swap(
+    `fn broken() -> Buf {
+  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`,
+    `fn broken() -> Buf {
+  let sealed = sql_move(row: Jar, query: "UPDATE jars SET state = 'sealed' WHERE id = 1 AND state = 'open' RETURNING *")
+  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`,
+  ),
+);
+const [moveHint] = unreadMove.errors;
+ok(
+  'C83 on an unread sql_move asks for a match on its Move, not a `do` that C82 refuses',
+  moveHint?.code === 'C83' &&
+    !moveHint.hint?.includes('`do sql_move') &&
+    /match on what sql_move gives/.test(moveHint.hint ?? ''),
+  `${moveHint?.code} ${moveHint?.hint}`,
+);
 ok(
   'handle may leave its capabilities unread, and std has none of the three',
   !build(jars).errors?.length,

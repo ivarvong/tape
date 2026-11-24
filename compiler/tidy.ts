@@ -7,14 +7,33 @@
 //   C85  a call multiplied by the literal 0                      -> `do call(…)`
 // "A call" here is one that does something: sql_*, wake, call, ask, now, random, rollback, or a function that
 // reaches one. A parameter or a name that is never read and holds no such call is dead, not hidden work.
-import { type At, type Call, type Expr, type FnDecl, type Program, eachExpr, partsOf } from './ast.ts';
+import { type At, type Call, type Expr, type FnDecl, type Program, type TypeAst, eachExpr, partsOf } from './ast.ts';
 import type { Problem } from './common.ts';
 import { CAPABILITIES } from './types.ts';
 
 const EFFECTS = ['sql_exec', 'sql_first', 'sql_all', 'sql_move', 'wake', 'call', 'ask', 'random', 'now', 'rollback'];
+// the effects whose value is not an Int, so `do` refuses them (C82), and what each gives
+const GIVES: Readonly<Record<string, string>> = {
+  sql_first: 'an Option',
+  sql_all: 'Rows',
+  sql_move: 'a Move',
+  call: 'a Result',
+  ask: 'a Result',
+  rollback: 'a Buf',
+};
+const typeText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(typeText).join(', ')}]` : t.name);
+/** How to run `name` for what it does: `do`, or, for a value `do` cannot drop, what to do with it instead. */
+function runIt(r: Reading, name: string): string {
+  const gives = r.gives.get(name);
+  if (gives === undefined) return `\`do ${name}(…)\``;
+  if (name === 'sql_first' || name === 'sql_all') return `\`do sql_exec(…)\`, for a statement whose rows are not read`;
+  return `a match on what ${name} gives (${gives}, which \`do\` does not drop: C82), with an arm for each outcome`;
+}
 /** What tidy reads a program through: the functions that do something, and what each function reads. */
 type Reading = {
   doing: Set<string>;
+  /** a function that does something and gives a value `do` cannot drop: what it gives (`do` drops only an Int, C82) */
+  gives: Map<string, string>;
   reads: Map<FnDecl, Set<string>>;
   /** function -> the parameters it never reads (capabilities aside) */
   unread: Map<string, Set<string>>;
@@ -52,7 +71,9 @@ function reading(prog: Program): Reading {
     const dead = f.params.filter(p => !names.has(p.name) && !caps.has(p.typeAst.name)).map(p => p.name);
     if (dead.length > 0 && !f.exported && f.name !== 'handle') unread.set(f.name, new Set(dead));
   }
-  return { doing: doingOf(prog), reads, unread };
+  const gives = new Map(Object.entries(GIVES));
+  for (const f of prog.fns.values()) if (f.retAst.name !== 'Int') gives.set(f.name, typeText(f.retAst));
+  return { doing: doingOf(prog), gives, reads, unread };
 }
 // the problems at one expression of f
 function problemsAt(r: Reading, f: FnDecl, e: Expr): Problem[] {
@@ -69,7 +90,7 @@ function problemsAt(r: Reading, f: FnDecl, e: Expr): Problem[] {
           'C83',
           l,
           `${l.name} is never read: ${l.value.name} is run for what it does`,
-          `Write \`do ${l.value.name}(…)\`.`,
+          `Write ${runIt(r, l.value.name)}.`,
         );
   const hidden = e.k === 'bin' && e.op === '*' && (zero(e.l) || zero(e.r)) ? doer(e) : null;
   if (hidden)
@@ -77,7 +98,7 @@ function problemsAt(r: Reading, f: FnDecl, e: Expr): Problem[] {
       'C85',
       e,
       `this is multiplied by 0: ${hidden.name} is run for what it does, and its value thrown away`,
-      `Run it as a step of its own, on the line before: \`do ${hidden.name}(…)\`.`,
+      `Run it as a step of its own, on the line before: ${runIt(r, hidden.name)}.`,
     );
   const never = e.k === 'call' ? r.unread.get(e.name) : undefined;
   if (e.k === 'call' && never)
@@ -88,7 +109,7 @@ function problemsAt(r: Reading, f: FnDecl, e: Expr): Problem[] {
           'C84',
           a.value,
           `${c.name} is passed as ${a.label}, which ${e.name} never reads: it is run for what it does, before ${e.name}`,
-          `Run it as a step of its own, on the line before: \`do ${c.name}(…)\`, and remove the parameter ${a.label} from ${e.name}.`,
+          `Run it as a step of its own, on the line before: ${runIt(r, c.name)}, and remove the parameter ${a.label} from ${e.name}.`,
         );
     }
   return out;
