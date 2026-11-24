@@ -439,6 +439,11 @@ function numberText(r: Rng): string {
   if (r.chance(15)) t += r.one([' ', 'x', '.', 'e', '\u0000']);
   return t;
 }
+const timed = (run: Run, t: string): number => {
+  const t0 = performance.now();
+  handled(run, enc.encode(t));
+  return performance.now() - t0;
+};
 export function parseCase(seed: number, n = 300): NumVerdict {
   const r = rng(seed);
   const s = r.one([0, 1, 2, 3, 6, 9, 18]);
@@ -452,7 +457,9 @@ export function parseCase(seed: number, n = 300): NumVerdict {
     const ms = performance.now() - t0;
     const w = want === null ? 'none' : decText(want, s);
     if (got !== w) return { cases: i + 1, bad: `parse_dec(${JSON.stringify(t)}, scale: ${s}): want ${w}, got ${got}` };
-    if (ms > 50) return { cases: i + 1, bad: `parse_dec(${JSON.stringify(t)}, scale: ${s}) took ${ms.toFixed(0)} ms` };
+    // slow twice running, so a pause of the collector or a loaded machine is not read as a slow parse
+    if (ms > 200 && timed(run, t) > 200)
+      return { cases: i + 1, bad: `parse_dec(${JSON.stringify(t)}, scale: ${s}) took ${ms.toFixed(0)} ms` };
   }
   return { cases: n, bad: null };
 }

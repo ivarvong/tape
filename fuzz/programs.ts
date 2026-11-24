@@ -66,7 +66,8 @@ export function check(text: string, inputs: Uint8Array[], extra: Partial<Options
   // compiles)
   let made;
   try {
-    const opts = { ...extra, exports: entries };
+    // a step budget of 500,000 unless one is given: a run past it is compared between the builds alone
+    const opts = { reductionLimit: 500_000, ...extra, exports: entries };
     made = compileAlso(
       sources,
       opts,
@@ -94,18 +95,21 @@ export function check(text: string, inputs: Uint8Array[], extra: Partial<Options
   let traps = 0;
   for (const entry of entries)
     for (const input of inputs) {
-      let want: string | null;
-      try {
-        const out = it.call(entry, [input]);
-        want = out instanceof Uint8Array ? lat(out) : `not bytes: ${typeof out}`;
-      } catch (e) {
-        if (e instanceof Trap) want = `trap ${e.code}`;
-        else if (e instanceof Unsupported) return fail('unsupported', e.message, traps);
-        // the interpreter's own stack: no meaning to compare; the builds must still agree with each other
-        else if (e instanceof RangeError && e.message.includes('call stack')) want = null;
-        else return fail('crash', `interpreter threw: ${e instanceof Error ? e.stack : String(e)}`, traps);
-      }
       const got = runs.map(([name, r]) => [name, handled(r, input, entry)] as const);
+      // a run the builds stopped on steps is one the interpreter, which counts none, would run to its end, at a
+      // thousandth of the speed: it is not asked (the builds are still held to each other)
+      let want: string | null = null;
+      if (!got.some(([, g]) => g.out === 'trap 2'))
+        try {
+          const out = it.call(entry, [input]);
+          want = out instanceof Uint8Array ? lat(out) : `not bytes: ${typeof out}`;
+        } catch (e) {
+          if (e instanceof Trap) want = `trap ${e.code}`;
+          else if (e instanceof Unsupported) return fail('unsupported', e.message, traps);
+          // the interpreter's own stack: no meaning to compare; the builds must still agree with each other
+          else if (e instanceof RangeError && e.message.includes('call stack')) want = null;
+          else return fail('crash', `interpreter threw: ${e instanceof Error ? e.stack : String(e)}`, traps);
+        }
       const [, first] = got[0] ?? [];
       if (!first) throw new Error('no builds');
       if (first.out.startsWith('trap')) {
