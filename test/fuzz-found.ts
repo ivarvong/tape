@@ -7,6 +7,7 @@ import { interpret } from '../interp.ts';
 import { instantiate, isEffect, replay } from '../host.ts';
 import { pack, unpack } from '../host/log.ts';
 import { nodeSql } from '../nodesql.ts';
+import { format } from '../fmt.ts';
 import { bare, finish, handleBare, same, std } from './harness.ts';
 
 const enc = new TextEncoder(),
@@ -312,6 +313,25 @@ fn handle(raw: View, db: Sql) -> Buf {
     { exports: ['f'] },
   );
   same('a record of 300 fields compiles', wide.wasm === null ? wide.errors[0]?.code : 'compiled', 'compiled');
+}
+
+// fuzz/compile.ts, 23 November 2026: `tape fmt` was not a fixed point on SQL that has a backslash at the end of a
+// line (a migration's, an invariant's: their SQL is left as written). The printer indents the line after a text's
+// carried backslash, and it found those in the SQL too, so each run of fmt indented the next line two more levels.
+{
+  const text = `migration 1 "t" {
+  CREATE TABLE t(id INTEGER PRIMARY KEY, \\
+    a TEXT NOT NULL)
+}
+
+fn f(n: Int) -> Int {
+  len("one \\
+      two") + n
+}
+`;
+  const once = format(text, 'carry.tape');
+  same('fmt of SQL with a backslash at the end of a line is a fixed point', format(once, 'carry.tape'), once);
+  same('and the SQL is left as written', once.includes('PRIMARY KEY, \\\n    a TEXT NOT NULL)'), true);
 }
 
 finish();

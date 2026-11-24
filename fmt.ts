@@ -49,8 +49,12 @@ const OPS = [
   '^',
   '_',
 ];
-/** In a text literal: the backslash that ends a line, and the line end. */
-const CARRY = '\\\n';
+/**
+ * In a text literal: the backslash that ends a line, and the line end, held as NUL and the line end (as wide) until
+ * it is printed. As the backslash itself, the printer also found it in a migration's or an invariant's SQL, which is
+ * left as written, and indented the line after it again on every run of fmt (fuzz/compile.ts, 23 November 2026).
+ */
+const CARRY = '\u0000\n';
 const CLOSER: Readonly<Record<string, string>> = { '(': ')', '[': ']', '{': '}' };
 const WORDS = new Set([
   'fn',
@@ -455,7 +459,7 @@ function printed(toks: readonly Tok[]): string {
   });
   // a text carried over lines is indented twice past the line it began on
   const shown = (l: Line): string =>
-    '  '.repeat(l.indent) + l.out.replaceAll(CARRY, `${CARRY}${'  '.repeat(l.indent + 2)}`);
+    '  '.repeat(l.indent) + l.out.replaceAll(CARRY, `\\\n${'  '.repeat(l.indent + 2)}`);
   return `${kept.map(l => (l === null ? '' : shown(l))).join('\n')}\n`;
 }
 const tokensOf = (text: string, name: string): Tok[] => {
