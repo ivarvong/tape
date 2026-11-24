@@ -90,19 +90,6 @@ const jsonOf = async (request: Request): Promise<unknown> => {
 const STOPPED =
   'the program stopped before it answered; what it committed before that is kept, so the outcome is unknown';
 
-// GET /:account/:name/:version/:kind -> that build's Wasm. Versions never change, so Workers Cache keeps them.
-export class Wasm extends WorkerEntrypoint {
-  override async fetch(request: Request): Promise<Response> {
-    const [, account, name, version, kind] = new URL(request.url).pathname.split('/');
-    const bytes = await this.ctx.exports.Name.getByName(`${account}/${name}`).wasm(Number(version), kind);
-    return bytes
-      ? new Response(bytes, {
-          headers: { 'content-type': 'application/wasm', 'cache-control': 'public, max-age=31536000, immutable' },
-        })
-      : new Response('no such version', { status: 404, headers: { 'cache-control': 'no-store' } });
-  }
-}
-
 const rejected = (why: string): ServiceReply => ({ status: 'rejected', body: enc.encode(why) });
 // Calls between programs: env.CALLS in each loaded program, bound to its account.
 export class Calls extends WorkerEntrypoint<Env, { account: string; from: string }> {

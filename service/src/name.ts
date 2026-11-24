@@ -681,33 +681,30 @@ export class Name extends DurableObject {
       .map(r => `${int(r.version)}.${int(r.rebuilt_at)}`);
     return { built, key: `${COMPILER}:${stamps.join(',')}` };
   }
-  // One build of one version, for the cached Wasm entrypoint.
-  wasm(version: number, kind: string | undefined): Uint8Array | null {
-    const [row] = this.#sql
-      .exec(`SELECT ${kind === 'traced' ? 'traced' : 'plain'} AS wasm FROM _tape_versions WHERE version = ?1`, version)
-      .toArray();
-    return row?.wasm instanceof ArrayBuffer ? new Uint8Array(row.wasm) : null;
-  }
   /** The code of the name's data: program.ts and the host, with every live version's builds as modules. */
-  async #code(
-    account: string,
-    name: string,
-    plan: Required<Plan>,
-    built: readonly number[],
-    key: string,
-  ): Promise<WorkerLoaderWorkerCode> {
-    // the URL names the builds (key), so a rebuilt version's Wasm is not the cached one of before
-    const read = async (v: number, kind: string): Promise<ArrayBuffer> =>
-      (await this.ctx.exports.Wasm.fetch(`http://wasm/${account}/${name}/${v}/${kind}/${key}`)).arrayBuffer();
-    // a version whose source today's compiler cannot build is left out: it answers rebuild_failed (#invoke)
+  #code(account: string, name: string, plan: Required<Plan>, built: readonly number[]): WorkerLoaderWorkerCode {
+    // A version whose source today's compiler cannot build is left out: it answers rebuild_failed (#invoke). The
+    // builds are read here, from this object's own rows: until 24 November 2026 each was fetched through a cached
+    // entrypoint of the Worker (Wasm), one after another, 4 to 49 ms each on a cold start (tape 0936bbf2: 17 ms for
+    // one live version, 118-122 ms for four and five).
     const rows = this.#sql
-      .exec(`SELECT version, source, sites FROM _tape_versions WHERE version IN (${built.join(',') || 'NULL'})`)
+      .exec(
+        `SELECT version, source, sites, plain, traced FROM _tape_versions WHERE version IN (${built.join(',') || 'NULL'})`,
+      )
       .toArray()
-      .map(r => ({ v: int(r.version), source: str(r.source), sites: listIn(r.sites) }));
+      .map(r => ({
+        v: int(r.version),
+        source: str(r.source),
+        sites: listIn(r.sites),
+        plain: r.plain,
+        traced: r.traced,
+      }));
     const modules: Record<string, WorkerLoaderModule> = {};
     for (const r of rows) {
-      modules[`v${r.v}.plain.wasm`] = { wasm: await read(r.v, 'plain') };
-      modules[`v${r.v}.traced.wasm`] = { wasm: await read(r.v, 'traced') };
+      if (!(r.plain instanceof ArrayBuffer) || !(r.traced instanceof ArrayBuffer))
+        throw new TypeError(`v${r.v} has no build stored`);
+      modules[`v${r.v}.plain.wasm`] = { wasm: r.plain };
+      modules[`v${r.v}.traced.wasm`] = { wasm: r.traced };
       modules[`v${r.v}.sites.json`] = { json: r.sites };
       modules[`v${r.v}.tape`] = { text: r.source };
     }
@@ -742,7 +739,7 @@ export class Name extends DurableObject {
     const { built, key } = this.#current(plan.live);
     return this.ctx.facets.get<Program>('data', () => ({
       class: this.env.LOADER.get(`${account}/${name}/data@${plan.live.join(',')}#${key}`, () =>
-        this.#code(account, name, plan, built, key),
+        this.#code(account, name, plan, built),
       ).getDurableObjectClass<Program>('Program'),
     }));
   }

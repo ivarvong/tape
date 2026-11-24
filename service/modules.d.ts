@@ -26,7 +26,7 @@ interface SqlStorageCursor<T extends Record<string, SqlStorageValue>> {
 }
 
 // What the runtime gives this Worker (cloudflare.config.ts), and what it exports: ctx.exports.Name is the
-// namespace of the Name Durable Object, ctx.exports.Wasm and ctx.exports.Calls are loopback bindings.
+// namespace of the Name Durable Object, ctx.exports.Calls is a loopback binding.
 declare namespace Cloudflare {
   interface Env {
     LOADER: WorkerLoader;

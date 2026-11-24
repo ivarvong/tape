@@ -11,8 +11,7 @@ export default defineConfig({
     observability: { enabled: true, traces: { enabled: true, headSamplingRate: 1 } },
     // Each version has its own cache (no crossVersionCache): with one shared cache, a new version answered / and
     // /playground/ from the cache the version before filled (tape-version of the old commit, seen by the pinned
-    // smoke of d9e16de1, 2026-11-22), and could answer a page whose hashed files it does not have. A deploy costs a
-    // cold cache: the Wasm of each version is fetched from its object again, once per location.
+    // smoke of d9e16de1, 2026-11-22), and could answer a page whose hashed files it does not have.
     cache: { enabled: true },
     env: {
       LOADER: bindings.workerLoader(),
@@ -38,7 +37,6 @@ export default defineConfig({
     assets: { htmlHandling: 'auto-trailing-slash', notFoundHandling: 'none' },
     exports: {
       default: exports.worker({ cache: { enabled: false } }),
-      Wasm: exports.worker({ cache: { enabled: true } }),
       Name: exports.durableObject({ storage: 'sqlite' }),
     },
   },
