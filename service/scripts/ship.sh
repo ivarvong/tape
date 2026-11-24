@@ -216,6 +216,22 @@ for pct in $STEP_LIST; do
   note "$pct%: $(grep '^telemetry ' "$STATE/telemetry.out")"
 done
 
+# ---- 4c. at 100%: every live program built with NEW's compiler now (POST /_rebuild), so no request pays for it.
+# A compiler change made the first request to each name rebuild it from source, 1.2-4 s on prod (2026-11-23). It
+# is recorded, not a reason to roll back: a name it misses still rebuilds on its first request, as before.
+TOKEN_FILE=${TAPE_TOKEN_FILE:-$HOME/.config/tape/operator-token}
+if [ -r "$TOKEN_FILE" ]; then
+  say "rebuild: every live name with tape $NEW_tape's compiler"
+  if curl -sS --max-time 900 -X POST -H "authorization: Bearer $(cat "$TOKEN_FILE")" -H 'content-type: application/json' \
+      --data '{"concurrency": 4, "accounts": ["ivar", "demo"]}' "$BASE/_rebuild" > "$STATE/rebuild.out" 2>&1; then
+    note "rebuild: $(json < "$STATE/rebuild.out" 'print("%d names (%d accounts), %d versions: %d rebuilt, %d failed, %d errors, %.1f s; slowest %s" % (d["names"], d["accounts"], d["versions"], d["rebuilt"], d["failed"], len(d["errors"]), d["ms"] / 1000, ", ".join("%s %d ms" % (x["name"], x["ms"]) for x in d["slowest"][:3])))' 2>&1 || head -c 300 "$STATE/rebuild.out")"
+  else
+    note "rebuild: the call failed: $(head -c 300 "$STATE/rebuild.out")"
+  fi
+else
+  note "rebuild: skipped, no operator token at $TOKEN_FILE"
+fi
+
 # ---- 5. at 100%
 all_from "$BASE/ivar/hello" tape-worker-version "$NEW_tape" || back "unpinned requests do not all reach tape $NEW_tape"
 say "prod smokes"

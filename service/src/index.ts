@@ -54,6 +54,7 @@ import { manifest, mcp, policyOf, refusal } from './tools.ts';
 import hosted, { RunTail } from '../../mcp/src/index.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
 import {
+  ACCOUNTS,
   PUBLISHED,
   stopped,
   SEGMENT,
@@ -474,6 +475,54 @@ const idsRoute = async (request: Request, ctx: ExecutionContext): Promise<Respon
   return reply(Object.fromEntries(list.map(n => [n, ctx.exports.Name.idFromName(n).toString()])));
 };
 
+// POST /_rebuild {"accounts"?: [...], "concurrency"?: n}: every live version of every program made current with this
+// Worker's compiler now (Name.rebuild), so that no request pays for it. ship.sh calls it once the new version takes
+// all traffic: a deploy that changes the compiler made the first request to each name rebuild it from source,
+// 1.2-4 s on prod (2026-11-23). The names are each account's registry; the accounts are those that uploaded a program
+// since the list was kept (ACCOUNTS), those with a published name, and any given. n names at a time (default 4).
+const rebuildRoute = async (request: Request, ctx: ExecutionContext): Promise<Response> => {
+  const asked = fieldsOf(await request.json().catch(() => ({})));
+  const given = Array.isArray(asked.accounts) ? asked.accounts.filter((a): a is string => typeof a === 'string') : [];
+  const n = typeof asked.concurrency === 'number' ? Math.max(1, Math.min(16, Math.floor(asked.concurrency))) : 4;
+  const t0 = Date.now();
+  const listed = await ctx.exports.Name.getByName(ACCOUNTS).accounts(),
+    published = (await ctx.exports.Name.getByName(PUBLISHED).publishedKeys()).map(k => k.split('/')[0] ?? '');
+  const accounts = [...new Set([...listed, ...published, ...given])].filter(a => SEGMENT.test(a)).toSorted();
+  const names: string[] = [];
+  for (const account of accounts)
+    for (const r of await ctx.exports.Name.getByName(`${account}/~registry`).registered())
+      if (r.kind === 'program' && !r.name.startsWith('~')) names.push(`${account}/${r.name}`);
+  const done: { name: string; live: number; rebuilt: number; failed: number; ms: number; error?: string }[] = [];
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < names.length; i = next++) {
+      const name = names[i] ?? '',
+        t = Date.now();
+      try {
+        const r = await ctx.exports.Name.getByName(name).rebuild();
+        done.push({ name, ...r, ms: Date.now() - t });
+      } catch (e) {
+        done.push({ name, live: 0, rebuilt: 0, failed: 0, ms: Date.now() - t, error: messageOf(e) });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(n, names.length) }, worker));
+  const sum = (k: 'live' | 'rebuilt' | 'failed'): number => done.reduce((a, d) => a + d[k], 0);
+  return reply({
+    accounts: accounts.length,
+    names: names.length,
+    versions: sum('live'),
+    rebuilt: sum('rebuilt'),
+    failed: sum('failed'),
+    errors: done.filter(d => d.error !== undefined).map(d => ({ name: d.name, error: d.error })),
+    slowest: done
+      .toSorted((a, b) => b.ms - a.ms)
+      .slice(0, 5)
+      .map(d => ({ name: d.name, ms: d.ms, rebuilt: d.rebuilt })),
+    ms: Date.now() - t0,
+  });
+};
+
 /** The operator's routes that are not a program's: null when the path is none of them. */
 const operatorRoute = (request: Request, env: Env, ctx: ExecutionContext, url: URL): Promise<Response> | null => {
   const path = url.pathname;
@@ -489,6 +538,7 @@ const operatorRoute = (request: Request, env: Env, ctx: ExecutionContext, url: U
   const retention = /^\/_retention\/([^/]+)\/([^/]+)$/.exec(path);
   if (retention) return retentionRoute(request, ctx, retention);
   if (path === '/_ids' && request.method === 'POST') return idsRoute(request, ctx);
+  if (path === '/_rebuild' && request.method === 'POST') return rebuildRoute(request, ctx);
   const accounts = /^\/_accounts\/([^/]+)$/.exec(path);
   return accounts ? accountRoute(ctx, request, accounts[1] ?? '') : null;
 };

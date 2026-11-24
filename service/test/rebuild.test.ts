@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from 'vitest';
 import alarm from './fixtures/alarm.tape?raw';
 import greet from './fixtures/greet.tape?raw';
 import old from './fixtures/greet-93137b6.json' with { type: 'json' };
-import { at, call, got, json, list } from './help.ts';
+import { anyone, at, call, got, json, list } from './help.ts';
 
 const bytesOf = (b64: string): Uint8Array => Uint8Array.from(atob(b64), c => c.codePointAt(0) ?? 0);
 const stub = (n: string) => env.NAMES.get(env.NAMES.idFromName(n));
@@ -92,5 +92,31 @@ describe('a stored build is a cache of the source', () => {
     expect(at(wakes, 'runs')).toEqual([]);
     const r = await call('/ivar/alarm/v/1/');
     expect([r.status, at(await json(r), 'error')]).toEqual([503, 'rebuild_failed']);
+  });
+});
+
+describe('POST /_rebuild', () => {
+  it('rebuilds every stale live version of every account it lists, before any request, and says how many', async () => {
+    expect(at(await got('/rbw/one', { method: 'POST', body: greet }), 'version')).toBe(1);
+    expect(at(await got('/rbw/two', { method: 'POST', body: greet }), 'version')).toBe(1);
+    expect(at(await got('/rbw/two', { method: 'POST', body: `${greet}\n` }), 'version')).toBe(2);
+    await stale('rbw/one', 1);
+    await stale('rbw/two', 1);
+    expect((await anyone('/_rebuild', { method: 'POST', body: '{}' })).status).toBe(401);
+    const r = await got('/_rebuild', { method: 'POST', body: '{"concurrency": 2}' });
+    // the account was listed when it uploaded; other tests' accounts are walked too, so only this one's are counted
+    const mine = await got('/rbw/one');
+    expect(at(list(mine)[0], 'rebuilt_from')).toBe('unknown');
+    expect(at(list(await got('/rbw/two'))[0], 'rebuilt_from')).toBe('unknown');
+    expect(at(r, 'errors')).toEqual([]);
+    expect(Number(at(r, 'rebuilt'))).toBeGreaterThanOrEqual(2);
+    expect(Number(at(r, 'names'))).toBeGreaterThanOrEqual(2);
+    // a second walk finds nothing stale
+    expect(at(await got('/_rebuild', { method: 'POST', body: '{}' }), 'rebuilt')).toBe(0);
+    // and the first request runs the build it made, without building again
+    const when = at(list(await got('/rbw/one'))[0], 'rebuilt_at');
+    const h = await hello('/rbw/one/v/1/');
+    expect([h.status, await h.text()]).toEqual([200, 'hello ada']);
+    expect(at(list(await got('/rbw/one'))[0], 'rebuilt_at')).toBe(when);
   });
 });

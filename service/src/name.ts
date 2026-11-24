@@ -37,7 +37,7 @@ import { entryOf as entryIn, policyOf } from './tools.ts';
 import type { Policy, ToolEntry } from './tools.ts';
 import * as view from './view.ts';
 import type { Links } from './view.ts';
-import { messageOf, randomHex, reply } from './web.ts';
+import { ACCOUNTS, messageOf, randomHex, reply } from './web.ts';
 
 /** host.ts imports these by name */
 const HOST_PARTS = {
@@ -647,6 +647,21 @@ export class Name extends DurableObject {
     console.log(JSON.stringify({ 'tape.rebuilt': { version, from, compiler: COMPILER, at } }));
     return null;
   }
+  /** Every live version's build made current (#fresh) now, not on the first request after a deploy that changed the
+   * compiler (1.2-4 s on prod, 2026-11-23): what POST /_rebuild calls for each name. */
+  rebuild(): { live: number; rebuilt: number; failed: number } {
+    if (!this.#has('_tape_versions')) return { live: 0, rebuilt: 0, failed: 0 };
+    const live = this.live();
+    let rebuilt = 0,
+      failed = 0;
+    for (const v of live) {
+      const [row] = this.#sql.exec('SELECT compiler FROM _tape_versions WHERE version = ?1', v).toArray();
+      const stale = row?.compiler !== COMPILER;
+      if (this.#fresh(v) !== null) failed++;
+      else if (stale) rebuilt++;
+    }
+    return { live: live.length, rebuilt, failed };
+  }
   /** The live versions whose builds are current (each made current first, #fresh), and what names their builds. */
   #current(live: readonly number[]): { built: number[]; key: string } {
     const built = live.filter(v => this.#fresh(v) === null);
@@ -1047,6 +1062,27 @@ export class Name extends DurableObject {
     this.#sql.exec('INSERT INTO _tape_names VALUES (?1, ?2, ?3) ON CONFLICT(name) DO NOTHING', name, kind, Date.now());
     return true;
   }
+  // ---- Every account that has uploaded a program (ACCOUNTS, one object): what POST /_rebuild walks.
+  addAccount(account: string): true {
+    this.#sql.exec('CREATE TABLE IF NOT EXISTS _tape_accounts(account TEXT PRIMARY KEY) WITHOUT ROWID');
+    this.#sql.exec('INSERT INTO _tape_accounts VALUES (?1) ON CONFLICT(account) DO NOTHING', account);
+    return true;
+  }
+  accounts(): string[] {
+    if (!this.#has('_tape_accounts')) return [];
+    return this.#sql
+      .exec('SELECT account FROM _tape_accounts ORDER BY account')
+      .toArray()
+      .map(r => str(r.account));
+  }
+  /** account/name of every published name (on PUBLISHED). */
+  publishedKeys(): string[] {
+    if (!this.#has('_tape_published')) return [];
+    return this.#sql
+      .exec('SELECT key FROM _tape_published ORDER BY key')
+      .toArray()
+      .map(r => str(r.key));
+  }
   // ---- The published names of every account (PUBLISHED, one object): the public route asks only this object, so a
   // tokenless request for a name nobody published reaches no account's objects and stores nothing.
   setPublished(key: string, published: boolean): true {
@@ -1073,6 +1109,7 @@ export class Name extends DurableObject {
   async enrol(account: string, name: string, kind: string): Promise<void> {
     if (this.#registered || name === '~registry') return;
     await this.ctx.exports.Name.getByName(`${account}/~registry`).registerName(name, kind);
+    await this.ctx.exports.Name.getByName(ACCOUNTS).addAccount(account);
     this.#registered = true;
   }
   size(): number {
