@@ -84,6 +84,10 @@ sees who called: the request line ends in ` public`, and std/http's `Request(cal
 For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
 box office served this way.
 
+`{"published": false}` takes effect at once: the name's own object checks that it is published in the same call that
+runs each public request. The Worker keeps a name's "published" from the account-wide list for up to 30 seconds per
+isolate, which only saves that lookup; for those 30 seconds an unpublished name's object is asked and answers 404 itself.
+
 ## Tools for agents
 
 A tool is a program made only of exported functions. The operator sets what an account's tools may use; an agent

@@ -360,9 +360,21 @@ const TOO_LARGE = `a public request's body is at most ${PUBLIC_BODY} bytes`;
 // name that answered /p/ or was published in the 7 days of Workers Observability before the list (2026-11-22). Each
 // is still asked whether it is published, so unpublishing one still works.
 const PUBLISHED_BEFORE: ReadonlySet<string> = new Set(['ivar/tix']);
+// A yes is kept in this isolate for PUBLISHED_TTL_MS, so a warm public request makes no call to the list's object
+// (it was 19 ms of a 141 ms request, trace 93a674291ab3e88eda1e14af41a0cddb). A no is never kept: a name published
+// a moment ago answers at once. Unpublishing still takes effect at once: the name's own object checks that it is
+// published in the call that runs the request (invokePublished); a kept yes only means that, for up to
+// PUBLISHED_TTL_MS, an unpublished name's object is asked and answers 404 itself (docs/service.md).
+export const PUBLISHED_TTL_MS = 30_000;
+const publishedUntil = new Map<string, number>();
 const isPublished = async (ctx: ExecutionContext, key: string): Promise<boolean> => {
+  const until = publishedUntil.get(key);
+  if (until !== undefined && until > Date.now()) return true;
   try {
-    return await ctx.exports.Name.getByName(PUBLISHED).isPublished(key);
+    const yes = await ctx.exports.Name.getByName(PUBLISHED).isPublished(key);
+    if (yes) publishedUntil.set(key, Date.now() + PUBLISHED_TTL_MS);
+    else publishedUntil.delete(key);
+    return yes;
   } catch (e) {
     if (messageOf(e).includes('does not implement the method')) return false;
     throw e;
@@ -385,9 +397,8 @@ const publicRoute = async (
   // published names answers, and no object of the account is made
   const key = `${account}/${name}`;
   if (!PUBLISHED_BEFORE.has(key) && !(await isPublished(ctx, key))) return reply({ error: 'no such page' }, 404);
-  const stub = ctx.exports.Name.getByName(`${account}/${name}`),
-    p = await stub.publication();
-  if (!p.published || p.latest === null) return reply({ error: 'no such page' }, 404);
+  // the name's object checks that it is published, and runs its latest live version, in the same call
+  const stub = ctx.exports.Name.getByName(`${account}/${name}`);
   const body = await bodyOf(request, PUBLIC_BODY);
   if (body === null) return reply({ error: TOO_LARGE }, 413);
   const again = new Request(request.url, {
@@ -398,7 +409,7 @@ const publicRoute = async (
   try {
     return await run(
       { request: again, stub, account, name, url, token: env.TOKEN, ctx },
-      { version: p.latest, path, via: 'public' },
+      { version: 0, path, via: 'public', published: true },
     );
   } catch (e) {
     stopped(e);

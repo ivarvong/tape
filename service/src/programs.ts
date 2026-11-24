@@ -2,7 +2,7 @@
 // request through a version.
 import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
-import type { Name } from './name.ts';
+import type { InvokeOptions, Name } from './name.ts';
 import { RouterTrace, store } from './spans.ts';
 import { BODY_MAX, SOURCE_MAX, bodyOf, hex, messageOf, reply, signed, stopped, tapeRequest, tooLarge } from './web.ts';
 
@@ -120,12 +120,40 @@ const ROUTER_NOT_SENT: Readonly<Record<string, string>> = {
 const overloaded = (e: unknown): boolean =>
   typeof e === 'object' && e !== null && 'overloaded' in e && e.overloaded === true;
 
-export type Target = { version: number; path: string; via: string | null };
+/** published: the public route's call, which runs the latest live version only if the name is published (version is
+ * then 0, and the object picks it) */
+// An object of the version before invokePublished (during a split deployment) is asked the way it was: publication(),
+// then invoke() of its latest version.
+async function invokePublished(
+  stub: DurableObjectStub<Name>,
+  account: string,
+  name: string,
+  bytes: Uint8Array,
+  options: InvokeOptions,
+): Promise<Response> {
+  try {
+    return await stub.invokePublished(account, name, bytes, options);
+  } catch (e) {
+    if (!messageOf(e).includes('does not implement the method')) throw e;
+    const p = await stub.publication();
+    if (!p.published || p.latest === null) return reply({ error: 'no such page' }, 404);
+    return stub.invoke(account, name, p.latest, bytes, options);
+  }
+}
+const invoked = (
+  stub: DurableObjectStub<Name>,
+  account: string,
+  name: string,
+  version: number,
+  bytes: Uint8Array,
+  options: InvokeOptions,
+): Promise<Response> => stub.invoke(account, name, version, bytes, options);
+export type Target = { version: number; path: string; via: string | null; published?: boolean };
 // One request to one version of a program (the operator's /v/:version/… route, and a published name's public
 // route, via: 'public', with its latest version).
 export async function run(
   { request, stub, account, name, url, token, ctx }: Omit<Args, 'm' | 'origin'>,
-  { version, path, via }: Target,
+  { version, path, via, published = false }: Target,
 ): Promise<Response> {
   const open = via !== null && via !== '';
   const bytes = await tapeRequest(request, path, url.search, via);
@@ -134,7 +162,12 @@ export async function run(
   const rt = await new RouterTrace(
     request,
     `${request.method} ${open ? '/p/{account}/{name}' : '/{account}/{name}/v/{version}'}${path}`,
-    { 'tape.account': account, 'tape.name': name, 'tape.version': version, ...(open ? { 'tape.via': via } : {}) },
+    {
+      'tape.account': account,
+      'tape.name': name,
+      'tape.version': published ? undefined : version,
+      ...(open ? { 'tape.via': via } : {}),
+    },
   ).started();
   // a jepsen-* account whose plan says router: true takes faults on this hop too (faults.ts); the decision is
   // made before the call span begins, so the call span stays the router's only child
@@ -155,11 +188,11 @@ export async function run(
   let out: Response;
   try {
     if (fault) call.event('tape.fault.injected', { 'tape.fault.kind': fault.kind, 'tape.fault.ms': fault.ms });
+    const options: InvokeOptions = { call: { trace: rt.trace, span: call.span }, fault: atCallee ? fault.kind : null };
     const send = (): Promise<Response> =>
-      stub.invoke(account, name, version, bytes, {
-        call: { trace: rt.trace, span: call.span },
-        fault: atCallee ? fault.kind : null,
-      });
+      published
+        ? invokePublished(stub, account, name, bytes, options)
+        : invoked(stub, account, name, version, bytes, options);
     const res = await (inTransit ? through(fault, send, () => Promise.resolve()) : send()),
       body = await res.arrayBuffer();
     call.done({ 'http.response.status_code': res.status, 'tape.call.outcome': 'answered' });

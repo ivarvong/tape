@@ -743,6 +743,18 @@ export class Name extends DurableObject {
   // reset_callee_before, reset_callee_after, storage_error. call: { trace, span } from a router (spans.ts): this
   // object then records its own span (a child of the router's call span) and the facet call's window, before it
   // replies, whatever the outcome; the run's span is a child of this one.
+  // The public route's call: run the latest live version if this name is published, else answer 404, in one call
+  // (it was publication() and then invoke(), two calls of about 15 ms each before the run).
+  invokePublished(
+    account: string,
+    name: string,
+    bytes: Uint8Array | ArrayBuffer,
+    options: InvokeOptions = {},
+  ): Promise<Response> {
+    const p = this.publication();
+    if (!p.published || p.latest === null) return Promise.resolve(reply({ error: 'no such page' }, 404));
+    return this.invoke(account, name, p.latest, bytes, options);
+  }
   async invoke(
     account: string,
     name: string,
