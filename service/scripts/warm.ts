@@ -1,8 +1,8 @@
 // warm.ts: one request to each published name's page after a deploy, so no visitor is the one who starts its object.
 //   node scripts/warm.ts <base-url> <rebuild.json> [--max <n>] [--concurrency <n>] [--timeout-ms <n>]
 // A deploy restarts every Durable Object, and the first request to a name then starts its object and loads its
-// data's code again: p50 526 ms, p95 832 ms in the Worker on prod (n=40), against p50 65 ms warm (n=71; tape
-// 0936bbf2, 24 November 2026). <rebuild.json> is what POST /_rebuild answered (ship.sh's rebuild.out): its
+// data's code again: p50 509 ms, p95 832 ms in the Worker on prod (n=82), against p50 69 ms warm (n=122; tape
+// 0936bbf2, 24 November 2026, scripts/obs/public.ts). <rebuild.json> is what POST /_rebuild answered (ship.sh's rebuild.out): its
 // `published` lists every published account/name. Each gets one GET of /p/<account>/<name>/, as a visitor would
 // send it (so the program runs, and records the request, as for any visit), at most --max names (200),
 // --concurrency at a time (4), each given --timeout-ms (10,000). Whatever a name answers, its object has started:

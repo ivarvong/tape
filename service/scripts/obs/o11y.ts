@@ -318,3 +318,50 @@ export function treeLines(spans: readonly Span[], width = 70): string[] {
   for (const r of (kids.get(null) ?? []).toSorted((a, b) => a.start - b.start)) show(r, '', '', true);
   return out;
 }
+
+/**
+ * Where one public request's time went (public.ts), from its trace: the spans, and the name's object's invocation.
+ * All in ms; a part the trace does not hold is null.
+ * `started`: the object was a new instance (it made its tables, which an instance does once), so the request also
+ * paid for starting it and loading its data's code. `answer`: from the request's start to the end of the Worker's
+ * invokePublished call, which is when it has the answer (the invocation's wall also holds what it does after).
+ * `list`: the call that asks the list of published names (0 when the isolate knew). `reach`: from the Worker's call
+ * to the object's first line. `data`: the object's call to its data (the run, and its log made durable).
+ */
+export type PublicTimes = {
+  started: boolean;
+  answer: number | null;
+  list: number;
+  reach: number | null;
+  objectCpu: number | null;
+  objectWall: number | null;
+  data: number | null;
+};
+export function publicTimes(spans: readonly Span[], invocations: readonly Invocation[]): PublicTimes {
+  const of = (s: Span, k: string): unknown => s.attributes[k];
+  const called = (method: string): Span | undefined =>
+    spans.find(
+      s => s.name === 'jsRpcCall' && of(s, 'jsrpc.method') === method && of(s, 'jsrpc.target_kind') === 'fetcher',
+    );
+  const root = spans.find(
+      s => s.parent === null && s.name !== 'fetch' && of(s, 'http.response.status_code') !== undefined,
+    ),
+    list = called('isPublished'),
+    call = called('invokePublished'),
+    served = spans.find(s => s.name === 'jsrpc' && of(s, 'jsrpc.method') === 'invokePublished'),
+    object = invocations.find(i => i.model === 'durableObject' && i.route.includes('invokePublished')),
+    // the object's call to its data carries the request as its body; a build fetched (before 58a2002) has none
+    data = spans.find(s => s.name === 'fetch' && of(s, 'http.request.body.size') !== undefined);
+  return {
+    started: spans.some(s => {
+      const q = of(s, 'db.query.text');
+      return typeof q === 'string' && q.startsWith('CREATE TABLE IF NOT EXISTS _tape_versions');
+    }),
+    answer: call ? call.start + call.ms - (root?.start ?? call.start) : null,
+    list: list?.ms ?? 0,
+    reach: call && served ? served.start - call.start : null,
+    objectCpu: object?.cpu ?? null,
+    objectWall: object?.wall ?? null,
+    data: data?.ms ?? null,
+  };
+}

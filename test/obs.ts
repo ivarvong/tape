@@ -8,6 +8,7 @@ import {
   invocationOf,
   observabilityDiff,
   pct,
+  publicTimes,
   routeOf,
   spanOf,
   treeLines,
@@ -268,4 +269,75 @@ same(
     ?.cached,
   true,
 );
+
+// a public request's trace (public.ts): the Worker asks the list, calls the name's object, which calls its data
+{
+  const sp = (
+    id: string,
+    parent: string | null,
+    name: string,
+    start: number,
+    ms: number,
+    a: Span['attributes'] = {},
+  ): Span => ({
+    id,
+    parent,
+    name,
+    start,
+    ms,
+    status: '',
+    attributes: a,
+  });
+  const client = { 'jsrpc.target_kind': 'fetcher' },
+    served = { 'jsrpc.target_kind': 'entrypoint' };
+  const traced = (cold: boolean): Span[] => [
+    sp('r', null, 'GET', 1000, 600, { 'http.response.status_code': 200 }),
+    sp('l', 'r', 'jsRpcCall', 1001, 20, { ...client, 'jsrpc.method': 'isPublished' }),
+    sp('c', 'r', 'jsRpcCall', 1022, 500, { ...client, 'jsrpc.method': 'invokePublished' }),
+    sp('j', 'c', 'jsrpc', 1160, 360, { 'jsrpc.method': 'invokePublished' }),
+    sp('h', 'j', 'jsRpcCall', 1161, 359, { ...served, 'jsrpc.method': 'invokePublished' }),
+    ...(cold
+      ? [
+          sp('q', 'h', 'durable_object_storage_exec', 1161, 0, {
+            'db.query.text': 'CREATE TABLE IF NOT EXISTS _tape_versions(version INTEGER',
+          }),
+        ]
+      : []),
+    // a build fetched from the Wasm entrypoint (before 58a2002) has no body; the call to the data has the request
+    sp('w', 'j', 'fetch', 1162, 9, { 'http.response.status_code': 200 }),
+    sp('d', null, 'fetch', 1200, 130, { 'http.request.body.size': 25, 'http.response.status_code': 200 }),
+    sp('s', 'r', 'jsRpcCall', 1530, 30, { ...client, 'jsrpc.method': 'routed' }),
+  ];
+  const object: Invocation = {
+    version: 'v',
+    entrypoint: 'Name',
+    model: 'durableObject',
+    route: 'DO Name.invokePublished',
+    url: '',
+    method: '',
+    status: null,
+    cpu: 200,
+    wall: 400,
+    outcome: 'ok',
+    requestId: 'q',
+    traceId: 't',
+    rayId: '',
+    at: 1160,
+  };
+  const times = { answer: 522, list: 20, reach: 138, objectCpu: 200, objectWall: 400, data: 130 };
+  same('a cold public request: the object made its tables', publicTimes(traced(true), [object]), {
+    started: true,
+    ...times,
+  });
+  same('a warm one', publicTimes(traced(false), [object]), { started: false, ...times });
+  same('a request the list refused: no call to the object', publicTimes(traced(false).slice(0, 2), []), {
+    started: false,
+    answer: null,
+    list: 20,
+    reach: null,
+    objectCpu: null,
+    objectWall: null,
+    data: null,
+  });
+}
 finish();

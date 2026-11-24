@@ -2,7 +2,7 @@
 
 How to see what the `tape` Worker does in production: one request's trace, CPU by version and route, and where the
 CPU goes. Every number reported carries its version id (and trace id or profile file). Last checked 2026-11-23 against
-tape dddd2c92 and 56539ce5 (profiles, traces).
+tape dddd2c92 and 56539ce5 (profiles, traces), and 2026-11-24 against 0936bbf2 (public requests).
 
 All scripts are in `service/scripts/obs/`, run from `service/` with Node 25, and call the `cf` CLI (never wrangler) with
 the OAuth login: they drop `CLOUDFLARE_API_TOKEN` and need `CLOUDFLARE_ACCOUNT_ID` in the environment (never in a file).
@@ -12,6 +12,7 @@ Reading profiles needs `go` (`go tool pprof`). A request is queryable ~10-30 s a
 | --- | --- |
 | see one request | `node scripts/obs/trace.ts <trace id>` or `--latest /v1/run` |
 | CPU / wall by version and route | `node scripts/obs/cpu.ts --minutes 30 [--version 93abc6f8] [--route /v1/run] [--ua <prefix>]` |
+| where a public request's time goes, cold and warm | `node scripts/obs/public.ts --minutes 30 [--path /p/demo/] [--version 0936bbf2] [--rows]` |
 | where the CPU goes | `node scripts/obs/profile.ts <full version uuid> --load fulfillment --runs 3` |
 | summarize profiles taken already | `node scripts/obs/profile.ts --read profiles/*.sym.pb` |
 
@@ -49,6 +50,40 @@ call answered from the compile cache (its log line's `cached: true`) is its own 
 route with and without it give the hit rate and what a hit costs. Every hosted call's log line also says its
 `isolate` (a random id per isolate) and that isolate's `cache_entries` and `cache_bytes` (counted, bound 8 MiB):
 the cache's real occupancy on prod.
+
+## Public requests, cold and warm (public.ts)
+
+A public request is the Worker's invocation and, under it, up to three Durable Object calls: `isPublished` on the
+list of published names (not made while the isolate remembers a yes), `invokePublished` on the name's object, which
+calls its data (a `fetch` span whose body is the request), and `routed`, after the answer has left (the invocation's
+wall time includes it, so wall is not what the client waited: `answer` is). public.ts reads each request's trace and
+prints p50 and p95 of each part by Worker version, cold and warm. Cold means the name's object was a new instance
+(its trace holds the `CREATE TABLE IF NOT EXISTS _tape_versions` an instance runs once). **An idle object does not
+stay warm**: one idle for 30, 50, 75, 100, 140 or 200 s was started again by the next request, one idle for 15 s was
+not (tape 0936bbf2, 24 November 2026), and the list's object and the data's loaded code go with it. So at low
+traffic most requests are cold ones, and a deploy only makes every name cold at once.
+
+**A Durable Object's span times do not show its CPU.** Its clock stands still while code runs, so spans inside an
+object are stamped as if compute took no time: a cold `invokePublished` whose spans covered 206 ms had `wallTimeMs`
+401 and `cpuTimeMs` 201 (trace 3c6a86317d551b3de60a380d2cb4902c). Read CPU from the object's invocation
+(`cpuTimeMs`), and durations from the caller's side (the Worker's `jsRpcCall`).
+
+Where a cold request's time went on tape 0936bbf2 (207 requests to /p/demo/*, 05:47 to 06:25 UTC, 24 November
+2026: 82 cold, 122 warm; p50 / p95 in ms). Cold: answer 476 / 808; the list 15 / 158 (it is cold too when
+everything has been idle); reaching the object's first line 128 / 188 (no code of ours runs: the platform starts
+the object, and the Worker's module is evaluated if the isolate is new, which the upload measured as "Worker Startup
+Time: 65 ms"); the object's CPU 172 / 358 (1 ms warm); its call to its data 105 / 211, of which fetching the builds
+was 47 / 122 (the 67 requests that fetched them). Warm: answer 35 / 59, of which the call to the data 19 / 26 (the
+run and its log made durable), the two hops to the object and back about 13, the list 0 / 17, and 1 to 2 ms of
+clock timers (spans.ts `fresh`).
+
+What was cut after that measurement, each to be measured again on the version that ships it: the module no longer
+decodes sql.js's Wasm when it starts (53 to 19 ms of top-level evaluation in Node 25); the object reads its builds
+from its own rows instead of fetching each (the 47 / 122 ms); it keeps the machines of its live versions instead of
+parsing every live version's source (most of the 172 / 358 ms of CPU: 122 with one live version, up to 364 with four);
+and the Worker remembers "published" for ten minutes, not 30 s. What is left of a cold start is the platform's
+start of two objects, the Loader's start of the data's code (about 35 ms and 10 more per live version, both builds
+of each: retiring old versions is what shortens it) and the same durable log write a warm request waits for.
 
 ## Profiles (profile.ts)
 
