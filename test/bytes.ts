@@ -9,7 +9,7 @@ import type { Options } from '../compiler.ts';
 import { BYTE_ESC } from '../compiler/lex.ts';
 import { format } from '../fmt.ts';
 import { interpret } from '../interp.ts';
-import { finish, ok, problems, same, std } from './harness.ts';
+import { bare, built, finish, handleBare, moduleOf, ok, problems, same, std } from './harness.ts';
 
 const BUILDS: Partial<Options>[] = [{}, { reuse: false }, { check: true }];
 
@@ -298,6 +298,22 @@ for (const [what, digits, literal] of pairs) sameModule(what, digits, literal);
     'Vec[Int] is an unknown type, and Dec is the nearest',
     e ? `${e.code} ${e.message} ${e.hint}` : 'compiled',
     'C06 unknown type Vec Did you mean `Dec`?',
+  );
+}
+
+// a ) " or ( inside a byte literal is that Int. It does not end the hole, and it is not a text literal. A refusal
+// inside the hole is reported on the file's line, not on the slice's.
+{
+  const answer = (body: string): string =>
+    handleBare(bare(moduleOf(built(`fn handle(raw: View) -> Buf {\n  ${body}\n}\n`))), new Uint8Array());
+  same("')' in a hole is the text 41", answer('buf() |> append(view: "\\(\')\')")'), '41');
+  same("'(' in a hole is the text 40", answer('buf() |> append(view: "\\(\'(\')")'), '40');
+  same(`'"' in a hole is the text 34`, answer('buf() |> append(view: "\\(\'"\')")'), '34');
+  same("'\\n' in a hole is the text 10", answer('buf() |> append(view: "\\(\'\\n\')")'), '10');
+  same(
+    "two characters in a hole, on the file's line",
+    problems(`fn f() -> Int {\n  len("\\('ab')")\n}\n`).map(p => `${p.code}:${p.line} ${p.message}`),
+    ['L07:2 a byte literal holds one byte'],
   );
 }
 

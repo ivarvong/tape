@@ -30,6 +30,11 @@ const cases: readonly (readonly [string, string, string])[] = [
     '[ada:3]',
   ],
   ['a literal with no hole is the text it was', 'buf() |> append(view: "no (holes) here")', 'no (holes) here'],
+  // a ) " or ( inside a byte literal is that Int, not the end of the hole and not a text literal
+  ['a ) in a byte literal in a hole', 'buf() |> append(view: "\\(\')\')")', '41'],
+  ['a ( in a byte literal in a hole', 'buf() |> append(view: "\\(\'(\')")', '40'],
+  ['a " in a byte literal in a hole', 'buf() |> append(view: "\\(\'"\')")', '34'],
+  ['an escape in a byte literal in a hole', 'buf() |> append(view: "\\(\'\\n\')")', '10'],
 ];
 for (const [what, body, want] of cases) same(what, answer(body), want);
 
@@ -54,6 +59,11 @@ for (const [what, body, want] of cases) {
 
 // ---- what is refused
 same('a hole that is not closed', codes(program('buf() |> append(view: "a \\(raw")')), ['L05:3']);
+same(
+  "a byte literal of two characters inside a hole, on the hole's line",
+  codes(program('buf() |> append(view: "\\(\'ab\')")')),
+  ['L07:3'],
+);
 same('a text literal inside a hole', codes(program('buf() |> append(view: "a \\("b")")')), ['L05:3']);
 same('two expressions in a hole', codes(program('buf() |> append(view: "a \\(raw raw)")')), ['P02:3']);
 same('a value that is neither text nor a number', codes(program('buf() |> append(view: "a \\(P(n: 1))")')), ['C19:3']);

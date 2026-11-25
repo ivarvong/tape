@@ -569,11 +569,26 @@ fn past(end: End) -> Int {
   }
 }
 
+// Where a byte literal at `at` ends, when the closing quote is where one byte puts it (`')'`, `'"'`, `'\''`);
+// otherwise the next byte. A ) or " inside the literal does not end a hole.
+fn byte_span(src: View, at: Int) -> Int {
+  let end = at + match {
+    byte_at(src, at: at + 1) == '\\' -> 3
+    else -> 2
+  }
+  match {
+    byte_at(src, at: end) == '\'' -> end + 1
+    else -> at + 1
+  }
+}
+
 // A hole, from after its `\(` (lex.ts, hole): Closed after the `)` that balances it, or Open at the line break, the
-// double quote or the end that broke it (the compiler refuses that: L05).
+// double quote or the end that broke it (the compiler refuses that: L05). A byte literal is skipped whole.
 fn hole_end(src: View, at: Int, depth: Int) -> End {
   match {
-    at >= len(src) or src[at] == 10 or src[at] == 34 -> Open(at)
+    at >= len(src) or src[at] == 10 -> Open(at)
+    src[at] == '\'' -> hole_end(src, at: byte_span(src, at), depth)
+    src[at] == 34 -> Open(at)
     src[at] == 41 and depth == 1 -> Closed(at: at + 1)
     src[at] == 41 -> hole_end(src, at: at + 1, depth: depth - 1)
     src[at] == 40 -> hole_end(src, at: at + 1, depth: depth + 1)

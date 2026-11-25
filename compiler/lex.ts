@@ -1,6 +1,6 @@
 // compiler/lex.ts: source text to tokens.
 import type { Token, TokenOf } from './ast.ts';
-import { fail, utf8 } from './common.ts';
+import { CompileError, fail, utf8 } from './common.ts';
 
 export const KEYWORDS = new Set([
   'fn',
@@ -120,6 +120,15 @@ function hole(sc: Scan): Token[] {
     j = from;
   for (; depth > 0; j++) {
     const c = sc.text[j];
+    // a byte literal is one Int: the ) or " it holds does not end the hole, and is not a text literal. The
+    // closing quote sits two bytes on, or three when the byte is an escape (`')'`, `'"'`, `'\''`).
+    if (c === "'") {
+      const end = j + (sc.text[j + 1] === '\\' ? 3 : 2);
+      if (sc.text[end] === "'") {
+        j = end;
+        continue;
+      }
+    }
     if (c === undefined || c === '\n' || c === '"')
       fail(
         here(sc),
@@ -130,10 +139,21 @@ function hole(sc: Scan): Token[] {
     if (c === '(') depth++;
     if (c === ')') depth--;
   }
-  const inner = lex(sc.file, sc.text.slice(from, j - 1)).map(t => ({ ...t, line: sc.line }));
+  // the slice is its own source, so a refusal in it is numbered from 1; the hole stands on sc.line
+  let inner: Token[];
+  try {
+    inner = lex(sc.file, sc.text.slice(from, j - 1));
+  } catch (e) {
+    if (e instanceof CompileError)
+      fail({ line: sc.line + e.info.line - 1, file: sc.file }, e.info.code, e.info.message, e.info.hint);
+    throw e;
+  }
   sc.i = j;
   // without the line end lex adds: the hole is one expression
-  return [...inner.slice(0, -2), { t: 'eof', line: sc.line, file: sc.file }];
+  return [
+    ...inner.map(t => ({ ...t, line: t.line + sc.line - 1 })).slice(0, -2),
+    { t: 'eof', line: sc.line, file: sc.file },
+  ];
 }
 // A text literal, from its opening quote: its bytes, with escapes read; with holes, the bytes between them.
 function text(sc: Scan): void {
