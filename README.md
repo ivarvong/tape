@@ -66,7 +66,7 @@ $ node tape.ts examples/hello.tape 'GET /hello/ada' 'GET /hello/ada'
 ← 200 ⏎ Hello again, ada #2!
 
   effect log
-    start   build ea9af81a8654a2ab  flags {}  216 bytes of memory, 91 steps, step version 2
+    start   build 771648b5581f1311  flags {}  216 bytes of memory, 91 steps, step version 2
     sql     INSERT INTO greeted(name, n) VALUES (?1, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  …
 
   trace, from that log

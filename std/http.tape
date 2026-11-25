@@ -59,16 +59,16 @@ type Request {
 //   > request(raw: "GET /k\raccept: text/html\n") |> header_of(name: "Accept")
 //   Some(value: "text/html")
 fn request(raw: View) -> Request {
-  let whole = until(v: raw, byte: 10)
-  let line = until(v: whole, byte: 13)
-  let rest = after(v: line, byte: 32)
+  let whole = until(v: raw, byte: '\n')
+  let line = until(v: whole, byte: '\r')
+  let rest = after(v: line, byte: ' ')
   let open = len(rest) >= 7 and has(v: rest, at: len(rest) - 7, word: " public")
   let target = slice(v: rest, from: 0, to: len(rest) - 7 * opened(open))
   Request(
-    method: method_of(token: until(v: line, byte: 32)),
-    path: until(v: target, byte: 63),
+    method: method_of(token: until(v: line, byte: ' ')),
+    path: until(v: target, byte: '?'),
     query: asked(target),
-    body: after(v: raw, byte: 10),
+    body: after(v: raw, byte: '\n'),
     caller: caller_of(open),
     headers: slice(v: whole, from: len(line), to: len(whole))
   )
@@ -97,7 +97,7 @@ private fn header_from(lines: View, name: View) -> Option[View] {
       match {
         at < 0 -> None
         else -> Some(
-          value: until(v: slice(v: lines, from: at + len(name), to: len(lines)), byte: 13)
+          value: until(v: slice(v: lines, from: at + len(name), to: len(lines)), byte: '\r')
         )
       }
     }
@@ -155,8 +155,8 @@ private fn caller_of(open: Bool) -> Caller {
 // The query of a target: None without a `?`, else what follows the first `?`.
 private fn asked(target: View) -> Option[View] {
   match {
-    find(v: target, byte: 63, at: 0) == len(target) -> None
-    else -> Some(after(v: target, byte: 63))
+    find(v: target, byte: '?', at: 0) == len(target) -> None
+    else -> Some(after(v: target, byte: '?'))
   }
 }
 
@@ -381,7 +381,7 @@ private fn form_from(body: View, name: View, at: Int) -> Option[View] {
 // form_from, once the next `&` or `=` is known.
 private fn form_stop(body: View, name: View, at: Int, stop: Int) -> Option[View] {
   match {
-    stop < len(body) and body[stop] == 61 -> form_value(body, name, at, eq: stop)
+    stop < len(body) and body[stop] == '=' -> form_value(body, name, at, eq: stop)
     form_named(raw: slice(v: body, from: at, to: stop), name, at: 0, n: 0) -> Some(value: "")
     stop >= len(body) -> None
     else -> form_from(body, name, at: stop + 1)
@@ -408,8 +408,8 @@ private fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
   match {
     at >= len(raw) -> n == len(name)
     n >= len(name) -> False
-    raw[at] == 43 -> name[n] == 32 and form_named(raw, name, at: at + 1, n: n + 1)
-    raw[at] == 37
+    raw[at] == '+' -> name[n] == ' ' and form_named(raw, name, at: at + 1, n: n + 1)
+    raw[at] == '%'
       and at + 2 < len(raw)
       and is_hex(raw[at + 1])
       and is_hex(raw[at + 2]) -> name[n] == (hex_value(raw[at + 1]) << 4) | hex_value(raw[at + 2])
@@ -429,8 +429,8 @@ private fn form_decoded(raw: View) -> View {
 private fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
   match {
     at >= len(raw) -> out
-    raw[at] == 43 -> form_bytes(out: push(buf: out, byte: 32), raw, at: at + 1)
-    raw[at] == 37
+    raw[at] == '+' -> form_bytes(out: push(buf: out, byte: ' '), raw, at: at + 1)
+    raw[at] == '%'
       and at + 2 < len(raw)
       and is_hex(raw[at + 1])
       and is_hex(raw[at + 2]) -> form_bytes(
@@ -526,11 +526,11 @@ fn write_html(out: Buf, text: View) -> Buf {
 private fn html_from(out: Buf, text: View, at: Int) -> Buf {
   match {
     at >= len(text) -> out
-    text[at] == 38 -> html_from(out: append(buf: out, view: "&amp;"), text, at: at + 1)
-    text[at] == 60 -> html_from(out: append(buf: out, view: "&lt;"), text, at: at + 1)
-    text[at] == 62 -> html_from(out: append(buf: out, view: "&gt;"), text, at: at + 1)
-    text[at] == 34 -> html_from(out: append(buf: out, view: "&quot;"), text, at: at + 1)
-    text[at] == 39 -> html_from(out: append(buf: out, view: "&#39;"), text, at: at + 1)
+    text[at] == '&' -> html_from(out: append(buf: out, view: "&amp;"), text, at: at + 1)
+    text[at] == '<' -> html_from(out: append(buf: out, view: "&lt;"), text, at: at + 1)
+    text[at] == '>' -> html_from(out: append(buf: out, view: "&gt;"), text, at: at + 1)
+    text[at] == '"' -> html_from(out: append(buf: out, view: "&quot;"), text, at: at + 1)
+    text[at] == '\'' -> html_from(out: append(buf: out, view: "&#39;"), text, at: at + 1)
     else -> html_from(out: push(buf: out, byte: text[at]), text, at: at + 1)
   }
 }
