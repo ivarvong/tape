@@ -384,6 +384,29 @@ same(
   [String(recGo()), Number(globalOf(rec, 'cost').value)],
   ['0', 11],
 );
+// A program's own scan takes its first argument with no name, like any function of the program: the built-in
+// qualifies the call to `file.scan`, and that name's parameters are the program's (pipes.ts). It was C11, "function
+// scan has no parameter raw", when the argument's name was not the parameter's, and C10 for an expression.
+const positional = (arg: string): string =>
+  `fn scan(v: View, at: Int) -> Int {\n  len(v) + at\n}\nfn go(raw: View) -> Int {\n  scan(${arg}, at: 1)\n}\n`;
+same('its own scan takes a bare name as its first argument', codes(positional('raw'), { exports: ['go'] }), []);
+same(
+  'and an expression',
+  codes(positional('slice(raw, from: 0, to: 2)'), { exports: ['go'] }),
+  [],
+);
+same('which is the first parameter', runInt(instance(positional('raw'), ['go']), 'go', fill(4)).value, '5');
+same(
+  "a later file's scan takes it too",
+  codes(
+    [
+      { name: 'a.tape', text: 'fn go(raw: View) -> Int {\n  b.scan(raw, at: 1)\n}\n' },
+      { name: 'b.tape', text: 'fn scan(v: View, at: Int) -> Int {\n  at\n}\n' },
+    ],
+    { exports: ['go'] },
+  ),
+  [],
+);
 const own = interpret([...std, { name: 'own.tape', text: shadow }]).call('go', [fill(4)]);
 same('the interpreter calls that scan too', typeof own === 'bigint' ? String(own) : 'not an int', '1');
 

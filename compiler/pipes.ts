@@ -73,10 +73,25 @@ export function resolvePipes(prog: Program): void {
     if (PIPE_FIRST[name]) return null;
     const builtIn = INTRINSICS.get(name);
     if (builtIn) return builtIn;
-    if (name.includes('.')) return null;
-    const own = prog.byFile.get(file)?.get(name),
-      keys = own ? [own] : (prog.defs.get(name) ?? []).map(d => d.key),
-      lists = keys.map(
+    const dot = name.indexOf('.');
+    // `file.name`: a later file's function, or the program's own function that shares a built-in's name, which
+    // shadow.ts names by its file (`p.scan`). Its parameters are that function's. Any other dotted name is an
+    // interface method (`repo.head`), checked by name.
+    let keys: readonly string[];
+    if (dot > 0) {
+      const stem = name.slice(0, dot),
+        fn = name.slice(dot + 1);
+      const found = [...prog.byFile].flatMap(([fl, names]) => {
+        const k = stemOf(fl) === stem ? names.get(fn) : undefined;
+        return k === undefined ? [] : [k];
+      });
+      if (found.length !== 1) return null;
+      keys = found;
+    } else {
+      const own = prog.byFile.get(file)?.get(name);
+      keys = own ? [own] : (prog.defs.get(name) ?? []).map(d => d.key);
+    }
+    const lists = keys.map(
         k =>
           prog.fns
             .get(k)
