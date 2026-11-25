@@ -23,6 +23,22 @@ const PIPE_FIRST: Readonly<Record<string, string>> = {
   wake: 'timer',
 };
 export function resolvePipes(prog: Program): void {
+  // the functions `name` can mean from `file`. A bare name is the file's own, or every definition. `stem.name` is
+  // that file's function: shadow qualifies a program's `scan` to `file.scan` when the name is also a built-in, and
+  // the first argument is still the first parameter (`scan(raw, at: 0)` is `scan(v: raw, at: 0)`).
+  const fnKeys = (name: string, file: string): readonly string[] => {
+    const dot = name.indexOf('.');
+    if (dot > 0) {
+      let found: string | undefined;
+      for (const [fl, names] of prog.byFile) {
+        const known = stemOf(fl) === name.slice(0, dot) ? names.get(name.slice(dot + 1)) : undefined;
+        if (known) found = known;
+      }
+      return found === undefined ? [] : [found];
+    }
+    const own = prog.byFile.get(file)?.get(name);
+    return own ? [own] : (prog.defs.get(name) ?? []).map(d => d.key);
+  };
   // the name of `name`'s first parameter, or null when it is a function value
   const firstOf = (name: string, f: FnDecl, at: At): string | null => {
     const fixed = PIPE_FIRST[name],
@@ -40,14 +56,8 @@ export function resolvePipes(prog: Program): void {
       );
     const dot = name.indexOf('.');
     if (dot > 0 && f.params.some(pm => pm.name === name.slice(0, dot))) return 'send'; // an interface method: repo.head(…)
-    const own = prog.byFile.get(f.file)?.get(name),
-      all = prog.defs.get(name) ?? [];
-    let keys = own ? [own] : all.map(d => d.key);
-    if (keys.length === 0 && dot > 0)
-      for (const [fl, names] of prog.byFile) {
-        const known = stemOf(fl) === name.slice(0, dot) ? names.get(name.slice(dot + 1)) : undefined;
-        if (known) keys = [known];
-      }
+    const all = prog.defs.get(name) ?? [],
+      keys = fnKeys(name, f.file);
     const firsts = [...new Set(keys.map(k => prog.fns.get(k)?.params[0]?.name))];
     if (keys.length === 0) return null; // a function value (a parameter or a let): its argument is passed bare
     if (firsts.length !== 1)
@@ -68,36 +78,42 @@ export function resolvePipes(prog: Program): void {
     );
   };
   // the names of the parameters a program writes at a call (the capabilities the compiler adds are not yet among
-  // them), or null for a built-in checked by name or a function value
-  const paramsOf = (name: string, file: string): readonly string[] | null => {
+  // them), or null for a built-in checked by name, an interface method, or a function value. `caller` is the
+  // enclosing function's parameters, so `repo.head(…)` stays a method when a file `repo` also defines `head`.
+  const paramsOf = (name: string, file: string, caller: readonly string[]): readonly string[] | null => {
     if (PIPE_FIRST[name]) return null;
     const builtIn = INTRINSICS.get(name);
     if (builtIn) return builtIn;
-    if (name.includes('.')) return null;
-    const own = prog.byFile.get(file)?.get(name),
-      keys = own ? [own] : (prog.defs.get(name) ?? []).map(d => d.key),
-      lists = keys.map(
-        k =>
-          prog.fns
-            .get(k)
-            ?.params.filter(pm => !pm.implicit)
-            .map(pm => pm.name) ?? [],
-      );
+    const dot = name.indexOf('.');
+    if (dot > 0 && caller.includes(name.slice(0, dot))) return null;
+    const lists = fnKeys(name, file).map(
+      k =>
+        prog.fns
+          .get(k)
+          ?.params.filter(pm => !pm.implicit)
+          .map(pm => pm.name) ?? [],
+    );
     const [one] = lists;
     return one !== undefined && lists.every(l => l.join() === one.join()) ? one : null;
   };
   // every function's body, and every refinement's condition (`where every_byte(self, keep: is_lower)`)
-  const roots: [string, Expr][] = [
-    ...[...prog.fns.values()].map((f): [string, Expr] => [f.file, f.body]),
-    ...[...prog.types.values()].flatMap((t): [string, Expr][] => (t.refine ? [[t.file, t.refine.pred]] : [])),
+  const roots: [string, Expr, readonly string[]][] = [
+    ...[...prog.fns.values()].map((f): [string, Expr, readonly string[]] => [
+      f.file,
+      f.body,
+      f.params.map(pm => pm.name),
+    ]),
+    ...[...prog.types.values()].flatMap((t): [string, Expr, readonly string[]][] =>
+      t.refine ? [[t.file, t.refine.pred, []]] : [],
+    ),
   ];
-  for (const [file, root] of roots)
+  for (const [file, root, caller] of roots)
     eachExpr(root, e => {
       if (e.k !== 'call') return;
       const [first] = e.args;
       if (first && !first.piped && (first.label === null || first.pun)) {
         // written first with no name: the first parameter, unless it is a name of one of the parameters
-        const params = paramsOf(e.name, file);
+        const params = paramsOf(e.name, file, caller);
         const [p0] = params ?? [];
         if (
           params &&

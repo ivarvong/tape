@@ -1,6 +1,6 @@
 // compiler/gen/intrinsic.ts: the functions the compiler knows itself: text and Bufs, timers, the clock, JSON out,
 // and the rows of a query. Those that leave the program (sql_*, decode, call, ask) have modules of their own.
-import type { Arg, Call } from '../ast.ts';
+import type { Arg, Call, Expr } from '../ast.ts';
 import { F64, I32, I64, TRAP, fail, sleb, uleb, utf8 } from '../common.ts';
 import { stdName } from '../shadow.ts';
 import { BUF, FLOAT, INT, INTRINSICS, REMOTE, T, VIEW, key, scaleOf } from '../types.ts';
@@ -15,6 +15,7 @@ import { emitFloatIntrinsic } from './float.ts';
 import { emitDecIntrinsic } from './dec.ts';
 import { emitByteScan } from './scan.ts';
 import { JSON_PLAIN, byteSet } from '../byteset.ts';
+import { spelledByte } from '../lex.ts';
 
 /** A call of an intrinsic with its arguments in the order of its parameters. */
 type Use = { readonly c: Ctx; readonly e: Call; readonly n: string; readonly args: readonly Arg[] };
@@ -371,15 +372,40 @@ const wrapping =
  * scan(v, at, set): the first position at or after `at` whose byte is in `set`, a text literal; len(v) when there
  * is none. The bytes are fixed at compile time (compiler/gen/scan.ts). `at` outside 0..len(v) traps.
  */
+/** The text literal of one byte, or null when text cannot spell it (no `\\0`). */
+function textByte(n: number): string | null {
+  const esc: Readonly<Record<number, string>> = {
+    10: '\\n',
+    13: '\\r',
+    9: '\\t',
+    8: '\\b',
+    12: '\\f',
+    34: '\\"',
+    92: '\\\\',
+  };
+  const e = esc[n];
+  if (e !== undefined) return `"${e}"`;
+  if (n > 31 && n < 127) return `"${String.fromCodePoint(n)}"`;
+  return null;
+}
+/**
+ * A byte literal is an Int (`'*'` is 42), so `set: '*'` is not a set. The hint names the text of that byte.
+ * Any other non-literal keeps the one hint: the bytes are fixed at compile time.
+ */
+function scanSetHint(e: Expr): string {
+  const general =
+    'The bytes are fixed when the program is compiled. Write the bytes to stop on as text: `set: "*_[]!<&"` (`\\n` is byte 10).';
+  if (e.k !== 'int' || e.v < 0n || e.v > 255n) return general;
+  const n = Number(e.v);
+  const text = textByte(n);
+  if (text === null) return general;
+  return `\`${spelledByte(n)}\` is the Int ${n}. The set of scan is text: write \`${text}\`.`;
+}
+
 function scan(u: Use): Type {
   const member = argAt(u, 2);
   if (member.value.k !== 'str')
-    return fail(
-      member,
-      'C93',
-      'the set of scan must be a text literal',
-      'The bytes are fixed when the program is compiled, so the scan reads 16 at a time. Write the bytes to stop on as text: `set: "*_[]!<&"` (`\\n` is byte 10).',
-    );
+    return fail(member, 'C93', 'the set of scan must be a text literal', scanSetHint(member.value));
   return scanBytes(u, byteSet(member.value.bytes));
 }
 

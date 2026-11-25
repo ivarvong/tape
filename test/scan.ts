@@ -9,7 +9,7 @@ import { JSON_PLAIN, hasByte } from '../compiler/byteset.ts';
 import { lex } from '../compiler/lex.ts';
 import { interpret, Trap } from '../interp.ts';
 import { std } from '../std.ts';
-import { bare, codes, finish, handleBare, same } from './harness.ts';
+import { bare, codes, finish, handleBare, problems, same } from './harness.ts';
 
 const BS = String.fromCodePoint(92);
 const QT = String.fromCodePoint(34);
@@ -357,6 +357,23 @@ same('a computed set is C93', codes(handle('let n = scan(raw, at: 0, set: raw)')
 same('a hole in the set is C93', codes(handle(`let n = scan(raw, at: 0, set: "a${BS}(raw)")`)), ['C93:2']);
 same('a joined set is C93', codes(handle('let n = scan(raw, at: 0, set: "ab" ++ raw)')), ['C93:2']);
 same('a missing set is C13', codes(handle('let n = scan(raw, at: 0)')), ['C13:2']);
+const byteHint = problems(handle("let n = scan(raw, at: 0, set: '*')"));
+same(
+  'a byte where a set is wanted is C93',
+  byteHint.map(e => `${e.code}:${e.line}`),
+  ['C93:2'],
+);
+same(
+  'and the hint writes that byte as text',
+  byteHint[0]?.hint ?? '',
+  '`\'*\'` is the Int 42. The set of scan is text: write `"*"`.',
+);
+const nlHint = problems(handle(`let n = scan(raw, at: 0, set: '${BS}n')`));
+same(
+  'a byte escape where a set is wanted names the text escape',
+  nlHint[0]?.hint ?? '',
+  '`\'\\n\'` is the Int 10. The set of scan is text: write `"\\n"`.',
+);
 const shadow = `fn scan(v: View, at: Int, set: View) -> Int {\n  at\n}\nfn go(raw: View) -> Int {\n  scan(v: raw, at: 1, set: "a")\n}\n`;
 same('a program may define its own scan', codes(shadow, { exports: ['go'] }), []);
 const shadowed = instance(shadow, ['go']);
@@ -386,6 +403,52 @@ same(
 );
 const own = interpret([...std, { name: 'own.tape', text: shadow }]).call('go', [fill(4)]);
 same('the interpreter calls that scan too', typeof own === 'bigint' ? String(own) : 'not an int', '1');
+
+// shadow qualifies the program's scan to file.scan, and that call still takes its first argument by position.
+// A bare name that is not the parameter, an expression, and a call from another file each failed (C11, C10, C11).
+const positional = (body: string): string =>
+  `fn scan(v: View, at: Int) -> Int {\n  at + len(v)\n}\nfn go(raw: View) -> Int {\n  ${body}\n}\n`;
+const answerOf = (files: { name: string; text: string }[], bytes: Uint8Array): string => {
+  const r = compile([...std, ...files], { exports: ['go'] });
+  if (!r.wasm) return r.errors.map(e => `${e.code} ${e.message}`).join('; ');
+  const got = runInt(
+    new WebAssembly.Instance(new WebAssembly.Module(r.wasm), {
+      env: { float_text: (): number => 0, float_of: (): number => 0 },
+    }).exports,
+    'go',
+    bytes,
+  ).value;
+  const read = interpret([...std, ...files]).call('go', [bytes]);
+  const interp = typeof read === 'bigint' ? String(read) : 'not an int';
+  return got === interp ? got : `${got} / ${interp}`;
+};
+same(
+  'a program scan takes a variable that is not its parameter',
+  answerOf([{ name: 'own.tape', text: positional('scan(raw, at: 0) + (raw |> scan(at: 0))') }], fill(4)),
+  '8',
+);
+same(
+  'a program scan takes an expression first',
+  answerOf([{ name: 'own.tape', text: positional('scan("abcd", at: 1)') }], fill(0)),
+  '5',
+);
+same(
+  'a program scan in another file takes its first argument by position',
+  answerOf(
+    [
+      { name: 'b.tape', text: 'fn scan(v: View, at: Int) -> Int {\n  at + len(v)\n}\n' },
+      { name: 'a.tape', text: 'fn go(raw: View) -> Int {\n  scan(raw, at: 0) + b.scan("zz", at: 1)\n}\n' },
+    ],
+    fill(4),
+  ),
+  '7',
+);
+const sliced = `fn slice(text: View, from: Int, to: Int) -> Int {\n  to - from + len(text)\n}\nfn go(raw: View) -> Int {\n  slice(raw, from: 1, to: 4)\n}\n`;
+same(
+  'a program slice takes a variable that is not its parameter',
+  answerOf([{ name: 'own.tape', text: sliced }], fill(2)),
+  '5',
+);
 
 const jsonStop = (b: number): boolean => b < 32 || b >= 128 || b === 34 || b === 92;
 let jsonBits = 0;
