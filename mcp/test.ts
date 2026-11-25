@@ -772,8 +772,6 @@ const tests: Test[] = [
       const http = await post(m, '/v1/compile', JSON.stringify({ files: [{ name: 'hello.tape', text: HELLO }] }));
       if (http.status !== 200 || JSON.stringify(http.body) !== JSON.stringify(ok))
         out.push(`POST /v1/compile: ${http.status} ${http.text.slice(0, 200)}`);
-      if (http.headers.get('tape-step-version') !== String(STEP_VERSION))
-        out.push(`tape-step-version ${http.headers.get('tape-step-version')}`);
       const root = await post(m, '/', '', { method: 'GET' });
       if (root.status !== 200 || F(root.body)['step_version'] !== STEP_VERSION)
         out.push(`GET / step_version ${String(F(root.body)['step_version'])}`);
@@ -806,6 +804,7 @@ const tests: Test[] = [
       // nothing ran, so there is no wait to report (a 0 would say the invocation returned within 1 ms)
       if ('invoke_wall_ms' in ran)
         out.push(`a refused compile reports invoke_wall_ms ${String(ran['invoke_wall_ms'])}`);
+      if (ran['step_version'] !== STEP_VERSION) out.push(`a refused run's step_version ${String(ran['step_version'])}`);
       return out;
     },
   },
@@ -824,8 +823,7 @@ const tests: Test[] = [
         out.push(`third: ${String(c?.['status'])} ${JSON.stringify(c?.['body'])}`);
       if (a?.['content_type'] !== 'text/plain; charset=utf-8' || a['truncated'] !== false)
         out.push(`first: ${JSON.stringify(a?.['content_type'])} truncated ${String(a?.['truncated'])}`);
-      for (const one of RESULTS(r))
-        if (one['step_version'] !== STEP_VERSION) out.push(`step_version ${String(one['step_version'])}`);
+      if (r['step_version'] !== STEP_VERSION) out.push(`step_version ${String(r['step_version'])}`);
       const http = await post(
         m,
         '/v1/run',

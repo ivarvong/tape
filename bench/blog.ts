@@ -4,7 +4,8 @@
 // that GET again, GET /posts/sunset/body (the cached article HTML, the same bytes as POST /render), the index and
 // the feed. Steps are the module's cost, exactly, and bytes are the arena (heap minus its floor) within 2%, the
 // same band as bench/sizes.json: an exact byte pin fails when a later change adds a custom section or a few
-// bytes of code (step_version, a content type, scan, form_field) without the blog doing anything different.
+// bytes of code (a content type, scan, form_field) without the blog doing anything different. The record's
+// step_version is the accounting those step counts were measured with.
 // Both are as the host records them, with the effect log on; the log off must come out the same. The clock is
 // pinned to 2026-11-24T12:00:00.000Z: the feed formats it by walking years from 1970, so an unpinned run would
 // change steps on New Year's Day. bench/blog.json is that record. Wasm bytes are also in bench/sizes.json.
@@ -13,6 +14,7 @@
 import '../node25.ts';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
+import { STEP_VERSION } from '../compiler/step-version.ts';
 import { instantiate, responseOf } from '../host.ts';
 import type { Answer } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
@@ -40,6 +42,8 @@ type Count = { steps: number; bytes: number };
 type Wasm = { bytes: number; functions: number };
 type Recorded = {
   now: string;
+  /** the step accounting the counts below were measured with */
+  step_version: number;
   md: Wasm;
   blog: Wasm;
   render: Count;
@@ -140,6 +144,7 @@ same('log off matches log on', counts(renderOff.count, off), counts(render.count
 
 const got: Recorded = {
   now: INSTANT,
+  step_version: STEP_VERSION,
   md: { bytes: mdWasm.length, functions: functionsOf(mdWasm) },
   blog: { bytes: blogWasm.length, functions: functionsOf(blogWasm) },
   render: render.count,
@@ -172,6 +177,7 @@ const isRecord = (v: unknown): v is Recorded =>
   typeof v === 'object' &&
   v !== null &&
   typeof Reflect.get(v, 'now') === 'string' &&
+  typeof Reflect.get(v, 'step_version') === 'number' &&
   isWasm(Reflect.get(v, 'md')) &&
   isWasm(Reflect.get(v, 'blog')) &&
   isCount(Reflect.get(v, 'render')) &&
@@ -218,6 +224,9 @@ if (process.argv.includes('--write')) {
   const drift = was
     ? [
         ...(got.now === was.now ? [] : [`now ${was.now} -> ${got.now}`]),
+        ...(got.step_version === was.step_version
+          ? []
+          : [`step_version ${String(was.step_version)} -> ${got.step_version}`]),
         ...wasmOff('md', got.md, was.md),
         ...wasmOff('blog', got.blog, was.blog),
         ...countOff('render', got.render, was.render),

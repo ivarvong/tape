@@ -55,7 +55,6 @@ const HEADERS = {
   'content-security-policy': "default-src 'none'; sandbox",
   'cache-control': 'no-store',
   'referrer-policy': 'no-referrer',
-  'tape-step-version': String(STEP_VERSION),
 };
 /** Any answer, with the headers every answer has. */
 const secured = (res: Response): Response => {
@@ -206,7 +205,7 @@ ${limits}`,
       title: 'Run HTTP requests against a Tape program',
       description: `Compile a Tape program and send it HTTP requests, in order, on a fresh in-memory SQLite database. A request is "METHOD SP TARGET", then optionally a line feed and a body ("GET /hello/ada", "POST /links\\n{\\"url\\":\\"https://example.com\\"}"), or {"request": "GET /window", "at_ms": 61000} on the run's own clock: now() is its start plus at_ms (none: the time before), and each timer due by then runs first, as a result of its own (woken).
 
-Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects, the effect log (each SQL statement as written, its params, rows_written or rows_returned, and rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay of that log gave the same bytes; steps and step_version; trace: "lines" (each arm tried, ✓ or ✗, at its file:line, with its effects; at most ${TRACE_LINES} lines; default for one request), "full" (OTLP) or "none" (default for several). If it does not compile: ok false, with diagnostics. random() starts from one seed each call, going on across its requests. Calls to other programs answer Unreachable, or as \`remotes\` says.
+Each result: status, content_type, headers ([{name, value}] the program set, if any), body; effects, the effect log (each SQL statement as written, its params, rows_written or rows_returned, and rows: past ${LIMITS.compactRows} only with effects "full", not "compact", the default; calls, now, random, wake); replayed, true when a replay of that log gave the same bytes; steps; trace: "lines" (each arm tried, ✓ or ✗, at its file:line, with its effects; at most ${TRACE_LINES} lines; default for one request), "full" (OTLP) or "none" (default for several). If it does not compile: ok false, with diagnostics and step_version. random() starts from one seed each call, going on across its requests. Calls to other programs answer Unreachable, or as \`remotes\` says.
 
 ${CHEAT_SHEET}
 
@@ -222,6 +221,7 @@ ${limits}`,
           ok: { type: 'boolean' },
           diagnostics: DIAGNOSTICS_SCHEMA,
           cached: { type: 'boolean' },
+          step_version: { type: 'integer' },
           results: { type: 'array', items: { type: 'object' } },
           timers: { type: 'object' },
           invoke_wall_ms: {

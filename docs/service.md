@@ -64,8 +64,7 @@ parameters reach the latest version of the program with that name in the same ac
 
 Every response names its request (`tape-request-id`), says what the request did (`tape-outcome`), and carries a
 trace link (`traceparent`). An operator's response also carries signed links to its trace as a page
-(`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`), and names the step accounting the deployed compiler builds
-(`tape-step-version`). The operator's run of a version also carries `server-timing`, the host's entry first:
+(`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`). The operator's run of a version also carries `server-timing`, the host's entry first:
 `tape-invoke;desc="wall time waiting on the program (not CPU)";dur=<ms>`. `<ms>` is the whole milliseconds this
 Worker waited on the program's object, from the invoke span's begin to its done, which is after the body is
 buffered. A negative reading is reported as 0. A `server-timing` the program set is kept after that entry: the
@@ -75,8 +74,11 @@ the number is a 1 ms sample of the object's whole call, with no network jitter, 
 route. What the number measures, and the precision it has on Workers, is in
 [telemetry](telemetry_and_profiling.md#what-a-client-can-read-of-a-requests-cost). The run's span in the OTLP says
 what the run used of the limits below, `tape.memory_bytes`, `tape.steps` and `tape.step_version` (the first entry
-of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them; a module built
-before the tag has no `step_version`), whether it finished or stopped. A storage failure at commit answers 503
+of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them), whether it finished or stopped. A log
+recorded before the tag has no `step_version`. A stored module is rebuilt with the compiler that is deployed before
+it runs, so the module that runs carries the current accounting and the log keeps the version recorded with that
+run. The `build` id is a hash of the source, so after the accounting changes the same program version and the same
+build can count the same request differently, and `step_version` is what tells the two counts apart. A storage failure at commit answers 503
 with `retry-after: 1` and says whether anything was kept (`applied`, and `outcome`); a trap answers 500.
 
 ### What a client should do

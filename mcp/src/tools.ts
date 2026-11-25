@@ -6,7 +6,7 @@
 // Few tools on purpose. Others an agent could use (fmt, the simulator, a program's tables) would each be a field of
 // these or a tool of its own; they wait until someone asks (test did: report 1fdd40f44552), so the list stays short.
 import { compileAlso } from '../../compiler.ts';
-import { STEP_VERSION, isStepVersion } from '../../compiler/step-version.ts';
+import { STEP_VERSION } from '../../compiler/step-version.ts';
 import type { StepVersion } from '../../compiler/step-version.ts';
 import { sha256 } from '../../compiler/sha256.ts';
 import type { Built, Source } from '../../compiler.ts';
@@ -132,8 +132,6 @@ export type RunResultOne = {
   replayed: boolean | null;
   replay_error?: string;
   steps: number;
-  /** which step accounting produced `steps` */
-  step_version: StepVersion;
   memory_bytes: number | null;
   trace: Otlp | string | null;
   omitted?: string;
@@ -143,6 +141,8 @@ export type RunResult = {
   diagnostics: Diagnostic[];
   /** the build came from this isolate's cache (CompileResult.cached) */
   cached: boolean;
+  /** the step accounting this call's compiler builds. One module a call, so one value, including when nothing ran. */
+  step_version: StepVersion;
   error?: string;
   results: RunResultOne[];
   /** on the run's own clock: the timers that ran, and those still set at the end */
@@ -776,7 +776,6 @@ function resultOf(
     replayed: ran.replayed,
     ...(ran.replay_error === null ? {} : { replay_error: ran.replay_error }),
     steps: ran.steps,
-    step_version: head && isHead(head) && isStepVersion(head.step_version) ? head.step_version : STEP_VERSION,
     memory_bytes: head && isHead(head) ? (head.bytes ?? null) : null,
     trace: large ? null : trace,
     ...(large
@@ -827,7 +826,11 @@ export async function runTool(
   if (isRefusal(remotes)) return { result: remotes, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
-  if (!built) return { result: { ok: false, diagnostics: c.diagnostics, cached: c.cached, results: [] }, usage };
+  if (!built)
+    return {
+      result: { ok: false, diagnostics: c.diagnostics, cached: c.cached, step_version: STEP_VERSION, results: [] },
+      usage,
+    };
   // the line trace: the same program built with { trace: true }, each request replayed through it from its log
   const traced = c.traced;
   const tracedWasm = traced?.wasm ?? null;
@@ -871,7 +874,15 @@ export async function runTool(
   const timed = { invoke_wall_ms };
   if (!all.ok)
     return {
-      result: { ok: false, diagnostics: [], cached: c.cached, error: all.error, results: [], ...timed },
+      result: {
+        ok: false,
+        diagnostics: [],
+        cached: c.cached,
+        step_version: STEP_VERSION,
+        error: all.error,
+        results: [],
+        ...timed,
+      },
       usage,
     };
   const names = namesOf(c.files);
@@ -884,6 +895,7 @@ export async function runTool(
       ok: results.every(r => r.error === null && r.replayed !== false),
       diagnostics: [],
       cached: c.cached,
+      step_version: STEP_VERSION,
       results,
       ...timed,
       ...(all.timers ? { timers: all.timers } : {}),
