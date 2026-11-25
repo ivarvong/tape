@@ -31,6 +31,12 @@ fn none() -> List[Int] {
 fn empty() -> Map[Int] {
   Empty
 }
+fn height(map: Map[Int]) -> Int {
+  match map {
+    Empty -> 0
+    Node(height) -> height
+  }
+}
 type Box { Box(items: List[Int], table: Map[Int]) }
 fn keep(c: Bool, m: Map[Int]) -> Option[Map[Int]] {
   match {

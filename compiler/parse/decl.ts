@@ -143,8 +143,8 @@ export function typeDecl(c: Cursor, prog: Program, isPrivate: boolean): void {
 }
 
 // ---- functions
-/** `fn name[A](x: T, …) -> R { … }`; `exported`: written after `export`. */
-export function fnDecl(c: Cursor, prog: Program, exported: boolean): void {
+/** `fn name[A](x: T, …) -> R { … }`; `exported`: written after `export`; `isPrivate`: after `private`. */
+export function fnDecl(c: Cursor, prog: Program, exported: boolean, isPrivate = false): void {
   if (exported) c.expect('kw', 'fn', '`export` goes before `fn`.');
   const n = c.expect('id'),
     tparams = typeParams(c),
@@ -169,7 +169,16 @@ export function fnDecl(c: Cursor, prog: Program, exported: boolean): void {
     );
   mine.set(n.v, unique);
   prog.defs.set(n.v, [...(prog.defs.get(n.v) ?? []), { key: unique, file: c.file }]);
-  prog.fns.set(unique, { name: unique, params: ps, retAst, body, ...c.at(n), exported, tparams });
+  prog.fns.set(unique, {
+    name: unique,
+    params: ps,
+    retAst,
+    body,
+    ...c.at(n),
+    exported,
+    tparams,
+    ...(isPrivate ? { private: true } : {}),
+  });
 }
 
 // ---- invariants, machines, interfaces

@@ -34,7 +34,7 @@ fn handle(raw: View) -> Buf {
 fn order(found: Result[Order, View]) -> Buf {
   match found {
     Ok(value) -> buf() |> write_json(value)
-    Err(error) -> buf() |> json.json_append(view: "error: ") |> json.json_append(view: error)
+    Err(error) -> buf() |> text.write_text(text: "error: ") |> text.write_text(text: error)
   }
 }
 
@@ -42,18 +42,18 @@ fn maybe(found: Result[Maybe, View]) -> Buf {
   match found {
     Ok(value: Maybe(a: Some(value: n), b: Some(value: name), c: None, d: Some(value: Cons(head: first)))) -> buf()
       |> text.write_int(value: n)
-      |> json.json_append(view: name)
+      |> text.write_text(text: name)
       |> write_json(value: first)
-    Ok -> buf() |> json.json_append(view: "other")
-    Err(error) -> buf() |> json.json_append(view: "error: ") |> json.json_append(view: error)
+    Ok -> buf() |> text.write_text(text: "other")
+    Err(error) -> buf() |> text.write_text(text: "error: ") |> text.write_text(text: error)
   }
 }
 
 fn shape(found: Result[Shape, View]) -> Buf {
   match found {
-    Ok(value: Circle(r)) -> buf() |> json.json_append(view: "circle ") |> text.write_int(value: r)
-    Ok(value: Rect(w, h)) -> buf() |> json.json_append(view: "rect ") |> text.write_int(value: w * h)
-    Err(error) -> buf() |> json.json_append(view: "error: ") |> json.json_append(view: error)
+    Ok(value: Circle(r)) -> buf() |> text.write_text(text: "circle ") |> text.write_int(value: r)
+    Ok(value: Rect(w, h)) -> buf() |> text.write_text(text: "rect ") |> text.write_int(value: w * h)
+    Err(error) -> buf() |> text.write_text(text: "error: ") |> text.write_text(text: error)
   }
 }
 `;

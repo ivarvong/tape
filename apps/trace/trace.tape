@@ -173,6 +173,15 @@ fn checked(v: View) -> Checked {
   jvalue(v, at: json_ws(v, at: 0), open: Nil)
 }
 
+// The first position at or after `at` that is not JSON whitespace.
+fn json_ws(v: View, at: Int) -> Int {
+  match {
+    at < len(v)
+      and (v[at] == 32 or v[at] == 10 or v[at] == 13 or v[at] == 9) -> json_ws(v, at: at + 1)
+    else -> at
+  }
+}
+
 fn jvalue(v: View, at: Int, open: List[Bool]) -> Checked {
   match {
     at >= len(v) -> Broken(at)
@@ -208,8 +217,8 @@ fn jstring(v: View, at: Int, end: Int, open: List[Bool]) -> Checked {
 }
 
 // After the closing quote of the string whose body starts at `at`, or -1 when it is not a JSON string. Printable
-// ASCII is passed four bytes a step where it can, else one; an escape or a byte past ASCII is read by std's
-// json_char, which checks escapes, surrogates and UTF-8.
+// ASCII is passed four bytes a step where it can, else one; an escape or a byte past ASCII is read by char_end,
+// which checks escapes, surrogates and UTF-8.
 fn string_valid(v: View, at: Int) -> Int {
   match {
     at >= len(v) -> -1
@@ -220,7 +229,7 @@ fn string_valid(v: View, at: Int) -> Int {
       and ascii(b: v[at + 2])
       and ascii(b: v[at + 3]) -> string_valid(v, at: at + 4)
     ascii(b: v[at]) -> string_valid(v, at: at + 1)
-    else -> string_char(v, found: json_char(v, at))
+    else -> string_char(v, next: char_end(v, at))
   }
 }
 
@@ -229,11 +238,83 @@ fn ascii(b: Int) -> Bool {
   b >= 32 and b < 128 and b != 34 and b != 92
 }
 
-fn string_char(v: View, found: JsonChar) -> Int {
-  match found {
-    Char(next) -> string_valid(v, at: next)
-    Quote(next) -> next
-    BadChar -> -1
+fn string_char(v: View, next: Int) -> Int {
+  match {
+    next < 0 -> -1
+    else -> string_valid(v, at: next)
+  }
+}
+
+// Past the escape or the UTF-8 sequence at `at` (a byte string_valid does not take as it is), or -1: a control
+// byte, an escape JSON does not have, a surrogate escape without its other half, or bytes that are not UTF-8.
+//
+//   > char_end(v: "\\u00e9!", at: 0)
+//   6
+//   > char_end(v: "\\ud83d\\ude00!", at: 0)
+//   12
+//   > char_end(v: "\\ud83d!", at: 0)
+//   -1
+//   > char_end(v: "\\q", at: 0)
+//   -1
+fn char_end(v: View, at: Int) -> Int {
+  match {
+    v[at] == 92 -> escape_end(v, at: at + 1)
+    v[at] < 32 -> -1
+    else -> match utf8_at(v, at) {
+      Utf8(next) -> next
+      BadUtf8 -> -1
+    }
+  }
+}
+
+// Past an escape whose letter is at `at`, or -1.
+fn escape_end(v: View, at: Int) -> Int {
+  match {
+    at >= len(v) -> -1
+    v[at] == 117 -> unit_end(v, at: at + 5, unit: unit_at(v, at: at + 1))
+    v[at] == 34
+      or v[at] == 92
+      or v[at] == 47
+      or v[at] == 98
+      or v[at] == 102
+      or v[at] == 110
+      or v[at] == 114
+      or v[at] == 116 -> at + 1
+    else -> -1
+  }
+}
+
+// The four hex digits at `at` as a number, or -1.
+fn unit_at(v: View, at: Int) -> Int {
+  match {
+    at + 4 <= len(v)
+      and is_hex(v[at])
+      and is_hex(v[at + 1])
+      and is_hex(v[at + 2])
+      and is_hex(v[at + 3]) -> (hex(v[at]) << 12) | (hex(v[at + 1]) << 8) | (
+        hex(v[at + 2]) << 4
+      ) | hex(v[at + 3])
+    else -> -1
+  }
+}
+
+// After a \u escape of `unit`, which ends at `at`: a high surrogate must have a low one escaped right after it,
+// and a low one alone is not a character.
+fn unit_end(v: View, at: Int, unit: Int) -> Int {
+  match {
+    unit < 0 -> -1
+    unit >= 55296 and unit < 56320 -> {
+      let low = match {
+        has(v, at, word: "\\u") -> unit_at(v, at: at + 2)
+        else -> -1
+      }
+      match {
+        low >= 56320 and low < 57344 -> at + 6
+        else -> -1
+      }
+    }
+    unit >= 56320 and unit < 57344 -> -1
+    else -> at
   }
 }
 
@@ -1711,6 +1792,14 @@ fn drop(list: List[Span], n: Int) -> List[Span] {
   match list {
     Cons(tail) if n > 0 -> drop(list: tail, n: n - 1)
     _ -> list
+  }
+}
+
+// The items of `list` in reverse order, in front of `acc`.
+fn reverse_onto(list: List[Span], acc: List[Span]) -> List[Span] {
+  match list {
+    Cons(head, tail) -> reverse_onto(list: tail, acc: Cons(head, tail: acc))
+    Nil -> acc
   }
 }
 

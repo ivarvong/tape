@@ -74,7 +74,8 @@ fn old_places(out: Buf, units: Int, at: Int, p: Int, scale: Int) -> Buf {
   }
 }
 `;
-const sources = [...std, { name: 'units.tape', text: program }];
+// write_units is private to std/text.tape (C94): the program here is read as the end of that file, which may call it
+const sources = std.map(s => (s.name === 'std/text.tape' ? { ...s, text: `${s.text}\n${program}` } : s));
 const b = compile(sources);
 if (!b.wasm) throw new Error(b.errors.map(e => `${e.code} ${e.line} ${e.message}`).join('; '));
 const app = instantiate(new WebAssembly.Module(b.wasm), { name: 'write-units' });

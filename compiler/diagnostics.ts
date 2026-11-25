@@ -347,6 +347,10 @@ export const DIAGNOSTICS = {
     meaning:
       'The set of `scan` that is not a text literal. The bytes are fixed when the program is compiled, so the scan reads 16 at a time.',
   },
+  C94: {
+    meaning:
+      "A `private fn` called, passed as a function value or matched as a pattern outside the file that defines it. std's helpers are private: what it reads and writes for decode is reached through decode, is_json and json_member.",
+  },
   C99: {
     meaning:
       'A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program.',

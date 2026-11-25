@@ -237,6 +237,8 @@ export type FnDecl = At & {
   body: Block;
   exported: boolean;
   tparams: string[];
+  /** `private fn`: called only from its own file (C94); the compiler's own calls of it are not refused */
+  private?: boolean;
   /** set by the build: the result type; for a generic function made for one set of type arguments, its `base` */
   ret?: Resolved;
   base?: string;

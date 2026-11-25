@@ -4,7 +4,7 @@
 
 Every program is compiled with these files before its own, so everything here is in scope without an import. Arguments are named (`until(v: raw, byte: 10)`), but the first may go without its name (`until(raw, byte: 10)`), and an argument whose value is a name of the same name may be written bare (`until(v, byte)`). `a |> f(b: 1)` is `f(<first parameter>: a, b: 1)`. A program may define a function of the same name as one here; its own wins. For the language itself see [LANGUAGE.md](../LANGUAGE.md); for a whole service, [the guide](guide.md).
 
-The examples under a function (`> expression`, then what it gives) are run by `tape test` on every commit. Each file also has helpers that these functions call and a program does not (their comments start `Internal:`); they are in the source, std/*.tape, and not listed here.
+The examples under a function (`> expression`, then what it gives) are run by `tape test` on every commit. Each file also has helpers that these functions call: each is a `private fn`, which a program cannot call (C94; a function of its own of the same name is its own), and the types they pass among themselves (their comments start `Internal:`). They are in the source, std/*.tape, and not listed here.
 
 ## Common tasks
 
@@ -1140,6 +1140,21 @@ fn utf8_at(v: View, at: Int) -> Utf8
 ```
 
 The code point that starts at `at` (a byte of 128 or more), and where the next one starts; BadUtf8 when it is not valid UTF-8.
+
+### fn utf8_end
+
+```tape
+fn utf8_end(v: View, at: Int) -> Int
+```
+
+Where the UTF-8 sequence that starts at `at` (a byte of 128 or more) ends. When the bytes there are not UTF-8, it is negative: minus where their maximal part ends, the longest start of a sequence that is right so far (at least one byte), which a WHATWG decoder (TextDecoder) reads as one U+FFFD. So a loop that copies text and replaces what is not UTF-8 goes on at the end either way, as write_json_string does.
+
+```
+> utf8_end(v: "aé!", at: 1)
+3
+> utf8_end(v: buf() |> push(byte: 97) |> push(byte: 195) |> push(byte: 33) |> freeze, at: 1)
+-2
+```
 
 ## std/json.tape
 

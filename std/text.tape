@@ -107,8 +107,8 @@ fn every_byte(v: View, keep: Fn[Int, Bool]) -> Bool {
   every_from(v, keep, at: 0)
 }
 
-// Internal: every_byte from position `at`.
-fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool {
+// every_byte from position `at`.
+private fn every_from(v: View, keep: Fn[Int, Bool], at: Int) -> Bool {
   match {
     at >= len(v) -> True
     keep(v[at]) -> every_from(v, keep, at: at + 1)
@@ -128,8 +128,8 @@ fn char_count(v: View) -> Int {
   chars_from(v, at: 0, n: 0)
 }
 
-// Internal: char_count from position `at`, n counted so far.
-fn chars_from(v: View, at: Int, n: Int) -> Int {
+// char_count from position `at`, n counted so far.
+private fn chars_from(v: View, at: Int, n: Int) -> Int {
   match {
     at >= len(v) -> n
     (v[at] & 192) == 128 -> chars_from(v, at: at + 1, n)
@@ -154,8 +154,8 @@ fn isqrt(n: Int) -> Option[Int] {
   }
 }
 
-// Internal: isqrt's search; the root is in lo..hi, and hi * hi never overflows.
-fn root_between(n: Int, lo: Int, hi: Int) -> Int {
+// isqrt's search; the root is in lo..hi, and hi * hi never overflows.
+private fn root_between(n: Int, lo: Int, hi: Int) -> Int {
   let mid = lo + (hi - lo + 1) / 2
   match {
     lo >= hi -> lo
@@ -188,8 +188,8 @@ fn decimal(v: View) -> Option[Int] {
   }
 }
 
-// Internal: the loop of decimal.
-fn decimal_value(v: View, at: Int, value: Int) -> Int {
+// The loop of decimal.
+private fn decimal_value(v: View, at: Int, value: Int) -> Int {
   match {
     at >= len(v) -> value
     else -> decimal_value(v, at: at + 1, value: value * 10 + v[at] - 48)
@@ -222,17 +222,17 @@ fn parse_int(text: View) -> Option[Int] {
   }
 }
 
-// Internal: parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the
+// parse_int's digits from `at` on, added to `value`, kept negative for a negative number so that the
 // least Int fits.
-fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
+private fn int_digits(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
   match {
     len(text) == 0 or not is_digit(text[at]) -> None
     else -> int_more(text, at, value, negative)
   }
 }
 
-// Internal: parse_int's digits after the first.
-fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
+// parse_int's digits after the first.
+private fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[Int] {
   match {
     at >= len(text) -> Some(value)
     not is_digit(text[at]) -> None
@@ -268,15 +268,15 @@ fn write_int(out: Buf, value: Int) -> Buf {
   }
 }
 
-// Internal: the loop of write_int.
-fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
+// The loop of write_int.
+private fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   match {
     value > 0 -> push(buf: write_digits(out, value: value / 10, last: value % 10), byte: 48 + last)
     else -> push(buf: out, byte: 48 + last)
   }
 }
 
-// Internal: units · 10^-scale with exactly `scale` digits after the point, as a hole and write_json write a Dec
+// units · 10^-scale with exactly `scale` digits after the point, as a hole and write_json write a Dec
 // (1230 at scale 2 is 12.30). The least Int is written without being negated.
 //
 //   > buf() |> write_units(units: -5, scale: 2) |> freeze
@@ -285,7 +285,7 @@ fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
 //   "1230"
 //   > buf() |> write_units(units: -9223372036854775808, scale: 18) |> freeze
 //   "-9.223372036854775808"
-fn write_units(out: Buf, units: Int, scale: Int) -> Buf {
+private fn write_units(out: Buf, units: Int, scale: Int) -> Buf {
   let signed = match {
     units < 0 -> push(buf: out, byte: 45)
     else -> out
@@ -295,17 +295,17 @@ fn write_units(out: Buf, units: Int, scale: Int) -> Buf {
   write_place(out: signed, units, at: 0, scale)
 }
 
-// Internal: p · 10^n.
-fn ten_power(n: Int, p: Int) -> Int {
+// p · 10^n.
+private fn ten_power(n: Int, p: Int) -> Int {
   match {
     n <= 0 -> p
     else -> ten_power(n: n - 1, p: p * 10)
   }
 }
 
-// Internal: the digits of units worth 10^at and more, at least up to the one worth 10^scale, with the point before
+// The digits of units worth 10^at and more, at least up to the one worth 10^scale, with the point before
 // the digit worth 10^(scale - 1): the higher digits first, then this one (units % 10).
-fn write_place(out: Buf, units: Int, at: Int, scale: Int) -> Buf {
+private fn write_place(out: Buf, units: Int, at: Int, scale: Int) -> Buf {
   let rest = units / 10
   let d = units % 10
   let higher = match {
@@ -383,9 +383,15 @@ fn utf8_at(v: View, at: Int) -> Utf8 {
   }
 }
 
-// Internal: where the UTF-8 sequence at `at` (a byte of 128 or more) ends; when the bytes there are not UTF-8,
-// minus where their maximal part ends: the longest start of a sequence that is right so far, at least one byte, the
-// bytes a WHATWG decoder replaces with one U+FFFD.
+// Where the UTF-8 sequence that starts at `at` (a byte of 128 or more) ends. When the bytes there are not UTF-8,
+// it is negative: minus where their maximal part ends, the longest start of a sequence that is right so far (at
+// least one byte), which a WHATWG decoder (TextDecoder) reads as one U+FFFD. So a loop that copies text and
+// replaces what is not UTF-8 goes on at the end either way, as write_json_string does.
+//
+//   > utf8_end(v: "aé!", at: 1)
+//   3
+//   > utf8_end(v: buf() |> push(byte: 97) |> push(byte: 195) |> push(byte: 33) |> freeze, at: 1)
+//   -2
 fn utf8_end(v: View, at: Int) -> Int {
   match utf8_at(v, at) {
     Utf8(next) -> next
@@ -393,8 +399,8 @@ fn utf8_end(v: View, at: Int) -> Int {
   }
 }
 
-// Internal: how many bytes from `at` one U+FFFD stands for.
-fn utf8_bad(v: View, at: Int, b: Int) -> Int {
+// How many bytes from `at` one U+FFFD stands for.
+private fn utf8_bad(v: View, at: Int, b: Int) -> Int {
   match {
     b >= 224 and b < 240 and cont(v, at: at + 1) and second_of_3(b, c: v[at + 1]) -> 2
     b >= 240 and b <= 244 and cont(v, at: at + 1) and second_of_4(b, c: v[at + 1]) -> match {
@@ -405,17 +411,17 @@ fn utf8_bad(v: View, at: Int, b: Int) -> Int {
   }
 }
 
-// Internal: is the byte at `at` a UTF-8 continuation byte?
-fn cont(v: View, at: Int) -> Bool {
+// Is the byte at `at` a UTF-8 continuation byte?
+private fn cont(v: View, at: Int) -> Bool {
   at < len(v) and (v[at] & 192) == 128
 }
 
-// Internal: the second byte of a three-byte sequence is allowed after `b` (no overlong forms, no surrogates).
-fn second_of_3(b: Int, c: Int) -> Bool {
+// The second byte of a three-byte sequence is allowed after `b` (no overlong forms, no surrogates).
+private fn second_of_3(b: Int, c: Int) -> Bool {
   (b != 224 or c >= 160) and (b != 237 or c <= 159)
 }
 
-// Internal: the second byte of a four-byte sequence is allowed after `b` (no overlong forms, nothing above U+10FFFF).
-fn second_of_4(b: Int, c: Int) -> Bool {
+// The second byte of a four-byte sequence is allowed after `b` (no overlong forms, nothing above U+10FFFF).
+private fn second_of_4(b: Int, c: Int) -> Bool {
   (b != 240 or c >= 144) and (b != 244 or c <= 143)
 }

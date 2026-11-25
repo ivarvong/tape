@@ -4,7 +4,7 @@
 
 A code starts with the part of the compiler that gives it: L for the lexer (the characters of a file), P for the parser (its shape), C for the checker and the rules (what it means). A refusal is a code, a file and line, what is wrong there, and what to write instead; the line and the fix name what the program wrote. This page says what each code refuses whatever the program, and where [LANGUAGE.md](../LANGUAGE.md) or [the guide](guide.md) explains it.
 
-103 codes.
+104 codes.
 
 | Code | Refuses | Explained in |
 |---|---|---|
@@ -86,7 +86,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C63 | A `sql_move` whose statement is not one UPDATE of one row by its whole unique key, with a compare-and-set on the state and RETURNING the row type. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job) |
 | C64 | A command's `once:` key that is a number, a Bool or an Option. A key names the command: text, or a record of the program's own. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C65 | A command's `once:` key that is the same every time it is sent: each command after the first is answered with the first's reply. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
-| C66 | A constructor of a private type made outside the file that declares it. A value of it is a witness that that file made it; a CallError comes only from a call. |  |
+| C66 | A constructor of a private type made outside the file that declares it. A value of it is a witness that that file made it; a CallError comes only from a call. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C67 | A statement the SQL checker does not read: outside the subset it parses (WITH, triggers, window functions, schema names), or not SQL. |  |
 | C68 | SQL naming a table or column the schema does not have, or a schema whose statements do not build, as SQLite would build them, one after another. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job) |
 | C69 | A query whose columns or values do not fit the program's types: a column count, name, type or NULL that the row type does not match, a value of the wrong kind, a NULL compared with `=`, or a write read as a row without RETURNING. | [LANGUAGE.md: 7. Declarations about rows](../LANGUAGE.md#7-declarations-about-rows); [the guide: Row types name their columns: *](guide.md#row-types-name-their-columns-) |
@@ -110,6 +110,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C87 | A match on a reply where one arm takes a refusal together with no answer and sets a timer: the same key gets the same refusal, so it asks for ever. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C88 | `repeat: True` or `no_floor: True` on a call whose statement its rule (C54 and C55, or C73) accepts anyway. The argument is a claim about the write, so it is refused where it is not true. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C93 | The set of `scan` that is not a text literal. The bytes are fixed when the program is compiled, so the scan reads 16 at a time. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
+| C94 | A `private fn` called, passed as a function value or matched as a pattern outside the file that defines it. std's helpers are private: what it reads and writes for decode is reached through decode, is_json and json_member. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C99 | A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program. |  |
 
 ## Reserved

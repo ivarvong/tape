@@ -5,8 +5,9 @@
 //   node docs/gen-std.ts --check   exit 1 when docs/std.md is not what this writes, when a function or type in std/
 //                                  has no doc comment, when a built-in has no entry here (or an entry names none),
 //                                  or when a common task's program does not compile
-// A comment that starts `Internal:` marks a helper: the functions meant to be called use it, and a program does not.
-// Helpers are not listed (they were 165 lines, 21 KB of the 70 KB an agent read): the source is their reference.
+// A helper is not listed: a `private fn` (C94: a program cannot call it), or a type whose comment starts
+// `Internal:` (one the helpers pass among themselves). They were 165 lines, 21 KB of the 70 KB an agent read; the
+// source is their reference.
 import { readFileSync, writeFileSync } from 'node:fs';
 // what every sql_ call takes after its query, on a write (INSERT, UPDATE, DELETE, with RETURNING for sql_first and sql_all)
 const WRITES =
@@ -25,6 +26,8 @@ type Decl = {
   /** the comment above it, without `//` */
   doc: string[];
   line: number;
+  /** written `private fn` */
+  private: boolean;
 };
 type File = { name: string; about: string[]; decls: Decl[] };
 
@@ -59,11 +62,18 @@ function parse(name: string, text: string): File {
           .replaceAll(/\s+/g, ' ')
           .replaceAll('( ', '(')
           .replaceAll(/,? \)/g, ')');
-        decls.push({ kind, name: m[2] ?? '', text: one, doc: block, line: start + 1 });
+        decls.push({
+          kind,
+          name: m[2] ?? '',
+          text: one,
+          doc: block,
+          line: start + 1,
+          private: l.startsWith('private '),
+        });
       } else {
         let body = l;
         if (l.trimEnd().endsWith('{')) while (j + 1 < lines.length && lines[j] !== '}') body += `\n${lines[++j] ?? ''}`;
-        decls.push({ kind, name: m[2] ?? '', text: body, doc: block, line: start + 1 });
+        decls.push({ kind, name: m[2] ?? '', text: body, doc: block, line: start + 1, private: false });
       }
       i = j;
     } else if (l.trim() === '' && block.length > 0 && blockStart === 0) about = block;
@@ -73,7 +83,7 @@ function parse(name: string, text: string): File {
 }
 const balanced = (s: string): boolean => (s.match(/\(/g) ?? []).length === (s.match(/\)/g) ?? []).length;
 
-const isInternal = (d: Decl): boolean => /^Internal\b/.test(d.doc[0] ?? '');
+const isInternal = (d: Decl): boolean => (d.kind === 'fn' ? d.private : /^Internal\b/.test(d.doc[0] ?? ''));
 const anchor = (d: { kind: string; name: string }): string => `${d.kind}-${d.name.toLowerCase()}`;
 /** `fn decimal`, `type Request`, `builtin len`: the anchor of that entry (GitHub's, of its heading). */
 const usedAnchor = (u: string): string => u.toLowerCase().replace(' ', '-');
@@ -534,7 +544,7 @@ const HEAD = [
   '',
   'Every program is compiled with these files before its own, so everything here is in scope without an import. Arguments are named (`until(v: raw, byte: 10)`), but the first may go without its name (`until(raw, byte: 10)`), and an argument whose value is a name of the same name may be written bare (`until(v, byte)`). `a |> f(b: 1)` is `f(<first parameter>: a, b: 1)`. A program may define a function of the same name as one here; its own wins. For the language itself see [LANGUAGE.md](../LANGUAGE.md); for a whole service, [the guide](guide.md).',
   '',
-  'The examples under a function (`> expression`, then what it gives) are run by `tape test` on every commit. Each file also has helpers that these functions call and a program does not (their comments start `Internal:`); they are in the source, std/*.tape, and not listed here.',
+  'The examples under a function (`> expression`, then what it gives) are run by `tape test` on every commit. Each file also has helpers that these functions call: each is a `private fn`, which a program cannot call (C94; a function of its own of the same name is its own), and the types they pass among themselves (their comments start `Internal:`). They are in the source, std/*.tape, and not listed here.',
   '',
 ];
 const BUILT_INS_ABOUT =

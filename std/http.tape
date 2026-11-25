@@ -64,8 +64,8 @@ fn header_of(request: Request, name: View) -> Option[View] {
   header_from(lines: request.headers, name: "\r" ++ lower(text: name) ++ ": ")
 }
 
-// Internal: header_of's search of the header lines.
-fn header_from(lines: View, name: View) -> Option[View] {
+// header_of's search of the header lines.
+private fn header_from(lines: View, name: View) -> Option[View] {
   match lines {
     "" -> None
     _ -> {
@@ -88,8 +88,8 @@ fn lower(text: View) -> View {
   freeze(buf: lower_from(out: buf(), text, at: 0))
 }
 
-// Internal: lower from position `at`.
-fn lower_from(out: Buf, text: View, at: Int) -> Buf {
+// lower from position `at`.
+private fn lower_from(out: Buf, text: View, at: Int) -> Buf {
   match {
     at >= len(text) -> out
     is_upper(text[at]) -> lower_from(out: push(buf: out, byte: text[at] + 32), text, at: at + 1)
@@ -97,25 +97,25 @@ fn lower_from(out: Buf, text: View, at: Int) -> Buf {
   }
 }
 
-// Internal: only the last word, and only `public`, names the caller: a target with a space in it (never sent by
+// Only the last word, and only `public`, names the caller: a target with a space in it (never sent by
 // the service, which passes the URL's percent-encoded path) is read as before.
-fn opened(open: Bool) -> Int {
+private fn opened(open: Bool) -> Int {
   match {
     open -> 1
     else -> 0
   }
 }
 
-// Internal: Anyone when the request line ended with ` public`.
-fn caller_of(open: Bool) -> Caller {
+// Anyone when the request line ended with ` public`.
+private fn caller_of(open: Bool) -> Caller {
   match {
     open -> Anyone
     else -> Operator
   }
 }
 
-// Internal: the query of a target: None without a `?`, else what follows the first `?`.
-fn asked(target: View) -> Option[View] {
+// The query of a target: None without a `?`, else what follows the first `?`.
+private fn asked(target: View) -> Option[View] {
   match {
     find(v: target, byte: 63, at: 0) == len(target) -> None
     else -> Some(after(v: target, byte: 63))
@@ -153,8 +153,8 @@ fn header(out: Buf, name: View, value: View) -> Buf {
     |> append(view: slice(v: all, from: len(line), to: len(all)))
 }
 
-// Internal: `name: value`, or, for a name or a value the host would refuse, a part it refuses with the reason.
-fn header_text(name: View, value: View) -> View {
+// `name: value`, or, for a name or a value the host would refuse, a part it refuses with the reason.
+private fn header_text(name: View, value: View) -> View {
   match {
     len(name) == 0
       or len(name) > 64
@@ -168,13 +168,13 @@ fn header_text(name: View, value: View) -> View {
   }
 }
 
-// Internal: a token character (RFC 9110): a letter, a digit, or one of !#$%&'*+-.^_`|~.
-fn token_byte(b: Int) -> Bool {
+// A token character (RFC 9110): a letter, a digit, or one of !#$%&'*+-.^_`|~.
+private fn token_byte(b: Int) -> Bool {
   is_alnum(b) or (b >= 35 and b <= 39) or token_mark(b)
 }
 
-// Internal: the marks among the token characters.
-fn token_mark(b: Int) -> Bool {
+// The marks among the token characters.
+private fn token_mark(b: Int) -> Bool {
   match b {
     33 -> True
     42 -> True
@@ -190,8 +190,8 @@ fn token_mark(b: Int) -> Bool {
   }
 }
 
-// Internal: a byte a header value may hold.
-fn value_byte(b: Int) -> Bool {
+// A byte a header value may hold.
+private fn value_byte(b: Int) -> Bool {
   b != 0 and b != 10 and b != 13
 }
 
@@ -270,18 +270,18 @@ fn form_field(body: View, name: View) -> Option[View] {
   form_from(body, name, at: 0)
 }
 
-// Internal: form_field, from the pair that starts at `at`. The next `&` or `=` is `scan`, one step per 16 bytes
+// form_field, from the pair that starts at `at`. The next `&` or `=` is `scan`, one step per 16 bytes
 // read, plus a few steps for the pair, and the pair's name is compared as it is decoded, in place. A lookup
 // makes nothing for the pairs it passes, only the value it finds.
-fn form_from(body: View, name: View, at: Int) -> Option[View] {
+private fn form_from(body: View, name: View, at: Int) -> Option[View] {
   match {
     at > len(body) -> None
     else -> form_stop(body, name, at, stop: scan(body, at, set: "&="))
   }
 }
 
-// Internal: form_from, once the next `&` or `=` is known.
-fn form_stop(body: View, name: View, at: Int, stop: Int) -> Option[View] {
+// form_from, once the next `&` or `=` is known.
+private fn form_stop(body: View, name: View, at: Int, stop: Int) -> Option[View] {
   match {
     stop < len(body) and body[stop] == 61 -> form_value(body, name, at, eq: stop)
     form_named(raw: slice(v: body, from: at, to: stop), name, at: 0, n: 0) -> Some(value: "")
@@ -290,8 +290,8 @@ fn form_stop(body: View, name: View, at: Int, stop: Int) -> Option[View] {
   }
 }
 
-// Internal: the pair has an `=`, so the value runs from the byte after it to the next `&`.
-fn form_value(body: View, name: View, at: Int, eq: Int) -> Option[View] {
+// The pair has an `=`, so the value runs from the byte after it to the next `&`.
+private fn form_value(body: View, name: View, at: Int, eq: Int) -> Option[View] {
   let end = scan(body, at: eq + 1, set: "&")
   match {
     form_named(
@@ -305,8 +305,8 @@ fn form_value(body: View, name: View, at: Int, eq: Int) -> Option[View] {
   }
 }
 
-// Internal: whether raw[at..], `+` and %XX decoded as form_bytes decodes them, is name[n..].
-fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
+// Whether raw[at..], `+` and %XX decoded as form_bytes decodes them, is name[n..].
+private fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
   match {
     at >= len(raw) -> n == len(name)
     n >= len(name) -> False
@@ -320,15 +320,15 @@ fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
   }
 }
 
-// Internal: one name or value of a form, `+` and %XX decoded. Form encoding, not a path's: `percent_decoded` is
+// One name or value of a form, `+` and %XX decoded. Form encoding, not a path's: `percent_decoded` is
 // the path's, where `+` stays a `+`, and it refuses what this passes through (a bad escape, bytes that are not
 // UTF-8).
-fn form_decoded(raw: View) -> View {
+private fn form_decoded(raw: View) -> View {
   freeze(buf: form_bytes(out: buf(), raw, at: 0))
 }
 
-// Internal: the loop of form_decoded.
-fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
+// The loop of form_decoded.
+private fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
   match {
     at >= len(raw) -> out
     raw[at] == 43 -> form_bytes(out: push(buf: out, byte: 32), raw, at: at + 1)
@@ -378,9 +378,9 @@ fn percent_decoded(text: View) -> Option[View] {
   }
 }
 
-// Internal: the loop of percent_decoded, from `at`: the bytes up to the next `%` as they are, then its escape. An
+// The loop of percent_decoded, from `at`: the bytes up to the next `%` as they are, then its escape. An
 // escape without two hex digits is written as 255, a byte UTF-8 never holds, so the check after makes it None.
-fn percent_bytes(out: Buf, text: View, at: Int) -> Buf {
+private fn percent_bytes(out: Buf, text: View, at: Int) -> Buf {
   let p = scan(v: text, at, set: "%")
   let copied = append(buf: out, view: slice(v: text, from: at, to: p))
   match {
@@ -396,8 +396,8 @@ fn percent_bytes(out: Buf, text: View, at: Int) -> Buf {
   }
 }
 
-// Internal: is v, from `at`, UTF-8 (RFC 3629)? ASCII is passed 16 bytes at a time (text_run's scan_plain).
-fn utf8_whole(v: View, at: Int) -> Bool {
+// Is v, from `at`, UTF-8 (RFC 3629)? ASCII is passed 16 bytes at a time (text_run's scan_plain).
+private fn utf8_whole(v: View, at: Int) -> Bool {
   let e = text_run(v, at)
   match {
     e >= len(v) -> True
@@ -415,8 +415,8 @@ fn write_html(out: Buf, text: View) -> Buf {
   html_from(out, text, at: 0)
 }
 
-// Internal: the loop of write_html.
-fn html_from(out: Buf, text: View, at: Int) -> Buf {
+// The loop of write_html.
+private fn html_from(out: Buf, text: View, at: Int) -> Buf {
   match {
     at >= len(text) -> out
     text[at] == 38 -> html_from(out: append(buf: out, view: "&amp;"), text, at: at + 1)

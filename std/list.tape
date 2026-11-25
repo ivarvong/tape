@@ -14,8 +14,8 @@ fn length[T](list: List[T]) -> Int {
   length_from(list, acc: 0)
 }
 
-// Internal: the loop of length.
-fn length_from[T](list: List[T], acc: Int) -> Int {
+// The loop of length.
+private fn length_from[T](list: List[T], acc: Int) -> Int {
   match list {
     Cons(tail) -> length_from(list: tail, acc: acc + 1)
     Nil -> acc
@@ -30,8 +30,8 @@ fn reverse[T](list: List[T]) -> List[T] {
   reverse_onto(list, acc: Nil)
 }
 
-// Internal: the loop of reverse.
-fn reverse_onto[T](list: List[T], acc: List[T]) -> List[T] {
+// The loop of reverse.
+private fn reverse_onto[T](list: List[T], acc: List[T]) -> List[T] {
   match list {
     Cons(head, tail) -> reverse_onto(list: tail, acc: Cons(head, tail: acc))
     Nil -> acc
@@ -46,8 +46,8 @@ fn map[A, B](list: List[A], by: Fn[A, B]) -> List[B] {
   reverse(list: map_onto(list, by, acc: Nil))
 }
 
-// Internal: the loop of map, last item first.
-fn map_onto[A, B](list: List[A], by: Fn[A, B], acc: List[B]) -> List[B] {
+// The loop of map, last item first.
+private fn map_onto[A, B](list: List[A], by: Fn[A, B], acc: List[B]) -> List[B] {
   match list {
     Cons(head, tail) -> map_onto(list: tail, by, acc: Cons(head: by(head), tail: acc))
     Nil -> acc
@@ -62,8 +62,8 @@ fn filter[A](list: List[A], keep: Fn[A, Bool]) -> List[A] {
   reverse(list: filter_onto(list, keep, acc: Nil))
 }
 
-// Internal: the loop of filter, last item first.
-fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A] {
+// The loop of filter, last item first.
+private fn filter_onto[A](list: List[A], keep: Fn[A, Bool], acc: List[A]) -> List[A] {
   match list {
     Cons(head, tail) if keep(head) -> filter_onto(list: tail, keep, acc: Cons(head, tail: acc))
     Cons(tail) -> filter_onto(list: tail, keep, acc)
@@ -97,16 +97,16 @@ fn range(from: Int, to: Int) -> List[Int] {
   range_down(from, at: to, acc: Nil)
 }
 
-// Internal: the loop of range, from the top down (at > from, so at - 1 fits).
-fn range_down(from: Int, at: Int, acc: List[Int]) -> List[Int] {
+// The loop of range, from the top down (at > from, so at - 1 fits).
+private fn range_down(from: Int, at: Int, acc: List[Int]) -> List[Int] {
   match {
     at <= from -> acc
     else -> range_down(from, at: at - 1, acc: Cons(head: at - 1, tail: acc))
   }
 }
 
-// Internal: fold over range(from, to), as compiler/fuse.ts writes it: no list is made (from < to, so from + 1 fits).
-fn fold_range[B](from: Int, to: Int, acc: B, by: Fn2[B, Int, B]) -> B {
+// fold over range(from, to), as compiler/fuse.ts writes it: no list is made (from < to, so from + 1 fits).
+private fn fold_range[B](from: Int, to: Int, acc: B, by: Fn2[B, Int, B]) -> B {
   match {
     from >= to -> acc
     else -> fold_range(from: from + 1, to, acc: by(acc, from), by)
@@ -144,8 +144,8 @@ fn join(list: List[View], sep: View) -> View {
   }
 }
 
-// Internal: join's texts after the first, each after `sep`.
-fn join_rest(out: Buf, list: List[View], sep: View) -> Buf {
+// join's texts after the first, each after `sep`.
+private fn join_rest(out: Buf, list: List[View], sep: View) -> Buf {
   match list {
     Cons(head, tail) -> join_rest(
       out: out |> append(view: sep) |> append(view: head),

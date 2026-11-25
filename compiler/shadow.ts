@@ -2,16 +2,20 @@
 
 import {
   type Expr,
+  type FnDecl,
+  type Pattern,
   type Program,
   type TypeAst,
   type TypeDecl,
+  armParts,
   eachExpr,
   eachPattern,
   eachType,
+  partsOf,
   patternsIn,
   typesIn,
 } from './ast.ts';
-import { stemOf } from './common.ts';
+import { fail, stemOf } from './common.ts';
 import { INTRINSICS, type Type } from './types.ts';
 
 // A program's own definition wins over std's of the same name, in the program's files
@@ -195,6 +199,84 @@ export function shadow(prog: Program): void {
     eachExpr(f.body, e => {
       if (e.k === 'call' && !e.name.includes('.')) e.name = pick(prog, e.name, f.file) ?? e.name;
     });
+  privateCalls(prog);
+}
+
+// ---- private functions
+// The function a name written in `file` means, as compiler/gen/module.ts find takes it once the calls are picked
+// above: the file's own, else the only one of the name, else `file.name`; null for none, or two (C45 says which).
+function meant(prog: Program, name: string, file: string): FnDecl | null {
+  const own = prog.byFile.get(file)?.get(name);
+  if (own !== undefined) return prog.fns.get(own) ?? null;
+  const all = prog.defs.get(name) ?? [];
+  const [only] = all;
+  if (only) return all.length === 1 ? (prog.fns.get(only.key) ?? null) : null;
+  const dot = name.indexOf('.');
+  if (dot > 0)
+    for (const [fl, names] of prog.byFile) {
+      const known = stemOf(fl) === name.slice(0, dot) ? names.get(name.slice(dot + 1)) : undefined;
+      if (known !== undefined) return prog.fns.get(known) ?? null;
+    }
+  return prog.fns.get(name) ?? null;
+}
+// what to use instead of std/json.tape's helpers, which read JSON one way for decode and the writers
+const JSON_INSTEAD =
+  '`decode(json: body, as: Order)` reads JSON into a type, `is_json(text: body)` says whether bytes are JSON, and `json_member(json: body, key: "id")` is the JSON of one member (decode that with `as: View`, `as: Int`, …)';
+/** C94: a private function named from another file: its name, written as the program wrote it. */
+function refusePrivate(g: FnDecl, written: string, at: { file: string; line: number }): never {
+  const bare = written.slice(written.lastIndexOf('.') + 1);
+  const yours = `or write a \`${bare}\` of your own in this file: a function a file defines is the one its calls take.`;
+  return fail(
+    at,
+    'C94',
+    `${bare} is private to ${g.file}: it may be called only there`,
+    g.file === 'std/json.tape'
+      ? `${JSON_INSTEAD}; ${yours}`
+      : `Use a public function (docs/std.md lists std's), ${yours}`,
+  );
+}
+/**
+ * C94: a `private fn` is called, passed as a function value or matched as a function pattern only in its own file.
+ * This reads the program as written, before the compiler writes anything of its own: decode's decoders (wire.ts,
+ * in a file of their own), write_json, write_rows, the holes of a text and every other call the build makes of std
+ * are made after it, so they are not refused. A name a local holds (a parameter, a `let`, a pattern's binding)
+ * is that local, not the function.
+ */
+function privateCalls(prog: Program): void {
+  const check = (name: string, file: string, at: { file: string; line: number }): void => {
+    const g = meant(prog, name, file);
+    if (g?.private && g.file !== file) refusePrivate(g, name, at);
+  };
+  const bindings = (p: Pattern, file: string, into: Set<string>): void =>
+    eachPattern(p, q => {
+      if (q.k === 'bind' || q.k === 'as') into.add(q.name);
+      if (q.k === 'fn' && !into.has(q.name)) check(q.name, file, q);
+    });
+  const walk = (e: Expr, file: string, locals: ReadonlySet<string>): void => {
+    if ((e.k === 'call' || e.k === 'var') && !locals.has(e.name)) check(e.name, file, e);
+    if (e.k === 'block') {
+      const scope = new Set(locals);
+      for (const l of e.lets) {
+        walk(l.value, file, scope);
+        if (l.pat) bindings(l.pat, file, scope);
+        else scope.add(l.name);
+      }
+      return walk(e.result, file, scope);
+    }
+    if (e.k === 'lambda') return walk(e.body, file, new Set([...locals, ...e.params.map(p => p.name)]));
+    if (e.k === 'match' && e.subject) {
+      walk(e.subject, file, locals);
+      for (const a of e.arms) {
+        const scope = new Set(locals);
+        bindings(a.pat, file, scope);
+        for (const part of armParts(a)) walk(part, file, scope);
+      }
+      return;
+    }
+    for (const part of partsOf(e)) walk(part, file, locals);
+  };
+  for (const f of prog.fns.values()) walk(f.body, f.file, new Set(f.params.map(p => p.name)));
+  for (const t of prog.types.values()) if (t.refine) walk(t.refine.pred, t.file, new Set(['self']));
 }
 // The qualified name a call from `file` takes when its bare name is not enough; null to leave the call as written.
 function pick(prog: Program, name: string, file: string): string | null {

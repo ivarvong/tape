@@ -2,7 +2,7 @@
 // (compiler/gen/module.ts importsOf: the indices of the functions after them depend on it), from what the program
 // names, so a call it missed is a call of another function's index: a module WebAssembly refuses ("expected type
 // f64, found call of type i32"), from a program the compiler accepted. Each program here has a Float only through
-// parse_float or a function of std's, or calls std's wake as `retry.retry_later`; each must give a module that
+// parse_float or decode (as: Float), or calls std's wake as `retry.retry_later`; each must give a module that
 // WebAssembly takes, and the Float ones answer through the host.
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
@@ -77,10 +77,10 @@ fn number(text: View) -> Bool {
     ],
   ],
   [
-    "std's json_maybe_float, its Float in a hole",
-    `${head}  match json.json_maybe_float(found: json.json_tree(v: body)) {
-    Some(value: x) -> respond(status: 200) |> append(view: "\\(x)")
-    None -> respond(status: 200) |> append(view: "none")
+    'decode of a Float, its Float in a hole',
+    `${head}  match decode(json: body, as: Float) {
+    Ok(value: x) -> respond(status: 200) |> append(view: "\\(x)")
+    Err -> respond(status: 200) |> append(view: "none")
   }
 }
 `,
@@ -90,8 +90,11 @@ fn number(text: View) -> Bool {
     ],
   ],
   [
-    "std's json_write_float of json_float_of",
-    `${head}  respond(status: 200) |> json.json_write_float(value: json.json_float_of(found: json.json_tree(v: body)))
+    'write_json of a Float decoded',
+    `${head}  match decode(json: body, as: Float) {
+    Ok(value: x) -> respond(status: 200) |> write_json(value: x)
+    Err -> respond(status: 200) |> append(view: "none")
+  }
 }
 `,
     [['12.5e-1', '1.25']],

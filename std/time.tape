@@ -112,8 +112,8 @@ fn http_date(ms: Int) -> View {
   "\(w), \(d) \(mo) \(y) \(h):\(mi):\(s) GMT"
 }
 
-// Internal: the day of the week of an instant, 0 for Sunday to 6 for Saturday (1970-01-01 was a Thursday).
-fn weekday(ms: Int) -> Int {
+// The day of the week of an instant, 0 for Sunday to 6 for Saturday (1970-01-01 was a Thursday).
+private fn weekday(ms: Int) -> Int {
   let days = ms / 86400000 - match {
     ms % 86400000 < 0 -> 1
     else -> 0
@@ -125,8 +125,8 @@ fn weekday(ms: Int) -> Int {
   }
 }
 
-// Internal: a day of the week as IMF-fixdate names it, 0 for Sunday.
-fn weekday_name(day: Int) -> View {
+// A day of the week as IMF-fixdate names it, 0 for Sunday.
+private fn weekday_name(day: Int) -> View {
   match day {
     0 -> "Sun"
     1 -> "Mon"
@@ -138,8 +138,8 @@ fn weekday_name(day: Int) -> View {
   }
 }
 
-// Internal: a month as IMF-fixdate names it, 1 for January.
-fn month_name(month: Int) -> View {
+// A month as IMF-fixdate names it, 1 for January.
+private fn month_name(month: Int) -> View {
   match month {
     1 -> "Jan"
     2 -> "Feb"
@@ -156,8 +156,8 @@ fn month_name(month: Int) -> View {
   }
 }
 
-// Internal: a year as rfc3339 writes it: four digits from 0 to 9999, else a sign and at least six.
-fn iso_year(year: Int) -> View {
+// A year as rfc3339 writes it: four digits from 0 to 9999, else a sign and at least six.
+private fn iso_year(year: Int) -> View {
   match {
     year >= 0 and year <= 9999 -> four_digit(n: year)
     year > 9999 -> "+" ++ six_digit(n: year)
@@ -165,25 +165,25 @@ fn iso_year(year: Int) -> View {
   }
 }
 
-// Internal: a year as http_date writes it: at least four digits, after a `-` before the year 0.
-fn http_year(year: Int) -> View {
+// A year as http_date writes it: at least four digits, after a `-` before the year 0.
+private fn http_year(year: Int) -> View {
   match {
     year >= 0 -> four_digit(n: year)
     else -> "-" ++ four_digit(n: 0 - year)
   }
 }
 
-// Internal: n, 0 or more, in at least two digits. These write n with decimal_text, not a hole: a hole's Int is
+// N, 0 or more, in at least two digits. These write n with decimal_text, not a hole: a hole's Int is
 // written by a call of write_int, which a program may define for itself (test/wire-names.ts).
-fn two_digit(n: Int) -> View {
+private fn two_digit(n: Int) -> View {
   match {
     n < 10 -> "0" ++ decimal_text(value: n)
     else -> decimal_text(value: n)
   }
 }
 
-// Internal: n, 0 or more, in at least three digits.
-fn three_digit(n: Int) -> View {
+// N, 0 or more, in at least three digits.
+private fn three_digit(n: Int) -> View {
   match {
     n < 10 -> "00" ++ decimal_text(value: n)
     n < 100 -> "0" ++ decimal_text(value: n)
@@ -191,8 +191,8 @@ fn three_digit(n: Int) -> View {
   }
 }
 
-// Internal: n, 0 or more, in at least four digits.
-fn four_digit(n: Int) -> View {
+// N, 0 or more, in at least four digits.
+private fn four_digit(n: Int) -> View {
   match {
     n < 10 -> "000" ++ decimal_text(value: n)
     n < 100 -> "00" ++ decimal_text(value: n)
@@ -201,8 +201,8 @@ fn four_digit(n: Int) -> View {
   }
 }
 
-// Internal: n, 0 or more, in at least six digits.
-fn six_digit(n: Int) -> View {
+// N, 0 or more, in at least six digits.
+private fn six_digit(n: Int) -> View {
   match {
     n < 10000 -> "00" ++ four_digit(n)
     n < 100000 -> "0" ++ decimal_text(value: n)

@@ -177,7 +177,7 @@ fn plain_end(v: View, at: Int) -> Int {
   scan_plain(v, at)
 }
 
-// a string whose plain run ends at its quote is a view; otherwise it is read run by run
+// a string whose plain run ends at its quote is a view; one with an escape is std's json_text, decoded
 fn jstring_at(v: View, at: Int, end: Int) -> JParsed {
   jstring(found: key_at(v, at, end))
 }
@@ -186,7 +186,7 @@ fn key_at(v: View, at: Int, end: Int) -> JsonText {
   let e = text_run(v, at: end)
   match {
     e < len(v) and v[e] == 34 -> JsonText(text: slice(v, from: at, to: e), next: e + 1)
-    e < len(v) and v[e] == 92 -> escaped(v, at: e, out: append(buf: buf(), view: slice(v, from: at, to: e)))
+    e < len(v) and v[e] == 92 -> json_text(v, at)
     else -> BadText
   }
 }
@@ -207,25 +207,13 @@ fn utf8_run(v: View, at: Int, found: Utf8) -> Int {
   }
 }
 
-// at: a backslash; out holds what is decoded so far
-fn escaped(v: View, at: Int, out: Buf) -> JsonText {
-  match json_char(v, at) {
-    Char(code, next) -> escaped_more(v, at: next, out: write_code(out, code))
-    _ -> bad_text(text: freeze(out))
-  }
-}
-
-fn escaped_more(v: View, at: Int, out: Buf) -> JsonText {
-  let e = text_run(v, at)
+// the first position at or after `at` that is not JSON whitespace
+fn json_ws(v: View, at: Int) -> Int {
   match {
-    e < len(v) and v[e] == 34 -> JsonText(text: freeze(append(buf: out, view: slice(v, from: at, to: e))), next: e + 1)
-    e < len(v) and v[e] == 92 -> escaped(v, at: e, out: append(buf: out, view: slice(v, from: at, to: e)))
-    else -> bad_text(text: freeze(out))
+    at < len(v)
+      and (v[at] == 32 or v[at] == 10 or v[at] == 13 or v[at] == 9) -> json_ws(v, at: at + 1)
+    else -> at
   }
-}
-
-fn bad_text(text: View) -> JsonText {
-  BadText
 }
 
 fn jstring(found: JsonText) -> JParsed {

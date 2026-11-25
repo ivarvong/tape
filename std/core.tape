@@ -83,8 +83,8 @@ fn same(a: View, b: View) -> Bool {
   len(a) == len(b) and same_from(a, b, at: 0)
 }
 
-// Internal: the loop of same, from position `at`.
-fn same_from(a: View, b: View, at: Int) -> Bool {
+// The loop of same, from position `at`.
+private fn same_from(a: View, b: View, at: Int) -> Bool {
   match {
     at >= len(a) -> True
     a[at] != b[at] -> False

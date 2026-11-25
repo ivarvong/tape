@@ -81,7 +81,7 @@ fn punct(b: Int) -> Int {
 ```
 
 Reserved words: `fn export type schema migration match with let do if else and or not`. Words with a meaning
-only where they stand: `interface flag machine invariant where contract settled private final read write`. A reserved
+only where they stand: `interface flag machine invariant where contract settled private final read write` (`private` before `fn` or `type`). A reserved
 word can name a record's field, since a field is never a variable: `Event(type: View)`, `e.type`, and in a pattern
 `Event(type: kind)`, which binds `kind` (a bare `Event(type)` would bind a variable named `type`, and is P01). So a
 JSON key that is a reserved word is decoded and written like any other.
@@ -196,6 +196,10 @@ and a function value written in it may name its type parameters (`fn(out: Buf, v
 A name is the first file's. Another file may define it again (C04 refuses a second definition in one file); that
 one is `file.name`, and in that file the bare name is its own. `handle` is the entry the host calls, so the
 first file that defines it serves requests and a later file's is `file.handle`.
+`private fn name(…)` is called, passed as a function value or matched as a pattern only in its own file (C94),
+as `private type` builds its values only there (C66). std's helpers are private: a program reaches what they do
+through the public functions docs/std.md lists, and a function of its own of a helper's name is its own. The calls
+the compiler writes itself (decode's decoders, `write_json`, the holes of a text) reach std's helpers all the same.
 
 A body is steps, then one expression that is its value. There are three steps:
 

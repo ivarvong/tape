@@ -1,6 +1,7 @@
 // Text with holes, "Hello, \(name)": what it gives, that it is the code of the append chain it stands for, and what
 // is refused. The compiled build and the reference interpreter must agree on every one.
 import '../node25.ts';
+import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { ok, same, finish, built, moduleOf, bare, handleBare, codes, std } from './harness.ts';
 
@@ -63,6 +64,30 @@ ok(
   codes(
     'schema "CREATE TABLE IF NOT EXISTS t(k TEXT PRIMARY KEY)"\nfn handle(raw: View, db: Sql) -> Buf {\n  do sql_exec(db, query: "DELETE FROM t WHERE k = \'\\(raw)\'")\n  respond(status: 200)\n}\n',
   ).includes('C32:3'),
+);
+
+// ---- an Int in a hole is written by std's write_int whatever the program names its own functions: the call the
+// compiler writes is text.write_int, so a program's own write_int (here of another type) is neither taken for it
+// in the program's file (it was C11) nor found beside std's from a file of std (it was C45)
+const OWN = 'fn write_int(x: Int) -> Int {\n  x + 1\n}\n';
+const holed = (stdExtra: string, body: string): string => {
+  const sources = [
+    ...std.map(s => (s.name === 'std/json.tape' ? { ...s, text: `${s.text}\n${stdExtra}` } : s)),
+    { name: 'own.tape', text: `${OWN}fn handle(raw: View) -> Buf {\n  ${body}\n}\n` },
+  ];
+  const b = compile(sources);
+  if (!b.wasm) return b.errors.map(e => `${e.code}:${e.line}`).join(' ');
+  return handleBare(bare(new WebAssembly.Module(b.wasm)), new TextEncoder().encode('ada'));
+};
+same(
+  "a program's own write_int, and an Int hole in the program's file",
+  holed('', 'buf() |> append(view: "\\(write_int(x: len(raw))) and \\(len(raw))")'),
+  '4 and 3',
+);
+same(
+  "an Int hole in a file of std, beside a program's own write_int",
+  holed('fn hole_of(n: Int) -> View {\n  "n=\\(n)"\n}\n', 'buf() |> append(view: json.hole_of(n: len(raw)))'),
+  'n=3',
 );
 
 finish();

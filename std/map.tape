@@ -26,8 +26,8 @@ fn compare(a: View, b: View) -> Int {
   compare_from(a, b, at: 0)
 }
 
-// Internal: the loop of compare.
-fn compare_from(a: View, b: View, at: Int) -> Int {
+// The loop of compare.
+private fn compare_from(a: View, b: View, at: Int) -> Int {
   match {
     at >= len(b) and at >= len(a) -> 0
     at >= len(b) -> 1
@@ -123,16 +123,16 @@ fn count[V](map: Map[V]) -> Int {
   }
 }
 
-// Internal: a tree's height.
-fn height[V](map: Map[V]) -> Int {
+// A tree's height.
+private fn height[V](map: Map[V]) -> Int {
   match map {
     Empty -> 0
     Node(height) -> height
   }
 }
 
-// Internal: a node with its height computed.
-fn node[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
+// A node with its height computed.
+private fn node[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match {
     height(map: left) > height(map: right) -> Node(
       left,
@@ -145,8 +145,8 @@ fn node[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   }
 }
 
-// Internal: a node, rotated when one side is more than one taller.
-fn balance[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
+// A node, rotated when one side is more than one taller.
+private fn balance[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match {
     height(map: left) > height(map: right) + 1 -> lean_right(left, key, value, right)
     height(map: right) > height(map: left) + 1 -> lean_left(left, key, value, right)
@@ -154,8 +154,8 @@ fn balance[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   }
 }
 
-// Internal: a rotation when the left side is taller.
-fn lean_right[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
+// A rotation when the left side is taller.
+private fn lean_right[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match left {
     Node(left: ll, key: lk, value: lv, right: lr) if height(map: ll) >= height(map: lr) -> node(
       left: ll,
@@ -178,8 +178,8 @@ fn lean_right[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   }
 }
 
-// Internal: a rotation when the right side is taller.
-fn lean_left[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
+// A rotation when the right side is taller.
+private fn lean_left[V](left: Map[V], key: View, value: V, right: Map[V]) -> Map[V] {
   match right {
     Node(left: rl, key: rk, value: rv, right: rr) if height(map: rr) >= height(map: rl) -> node(
       left: node(left, key, value, right: rl),

@@ -49,7 +49,9 @@ export function written(c: Ctx, e: Interp, into: Expr): Expr {
         'the program has no function write_int',
         'A number in a text literal needs std/text.tape: compile it together with your file.',
       );
-    else out = call('write_int', 'out', out, 'value', value);
+    // by its file's stem, so a program's own write_int, which a file of the program or of std would take for the
+    // bare name, is not called (C11) or found beside std's (C45)
+    else out = call('text.write_int', 'out', out, 'value', value);
   }
   return out;
 }

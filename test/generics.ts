@@ -151,7 +151,13 @@ T(
   Number(
     run(
       MAP +
-        `fn f(n: Int) -> Int {
+        `fn height(map: Map[Int]) -> Int {
+  match map {
+    Empty -> 0
+    Node(height) -> height
+  }
+}
+fn f(n: Int) -> Int {
   height(map: fill(n, step: 1, map: Empty))
 }`,
       [1000n],

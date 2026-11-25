@@ -18,6 +18,8 @@ function declaration(c: Cursor, prog: Program, t: Token): void {
   else if (kw && word === 'type') typeDecl(c, prog, false);
   // `private type`: its constructors build values only in this file (C66)
   else if (!kw && word === 'private' && c.eat('kw', 'type')) typeDecl(c, prog, true);
+  // `private fn`: called only from this file (C94)
+  else if (!kw && word === 'private' && c.eat('kw', 'fn')) fnDecl(c, prog, false, true);
   else if (kw && (word === 'fn' || word === 'export')) fnDecl(c, prog, word === 'export');
   else if (!kw && word === 'invariant' && c.is('str')) invariant(c, prog, t);
   else if (!kw && word === 'machine') machine(c, prog);
@@ -27,7 +29,7 @@ function declaration(c: Cursor, prog: Program, t: Token): void {
       t,
       'P05',
       `expected \`fn\`, \`type\`, \`interface\` or \`schema\` but found ${shown(t)}`,
-      'A file is declarations: `fn`, `export fn`, `type`, `interface`, `migration`, `schema`, `flag`, `machine`, `invariant`. A statement goes inside a function.',
+      'A file is declarations: `fn`, `export fn`, `private fn`, `type`, `private type`, `interface`, `migration`, `schema`, `flag`, `machine`, `invariant`. A statement goes inside a function.',
     );
 }
 export function parse(file: string, text: string, prog: Program): void {
