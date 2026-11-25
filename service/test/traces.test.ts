@@ -243,11 +243,17 @@ describe('traces: faults leave an explicit trace', () => {
     expect(await got('/kv/jepsen-trc/f/k/b')).toEqual({ key: 'b', value: 'kept', version: 1 });
   });
 
-  it('a storage error at commit: 503 applied: false with retry-after (transient), the run is rolled back in the trace, and nothing is stored', async () => {
+  it('a storage error at commit: 503 not_applied with retry-after (transient), the run is rolled back in the trace, and nothing is stored', async () => {
     await setFaults('jepsen-trc', { storage_error: 1 });
     const { trace, res } = traced(`/kv/jepsen-trc/f/k/c?op=${Date.now()}_tr4`, { method: 'PUT', body: 'lost' });
     const r = await res;
-    expect([r.status, at(await json(r), 'applied'), r.headers.get('retry-after')]).toEqual([503, false, '1']);
+    const body = await json(r);
+    expect([r.status, at(body, 'outcome'), at(body, 'transient'), r.headers.get('retry-after')]).toEqual([
+      503,
+      'not_applied',
+      true,
+      '1',
+    ]);
     await setFaults('jepsen-trc', null);
     const spans = spansOf(await got(`/kv/jepsen-trc/f/traces/${trace}?key=c`)),
       t = tree(spans);
@@ -264,7 +270,7 @@ describe('traces: faults leave an explicit trace', () => {
     expect((await call('/kv/jepsen-trc/f/k/c')).status).toBe(404);
   });
 
-  it('a program that traps: 500 applied: false, recorded with what it did, and its writes rolled back', async () => {
+  it('a program that traps: 500 not_applied, recorded with what it did, and its writes rolled back', async () => {
     const src = `migration 1 "t" {
   CREATE TABLE t(x INTEGER NOT NULL)
 }
@@ -292,12 +298,15 @@ fn divide(wrote: Option[N]) -> Buf {
     expect(up.status).toBe(201);
     const { res } = traced('/trc/trap/v/1/go', { method: 'POST' });
     const r = await res;
+    const body = await json(r);
     expect([
       r.status,
-      at(await json(r), 'applied'),
-      r.headers.get('tape-applied'),
+      at(body, 'outcome'),
+      at(body, 'transient'),
+      r.headers.get('tape-outcome'),
       r.headers.get('retry-after'),
-    ]).toEqual([500, false, 'false', null]); // a trap is not transient
+    ]).toEqual([500, 'not_applied', undefined, 'not_applied', null]); // a trap is not transient
+    expect(String(at(body, 'retry'))).toContain('cannot apply it twice');
     expect(await (await call('/trc/trap/v/1/n')).text()).toBe('0');
     const spans = spansOf(await json(await linked(r))),
       run = must(

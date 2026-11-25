@@ -234,10 +234,11 @@ export async function run(
   // failure, and they are not a link.
   const id = out.headers.get('tape-request-id');
   if (id === null || id === '' || id === 'null') out.headers.set('tape-request-id', crypto.randomUUID());
-  // A response the object returned is a finished request, including the program's own 500. Unknown is only the
-  // stop path, which already set the header (web.ts unknownStop).
+  // A response that never said what it did is unknown. applied is the strongest claim, and a default must not be
+  // it: a 409 for a version that did not run was labelled applied when this fell through. A program that answered,
+  // including its own 500, sets the header itself (program.ts). The stop path sets unknown (web.ts unknownStop).
   if (out.headers.get('tape-outcome') === null)
-    for (const [header, value] of Object.entries(encodeOutcome(APPLY.applied).headers)) out.headers.set(header, value);
+    for (const [header, value] of Object.entries(encodeOutcome(APPLY.unknown).headers)) out.headers.set(header, value);
   out.headers.set('traceparent', `00-${rt.trace}-${rt.span}-01`);
   const storeIt = (): Promise<string | null> =>
     store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);

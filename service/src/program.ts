@@ -649,7 +649,14 @@ export class Program extends DurableObject<Env> {
     try {
       app = this.app(version);
     } catch (e) {
-      return json({ error: messageOf(e) }, 409);
+      // app() reads storage before the run (the held migration, the machine). A throw here kept nothing. The
+      // header is set here: a missing tape-outcome is unknown at the router, and unknown is a weaker claim than
+      // this one, which the service can make.
+      const encoded = encodeOutcome(APPLY.not_applied);
+      const res = json({ error: messageOf(e), ...encoded.body }, 409);
+      res.headers.set('tape-request-id', crypto.randomUUID());
+      for (const [header, value] of Object.entries(encoded.headers)) res.headers.set(header, value);
+      return res;
     }
     // tape-fault (jepsen-* only, set by the supervisor): storage_error fails the transaction as it commits, after
     // every statement ran; storage_reset fails as the transaction opens, before the run logs anything, the way
@@ -677,13 +684,19 @@ export class Program extends DurableObject<Env> {
     try {
       const ran = await app.runLogged(bytes, { transaction, trace: parent });
       const { status, body, type, headers } = split(ran.out);
+      // A stretch that committed has a log id before this write. runLogged returning means each of those
+      // transactions returned. A program rollback (rollback(out)) undoes the stretch it is in and still answers.
+      const prior = log.id() !== null;
       // the whole log, with its measured took (and, for a run that rolled itself back, written only now)
       log.keep(ran.effects, false);
+      const head = ran.effects[0];
+      const undone = head !== undefined && isHead(head) && head.undone === true;
+      const finished = undone ? (prior ? APPLY.partly : APPLY.not_applied) : APPLY.applied;
       const res = new Response(body, {
         status,
         headers: {
           ...this.#headers(log.id(), ran.effects[0]),
-          ...encodeOutcome(APPLY.applied).headers,
+          ...encodeOutcome(finished).headers,
           ...(type === undefined ? {} : { 'content-type': type }),
         },
       });
@@ -696,7 +709,7 @@ export class Program extends DurableObject<Env> {
   }
   // The run failed inside its transaction (a trap, a storage error). A storage failure is transient (R-ANS-2): 503
   // with retry-after, and the same request sent again with its key may succeed. A trap is the program's: 500.
-  // A failure before the log began kept nothing (the log commits with the writes): that is `not applied`, recorded
+  // A failure before the log began kept nothing (the log commits with the writes): that is `not_applied`, recorded
   // when the store still accepts a row, and answered even when it does not. The service does not run the request
   // again itself. A storage reset fails the requests in flight together; retrying them in the same turn hits the
   // object while it is being reset, and a GET is not a read (a program may write on any method).
@@ -721,16 +734,20 @@ export class Program extends DurableObject<Env> {
       ...(effects || kept ? {} : { unstarted: true }),
     };
     if (!effects) {
-      // The log never began, so this request's transaction did not commit. A later failure of the final log write,
-      // after a stretch had committed, is the other way to arrive here: those writes were kept.
-      const apply = kept ? APPLY.applied : APPLY['not applied'];
+      // The log never began, so this request's transaction did not commit: not_applied. The other way here is the
+      // final log.keep, the statement after runLogged has returned. runLogged returns only once each stretch's
+      // transactionSync has returned, and that return is the commit, so those writes were kept. The answer is
+      // applied and carries no retry-after: inviting the client to send the write again would apply it twice.
+      // A throw inside the transaction is the other function (effects is set, and a failed commit leaves the id
+      // unset because record() assigns it only after its INSERT returns).
+      const apply = kept ? APPLY.applied : APPLY.not_applied;
       const noted = kept ? null : this.#unstarted(version, bytes, failed, parent);
       const error = kept
         ? `the request was applied, but its answer was not recorded: ${message}`
         : `nothing was applied: ${message}`;
       return failedResponse(error, message, transient, apply, this.#headers(noted?.id ?? log.id(), noted?.head));
     }
-    const apply = kept ? APPLY.partly : APPLY['not applied'];
+    const apply = kept ? APPLY.partly : APPLY.not_applied;
     log.keep(effects, false, failed);
     const error = kept
       ? `the program failed after a call; what it wrote before that call was kept, the rest was rolled back: ${message}`

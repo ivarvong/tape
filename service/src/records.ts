@@ -27,29 +27,30 @@ export type Failed = {
 // the run's last call were kept and the rest was rolled back (R-ANS-2).
 const RETRY = {
   applied: 'the request finished; sending it again can apply it a second time',
-  notApplied: 'nothing was kept; send the same request again with the same idempotency key',
+  not_applied: 'nothing was kept; sending it again cannot apply it twice',
   partly:
-    'writes before the last call were kept and the rest was rolled back; send it again only with the same idempotency key',
-  unknown: 'it may already have been applied; send it again only with the same idempotency key',
+    "writes before the last call were kept; sending it again can repeat that part, so only with the program's own idempotency key",
+  unknown:
+    "the service cannot tell whether it was kept; sending it again can apply it a second time, so only with the program's own idempotency key",
 } as const;
 /** What this request did, as far as the service can tell. Exactly one of these. */
 export type Apply =
   | { outcome: 'applied'; retry: typeof RETRY.applied }
-  | { outcome: 'not applied'; retry: typeof RETRY.notApplied }
+  | { outcome: 'not_applied'; retry: typeof RETRY.not_applied }
   | { outcome: 'partly'; retry: typeof RETRY.partly }
   | { outcome: 'unknown'; retry: typeof RETRY.unknown };
 export const APPLY = {
   applied: { outcome: 'applied', retry: RETRY.applied },
-  'not applied': { outcome: 'not applied', retry: RETRY.notApplied },
+  not_applied: { outcome: 'not_applied', retry: RETRY.not_applied },
   partly: { outcome: 'partly', retry: RETRY.partly },
   unknown: { outcome: 'unknown', retry: RETRY.unknown },
 } as const satisfies { [K in Apply['outcome']]: Extract<Apply, { outcome: K }> };
-/** The body fields and headers of one outcome. retry-after is only on `not applied`: an unknown outcome may already
- * have been applied, so a header that says "send it again now" would apply it twice. */
+/** The body fields and headers of one outcome. `retry` says whether sending the request again is safe. `retry-after`
+ * is only on a transient `not_applied`: that header says a retry may succeed, and it is not set on `unknown` (the
+ * request may already have been kept) or on a `not_applied` that will not change (a trap, a retired version). */
 export type EncodedOutcome = {
   outcome: Apply['outcome'];
   retry: string;
-  applied?: false | 'partly';
   transient?: true;
 };
 export function encodeOutcome(
@@ -57,24 +58,18 @@ export function encodeOutcome(
   transient = false,
 ): { body: EncodedOutcome; headers: Record<string, string> } {
   const headers: Record<string, string> = { 'tape-outcome': apply.outcome };
-  const retryAfter = transient && apply.outcome === 'not applied';
-  if (apply.outcome === 'not applied') headers['tape-applied'] = 'false';
+  const retryAfter = transient && apply.outcome === 'not_applied';
   if (retryAfter) headers['retry-after'] = '1';
   switch (apply.outcome) {
     case 'applied':
       return { body: { outcome: 'applied', retry: apply.retry }, headers };
-    case 'not applied':
+    case 'not_applied':
       return {
-        body: {
-          outcome: 'not applied',
-          retry: apply.retry,
-          applied: false,
-          ...(retryAfter ? { transient: true } : {}),
-        },
+        body: { outcome: 'not_applied', retry: apply.retry, ...(retryAfter ? { transient: true } : {}) },
         headers,
       };
     case 'partly':
-      return { body: { outcome: 'partly', retry: apply.retry, applied: 'partly' }, headers };
+      return { body: { outcome: 'partly', retry: apply.retry }, headers };
     case 'unknown':
       return { body: { outcome: 'unknown', retry: apply.retry }, headers };
     default: {

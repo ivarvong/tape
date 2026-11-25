@@ -213,7 +213,10 @@ const numberAt = (v: unknown, field: string): number | undefined => {
 const outcomeOf = (f: Op['f'], res: Pick<Reply, 'status' | 'body'>): Partial<Attempt> => {
   const b = fields(res.body),
     version = numberAt(b, 'version'),
-    unsent = res.status === 503 && b.outcome === 'not applied';
+    rolledBack =
+      b.applied === false ||
+      (b.outcome === 'not_applied' && (res.status === 500 || b.transient === true)),
+    unsent = res.status === 503 && b.outcome === 'not_applied' && b.transient !== true;
   if (f === 'get') {
     if (res.status === 200) return { type: 'ok', live: true, version, read: b.value };
     if (res.status === 404 && version !== undefined) return { type: 'ok', live: false, version };
@@ -224,7 +227,7 @@ const outcomeOf = (f: Op['f'], res: Pick<Reply, 'status' | 'body'>): Partial<Att
   // the version it found
   if (res.status === 409 || (f === 'del' && res.status === 404)) return { type: 'fail', version };
   // rolled back: a claim the checks hold it to
-  if ((res.status === 500 || res.status === 503) && b.applied === false) return { type: 'fail', applied: false };
+  if ((res.status === 500 || res.status === 503) && rolledBack) return { type: 'fail', applied: false };
   // refused before any shard was called (the cluster lookup failed): a claim the checks hold it to as well
   return unsent ? { type: 'fail', not_sent: true } : { type: 'info' };
 };

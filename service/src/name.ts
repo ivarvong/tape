@@ -190,15 +190,17 @@ const brokenBy = (problems: readonly { version: number }[], candidate: number): 
 const are = (list: readonly unknown[]): string => (list.length > 1 ? 'are' : 'is');
 
 const enc = new TextEncoder();
-/** A response that is not a program's answer: it still names a request and what the request did. */
-const carry = (res: Response, outcome: Apply['outcome']): Response => {
-  const encoded = encodeOutcome(APPLY[outcome], res.status === 503);
+/** A response that is not a program's answer: it still names a request and what the request did. `transient` is
+ * passed by the caller. A 503 is not itself a retry: rebuild_failed stays 503 until a version that builds is
+ * uploaded, and retry-after on it would tell the client the same source will build if it waits a second. */
+const carry = (res: Response, outcome: Apply['outcome'], transient = false): Response => {
+  const encoded = encodeOutcome(APPLY[outcome], transient);
   if (res.headers.get('tape-request-id') === null) res.headers.set('tape-request-id', crypto.randomUUID());
   for (const [header, value] of Object.entries(encoded.headers)) res.headers.set(header, value);
   return res;
 };
-const outcomeBody = (outcome: Apply['outcome'], status: number): ReturnType<typeof encodeOutcome>['body'] =>
-  encodeOutcome(APPLY[outcome], status === 503).body;
+const outcomeBody = (outcome: Apply['outcome'], transient = false): ReturnType<typeof encodeOutcome>['body'] =>
+  encodeOutcome(APPLY[outcome], transient).body;
 const htmlPage = (html: string): Response =>
   new Response(html, {
     headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'private, max-age=300' },
@@ -829,7 +831,7 @@ export class Name extends DurableObject {
     const p = this.publication();
     if (!p.published || p.latest === null)
       return Promise.resolve(
-        carry(reply({ error: 'no such page', ...outcomeBody('not applied', 404) }, 404), 'not applied'),
+        carry(reply({ error: 'no such page', ...outcomeBody('not_applied') }, 404), 'not_applied'),
       );
     // a public answer carries no trace link, so its record need not be durable before the reply; a jepsen-*
     // account's is, as its faults are checked that way
@@ -848,12 +850,13 @@ export class Name extends DurableObject {
         reply(
           {
             error: `${name} is being upgraded to the current program; the request did not run: send it again`,
-            ...outcomeBody('not applied', 503),
+            ...outcomeBody('not_applied', true),
             upgrading: true,
           },
           503,
         ),
-        'not applied',
+        'not_applied',
+        true,
       );
     this.#inflight++;
     try {
@@ -950,12 +953,13 @@ export class Name extends DurableObject {
       opened();
       note({ status: retired ? 410 : 404, error });
       return carry(
-        reply({ error, ...outcomeBody('not applied', retired ? 410 : 404) }, retired ? 410 : 404),
-        'not applied',
+        reply({ error, ...outcomeBody('not_applied') }, retired ? 410 : 404),
+        'not_applied',
       );
     }
     const unbuilt = this.#fresh(version);
     if (unbuilt) {
+      // Permanent until a version that builds is uploaded. No retry-after: waiting does not make this source build.
       const error = 'rebuild_failed';
       opened();
       note({ status: 503, error });
@@ -965,11 +969,11 @@ export class Name extends DurableObject {
             error,
             message: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
             errors: unbuilt,
-            ...outcomeBody('not applied', 503),
+            ...outcomeBody('not_applied'),
           },
           503,
         ),
-        'not applied',
+        'not_applied',
       );
     }
     if (faulty === 'reset_callee_before') this.reset('jepsen: the shard was reset before it ran the request');
@@ -1026,7 +1030,10 @@ export class Name extends DurableObject {
       facet_began: facetBegan,
       facet_took: facetTook,
       status: res.status,
-      error: res.headers.get('tape-applied') === 'false' ? 'the run failed and was rolled back' : null,
+      error:
+        res.headers.get('tape-outcome') === 'not_applied' || res.headers.get('tape-outcome') === 'partly'
+          ? 'the run failed and was rolled back'
+          : null,
     });
     if (faulty === 'reset_callee_after') {
       await res.arrayBuffer();

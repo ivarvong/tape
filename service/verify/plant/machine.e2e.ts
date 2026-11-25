@@ -63,7 +63,7 @@ describe('a transition the machine does not declare', () => {
       // the hold was committed before the charge was sent (a call is a commit point); everything after the call,
       // the planted write and the seats it would free, rolled back
       expect(buy.status).toBe(500);
-      expect(field(buy.body, 'applied')).toBe('partly');
+      expect(field(buy.body, 'outcome')).toBe('partly');
       expect(JSON.stringify(buy.body)).toContain('that move is not declared');
       // the hold (committed before the charge was sent) stands; the refused move left the sale pending
       expect(field(sale.body, 'state')).toBe('pending');
