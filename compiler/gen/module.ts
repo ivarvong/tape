@@ -296,6 +296,8 @@ export function orderArgs(
   args: readonly Arg[],
   at: Place,
   hidden: ReadonlySet<string> = new Set(),
+  // appended to a missing-argument hint: a program constructor that shadows std's (Content's Atom)
+  aside = '',
 ): Arg[] {
   const written = names.filter(n => !hidden.has(n)),
     given = args.filter(a => a.label === null || !hidden.has(a.label)),
@@ -308,7 +310,7 @@ export function orderArgs(
     return names.map(n =>
       n === one
         ? first
-        : (rest.get(n) ?? fail(at, 'C13', `${what} is missing argument ${n}`, `${what} takes ${list}.`)),
+        : (rest.get(n) ?? fail(at, 'C13', `${what} is missing argument ${n}`, `${what} takes ${list}.${aside}`)),
     );
   }
   const by = new Map<string, Arg>();
@@ -334,7 +336,9 @@ export function orderArgs(
     if (by.has(a.label)) fail(a, 'C12', `argument ${a.label} is given twice`, `Give ${a.label} once.`);
     by.set(a.label, a);
   }
-  return names.map(n => by.get(n) ?? fail(at, 'C13', `${what} is missing argument ${n}`, `${what} takes ${list}.`));
+  return names.map(
+    n => by.get(n) ?? fail(at, 'C13', `${what} is missing argument ${n}`, `${what} takes ${list}.${aside}`),
+  );
 }
 
 // ---- the tables every function adds to

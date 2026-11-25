@@ -66,7 +66,7 @@ describe('content types', () => {
       [
         '/feed.xml',
         'application/atom+xml; charset=utf-8',
-        '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"/>',
+        '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><script xmlns="http://www.w3.org/1999/xhtml">ran=1</script></feed>',
       ],
       ['/rss.xml', 'application/rss+xml; charset=utf-8', '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"/>'],
       ['/doc.xml', 'application/xml; charset=utf-8', '<?xml version="1.0" encoding="utf-8"?><doc/>'],

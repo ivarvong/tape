@@ -168,6 +168,22 @@ fn f() -> Int {
 `;
 T("std's Text arm, beside a program's refined Text", run(RT2, 'f'), 8);
 T("std's Text arm, beside a program's refined Text (interp)", Number(interp(RT2, 'f')), 8);
+// a program constructor of the same name as a std one (Content's Atom, and the same for Text or Json) takes the
+// bare name. `content: Atom` is then the program's, and C13 has to say so: the missing field is not a hint that
+// std's Atom, which has none, was shadowed.
+const SHADOW_ATOM = `type Atom { Atom(n: Int) }
+fn f() -> Buf {
+  respond_as(status: 200, content: Atom)
+}
+`;
+const atomErr = compile([...std, { name: 't.tape', text: SHADOW_ATOM }], { exports: ['f'] }).errors.find(
+  e => e.code === 'C13',
+);
+T(
+  "a program's Atom shadows std's, and C13 says so",
+  atomErr ? `${atomErr.code}: ${atomErr.message} | ${atomErr.hint}` : 'compiled',
+  "C13: constructor Atom is missing argument n | constructor Atom takes (n). This program's Atom shadows std's Atom: rename the program's Atom to use std's here.",
+);
 
 // ---- 2. row-derived column lists
 const B = `schema "CREATE TABLE orders (id INTEGER PRIMARY KEY, state TEXT NOT NULL, total INTEGER NOT NULL, note TEXT)"

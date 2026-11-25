@@ -34,7 +34,7 @@ Uses: [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`write_json`]
 
 ### Respond with an Atom feed
 
-`respond_as(status: 200, content: Atom)` answers `application/atom+xml`; the host adds `charset=utf-8`. `Rss` is `application/rss+xml` and `Xml` is `application/xml`. These are documents, not pages.
+`respond_as(status: 200, content: Atom)` answers `application/atom+xml` (the host adds `charset=utf-8`, which overrides an encoding declaration in the document). `Rss` is `application/rss+xml` and `Xml` is `application/xml`. Chrome renders these as pages; the service's content-security-policy is what stops a script in the document, and a host that serves them must send that policy.
 
 ```tape
 fn handle(raw: View) -> Buf {
@@ -1404,7 +1404,7 @@ type Content {
 }
 ```
 
-The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml: a feed or an XML document, not a page. The host labels those three, and the text types, charset=utf-8. application/xhtml+xml is not a Content, because a browser would run it as a page.
+The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed.
 
 ### fn respond_as
 

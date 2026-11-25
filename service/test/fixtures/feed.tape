@@ -1,7 +1,9 @@
-// A feed and two other XML documents. The host serves Atom, RSS and XML as those types, with charset=utf-8, and
-// not as a page (test/v04.ts, service/test/public.test.ts, service/test/headers.test.ts).
+// A feed and two other XML documents. The Atom body holds an XHTML script. Chrome runs that script when the
+// response is application/atom+xml, application/rss+xml or application/xml, and nosniff does not stop it. The
+// service's content-security-policy (sandbox, default-src 'none') does (service/src/headers.ts, headers.test.ts).
 fn atom_feed() -> View {
-  "<?xml version=\"1.0\" encoding=\"utf-8\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"/>"
+  "<?xml version=\"1.0\" encoding=\"utf-8\"?><feed xmlns=\"http://www.w3.org/2005/Atom\"><script \
+      xmlns=\"http://www.w3.org/1999/xhtml\">ran=1</script></feed>"
 }
 
 fn rss_feed() -> View {
