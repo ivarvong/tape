@@ -86,7 +86,9 @@ describe('a stored build is a cache of the source', () => {
     await stale('ivar/alarm', 1, alarm.replace('respond(status: 202)', 'respond_with(status: 202)'));
     // due now: the alarm below finds it due, as the runtime's would (if the runtime's ran first, it took the same
     // path: the version cannot be rebuilt, so the timer is kept and the alarm is set an hour on)
-    await new Promise(done => setTimeout(done, Math.max(0, setAt + 3100 - Date.now())));
+    await new Promise<void>(done => {
+      setTimeout(done, Math.max(0, setAt + 3100 - Date.now()));
+    });
     const errors = vi.spyOn(console, 'error');
     const before = Date.now();
     // the alarm, run as the runtime runs it (runDurableObjectAlarm would delete the alarm it sets again)
