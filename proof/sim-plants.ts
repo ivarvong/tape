@@ -6,7 +6,7 @@ import '../node25.ts';
 import { plants } from '../apps/tickets/plants.ts';
 import type { Plant } from '../apps/tickets/plants.ts';
 import { auto, search } from '../sim.ts';
-import { arg, read, record } from './lib.ts';
+import { arg, edited, read, record } from './lib.ts';
 
 const tickets = read('apps/tickets/tickets.tape');
 const pay = read('apps/tickets/pay.tape');
@@ -40,13 +40,14 @@ type Row = {
   ms?: number;
 };
 async function hunt(p: Plant): Promise<Row> {
-  if (p.pairs.some(([a]) => !tickets.includes(a))) {
+  const text = edited(tickets, p.pairs);
+  if (text === null) {
     console.log('??       ', p.name);
     return { plant: p.name, sim: 'its text is not in tickets.tape' };
   }
   const a = auto(
     [
-      { name: 'tickets', text: p.pairs.reduce((t, [x, y]) => t.replace(x, y), tickets) },
+      { name: 'tickets', text },
       { name: 'pay', text: pay },
     ],
     { rules: false, clients: 4, ops: 10 },

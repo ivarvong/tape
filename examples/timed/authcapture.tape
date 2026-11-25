@@ -82,11 +82,11 @@ export fn woken(
   }
 }
 
-fn load(id: Int) -> Option[Payment] {
+fn load(id: Int) -> Option[Payment] uses db {
   sql_first(row: Payment, query: "SELECT * FROM payments WHERE id = :id", id)
 }
 
-fn made(body: View) -> Outcome {
+fn made(body: View) -> Outcome uses clock, db, gateway, timer {
   let Ok(value: NewPayment(key, card, amount)) = decode(json: body, as: NewPayment) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -106,7 +106,7 @@ fn made(body: View) -> Outcome {
   authorize(payment: p)
 }
 
-fn authorize(payment: Payment) -> Outcome {
+fn authorize(payment: Payment) -> Outcome uses clock, db, gateway, timer {
   let Payment(id, card, amount) = payment
   authorized(
     id,
@@ -122,7 +122,10 @@ fn authorize(payment: Payment) -> Outcome {
   )
 }
 
-fn authorized(id: Int, reply: Result[Authorization, CallError[GatewayError]]) -> Outcome {
+fn authorized(
+  id: Int,
+  reply: Result[Authorization, CallError[GatewayError]]
+) -> Outcome uses clock, db, timer {
   match reply {
     Ok(value) -> {
       do wake(after: flags.void_ms, key: id)
@@ -167,7 +170,7 @@ fn pending(found: Option[Payment]) -> Outcome {
 
 // Shipped: capturing, with a timer set before the call. A refused capture is authorized again, and its void
 // deadline is a timer again.
-fn capture(id: Int) -> Outcome {
+fn capture(id: Int) -> Outcome uses clock, db, gateway, timer {
   let Some(value: p) = load(id) else -> Problem(status: 404, reason: "no such payment")
   match p {
     Payment(state: Authorized) -> {
@@ -189,7 +192,7 @@ fn capture(id: Int) -> Outcome {
   }
 }
 
-fn capturing(moved: Move[Payment]) -> Outcome {
+fn capturing(moved: Move[Payment]) -> Outcome uses clock, db, gateway, timer {
   match moved {
     Moved(value) -> captured(payment: value)
     Raced(now) -> Shown(status: 409, payment: now)
@@ -197,7 +200,7 @@ fn capturing(moved: Move[Payment]) -> Outcome {
   }
 }
 
-fn captured(payment: Payment) -> Outcome {
+fn captured(payment: Payment) -> Outcome uses clock, db, gateway, timer {
   let Payment(id, amount, void_at) = payment
   settled(
     id,
@@ -214,7 +217,11 @@ fn captured(payment: Payment) -> Outcome {
   )
 }
 
-fn settled(id: Int, void_at: Int, reply: Result[Done, CallError[GatewayError]]) -> Outcome {
+fn settled(
+  id: Int,
+  void_at: Int,
+  reply: Result[Done, CallError[GatewayError]]
+) -> Outcome uses clock, db, timer {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -245,14 +252,14 @@ fn settled(id: Int, void_at: Int, reply: Result[Done, CallError[GatewayError]]) 
   }
 }
 
-fn left(until: Int) -> Int {
+fn left(until: Int) -> Int uses clock {
   match {
     until > now() -> until - now()
     else -> 0
   }
 }
 
-fn voiding(payment: Payment) -> Outcome {
+fn voiding(payment: Payment) -> Outcome uses db, gateway, timer {
   let Payment(id) = payment
   match sql_move(
     row: Payment,
@@ -269,7 +276,7 @@ fn voiding(payment: Payment) -> Outcome {
   }
 }
 
-fn void(payment: Payment) -> Outcome {
+fn void(payment: Payment) -> Outcome uses db, gateway, timer {
   let Payment(id, amount) = payment
   voided(
     id,
@@ -285,7 +292,7 @@ fn void(payment: Payment) -> Outcome {
   )
 }
 
-fn voided(id: Int, reply: Result[Done, CallError[GatewayError]]) -> Outcome {
+fn voided(id: Int, reply: Result[Done, CallError[GatewayError]]) -> Outcome uses db, timer {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -316,7 +323,7 @@ fn voided(id: Int, reply: Result[Done, CallError[GatewayError]]) -> Outcome {
 
 // The timer's run: a call still out is asked again; an authorization past its deadline is voided (one not yet
 // due is waited for again).
-fn due(found: Option[Payment]) -> Outcome {
+fn due(found: Option[Payment]) -> Outcome uses clock, db, gateway, timer {
   let Some(value: p) = found else -> Problem(status: 404, reason: "no such payment")
   match p {
     Payment(state: Authorizing) -> authorize(payment: p)
@@ -334,7 +341,7 @@ fn due(found: Option[Payment]) -> Outcome {
   }
 }
 
-fn latest(id: Int, m: Move[Payment]) -> Option[Payment] {
+fn latest(id: Int, m: Move[Payment]) -> Option[Payment] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

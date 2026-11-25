@@ -79,11 +79,11 @@ export fn woken(db: Sql, bank: Remote, timer: Timer, message: Wake) -> Result[Tr
   }
 }
 
-fn load(id: Int) -> Option[Transfer] {
+fn load(id: Int) -> Option[Transfer] uses db {
   sql_first(row: Transfer, query: "SELECT * FROM transfers WHERE id = :id", id)
 }
 
-fn started(body: View) -> Outcome {
+fn started(body: View) -> Outcome uses bank, db, timer {
   let Ok(value: NewTransfer(key, from, to, amount)) = decode(json: body, as: NewTransfer) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -108,7 +108,7 @@ fn started(body: View) -> Outcome {
 // the timer makes them. Sent twice, the second finds the count back at none already and changes nothing, so a
 // resume heard twice is not two rounds of attempts. Any other transfer is shown as it is: its timer is at work, or
 // it is finished.
-fn resumed(found: Option[Transfer]) -> Outcome {
+fn resumed(found: Option[Transfer]) -> Outcome uses db, timer {
   let Some(
     value: t = Transfer(id, state, tries)
   ) = found else -> Problem(status: 404, reason: "no such transfer")
@@ -131,12 +131,12 @@ fn resumed(found: Option[Transfer]) -> Outcome {
   }
 }
 
-fn first(transfer: Transfer) -> Outcome {
+fn first(transfer: Transfer) -> Outcome uses bank, db, timer {
   advance(found: Some(value: transfer))
 }
 
 // The state names the step; its reply decides the move, and advance goes on from the state the move leaves.
-fn advance(found: Option[Transfer]) -> Outcome {
+fn advance(found: Option[Transfer]) -> Outcome uses bank, db, timer {
   let Some(value: t) = found else -> Problem(status: 404, reason: "no such transfer")
   match t {
     Transfer(id, source, amount, state: Withdrawing, tries) -> {
@@ -194,7 +194,7 @@ fn advance(found: Option[Transfer]) -> Outcome {
   }
 }
 
-fn moved(id: Int, from: TransferState, to: TransferState, note: View) -> Option[Transfer] {
+fn moved(id: Int, from: TransferState, to: TransferState, note: View) -> Option[Transfer] uses db {
   latest(
     id,
     m: sql_move(
@@ -211,7 +211,7 @@ fn moved(id: Int, from: TransferState, to: TransferState, note: View) -> Option[
 
 // A step that did not answer (or was refused while compensating): one more failure, and a timer to try again,
 // or none after the last attempt (the transfer says so, and waits for resume).
-fn failed(id: Int, state: TransferState, tries: Int) -> Outcome {
+fn failed(id: Int, state: TransferState, tries: Int) -> Outcome uses db, timer {
   match sql_move(
     row: Transfer,
     query: "UPDATE transfers SET tries = :tries + 1 WHERE id = :id AND state = :state \
@@ -230,7 +230,7 @@ fn failed(id: Int, state: TransferState, tries: Int) -> Outcome {
   }
 }
 
-fn told(id: Int, state: TransferState, plan: Retry) -> Outcome {
+fn told(id: Int, state: TransferState, plan: Retry) -> Outcome uses db {
   match plan {
     RetryIn(after) -> shown(found: noted(id, state, note: "no answer; again in \(after) ms"))
     GaveUp(tries) -> shown(
@@ -239,7 +239,7 @@ fn told(id: Int, state: TransferState, plan: Retry) -> Outcome {
   }
 }
 
-fn noted(id: Int, state: TransferState, note: View) -> Option[Transfer] {
+fn noted(id: Int, state: TransferState, note: View) -> Option[Transfer] uses db {
   latest(
     id,
     m: sql_move(
@@ -252,7 +252,7 @@ fn noted(id: Int, state: TransferState, note: View) -> Option[Transfer] {
   )
 }
 
-fn latest(id: Int, m: Move[Transfer]) -> Option[Transfer] {
+fn latest(id: Int, m: Move[Transfer]) -> Option[Transfer] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

@@ -66,7 +66,7 @@ port.addEventListener('message', (e: MessageEvent<Ask>): void => {
         port.postMessage({ id: ask.id, kind: 'compile', result, ms }, result.wasm ? [result.wasm.buffer] : []);
       } else if (ask.kind === 'format') {
         try {
-          port.postMessage({ id: ask.id, kind: 'format', text: format(ask.text, ask.file), error: null });
+          port.postMessage({ id: ask.id, kind: 'format', text: format(ask.text, ask.file, std), error: null });
         } catch (err) {
           port.postMessage({
             id: ask.id,

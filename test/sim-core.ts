@@ -6,12 +6,21 @@ import type { Model, Op, Outcome } from '../sim/engine.ts';
 import type { Json } from '../sim/values.ts';
 import { model } from '../apps/tickets/sim.ts';
 import { plants } from '../apps/tickets/plants.ts';
-import { finish, ok, problems, read } from './harness.ts';
+import { usesStripped, usesWritten } from '../fmt.ts';
+import { finish, ok, problems, read, std } from './harness.ts';
 import { autoOf, builtFor, wrongIn } from './simulated.ts';
 
 const source = read('apps/tickets/tickets.tape');
+// a plant is made to the program without its `uses` clauses, which are written again after it, as fmt would
 const planted = (words: string): string =>
-  (plants.find(x => x.name.includes(words))?.pairs ?? []).reduce((t, [a, b]) => t.replace(a, b), source);
+  usesWritten(
+    (plants.find(x => x.name.includes(words))?.pairs ?? []).reduce(
+      (t, [a, b]) => t.replace(a, b),
+      usesStripped(source),
+    ),
+    'tickets.tape',
+    std,
+  );
 const refusedIn = (text: string): string[] => problems(text).map(e => e.code);
 
 const good = builtFor(source);

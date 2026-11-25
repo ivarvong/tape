@@ -67,7 +67,7 @@ fn handle(raw: View, db: Sql, model: Remote, tools: Remote) -> Response {
 }
 
 // db, model and tools are the capabilities handle declares; the functions below use them by name (C72).
-fn routed(raw: View) -> Outcome {
+fn routed(raw: View) -> Outcome uses db, model, tools {
   match request(raw) {
     Request(method: Post, path: "/runs", body) -> {
       let Ok(value: NewRun(key, prompt)) = decode(json: body, as: NewRun) else {
@@ -105,13 +105,13 @@ fn routed(raw: View) -> Outcome {
   }
 }
 
-fn load(id: Int) -> Option[Run] {
+fn load(id: Int) -> Option[Run] uses db {
   sql_first(row: Run, query: "SELECT * FROM runs WHERE id = :id", id)
 }
 
 // The state names what to do next. The loop is this function calling itself (through `next`) with the row each
 // step leaves; each turn is a commit point at its call.
-fn advance(run: Run) -> Outcome {
+fn advance(run: Run) -> Outcome uses db, model, tools {
   match run {
     Run(id, step, state: Thinking) if step >= 5 -> show(
       status: 200,
@@ -193,12 +193,12 @@ fn advance(run: Run) -> Outcome {
   }
 }
 
-fn next(found: Option[Run]) -> Outcome {
+fn next(found: Option[Run]) -> Outcome uses db, model, tools {
   let Some(value: run) = found else -> missing()
   advance(run)
 }
 
-fn told(id: Int, last: View) -> Option[Run] {
+fn told(id: Int, last: View) -> Option[Run] uses db {
   latest(
     id,
     moved: sql_move(
@@ -211,7 +211,7 @@ fn told(id: Int, last: View) -> Option[Run] {
   )
 }
 
-fn latest(id: Int, moved: Move[Run]) -> Option[Run] {
+fn latest(id: Int, moved: Move[Run]) -> Option[Run] uses db {
   match moved {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

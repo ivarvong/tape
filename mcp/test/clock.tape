@@ -36,7 +36,7 @@ export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Count, View] {
 }
 
 // the hits within the last 60 s: at > since
-fn in_window(since: Int) -> Response {
+fn in_window(since: Int) -> Response uses db {
   let Some(value: Count(n)) = sql_first(
     row: Count,
     query: "SELECT count(*) AS n FROM hits WHERE at > :since",
@@ -45,12 +45,12 @@ fn in_window(since: Int) -> Response {
   counted(n)
 }
 
-fn later(key: Int) -> Response {
+fn later(key: Int) -> Response uses timer {
   do wake(after: 5000, key)
   empty(status: 202)
 }
 
-fn added(n: Int) -> Int {
+fn added(n: Int) -> Int uses db {
   match {
     n <= 0 -> 0
     else -> sql_exec(query: "INSERT INTO hits(at) VALUES (:n)", n, repeat: True) + added(n: n - 1)

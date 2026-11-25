@@ -11,9 +11,17 @@
 // opening `{` or before a closing `}`, none at the start, and one newline at the end. Comments, text literals and
 // migration SQL are kept exactly as written; a comment after code is set off by two spaces.
 //
+// A function's `uses` clause (C101) is fmt's to write too: given the files the program is built with besides this
+// one (`std`), fmt compiles the program, and when nothing but C101 refuses it, writes after each function's result
+// type the clause the compiler infers (compiler/ambient.ts clauseOf): `uses` and the capabilities the function
+// reaches by name, in alphabetical order, or no clause. A file formatted alone, or one whose program does not
+// compile, keeps its clauses as written. Formatting again changes nothing: the clauses written are the ones inferred.
+//
 // A file that does not parse is not formatted: the parse error is thrown, as the compiler reports it.
 import { readFileSync } from 'node:fs';
-import { parseProgram } from './compiler.ts';
+import { compile, parseProgram } from './compiler.ts';
+import type { Source } from './compiler.ts';
+import { clauseOf } from './compiler/ambient.ts';
 import { BYTE_ESC, CONTINUES } from './compiler/lex.ts';
 
 // longest first, so `->` is not read as `-`
@@ -474,10 +482,132 @@ const tokensOf = (text: string, name: string): Tok[] => {
   parseProgram([{ name, text }]); // throws the compiler's own error for a file that does not parse
   return tokens(text.replaceAll('\r\n', '\n'));
 };
+
+/** Each function of the file by its name, and the clause its signature carries (none for an entry point); null when
+ * the program `std`, the file and `after` make (in that order) is refused for anything but C101, so what it reaches
+ * is not known. With `whole` false, the program need only parse: what it reaches is read from what it calls. */
+export function clausesOf(
+  text: string,
+  name: string,
+  std: readonly Source[],
+  after: readonly Source[] = [],
+  whole = true,
+): Map<string, string[]> | null {
+  const sources = [...std.filter(s => s.name !== name), { name, text }, ...after.filter(s => s.name !== name)];
+  if (whole) {
+    const built = compile(sources);
+    if (built.wasm === null && built.errors.some(e => e.code !== 'C101')) return null;
+  }
+  let prog;
+  try {
+    prog = parseProgram(sources);
+  } catch {
+    return null;
+  }
+  return new Map(
+    [...prog.fns.values()]
+      .filter(f => f.file === name)
+      .map(f => [f.name.slice(f.name.lastIndexOf('.') + 1), clauseOf(f)]),
+  );
+}
+const word = (v: string): Tok => ({ t: 'word', v });
+const COMMA: Tok = { t: 'op', v: ',' };
+/** The tokens with each top-level function's `uses` clause, between its result type and its body, as `clauses` has
+ * it. A function `clauses` does not name keeps what it has. */
+function withClauses(toks: readonly Tok[], clauses: ReadonlyMap<string, readonly string[]>): Tok[] {
+  const out: Tok[] = [];
+  let depth = 0;
+  for (let k = 0; k < toks.length; k++) {
+    const x = toks[k];
+    if (!x) continue;
+    const name = toks[k + 1];
+    const want = depth === 0 && x.t === 'word' && x.v === 'fn' && name?.t === 'word' ? clauses.get(name.v) : undefined;
+    if (!want) {
+      if (opens(x)) depth++;
+      else if (closes(x)) depth--;
+      out.push(x);
+      continue;
+    }
+    // the result type ends at the first `uses` or `{` outside brackets after the `->` the parameters are followed by
+    let j = k + 2,
+      d = 0;
+    for (; j < toks.length && !(d === 0 && is(toks[j] ?? null, '->')); j++)
+      d += opens(toks[j]) ? 1 : closes(toks[j]) ? -1 : 0;
+    let end = j + 1;
+    for (; end < toks.length; end++) {
+      const y = toks[end];
+      if (d === 0 && (is(y ?? null, '{') || (y?.t === 'word' && y.v === 'uses'))) break;
+      d += opens(y) ? 1 : closes(y) ? -1 : 0;
+    }
+    let body = end;
+    while (body < toks.length && !is(toks[body] ?? null, '{')) body++;
+    out.push(...toks.slice(k, end));
+    if (want.length > 0) out.push(word('uses'), ...want.flatMap((n, i) => (i > 0 ? [COMMA, word(n)] : [word(n)])));
+    k = body - 1;
+  }
+  return out;
+}
+/** Where, from `from`, the first place outside round and square brackets that `here` holds for is. */
+function bracketsOut(text: string, from: number, here: (at: number) => boolean): number {
+  let depth = 0,
+    k = from;
+  for (; k < text.length; k++) {
+    if (depth === 0 && here(k)) return k;
+    const c = text[k];
+    if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth--;
+  }
+  return k;
+}
+/** The text with the `uses` clause of each top-level function `want` names (by its name) set to what it gives, and
+ * nothing else changed: no line is laid out again. */
+function clausesSet(text: string, want: (name: string) => readonly string[] | undefined): string {
+  let out = '',
+    at = 0;
+  const top = /^(?:export |private )?fn ([a-z_][A-Za-z0-9_]*)\b/gm;
+  for (let m = top.exec(text); m; m = top.exec(text)) {
+    const names = want(m[1] ?? '');
+    if (!names) continue;
+    // past the parameters to the `->`, then to the `{` that opens the body, outside brackets
+    const i = bracketsOut(text, m.index + m[0].length, k => text.startsWith('->', k)),
+      j = bracketsOut(text, i + 2, k => text[k] === '{');
+    const result = text
+      .slice(i + 2, j)
+      .replace(/\s+uses\s[\s\S]*$/, '')
+      .trimEnd();
+    out += `${text.slice(at, i + 2)}${result}${names.length > 0 ? ` uses ${names.join(', ')}` : ''} `;
+    at = j;
+    top.lastIndex = j;
+  }
+  return out + text.slice(at);
+}
+/**
+ * The file with each function's `uses` clause as the compiler infers it, and nothing else changed. For a tool that
+ * edits a program as text and builds what it made, as the person who made the edit would run fmt: a planted bug
+ * that drops a `wake` drops its function's `timer` with it, and is not caught by C101; a plant the compiler refuses
+ * for another reason is refused for that alone. The file as it is when its program does not parse.
+ */
+export function usesWritten(text: string, name: string, std: readonly Source[], after: readonly Source[] = []): string {
+  const clauses = clausesOf(text, name, std, after, false);
+  return clauses ? clausesSet(text, n => clauses.get(n)) : text;
+}
+/** The file with no `uses` clause: what a tool's edits written before the clauses (a plant's text) are made to,
+ * before usesWritten puts them back. */
+export const usesStripped = (text: string): string => clausesSet(text, () => []);
+
 /** The file in the one layout: every step on one line, then each line wider than WIDTH broken. Where the lines of
- * a step were broken before does not count, so a program has one layout however it was typed. */
-export function format(text: string, name = 'file.tape'): string {
-  return printed(wrapped(joined(tokensOf(text, name))));
+ * a step were broken before does not count, so a program has one layout however it was typed. With `std` (and
+ * `after`), the other files of its program, each function's `uses` clause is written as the compiler infers it
+ * (clausesOf). */
+export function format(
+  text: string,
+  name = 'file.tape',
+  std?: readonly Source[],
+  after: readonly Source[] = [],
+): string {
+  const toks = tokensOf(text, name),
+    clauses = std ? clausesOf(text, name, std, after) : null;
+  return printed(wrapped(joined(clauses ? withClauses(toks, clauses) : toks)));
 }
 /** The file with every step on one line, however long: what `format` gives back when it is formatted again. Edits
  * of a program that are written as text (a planted bug, a test's change) are made to this, so they do not depend

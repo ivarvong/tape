@@ -287,7 +287,7 @@ fn handle(raw: View, db: Sql) -> Response {
     _ -> empty(status: 404)
   }
 }
-fn settle(id: Int, state: View) -> Response {
+fn settle(id: Int, state: View) -> Response uses db {
   match state {
 ${arm}
   }
@@ -326,7 +326,7 @@ T(
   c59(
     M(`    _ -> pick(id, state)`).replace(
       'fn done(',
-      `fn pick(id: Int, state: View) -> Response {\n  match {\n    state == "canceled" -> empty(status: 409)\n    else -> ${W}\n  }\n}\nfn done(`,
+      `fn pick(id: Int, state: View) -> Response uses db {\n  match {\n    state == "canceled" -> empty(status: 409)\n    else -> ${W}\n  }\n}\nfn done(`,
     ),
   ),
   [],

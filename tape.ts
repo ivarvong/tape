@@ -1,6 +1,6 @@
 // tape.ts: the command line.
 //   node tape.ts hello.tape 'GET /hello/ada' ['POST /x⏎{"a":1}' ...]     run requests (\n in an argument is a line feed)
-//   node tape.ts fmt [--check] files…                                     the canonical layout
+//   node tape.ts fmt [--check] [--with f] files…                          the canonical layout, `uses` clauses too
 //   node tape.ts test [files…]                                            the examples in comments
 //   node tape.ts sim a.tape b.tape                                        simulate them together
 // Each command is a file of cli/.

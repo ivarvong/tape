@@ -266,7 +266,7 @@ fn op_bytes(v: View, at: Int) -> Bool {
   }
 }
 
-fn placement() -> Option[Placement] {
+fn placement() -> Option[Placement] uses db {
   sql_first(row: Placement, query: "SELECT * FROM placement")
 }
 
@@ -274,7 +274,7 @@ fn placement() -> Option[Placement] {
 //
 //   > digits_until(v: "12&window=5", at: 0, n: 0)
 //   12
-fn place_with(shard: Int, shards: Int, tail: View) -> Response {
+fn place_with(shard: Int, shards: Int, tail: View) -> Response uses db {
   match tail {
     "window=" ++ rest -> place(
       shard,
@@ -315,7 +315,7 @@ fn digits_until(v: View, at: Int, n: Int) -> Int {
 }
 
 // Set once: the first placement is kept (the CHECKs refuse an impossible one), and the reply is what is stored.
-fn place(shard: Int, shards: Int, window: Int, skew: Int) -> Response {
+fn place(shard: Int, shards: Int, window: Int, skew: Int) -> Response uses db {
   match {
     shards < 1
       or shards > 64
@@ -365,7 +365,7 @@ fn placement_reply(same: Bool, stored: Placed) -> Response {
   }
 }
 
-fn checked(parsed: Parsed) -> Response {
+fn checked(parsed: Parsed) -> Response uses clock, db {
   match parsed {
     Valid(op, once) -> owned(op, once, place: placement())
     Invalid(status, reason) -> problem(status, detail: reason)
@@ -373,7 +373,7 @@ fn checked(parsed: Parsed) -> Response {
 }
 
 // A key this shard does not own is refused: the router sends each key to fnv1a(key) mod shards.
-fn owned(op: Op, once: View, place: Option[Placement]) -> Response {
+fn owned(op: Op, once: View, place: Option[Placement]) -> Response uses clock, db {
   match place {
     Some(value: Placement(shard, shards)) -> mine(
       op,
@@ -388,7 +388,7 @@ fn owned(op: Op, once: View, place: Option[Placement]) -> Response {
   }
 }
 
-fn mine(op: Op, once: View, shard: Int, at: Int) -> Response {
+fn mine(op: Op, once: View, shard: Int, at: Int) -> Response uses clock, db {
   match {
     at == shard
       and len(once) == 0
@@ -409,7 +409,7 @@ fn mine(op: Op, once: View, shard: Int, at: Int) -> Response {
 }
 
 // R-RET-2: an op is run only inside its window; its earlier commit is then still stored (R-RET-4)
-fn timed(op: Op, once: View, t: Int, now: Int, window: Option[Window]) -> Response {
+fn timed(op: Op, once: View, t: Int, now: Int, window: Option[Window]) -> Response uses db {
   match window {
     Some(value: Window(window_ms, skew_ms)) -> windowed(op, once, t, now, window_ms, skew_ms)
     None -> problem(
@@ -419,7 +419,14 @@ fn timed(op: Op, once: View, t: Int, now: Int, window: Option[Window]) -> Respon
   }
 }
 
-fn windowed(op: Op, once: View, t: Int, now: Int, window_ms: Int, skew_ms: Int) -> Response {
+fn windowed(
+  op: Op,
+  once: View,
+  t: Int,
+  now: Int,
+  window_ms: Int,
+  skew_ms: Int
+) -> Response uses db {
   match {
     t < 0 -> problem(
       status: 400,
@@ -483,7 +490,7 @@ fn key_of(op: Op) -> View {
 }
 
 // A write under an op id that was applied to this key before answers what it answered then, and writes nothing.
-fn replayed(op: Op, once: View, t: Int, cutoff: Int, done: Option[Done]) -> Response {
+fn replayed(op: Op, once: View, t: Int, cutoff: Int, done: Option[Done]) -> Response uses db {
   match done {
     Some(value: Done(key, status, version)) -> write_json(out: buf(), value: Stored(key, version))
       |> respond(status)
@@ -491,7 +498,7 @@ fn replayed(op: Op, once: View, t: Int, cutoff: Int, done: Option[Done]) -> Resp
   }
 }
 
-fn run(op: Op, once: View, t: Int, cutoff: Int) -> Response {
+fn run(op: Op, once: View, t: Int, cutoff: Int) -> Response uses db {
   match op {
     Read(key) -> read(found: found(key, row: load(key)))
     Write(key, value, expect: Any) -> stored(
@@ -570,7 +577,7 @@ fn run(op: Op, once: View, t: Int, cutoff: Int) -> Response {
   }
 }
 
-fn load(key: View) -> Option[Row] {
+fn load(key: View) -> Option[Row] uses db {
   sql_first(row: Row, query: "SELECT * FROM kv WHERE key = :key", key)
 }
 
@@ -611,7 +618,7 @@ fn stored(
   cutoff: Int,
   expect: Expect,
   wrote: Option[Row]
-) -> Response {
+) -> Response uses db {
   match wrote {
     Some(value: Row(version: 1)) -> applied(key, once, t, cutoff, status: 201, version: 1)
     Some(value: Row(version)) -> applied(key, once, t, cutoff, status: 200, version)
@@ -622,7 +629,14 @@ fn stored(
 // The reply to a write that was applied; under an op id, the reply is stored with the write (one transaction),
 // with the op's t, and up to 32 stored replies whose t is before cutoff (now - window - skew) are deleted (R-RET-3).
 // This op's own t is at least now - window (it was accepted), so it is never among them.
-fn applied(key: View, once: View, t: Int, cutoff: Int, status: Int, version: Int) -> Response {
+fn applied(
+  key: View,
+  once: View,
+  t: Int,
+  cutoff: Int,
+  status: Int,
+  version: Int
+) -> Response uses db {
   match {
     len(once) == 0 -> write_json(out: buf(), value: Stored(key, version)) |> respond(status)
     else -> {
@@ -672,7 +686,7 @@ fn removed(
   cutoff: Int,
   expect: Expect,
   gone: Option[Row]
-) -> Response {
+) -> Response uses db {
   match gone {
     Some(value: Row(version)) -> applied(key, once, t, cutoff, status: 200, version)
     None -> not_removed(key, expect, found: found(key, row: load(key)))

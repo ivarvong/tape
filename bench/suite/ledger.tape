@@ -23,7 +23,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn batch(body: View) -> Response {
+fn batch(body: View) -> Response uses db {
   let Ok(value: Batch(transfers)) = decode(json: body, as: Batch) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -35,7 +35,7 @@ fn batch(body: View) -> Response {
     |> respond(status: 200)
 }
 
-fn each(transfers: List[Transfer], out: Buf, first: Bool) -> Buf {
+fn each(transfers: List[Transfer], out: Buf, first: Bool) -> Buf uses db {
   match transfers {
     Cons(head, tail) if first -> each(
       transfers: tail,
@@ -52,7 +52,7 @@ fn each(transfers: List[Transfer], out: Buf, first: Bool) -> Buf {
 }
 
 // [the key, the status]
-fn result(out: Buf, t: Transfer) -> Buf {
+fn result(out: Buf, t: Transfer) -> Buf uses db {
   out
     |> write_json_string(text: t.key)
     |> push(byte: 44)
@@ -60,7 +60,7 @@ fn result(out: Buf, t: Transfer) -> Buf {
     |> push(byte: 93)
 }
 
-fn transfer(t: Transfer) -> Int {
+fn transfer(t: Transfer) -> Int uses db {
   let Transfer(key, from, to, amount) = t
   // A key seen before is that transfer again: the same one answers as it did, another one is refused.
   let None = sql_first(

@@ -89,11 +89,11 @@ export fn woken(
   }
 }
 
-fn load(id: Int) -> Option[Req] {
+fn load(id: Int) -> Option[Req] uses db {
   sql_first(row: Req, query: "SELECT * FROM requests WHERE id = :id", id)
 }
 
-fn opened(body: View) -> Outcome {
+fn opened(body: View) -> Outcome uses clock, db, timer {
   let Ok(value: NewRequest(key, approver, manager)) = decode(json: body, as: NewRequest) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -116,7 +116,7 @@ fn opened(body: View) -> Outcome {
 
 // The timer's run: a pending request past its SLA is escalated, with a new SLA (a timer, set in the same commit,
 // before the page goes out); an escalated one past it is denied; an escalated one not yet paged is paged.
-fn due(found: Option[Req]) -> Outcome {
+fn due(found: Option[Req]) -> Outcome uses clock, db, pager, timer {
   let Some(value: r) = found else -> Problem(status: 404, reason: "no such request")
   match r {
     Req(id, state: Pending, due) if due <= now() -> escalate(id)
@@ -143,7 +143,7 @@ fn due(found: Option[Req]) -> Outcome {
   }
 }
 
-fn escalate(id: Int) -> Outcome {
+fn escalate(id: Int) -> Outcome uses clock, db, pager, timer {
   match sql_move(
     row: Req,
     query: "UPDATE requests SET state = 'escalated', due = :due WHERE id = :id \
@@ -160,14 +160,14 @@ fn escalate(id: Int) -> Outcome {
   }
 }
 
-fn escalated(request: Req) -> Outcome {
+fn escalated(request: Req) -> Outcome uses clock, db, pager, timer {
   page(request)
 }
 
 // A page that did not answer is sent again a minute later. A row has one timer (setting it again moves it), so
 // that retry replaced the SLA's: a page that went out sets the SLA's timer again. (Written first with the Ok arm
 // only noting the page; C79 found the escalated request left with no timer for its SLA.)
-fn page(request: Req) -> Outcome {
+fn page(request: Req) -> Outcome uses clock, db, pager, timer {
   let Req(id, manager, due) = request
   match call(
     to: pager,
@@ -194,7 +194,7 @@ fn page(request: Req) -> Outcome {
   }
 }
 
-fn noted(id: Int) -> Outcome {
+fn noted(id: Int) -> Outcome uses db {
   shown(found: latest(
     id,
     m: sql_move(
@@ -205,7 +205,7 @@ fn noted(id: Int) -> Outcome {
   ))
 }
 
-fn left(until: Int) -> Int {
+fn left(until: Int) -> Int uses clock {
   match {
     until > now() -> until - now()
     else -> 0
@@ -216,7 +216,7 @@ fn later(request: Req) -> Outcome {
   Shown(status: 200, request)
 }
 
-fn latest(id: Int, m: Move[Req]) -> Option[Req] {
+fn latest(id: Int, m: Move[Req]) -> Option[Req] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

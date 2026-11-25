@@ -71,11 +71,11 @@ export fn woken(db: Sql, hook: Remote, timer: Timer, message: Wake) -> Result[De
   }
 }
 
-fn load(id: Int) -> Option[Delivery] {
+fn load(id: Int) -> Option[Delivery] uses db {
   sql_first(row: Delivery, query: "SELECT * FROM deliveries WHERE id = :id", id)
 }
 
-fn made(body: View) -> Outcome {
+fn made(body: View) -> Outcome uses db, timer {
   let Ok(value: NewDelivery(key, topic, body: text)) = decode(json: body, as: NewDelivery) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -95,7 +95,7 @@ fn made(body: View) -> Outcome {
   Shown(status: 201, delivery: d)
 }
 
-fn redeliver(id: Int) -> Outcome {
+fn redeliver(id: Int) -> Outcome uses db, timer {
   match sql_move(
     row: Delivery,
     query: "UPDATE deliveries SET state = 'pending', tries = 0, round = round + 1, note = '' \
@@ -116,7 +116,7 @@ fn again(delivery: Delivery) -> Outcome {
 }
 
 // The timer's run: a pending delivery is sent; any other is shown as it is.
-fn send(found: Option[Delivery]) -> Outcome {
+fn send(found: Option[Delivery]) -> Outcome uses db, hook, timer {
   let Some(value: d) = found else -> Problem(status: 404, reason: "no such delivery")
   match d {
     Delivery(id, topic, body, state: Pending, tries, round) -> sent(
@@ -137,7 +137,11 @@ fn send(found: Option[Delivery]) -> Outcome {
   }
 }
 
-fn sent(id: Int, tries: Int, reply: Result[Posted, CallError[PostError]]) -> Outcome {
+fn sent(
+  id: Int,
+  tries: Int,
+  reply: Result[Posted, CallError[PostError]]
+) -> Outcome uses db, timer {
   match reply {
     Ok(value) -> shown(found: moved(id, to: Delivered, note: ""))
     Err(error: Rejected(reason: Refused(reason))) -> shown(found: moved(id, to: Dead, note: reason))
@@ -156,7 +160,7 @@ fn sent(id: Int, tries: Int, reply: Result[Posted, CallError[PostError]]) -> Out
 }
 
 // Another failure in a row: try again later, or give up after the last attempt (the delivery is dead).
-fn failed(id: Int, tried: Move[Delivery]) -> Outcome {
+fn failed(id: Int, tried: Move[Delivery]) -> Outcome uses db, timer {
   match tried {
     Moved(value: Delivery(tries)) -> decided(
       id,
@@ -172,14 +176,14 @@ fn failed(id: Int, tried: Move[Delivery]) -> Outcome {
   }
 }
 
-fn decided(id: Int, plan: Retry) -> Outcome {
+fn decided(id: Int, plan: Retry) -> Outcome uses db {
   match plan {
     RetryIn(after) -> shown(found: noted(id, note: "no answer; again in \(after) ms"))
     GaveUp(tries) -> shown(found: moved(id, to: Dead, note: "no answer after \(tries) attempts"))
   }
 }
 
-fn moved(id: Int, to: DeliveryState, note: View) -> Option[Delivery] {
+fn moved(id: Int, to: DeliveryState, note: View) -> Option[Delivery] uses db {
   latest(
     id,
     m: sql_move(
@@ -193,7 +197,7 @@ fn moved(id: Int, to: DeliveryState, note: View) -> Option[Delivery] {
   )
 }
 
-fn noted(id: Int, note: View) -> Option[Delivery] {
+fn noted(id: Int, note: View) -> Option[Delivery] uses db {
   latest(
     id,
     m: sql_move(
@@ -205,7 +209,7 @@ fn noted(id: Int, note: View) -> Option[Delivery] {
   )
 }
 
-fn latest(id: Int, m: Move[Delivery]) -> Option[Delivery] {
+fn latest(id: Int, m: Move[Delivery]) -> Option[Delivery] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

@@ -144,13 +144,13 @@ T(
 // ---- 3. ambient capabilities
 const A = `schema "CREATE TABLE IF NOT EXISTS t(id INTEGER PRIMARY KEY, n INTEGER NOT NULL)"
 type Row { Row(n: Int) }
-fn count(id: Int) -> Int {
+fn count(id: Int) -> Int uses db {
   match sql_first(db, query: "SELECT n FROM t WHERE id = :id", id, row: Row) {
     Some(value: Row(n)) -> n
     None -> 0
   }
 }
-fn twice(id: Int) -> Int {
+fn twice(id: Int) -> Int uses db {
   count(id) + count(id)
 }
 fn handle(raw: View, db: Sql) -> Response {

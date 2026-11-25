@@ -22,7 +22,7 @@ export fn woken(payments: Remote, timer: Timer, message: Wake) -> Result[Charged
   }
 }
 
-fn charged(order: Int) -> Result[Charged, CallError[ChargeError]] {
+fn charged(order: Int) -> Result[Charged, CallError[ChargeError]] uses payments {
   call(
     to: payments,
     method: "charge",
@@ -34,7 +34,7 @@ fn charged(order: Int) -> Result[Charged, CallError[ChargeError]] {
   )
 }
 
-fn paid(order: Int, reply: Result[Charged, CallError[ChargeError]]) -> Response {
+fn paid(order: Int, reply: Result[Charged, CallError[ChargeError]]) -> Response uses timer {
   match reply {
     Ok(value: Charged(payment)) -> buf() |> write_int(value: payment) |> respond(status: 201)
     Err(error: Timeout) -> {

@@ -54,7 +54,7 @@ fn given(v: View) -> Option[View] {
   }
 }
 
-fn added(body: View) -> Response {
+fn added(body: View) -> Response uses db {
   let Ok(value: NewItem(name, region, qty)) = decode(json: body, as: NewItem) else {
     Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
@@ -91,7 +91,7 @@ fn cleared(v: View) -> Option[View] {
 }
 
 // the region set as it closes
-fn closed(id: Option[Int], region: View) -> Response {
+fn closed(id: Option[Int], region: View) -> Response uses db {
   let Some(value: n) = id else -> empty(status: 400)
   match sql_move(
     row: Item,

@@ -299,7 +299,7 @@ fn handle(raw: View, shop: Remote) -> Response {
   }
 }
 
-fn asked(basket: Result[Basket, View]) -> Response {
+fn asked(basket: Result[Basket, View]) -> Response uses shop {
   match basket {
     Ok(value) -> quoted(reply: ask(to: shop, method: "price", send: value, reply: Quote, error: Refusal, within: 1000))
     Err(error) -> buf() |> append(view: error) |> respond(status: 400)

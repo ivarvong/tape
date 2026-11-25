@@ -67,12 +67,12 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   }
 }
 
-fn load(slug: View) -> Option[Link] {
+fn load(slug: View) -> Option[Link] uses db {
   sql_first(row: Link, query: "SELECT * FROM links WHERE slug = :slug", slug)
 }
 
 // POST /links: the slug is claimed by the INSERT; a second run (a retry) finds it and answers what is there.
-fn create(body: View) -> Response {
+fn create(body: View) -> Response uses clock, db {
   let Ok(value: NewLink(slug, url)) = decode(json: body, as: NewLink) else {
     Err(error) -> problem(status: 400, detail: error)
   }

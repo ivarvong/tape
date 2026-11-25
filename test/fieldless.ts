@@ -43,7 +43,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn put(body: View) -> Response {
+fn put(body: View) -> Response uses db {
   let Ok(value: Mark(id, state, was)) = decode(json: body, as: Mark) else {
     Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }

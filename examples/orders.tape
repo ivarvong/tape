@@ -49,7 +49,7 @@ fn handle(raw: View, db: Sql, stock: Remote) -> Response {
 }
 
 // The order this request makes, or the one an earlier request with the same key made.
-fn place(body: View) -> Response {
+fn place(body: View) -> Response uses db, stock {
   let Ok(value: NewOrder(key, item)) = decode(json: body, as: NewOrder) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -71,7 +71,7 @@ fn place(body: View) -> Response {
 }
 
 // The same key again: a pending order is sent to stock again (same once key); a settled one is shown as it stands.
-fn again(found: Option[Order]) -> Response {
+fn again(found: Option[Order]) -> Response uses db, stock {
   match found {
     Some(value: order = Order(state: Pending)) -> reserve(order)
     Some(value: order = Order(state: Confirmed)) -> shown(status: 200, order)
@@ -80,7 +80,7 @@ fn again(found: Option[Order]) -> Response {
   }
 }
 
-fn retry(id: Int) -> Response {
+fn retry(id: Int) -> Response uses db, stock {
   let Some(value: order) = sql_first(
     row: Order,
     query: "SELECT * FROM orders WHERE id = :id AND state = 'pending'",
@@ -90,7 +90,7 @@ fn retry(id: Int) -> Response {
 }
 
 // The order is committed before the call is made: a call is a commit point. Each way the call can fail is an arm.
-fn reserve(order: Order) -> Response {
+fn reserve(order: Order) -> Response uses db, stock {
   let Order(id, item) = order
   let Ok(value: Reserved) = call(
     to: stock,

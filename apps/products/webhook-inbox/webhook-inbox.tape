@@ -64,7 +64,7 @@ fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
   }
 }
 
-fn recent(box: View) -> Rows[Delivery] {
+fn recent(box: View) -> Rows[Delivery] uses db {
   sql_all(
     row: Delivery,
     query: "SELECT * FROM deliveries WHERE box = :box ORDER BY seq DESC LIMIT 50",
@@ -73,7 +73,7 @@ fn recent(box: View) -> Rows[Delivery] {
 }
 
 // Ten random a-z and 0-9.
-fn fresh_box() -> View {
+fn fresh_box() -> View uses dice {
   let n = random()
   range(from: 0, to: 10)
     |> fold(from: buf(), by: fn(out: Buf, i: Int) -> Buf {
@@ -141,7 +141,7 @@ fn body_id(raw: Option[View]) -> Option[View] {
   }
 }
 
-fn deliver(box: View, body: View, r: Request) -> Response {
+fn deliver(box: View, body: View, r: Request) -> Response uses clock, db {
   let True = len(body) > 0 else -> problem(status: 400, detail: "empty: send a JSON body")
   let True = len(body) <= 65536 else -> problem(status: 413, detail: "the body is over 64 KB")
   let True = is_json(text: body) else -> problem(status: 400, detail: "not JSON")
@@ -163,7 +163,7 @@ fn deliver(box: View, body: View, r: Request) -> Response {
   }
 }
 
-fn keyed(box: View, body: View, k: View) -> Response {
+fn keyed(box: View, body: View, k: View) -> Response uses clock, db {
   let Some(value: d) = sql_first(
     row: Delivery,
     query: "INSERT INTO deliveries(box, key, at, size, body) \
@@ -196,7 +196,7 @@ fn repeated(box: View, found: Option[Delivery]) -> Response {
 }
 
 // A new delivery is kept, and the box is cut back to its newest 50.
-fn stored(status: Int, box: View, d: Delivery, duplicate: Bool) -> Response {
+fn stored(status: Int, box: View, d: Delivery, duplicate: Bool) -> Response uses db {
   let _ = sql_exec(
     query: "DELETE FROM deliveries WHERE box = :box AND seq NOT IN (SELECT seq FROM deliveries \
         WHERE box = :box ORDER BY seq DESC LIMIT 50)",

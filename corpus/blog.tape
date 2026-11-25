@@ -82,7 +82,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   answered(r: request(raw), db)
 }
 
-fn answered(r: Request, db: Sql) -> Response {
+fn answered(r: Request, db: Sql) -> Response uses clock {
   match r {
     Request(method: Get, path: "/", query) -> listed(query, r, db)
     Request(method: Get, path: "/feed.xml") -> fed(r, db)
@@ -222,7 +222,7 @@ fn put(
   key: Option[View],
   r: Request,
   db: Sql
-) -> Response {
+) -> Response uses clock {
   match fields(slug, title, published, key) {
     Bad(status, reason) -> render(o: Problem(status, reason), r, db)
     Fine(slug: s, title: t, published: d, key: k) -> saved(
@@ -245,7 +245,7 @@ fn post(
   key: Option[View],
   r: Request,
   db: Sql
-) -> Response {
+) -> Response uses clock {
   match fields(slug, title, published, key) {
     Bad(status, reason) -> render(o: Problem(status, reason), r, db)
     Fine(slug: s, title: t, published: d, key: k) -> created(
@@ -284,7 +284,7 @@ fn created(
   key: View,
   r: Request,
   db: Sql
-) -> Response {
+) -> Response uses clock {
   let req_hash = digest(
     text: "POST\n" ++ slug ++ "\n" ++ title ++ "\n" ++ published ++ "\n" ++ markdown
   )
@@ -309,7 +309,7 @@ fn saved(
   key: View,
   r: Request,
   db: Sql
-) -> Response {
+) -> Response uses clock {
   let req_hash = digest(
     text: "PUT\n" ++ slug ++ "\n" ++ title ++ "\n" ++ published ++ "\n" ++ markdown
   )
@@ -417,7 +417,7 @@ fn replayed(op: Op, req_hash: View, r: Request, db: Sql) -> Response {
   }
 }
 
-fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> Outcome {
+fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> Outcome uses clock {
   let h = digest(markdown)
   // the render is cached for the page that shows the post
   let _ = cached(hash: h, markdown, db)
@@ -440,7 +440,7 @@ fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> 
   }
 }
 
-fn update(was: Story, title: View, published: View, markdown: View, db: Sql) -> Outcome {
+fn update(was: Story, title: View, published: View, markdown: View, db: Sql) -> Outcome uses clock {
   let h = digest(markdown)
   // the render is cached for the page that shows the post
   let _ = cached(hash: h, markdown, db)

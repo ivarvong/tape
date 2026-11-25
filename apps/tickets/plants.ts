@@ -6,6 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { sources, compiled } from './world.ts';
+import { usesStripped, usesWritten } from '../../fmt.ts';
+import { std } from '../../std.ts';
 import { mutants } from '../../experiments/c78/mutants.ts';
 import { round2 } from '../../experiments/c78/round2.ts';
 import { round3 } from '../../experiments/c78/round3.ts';
@@ -168,12 +170,19 @@ function scenarios(file: string): Check[] {
 }
 /** What catches one plant: the compiler, the scenarios, or nothing. */
 function caught(p: Plant, n: number): Caught {
-  const missing = p.pairs.find(([from]) => !sources.tickets.includes(from));
+  // a plant is written against the program without its `uses` clauses, and they are written again after it as fmt
+  // would: a plant that drops a `wake` drops its function's `timer` with it, which is no catch (C101)
+  const base = usesStripped(sources.tickets);
+  const missing = p.pairs.find(([from]) => !base.includes(from));
   if (missing) {
     console.log(`??    ${p.name}: its text is not in tickets.tape: ${missing[0].slice(0, 60)}`);
     return { plant: p.name, error: 'its text is not in tickets.tape' };
   }
-  const text = p.pairs.reduce((t, [from, to]) => t.replace(from, to), sources.tickets);
+  const text = usesWritten(
+    p.pairs.reduce((t, [from, to]) => t.replace(from, to), base),
+    'program.tape',
+    std,
+  );
   const refused = compiled(text).errors ?? [];
   const [first] = refused;
   if (first) {

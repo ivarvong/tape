@@ -132,7 +132,7 @@ const retried = swap(
     '    Request(method: Post, path: "/retry/" ++ decimal(id)) -> again(found: load(id)) |> rendered\n    _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))',
   ),
   'fn load(id: Int)',
-  'fn again(found: Option[Order]) -> Outcome {\n  match found {\n    Some(value) -> charge(order: value)\n    None -> Problem(status: 404, reason: "no such order")\n  }\n}\n\nfn load(id: Int)',
+  'fn again(found: Option[Order]) -> Outcome uses db, payments, timer {\n  match found {\n    Some(value) -> charge(order: value)\n    None -> Problem(status: 404, reason: "no such order")\n  }\n}\n\nfn load(id: Int)',
 );
 T('a request that reads the row back and moves it on is one', errs(retried), []);
 

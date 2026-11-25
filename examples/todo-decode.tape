@@ -55,7 +55,7 @@ fn item(id: Option[Int]) -> Route {
   }
 }
 
-fn serve(method: View, route: Route, query: View, body: View) -> Response {
+fn serve(method: View, route: Route, query: View, body: View) -> Response uses db {
   match route {
     NoRoute -> error(status: 404)
     List if method == "GET" -> list(query)
@@ -75,7 +75,7 @@ fn serve(method: View, route: Route, query: View, body: View) -> Response {
   }
 }
 
-fn list(query: View) -> Response {
+fn list(query: View) -> Response uses db {
   match query {
     "" -> todos(rows: sql_all(row: Todo, query: "SELECT * FROM todos ORDER BY id"))
     "done=true" -> todos(rows: sql_all(
@@ -92,7 +92,7 @@ fn list(query: View) -> Response {
   }
 }
 
-fn create(body: Result[NewTodo, View]) -> Response {
+fn create(body: Result[NewTodo, View]) -> Response uses db {
   match body {
     Ok(value: NewTodo(key, title, done: None)) if titled(title)
       and keyed(key) -> insert(key, text: title, done: False)
@@ -111,7 +111,7 @@ fn keyed(key: View) -> Bool {
   len(key) >= 1 and len(key) <= 64
 }
 
-fn insert(key: View, text: View, done: Bool) -> Response {
+fn insert(key: View, text: View, done: Bool) -> Response uses db {
   made(
     key,
     found: sql_first(
@@ -126,7 +126,7 @@ fn insert(key: View, text: View, done: Bool) -> Response {
 }
 
 // 201 with the todo this request made, or 200 with the one an earlier request with the same key made.
-fn made(key: View, found: Option[Todo]) -> Response {
+fn made(key: View, found: Option[Todo]) -> Response uses db {
   match found {
     Some(value) -> one(status: 201, found)
     None -> one(
@@ -136,7 +136,7 @@ fn made(key: View, found: Option[Todo]) -> Response {
   }
 }
 
-fn update(id: Int, body: Result[Changes, View]) -> Response {
+fn update(id: Int, body: Result[Changes, View]) -> Response uses db {
   match body {
     Ok(value: Changes(title: Some(value: title), done: None)) if titled(title) -> one(
       status: 200,

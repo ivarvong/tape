@@ -5,13 +5,22 @@ import { replay, rng, search, shrink, valueOf } from '../sim.ts';
 import type { Auto, AutoOptions } from '../sim/model.ts';
 import type { Json } from '../sim/values.ts';
 import { plants } from '../apps/tickets/plants.ts';
-import { finish, ok, problems, read } from './harness.ts';
+import { usesStripped, usesWritten } from '../fmt.ts';
+import { finish, ok, problems, read, std } from './harness.ts';
 import { autoOf, wrongIn } from './simulated.ts';
 
 const tickets = read('apps/tickets/tickets.tape'),
   pay = read('apps/tickets/pay.tape');
+// a plant is made to the program without its `uses` clauses, which are written again after it, as fmt would
 const planted = (words: string): string =>
-  (plants.find(x => x.name.includes(words))?.pairs ?? []).reduce((t, [from, to]) => t.replace(from, to), tickets);
+  usesWritten(
+    (plants.find(x => x.name.includes(words))?.pairs ?? []).reduce(
+      (t, [from, to]) => t.replace(from, to),
+      usesStripped(tickets),
+    ),
+    'tickets.tape',
+    std,
+  );
 const both = (text: string, opts: AutoOptions = {}): Auto =>
   autoOf(
     [
@@ -126,7 +135,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn changed(id: Int, body: View) -> Response {
+fn changed(id: Int, body: View) -> Response uses db {
   let Ok(value: Change(state)) = decode(json: body, as: Change) else -> empty(status: 400)
   match state {
     "running" -> shown(m: sql_move(row: Job, query: "UPDATE jobs SET state = 'running' WHERE id = :id AND state = 'queued' RETURNING *", id))
@@ -174,7 +183,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn taken(body: View) -> Response {
+fn taken(body: View) -> Response uses db {
   let Ok(value: Take(key, amount)) = decode(json: body, as: Take) else -> empty(status: 400)
   let 1 = sql_exec(
     query: "INSERT INTO takes(key, amount) VALUES (:key, :amount) ON CONFLICT(key) DO NOTHING",
@@ -317,7 +326,7 @@ fn handle(raw: View, db: Sql, dice: Entropy) -> Response {
     _ -> empty(status: 404)
   }
 }
-fn create(body: View) -> Response {
+fn create(body: View) -> Response uses db, dice {
   let Ok(value: NewLink(url)) = decode(json: body, as: NewLink) else -> empty(status: 400)
   let Some(value) = sql_first(row: Link, query: "INSERT INTO links(id, url) VALUES (:id, :url) RETURNING *", id: random() % 1000000000, url) else -> empty(status: 500)
   buf() |> write_json(value) |> respond(status: 201)

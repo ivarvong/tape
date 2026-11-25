@@ -43,7 +43,7 @@ fn handle(raw: View, db: Sql) -> Response {
 }
 
 // The op id is recorded with the name; a repeat added nothing, and answers the count as it stands.
-fn add(name: View, op: View) -> Response {
+fn add(name: View, op: View) -> Response uses db {
   let _ = sql_exec(
     query: "INSERT INTO counted(op, name) VALUES (:op, :name) ON CONFLICT(op, name) DO NOTHING",
     op,

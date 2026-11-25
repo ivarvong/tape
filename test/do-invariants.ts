@@ -52,18 +52,18 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn set(coins: Int, key: View) -> Response {
+fn set(coins: Int, key: View) -> Response uses db {
   let _ = sql_exec(query: "INSERT INTO notes(key, coins) VALUES (:key, :coins) ON CONFLICT(key) DO NOTHING", key, coins)
   do recounted()
   buf() |> append(view: "set") |> respond(status: 200)
 }
 
-fn recounted() -> Done {
+fn recounted() -> Done uses db {
   let _ = sql_exec(query: "UPDATE purse SET coins = (SELECT coalesce(max(coins), 0) FROM notes) WHERE id = 1")
   Done
 }
 
-fn broken() -> Response {
+fn broken() -> Response uses db {
   let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> empty(status: 404)
   buf() |> append(view: "broken") |> respond(status: 200)
 }
@@ -168,7 +168,7 @@ ok('C82: do takes a call', codes(build(swap(BREAK, `  do 1 + 1`))) === 'C82');
   // a function of the program's that gives an Int is not run with `do` either
   const [f] = build(
     swap(BREAK, `  do rows()`) +
-      '\nfn rows() -> Int {\n  sql_exec(query: "UPDATE purse SET coins = 0 WHERE id = 1")\n}\n',
+      '\nfn rows() -> Int uses db {\n  sql_exec(query: "UPDATE purse SET coins = 0 WHERE id = 1")\n}\n',
   ).errors;
   ok(
     "C82: do on the program's own Int function offers let 1 and let _, and a function that gives Done",
@@ -270,16 +270,16 @@ ok(
 
 // tidy
 const untidy = swap(
-  `fn broken() -> Response {
+  `fn broken() -> Response uses db {
 ${BREAK}
   buf() |> append(view: "broken") |> respond(status: 200)
 }`,
-  `fn broken() -> Response {
+  `fn broken() -> Response uses db {
   let wrote = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")
   after(done: sql_exec(query: "UPDATE purse SET coins = 0 - 2 WHERE id = 1"))
 }
 
-fn after(done: Int) -> Response {
+fn after(done: Int) -> Response uses db {
   buf() |> append(view: "broken") |> respond(status: 200 + 0 * sql_exec(query: "UPDATE purse SET coins = 0 - 3 WHERE id = 1"))
 }`,
 );
@@ -305,9 +305,9 @@ ok(
 // a value `do` cannot drop (C82): C83's hint says what to write instead of `do`, which would only be refused
 const unreadMove = build(
   swap(
-    `fn broken() -> Response {
+    `fn broken() -> Response uses db {
 ${BREAK}`,
-    `fn broken() -> Response {
+    `fn broken() -> Response uses db {
   let sealed = sql_move(row: Jar, query: "UPDATE jars SET state = 'sealed' WHERE id = 1 AND state = 'open' RETURNING *")
 ${BREAK}`,
   ),

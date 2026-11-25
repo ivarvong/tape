@@ -37,7 +37,7 @@ fn handle(raw: View, prices: Remote) -> Response {
   asked(item: request(raw).body, tries: 0)
 }
 
-fn asked(item: View, tries: Int) -> Response {
+fn asked(item: View, tries: Int) -> Response uses prices {
   match ask(to: prices, method: "quote", send: Ask(item), reply: Quote, error: QuoteError, within: 1000) {
     Ok(value: Quote(cents)) -> buf() |> append(view: "\\(cents) after \\(tries)") |> respond(status: 200)
 ${arms}

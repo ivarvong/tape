@@ -239,6 +239,10 @@ export type FnDecl = At & {
   tparams: string[];
   /** `private fn`: called only from its own file (C94); the compiler's own calls of it are not refused */
   private?: boolean;
+  /** `-> R uses db, http`: the capabilities the function says it reaches by name (C101 checks it) */
+  uses?: string[];
+  /** set by compiler/ambient.ts: each capability the function takes by name, with the call path that reaches it */
+  reached?: ReadonlyMap<string, readonly string[]>;
   /** set by the build: the result type; for a generic function made for one set of type arguments, its `base` */
   ret?: Resolved;
   base?: string;

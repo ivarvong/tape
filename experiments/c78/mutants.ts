@@ -3,18 +3,20 @@
 import '../../node25.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile } from '../../compiler.ts';
-import { readFlat } from '../../fmt.ts';
+import { readFlat, usesStripped, usesWritten } from '../../fmt.ts';
 const here = (p: string): string => new URL(`../../${p}`, import.meta.url).pathname;
 const read = (p: string): string => (p.endsWith('.tape') ? readFlat(here(p)) : readFileSync(here(p), 'utf8'));
 const std = readdirSync(here('std')).filter(f => f.endsWith('.tape')).map(f => ({ name: `std/${f}`, text: read(`std/${f}`) }));
-const tickets = read('apps/tickets/tickets.tape');
+// the mutants were written before the `uses` clauses: made to the program without them, which problems writes again
+const tickets = usesStripped(read('apps/tickets/tickets.tape'));
 type Pair = readonly [string, string];
 const swap = (text: string, pairs: readonly Pair[]): string =>
   pairs.reduce((t, [a, b]) => {
     if (!t.includes(a)) throw new Error(`not found: ${a}`);
     return t.replace(a, b);
   }, text);
-const problems = (text: string) => compile([...std, { name: 'tickets.tape', text }]).errors;
+const problems = (text: string) =>
+  compile([...std, { name: 'tickets.tape', text: usesWritten(text, 'tickets.tape', std) }]).errors;
 const NOREFUNDWAKE: Pair = ['      do wake(after: 5000, key: id)\n      refund_hold(hold: value)', '      refund_hold(hold: value)'];
 export const mutants: (readonly [string, ...Pair[]])[] = [
   ['1a refund timer keyed 999999', ['do wake(after: 5000, key: id)\n      refund_hold(hold: value)', 'do wake(after: 5000, key: 999999)\n      refund_hold(hold: value)']],

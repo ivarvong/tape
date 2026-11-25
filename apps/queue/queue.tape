@@ -169,7 +169,7 @@ fn answer(outcome: Outcome) -> Result[Job, View] {
   }
 }
 
-fn add(body: View) -> Outcome {
+fn add(body: View) -> Outcome uses clock, db {
   let Ok(value: NewJob(key, kind, payload, delay_ms, most)) = decode(json: body, as: NewJob) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -197,7 +197,7 @@ fn again(found: Option[Job]) -> Outcome {
 
 // The oldest job of this kind that is due. The lease's key is written with it, so the same request again finds
 // the job it was given instead of taking another.
-fn lease(body: View) -> Outcome {
+fn lease(body: View) -> Outcome uses clock, db, timer {
   let Ok(value: LeaseReq(key, worker, kind, for_ms)) = decode(json: body, as: LeaseReq) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -230,7 +230,7 @@ fn lease(body: View) -> Outcome {
 }
 
 // Done, by the attempt that holds the lease. The same ack again finds the job done by that attempt.
-fn ack(id: Int, body: View) -> Outcome {
+fn ack(id: Int, body: View) -> Outcome uses db {
   let Ok(value: Ack(attempt)) = decode(json: body, as: Ack) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -248,7 +248,7 @@ fn ack(id: Int, body: View) -> Outcome {
   }
 }
 
-fn nack(id: Int, body: View) -> Outcome {
+fn nack(id: Int, body: View) -> Outcome uses clock, db {
   let Ok(value: Nack(attempt, error)) = decode(json: body, as: Nack) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -257,7 +257,7 @@ fn nack(id: Int, body: View) -> Outcome {
 }
 
 // The job goes back: ready after a wait that doubles with each attempt, or dead when this was its last.
-fn back(id: Int, attempt: Int, most: Int, error: View) -> Outcome {
+fn back(id: Int, attempt: Int, most: Int, error: View) -> Outcome uses clock, db {
   match {
     attempt >= most -> held(m: sql_move(
       row: Job,
@@ -286,7 +286,7 @@ fn wait(attempt: Int) -> Int {
   }
 }
 
-fn extend(id: Int, body: View) -> Outcome {
+fn extend(id: Int, body: View) -> Outcome uses clock, db, timer {
   let Ok(value: Extend(attempt, for_ms)) = decode(json: body, as: Extend) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -305,7 +305,7 @@ fn extend(id: Int, body: View) -> Outcome {
   Shown(status: 200, job)
 }
 
-fn load(id: Int) -> Option[Job] {
+fn load(id: Int) -> Option[Job] uses db {
   sql_first(row: Job, query: "SELECT * FROM jobs WHERE id = :id", id)
 }
 

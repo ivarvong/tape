@@ -77,7 +77,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
 }
 
 // ?limit= (1 to 100000, 10 when absent) and ?window= in seconds (1 to 86400, 60 when absent).
-fn rule(query: Option[View]) -> Result[Rule, View] {
+fn rule(query: Option[View]) -> Result[Rule, View] uses clock {
   let q = match query {
     Some(value) -> value
     None -> ""
@@ -113,7 +113,7 @@ fn peeked(key: View, rule: Rule, n: Int) -> Response {
   answered(key, rule, allowed: n < rule.limit, used: n, peek: True)
 }
 
-fn used(key: View, rule: Rule) -> Int {
+fn used(key: View, rule: Rule) -> Int uses db {
   match sql_first(
     row: Count,
     query: "SELECT n FROM windows WHERE key = :key AND span = :span AND slot = :slot",
@@ -128,7 +128,7 @@ fn used(key: View, rule: Rule) -> Int {
 
 // ---------- a hit ----------
 
-fn hit(key: View, rule: Rule, op: Option[View]) -> Response {
+fn hit(key: View, rule: Rule, op: Option[View]) -> Response uses db {
   let _ = sql_exec(
     query: "DELETE FROM windows WHERE key = :key AND slot < :slot - 1",
     key,
@@ -155,7 +155,7 @@ fn hit(key: View, rule: Rule, op: Option[View]) -> Response {
 
 // A hit with an idempotency key: the key is claimed first, so a second run of the same request finds the claim
 // and answers the verdict the first one stored.
-fn once(key: View, rule: Rule, o: View) -> Response {
+fn once(key: View, rule: Rule, o: View) -> Response uses db {
   let _ = sql_exec(
     query: "DELETE FROM ops WHERE key = :key AND slot < :slot - 1",
     key,
@@ -233,7 +233,7 @@ fn answered(key: View, rule: Rule, allowed: Bool, used: Int, peek: Bool) -> Resp
 
 // ---------- the dashboard ----------
 
-fn dashboard(at: Int) -> Response {
+fn dashboard(at: Int) -> Response uses db {
   buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><meta name=robots \

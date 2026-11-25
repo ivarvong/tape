@@ -24,7 +24,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn deliver(body: View) -> Response {
+fn deliver(body: View) -> Response uses db {
   let Ok(value: Delivery(source, events)) = decode(json: body, as: Delivery) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -40,7 +40,7 @@ fn deliver(body: View) -> Response {
   out |> append(view: "],\"customers\":\(customers),\"total\":\(total)}") |> respond(status: 200)
 }
 
-fn route_all(source: View, events: List[Event], out: Buf, first: Bool) -> Buf {
+fn route_all(source: View, events: List[Event], out: Buf, first: Bool) -> Buf uses db {
   match events {
     Cons(head, tail) if first -> route_all(
       source,
@@ -59,7 +59,7 @@ fn route_all(source: View, events: List[Event], out: Buf, first: Bool) -> Buf {
 }
 
 // [the id, what was done]
-fn route(out: Buf, source: View, e: Event) -> Buf {
+fn route(out: Buf, source: View, e: Event) -> Buf uses db {
   out
     |> write_json_string(text: e.id)
     |> append(view: ",\"")
@@ -67,7 +67,7 @@ fn route(out: Buf, source: View, e: Event) -> Buf {
     |> append(view: "\"]")
 }
 
-fn outcome(source: View, e: Event) -> View {
+fn outcome(source: View, e: Event) -> View uses db {
   let Event(id, kind, account, amount, note) = e
   let 1 = sql_exec(
     query: "INSERT INTO seen(id, source) VALUES (:id, :source) ON CONFLICT(id) DO NOTHING",
@@ -97,7 +97,7 @@ fn paid(n: Int, what: View) -> View {
   }
 }
 // A payment recorded under the event's id, and the account's total moved by it; 1.
-fn pay(id: Id, account: Account, amount: Int) -> Int {
+fn pay(id: Id, account: Account, amount: Int) -> Int uses db {
   let 1 = sql_exec(
     query: "INSERT INTO payments(id, account, amount) VALUES (:id, :account, :amount) \
         ON CONFLICT(id) DO NOTHING",

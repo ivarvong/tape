@@ -86,7 +86,7 @@ fn filter(query: Option[View]) -> Option[Filter] {
   }
 }
 
-fn list(which: Filter) -> Response {
+fn list(which: Filter) -> Response uses db {
   match which {
     Everything -> todos(rows: sql_all(row: Todo, query: "SELECT * FROM todos ORDER BY id"))
     Only(done) -> todos(
@@ -95,7 +95,7 @@ fn list(which: Filter) -> Response {
   }
 }
 
-fn create(body: View) -> Response {
+fn create(body: View) -> Response uses db {
   match decode(json: body, as: NewTodo) {
     Ok(value: NewTodo(key, title, done: Some(value: done))) -> insert(key, title, done)
     Ok(value: NewTodo(key, title, done: None)) -> insert(key, title, done: False)
@@ -103,7 +103,7 @@ fn create(body: View) -> Response {
   }
 }
 
-fn insert(key: Key, title: Title, done: Bool) -> Response {
+fn insert(key: Key, title: Title, done: Bool) -> Response uses db {
   made(
     key,
     found: sql_first(
@@ -118,7 +118,7 @@ fn insert(key: Key, title: Title, done: Bool) -> Response {
 }
 
 // 201 with the todo this request made, or 200 with the one an earlier request with the same key made.
-fn made(key: Key, found: Option[Todo]) -> Response {
+fn made(key: Key, found: Option[Todo]) -> Response uses db {
   match found {
     Some(value) -> one(status: 201, found)
     None -> one(
@@ -128,7 +128,7 @@ fn made(key: Key, found: Option[Todo]) -> Response {
   }
 }
 
-fn update(id: Id, body: View) -> Response {
+fn update(id: Id, body: View) -> Response uses db {
   match decode(json: body, as: Changes) {
     Ok(value: Retitle(title)) -> one(
       status: 200,

@@ -103,7 +103,7 @@ const traced = moduleOf(built(PROGRAM, { trace: true }));
 
 // ---- the compiler: Secrets is granted by an entry point, and used by name below it
 {
-  const helper = `fn key() -> Option[View] {\n  secret(name: "stripe")\n}\n\nfn handle(raw: View, secrets: Secrets) -> Response {\n  match key() {\n    Some -> empty(status: 200)\n    None -> empty(status: 404)\n  }\n}\n`;
+  const helper = `fn key() -> Option[View] uses secrets {\n  secret(name: "stripe")\n}\n\nfn handle(raw: View, secrets: Secrets) -> Response {\n  match key() {\n    Some -> empty(status: 200)\n    None -> empty(status: 404)\n  }\n}\n`;
   same("a helper reads the entry point's Secrets by name", codes(helper), []);
   same(
     'secret() with no Secrets declared is C72',

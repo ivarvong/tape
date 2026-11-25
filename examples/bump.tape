@@ -53,7 +53,7 @@ fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Response {
   }
 }
 
-fn version() -> Response {
+fn version() -> Response uses repo {
   let Ok(value: File(content)) = repo.read_file(
     send: ReadFile(ref: "main", path: "VERSION"),
     within: 2000
@@ -68,7 +68,7 @@ fn version() -> Response {
     |> respond(status: 200)
 }
 
-fn start(body: View) -> Response {
+fn start(body: View) -> Response uses clock, db, repo {
   let Ok(value: Bump(key, from, to)) = decode(json: body, as: Bump) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -99,14 +99,14 @@ fn start(body: View) -> Response {
   edit(intent)
 }
 
-fn again(found: Option[Intent]) -> Response {
+fn again(found: Option[Intent]) -> Response uses db, repo {
   match found {
     Some(value) -> edit(intent: value)
     None -> problem(status: 404, detail: "no such pending bump")
   }
 }
 
-fn retry(id: Int) -> Response {
+fn retry(id: Int) -> Response uses db, repo {
   let Some(value: intent) = sql_first(
     row: Intent,
     query: "SELECT * FROM bumps WHERE id = :id AND state = 'pending'",
@@ -116,7 +116,7 @@ fn retry(id: Int) -> Response {
 }
 
 // The edit is a command with the bump's key: sent again, the repository answers what it did the first time.
-fn edit(intent: Intent) -> Response {
+fn edit(intent: Intent) -> Response uses db, repo {
   let Intent(id, find, replace, expected, time) = intent
   let Ok(value: Edited(commit)) = repo.edit_file(
     send: Edit(

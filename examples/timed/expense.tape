@@ -89,11 +89,11 @@ export fn woken(
   }
 }
 
-fn load(id: Int) -> Option[Expense] {
+fn load(id: Int) -> Option[Expense] uses db {
   sql_first(row: Expense, query: "SELECT * FROM expenses WHERE id = :id", id)
 }
 
-fn filed(body: View) -> Outcome {
+fn filed(body: View) -> Outcome uses clock, db, timer {
   let Ok(value: NewExpense(key, amount, approver)) = decode(json: body, as: NewExpense) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -115,7 +115,7 @@ fn filed(body: View) -> Outcome {
 }
 
 // Approved in time: paying, with a timer for the payment's outcome, set before the call.
-fn approve(id: Int) -> Outcome {
+fn approve(id: Int) -> Outcome uses clock, db, payments, timer {
   let Some(value: e) = load(id) else -> Problem(status: 404, reason: "no such expense")
   match e {
     Expense(state: Waiting, deadline) if deadline <= now() -> Problem(
@@ -139,7 +139,7 @@ fn approve(id: Int) -> Outcome {
   }
 }
 
-fn paying(moved: Move[Expense]) -> Outcome {
+fn paying(moved: Move[Expense]) -> Outcome uses db, payments, timer {
   match moved {
     Moved(value) -> pay(expense: value)
     Raced(now) -> Shown(status: 409, expense: now)
@@ -147,7 +147,7 @@ fn paying(moved: Move[Expense]) -> Outcome {
   }
 }
 
-fn pay(expense: Expense) -> Outcome {
+fn pay(expense: Expense) -> Outcome uses db, payments, timer {
   let Expense(id, amount) = expense
   paid(
     id,
@@ -163,7 +163,7 @@ fn pay(expense: Expense) -> Outcome {
   )
 }
 
-fn paid(id: Int, reply: Result[Payout, CallError[PayoutError]]) -> Outcome {
+fn paid(id: Int, reply: Result[Payout, CallError[PayoutError]]) -> Outcome uses db, timer {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -192,7 +192,7 @@ fn paid(id: Int, reply: Result[Payout, CallError[PayoutError]]) -> Outcome {
 }
 
 // No answer: the payment is asked again by the timer this sets.
-fn unknown(id: Int) -> Outcome {
+fn unknown(id: Int) -> Outcome uses db {
   match load(id) {
     Some(value) -> Shown(status: 202, expense: value)
     None -> Problem(status: 404, reason: "no such expense")
@@ -201,7 +201,7 @@ fn unknown(id: Int) -> Outcome {
 
 // The timer's run: a waiting expense past its deadline expires (one not yet due is waited for again); a payment
 // still out is asked again.
-fn due(found: Option[Expense]) -> Outcome {
+fn due(found: Option[Expense]) -> Outcome uses clock, db, payments, timer {
   let Some(value: e) = found else -> Problem(status: 404, reason: "no such expense")
   match e {
     Expense(id, state: Waiting, deadline) if deadline <= now() -> shown(found: latest(
@@ -229,7 +229,7 @@ fn later(expense: Expense) -> Outcome {
   Shown(status: 200, expense)
 }
 
-fn latest(id: Int, m: Move[Expense]) -> Option[Expense] {
+fn latest(id: Int, m: Move[Expense]) -> Option[Expense] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

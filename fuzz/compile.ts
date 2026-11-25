@@ -59,6 +59,7 @@ const TOKENS = [
   'final',
   'read',
   'write',
+  'uses',
   '(',
   ')',
   '{',

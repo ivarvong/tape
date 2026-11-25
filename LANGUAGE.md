@@ -21,10 +21,12 @@ waits on a call, another may run. Three things hold for every program:
 1. **Everything it does to the world is in a log.** SQL, calls to other programs, the clock, random numbers and
    timers are effects. Each is recorded, and a run can be repeated from its log.
 2. **Memory is the request's.** Values are immutable. Nothing lives past the request except rows.
-3. **What a request can do is declared where it enters.** An entry point (`handle`, `woken`, an exported function)
-   declares each capability it uses, itself or through what it calls: the database, another program, the clock,
-   random numbers, a timer. A function it calls uses that capability by its name without passing it, and a
-   capability no entry point declares is refused with the call path to its use (C72, section 4).
+3. **What a function can do is in its signature.** An entry point (`handle`, `woken`, an exported function)
+   declares each capability as a parameter: the database, another program, the clock, random numbers, a timer, its
+   secrets, the network. Every other function that reaches one, itself or through what it calls, says so with
+   `uses`: `fn load(id: Int) -> Option[Order] uses db`. It uses the capability by its name without passing it; a
+   capability no entry point declares is refused with the call path to its use (C72), and a signature that does not
+   say what its function reaches is refused with the clause to write (C101, section 4).
 
 ## 2. Text
 
@@ -81,7 +83,7 @@ fn punct(b: Int) -> Int {
 ```
 
 Reserved words: `fn export type schema migration match with let do if else and or not`. Words with a meaning
-only where they stand: `interface flag machine invariant where contract settled private final read write` (`private` before `fn` or `type`). A reserved
+only where they stand: `interface flag machine invariant where contract settled private final read write uses` (`private` before `fn` or `type`, `uses` after a function's result type). A reserved
 word can name a record's field, since a field is never a variable: `Event(type: View)`, `e.type`, and in a pattern
 `Event(type: kind)`, which binds `kind` (a bare `Event(type)` would bind a variable named `type`, and is P01). So a
 JSON key that is a reserved word is decoded and written like any other.
@@ -192,6 +194,9 @@ fn name(param: Type, …) -> Type {
   …
   expression
 }
+fn name(param: Type, …) -> Type uses db, clock {
+  …
+}
 ```
 
 Arguments are named, `f(at: i)`, with two exceptions, one rule: a bare name that is one of the callee's parameters
@@ -289,9 +294,17 @@ fn dots(n: Int) -> Int {
 ```
 
 Capabilities are ambient by name. An entry point (`handle`, an exported function) declares each one it uses,
-itself or through what it calls (C72 names the call path when it does not); every other function uses it by that
-name without declaring or passing it: `sql_first(…)` in a helper uses handle's `db: Sql`, and `now()` its
+itself or through what it calls, as a parameter (C72 names the call path when it does not); every other function
+uses it by that name without passing it: `sql_first(…)` in a helper uses handle's `db: Sql`, and `now()` its
 `clock: Clock`. A built-in that needs one no entry point declares is C72 at the call.
+
+What a function reaches is in its signature: after its result type, `uses` and the name of each capability it uses
+by name, itself or through a function it calls, in alphabetical order (`-> Option[Order] uses clock, db`). A function
+that reaches none writes no clause, and an entry point writes none (its capabilities are its parameters), nor does
+a function for a capability it is given as a parameter. A clause missing, naming one the function does not reach,
+or out of order is C101, whose fix is the clause to write; `tape fmt` writes it. The clause is checked, not
+compiled: a function value cannot use a capability (C44), so a clause is never part of a type, and the code
+is the same with it or without it. `uses` is a word only there.
 
 ## 5. Patterns
 
@@ -518,7 +531,7 @@ export fn woken(db: Sql, payments: Remote, timer: Timer, message: Wake) -> Resul
   }
 }
 
-fn place(body: View) -> Outcome {
+fn place(body: View) -> Outcome uses db, payments, timer {
   let Ok(value: NewOrder(key, amount)) = decode(json: body, as: NewOrder) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -538,7 +551,7 @@ fn place(body: View) -> Outcome {
   charge(order)
 }
 
-fn charge(order: Order) -> Outcome {
+fn charge(order: Order) -> Outcome uses db, payments, timer {
   match order {
     Order(id, amount, state: Paying) -> {
       let Ok(value: Charged) = call(
@@ -573,7 +586,7 @@ fn charge(order: Order) -> Outcome {
   }
 }
 
-fn load(id: Int) -> Option[Order] {
+fn load(id: Int) -> Option[Order] uses db {
   sql_first(row: Order, query: "SELECT * FROM orders WHERE id = :id", id)
 }
 

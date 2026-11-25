@@ -144,7 +144,8 @@ export function typeDecl(c: Cursor, prog: Program, isPrivate: boolean): void {
 }
 
 // ---- functions
-/** `fn name[A](x: T, …) -> R { … }`; `exported`: written after `export`; `isPrivate`: after `private`. */
+/** `fn name[A](x: T, …) -> R uses a, b { … }`; `exported`: written after `export`; `isPrivate`: after `private`.
+ * `uses` is a word only there: the capabilities the function reaches by name (compiler/ambient.ts clauses). */
 export function fnDecl(c: Cursor, prog: Program, exported: boolean, isPrivate = false): void {
   if (exported) c.expect('kw', 'fn', '`export` goes before `fn`.');
   const n = c.expect('id'),
@@ -152,6 +153,7 @@ export function fnDecl(c: Cursor, prog: Program, exported: boolean, isPrivate = 
     ps = params(c);
   c.expect('op', '->', 'Every function states its result type: `-> Type`.');
   const retAst = type(c),
+    uses = c.eat('id', 'uses') ? c.list(x => x.expect('id').v) : null,
     body = block(c),
     mine = prog.byFile.get(c.file) ?? new Map<string, string>(),
     // a name another file has already taken is known as `file.name`
@@ -179,6 +181,7 @@ export function fnDecl(c: Cursor, prog: Program, exported: boolean, isPrivate = 
     exported,
     tparams,
     ...(isPrivate ? { private: true } : {}),
+    ...(uses ? { uses } : {}),
   });
 }
 

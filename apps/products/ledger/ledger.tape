@@ -105,7 +105,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   }
 }
 
-fn opened(body: View) -> Response {
+fn opened(body: View) -> Response uses db {
   let Ok(value: NewAccount(id, external)) = decode(json: body, as: NewAccount) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -129,7 +129,7 @@ fn opened(body: View) -> Response {
   }
 }
 
-fn account(id: View) -> Response {
+fn account(id: View) -> Response uses db {
   let Some(value: Account(external, balance)) = sql_first(
     row: Account,
     query: "SELECT * FROM accounts WHERE id = :id",
@@ -160,7 +160,7 @@ fn entries(rows: Rows[Entry]) -> List[Entry] {
   }
 }
 
-fn sent(body: View) -> Response {
+fn sent(body: View) -> Response uses clock, db {
   let Ok(
     value: NewTransfer(key, from, to, amount, memo)
   ) = decode(json: body, as: NewTransfer) else {
@@ -208,7 +208,7 @@ fn sent(body: View) -> Response {
 }
 
 // out of an account: down to zero for one of ours, without a floor for an external one
-fn take(from: View, amount: Dec[2]) -> Int {
+fn take(from: View, amount: Dec[2]) -> Int uses db {
   match sql_first(row: Account, query: "SELECT * FROM accounts WHERE id = :from", from) {
     Some(value: Account(external: True)) -> sql_exec(
       query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND external = 1",
@@ -226,7 +226,7 @@ fn take(from: View, amount: Dec[2]) -> Int {
 }
 
 // the key was claimed: by this transfer (a retry), by another, or nothing was made (an account is missing)
-fn again(key: View, from: View, to: View, amount: Dec[2], note: View) -> Response {
+fn again(key: View, from: View, to: View, amount: Dec[2], note: View) -> Response uses db {
   match sql_first(row: Transfer, query: "SELECT * FROM transfers WHERE client = :key", key) {
     Some(value: t) if t.src == from
       and t.dst == to
@@ -252,7 +252,7 @@ fn shown_transfer(status: Int, t: Transfer) -> Response {
   )
 }
 
-fn transfers_csv() -> Response {
+fn transfers_csv() -> Response uses db {
   buf()
     |> append(view: "id,at,from,to,amount,memo,key\r ")
     |> csv_rows(rows: sql_all(row: Transfer, query: "SELECT * FROM transfers ORDER BY id"))
@@ -273,7 +273,7 @@ fn csv_rows(out: Buf, rows: Rows[Transfer]) -> Buf {
     })
 }
 
-fn balances_csv() -> Response {
+fn balances_csv() -> Response uses db {
   buf()
     |> append(view: "account,external,balance\r ")
     |> balance_rows(rows: sql_all(row: Account, query: "SELECT * FROM accounts ORDER BY id"))
@@ -371,7 +371,7 @@ fn two(n: Int) -> View {
   }
 }
 
-fn home() -> Response {
+fn home() -> Response uses db {
   let out = buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
     |> append(view: "<meta name=viewport \

@@ -22,7 +22,7 @@ fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
   }
 }
 
-fn create(body: View) -> Response {
+fn create(body: View) -> Response uses clock, db, dice {
   let Ok(value: NewLink(key, url)) = decode(json: body, as: NewLink) else {
     Err(error) -> problem(status: 400, detail: error)
   }

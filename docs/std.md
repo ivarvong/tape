@@ -1924,7 +1924,7 @@ fn fold_rows[A, B](rows: Rows[A], from: B, by: Fn2[B, A, B]) -> B
 Combine the rows of a query in their order, starting from `from`, as `fold` combines a list's items: one step a row and one more, and no list is made. `from` may be a Buf, handed from row to row, to write each row into it:
 
 ```
-fn names(out: Buf) -> Buf {
+fn names(out: Buf) -> Buf uses db {
   sql_all(row: Item, query: "SELECT * FROM items ORDER BY id")
     |> fold_rows(from: out, by: fn(o: Buf, item: Item) -> Buf { o |> append(view: item.name) })
 }

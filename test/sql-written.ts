@@ -38,7 +38,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn upsert(k: View) -> Response {
+fn upsert(k: View) -> Response uses db {
   let Some(value: row) = sql_first(
     row: Kv,
     query: "INSERT INTO kv(k, v) VALUES (:k, 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING *",

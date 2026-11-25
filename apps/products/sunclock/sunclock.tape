@@ -62,7 +62,7 @@ fn handle(raw: View, clock: Clock) -> Response {
 
 // ---------- the query ----------
 
-fn place(q: View) -> Result[Place, View] {
+fn place(q: View) -> Result[Place, View] uses clock {
   let Some(value: lat) = number(
     q,
     name: "lat",

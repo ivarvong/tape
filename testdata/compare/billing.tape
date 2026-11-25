@@ -79,7 +79,7 @@ fn handle(raw: View, db: Sql, payments: Remote, tools: Remote) -> Response {
 
 // db, payments and tools are the capabilities handle declares: the functions below use them by name (the compiler
 // passes them; an entry point that does not declare one it reaches is refused, C72).
-fn routed(raw: View) -> Outcome {
+fn routed(raw: View) -> Outcome uses db, payments, tools {
   match request(raw) {
     Request(method: Post, path: "/subs", body) -> {
       let Ok(value: NewSub(key, card, price)) = decode(json: body, as: NewSub) else {
@@ -142,7 +142,7 @@ fn routed(raw: View) -> Outcome {
   }
 }
 
-fn load(id: Int) -> Option[Sub] {
+fn load(id: Int) -> Option[Sub] uses db {
   sql_first(
     row: Sub,
     query: "SELECT *, (SELECT count(*) FROM invoices WHERE sub = subs.id) AS invoices FROM subs \
@@ -154,7 +154,7 @@ fn load(id: Int) -> Option[Sub] {
 // Bill period n, unless it is billed already or the subscription is canceled. A canceled subscription whose last
 // charge went out without an answer has that charge sent again (same key: it runs at most once) to settle it.
 // Otherwise the period is written down (and committed: a call is a commit point) before its charge goes out.
-fn renew(sub: Sub, period: Int) -> Outcome {
+fn renew(sub: Sub, period: Int) -> Outcome uses db, payments, tools {
   match sub {
     Sub(
       id,
@@ -187,7 +187,7 @@ fn renew(sub: Sub, period: Int) -> Outcome {
 }
 
 // The period written down (and committed: a call is a commit point) before its charge goes out.
-fn bill(id: Int, period: Int, state: SubState) -> Outcome {
+fn bill(id: Int, period: Int, state: SubState) -> Outcome uses db, payments, tools {
   let Moved(value: Sub(card, price)) = sql_move(
     row: Sub,
     query: "UPDATE subs SET charging = :period WHERE id = :id AND state = :state \
@@ -225,7 +225,7 @@ fn charged(
   price: Int,
   state: SubState,
   reply: Result[Charged, CallError[Refusal]]
-) -> Outcome {
+) -> Outcome uses db, tools {
   match reply {
     Ok(value) -> {
       let _ = sql_exec(
@@ -284,7 +284,7 @@ fn charged(
 }
 
 // A charge settled for a subscription that was not canceled: it is active, paid to the period.
-fn activated(id: Int, period: Int, state: SubState) -> Outcome {
+fn activated(id: Int, period: Int, state: SubState) -> Outcome uses db {
   show(
     status: 200,
     found: latest(
@@ -302,7 +302,7 @@ fn activated(id: Int, period: Int, state: SubState) -> Outcome {
   )
 }
 
-fn latest(id: Int, moved: Move[Sub]) -> Option[Sub] {
+fn latest(id: Int, moved: Move[Sub]) -> Option[Sub] uses db {
   match moved {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

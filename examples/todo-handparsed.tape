@@ -56,7 +56,7 @@ fn item(id: Option[Int]) -> Route {
   }
 }
 
-fn serve(method: View, route: Route, query: View, body: View) -> Response {
+fn serve(method: View, route: Route, query: View, body: View) -> Response uses db {
   match route {
     NoRoute -> error(status: 404)
     List if method == "GET" -> list(query)
@@ -76,7 +76,7 @@ fn serve(method: View, route: Route, query: View, body: View) -> Response {
   }
 }
 
-fn list(query: View) -> Response {
+fn list(query: View) -> Response uses db {
   match query {
     "" -> todos(rows: sql_all(row: Todo, query: "SELECT * FROM todos ORDER BY id"))
     "done=true" -> todos(rows: sql_all(
@@ -93,7 +93,7 @@ fn list(query: View) -> Response {
   }
 }
 
-fn create(draft: Draft) -> Response {
+fn create(draft: Draft) -> Response uses db {
   match draft {
     Draft(
       key: Set(value: key),
@@ -109,7 +109,7 @@ fn create(draft: Draft) -> Response {
   }
 }
 
-fn insert(key: View, text: View, done: Bool) -> Response {
+fn insert(key: View, text: View, done: Bool) -> Response uses db {
   made(
     key,
     found: sql_first(
@@ -124,7 +124,7 @@ fn insert(key: View, text: View, done: Bool) -> Response {
 }
 
 // 201 with the todo this request made, or 200 with the one an earlier request with the same key made.
-fn made(key: View, found: Option[Todo]) -> Response {
+fn made(key: View, found: Option[Todo]) -> Response uses db {
   match found {
     Some(value) -> one(status: 201, found)
     None -> one(
@@ -134,7 +134,7 @@ fn made(key: View, found: Option[Todo]) -> Response {
   }
 }
 
-fn update(id: Int, draft: Draft) -> Response {
+fn update(id: Int, draft: Draft) -> Response uses db {
   match draft {
     Draft(key: Unset, title: Set(value: text), done: Unset) -> one(
       status: 200,

@@ -379,6 +379,10 @@ export const DIAGNOSTICS = {
     meaning:
       "A fetch whose method is not written `Get` or `Head` without `key: Some(…)`. A request that timed out may have been received, so it is sent again, which is safe only when the other side can tell it for a repeat: std/http.tape's fetch sends the key as Idempotency-Key.",
   },
+  C101: {
+    meaning:
+      'A signature that does not say which capabilities its function reaches: a function that uses one by name, itself or through what it calls, without `uses` and those names in alphabetical order after its result type (`uses clock, db`), a clause that names one it does not reach, or a clause on an entry point, which declares each capability as a parameter. `tape fmt` writes the clause.',
+  },
 } as const satisfies Record<string, Diagnostic>;
 
 export type Code = keyof typeof DIAGNOSTICS;

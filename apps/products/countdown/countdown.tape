@@ -44,11 +44,11 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   }
 }
 
-fn load(id: Int) -> Option[Event] {
+fn load(id: Int) -> Option[Event] uses db {
   sql_first(row: Event, query: "SELECT * FROM events WHERE id = :id", id)
 }
 
-fn made(body: View) -> Response {
+fn made(body: View) -> Response uses clock, db {
   let Ok(value: NewEvent(key, name, at)) = decode(json: body, as: NewEvent) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -348,7 +348,7 @@ fn number(v: View) -> Option[Int] {
   }
 }
 
-fn home(at: Int) -> Response {
+fn home(at: Int) -> Response uses db {
   let out = shell(title: "countdowns")
     |> append(
       view: "<p>A page that counts down to an event, computed on the server at each load.</p>"

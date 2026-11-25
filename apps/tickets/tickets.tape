@@ -258,7 +258,12 @@ fn handle(raw: View, db: Sql, pay: Remote, clock: Clock, timer: Timer, dice: Ent
   }
 }
 
-fn routed(method: Method, path: View, body: View, caller: Caller) -> Outcome {
+fn routed(
+  method: Method,
+  path: View,
+  body: View,
+  caller: Caller
+) -> Outcome uses clock, db, pay, timer {
   match method {
     Post -> posted(path, body, caller)
     _ -> Problem(status: 404, reason: "no such route")
@@ -267,7 +272,7 @@ fn routed(method: Method, path: View, body: View, caller: Caller) -> Outcome {
 
 // The admin routes are reached only on the Operator arm; a public caller's request goes to buyer_post, where they
 // are 403. (Arguments are evaluated before a call, so the check is this match, not a helper taking the outcome.)
-fn posted(path: View, body: View, caller: Caller) -> Outcome {
+fn posted(path: View, body: View, caller: Caller) -> Outcome uses clock, db, pay, timer {
   match caller {
     Operator -> operator_post(path, body)
     Anyone -> buyer_post(path, body)
@@ -275,7 +280,7 @@ fn posted(path: View, body: View, caller: Caller) -> Outcome {
   }
 }
 
-fn operator_post(path: View, body: View) -> Outcome {
+fn operator_post(path: View, body: View) -> Outcome uses clock, db, pay, timer {
   match path {
     "/events" -> new_event(body)
     "/events/" ++ decimal(id) ++ "/tiers" -> new_tier(event: id, body)
@@ -285,7 +290,7 @@ fn operator_post(path: View, body: View) -> Outcome {
   }
 }
 
-fn buyer_post(path: View, body: View) -> Outcome {
+fn buyer_post(path: View, body: View) -> Outcome uses clock, db, pay, timer {
   match path {
     "/holds" -> new_hold(body)
     "/holds/" ++ decimal(id) ++ "/checkout" -> checkout(id, body)
@@ -303,7 +308,7 @@ fn buyer_post(path: View, body: View) -> Outcome {
 
 // ---- events and tiers
 
-fn new_event(body: View) -> Outcome {
+fn new_event(body: View) -> Outcome uses db {
   let Ok(value: NewEvent(key, name, starts, tiers)) = decode(json: body, as: NewEvent) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -332,7 +337,7 @@ fn listed(tiers: Option[List[NewTier]]) -> List[NewTier] {
 // The tiers sent with a new event, in the event's own transaction: all of them, or (the event's key seen before)
 // none again. A tier whose key is taken (by another event's tier, or twice in one list) is no tier of this event:
 // the event is undone and the answer says which key.
-fn added(event: Event, tiers: List[NewTier]) -> Outcome {
+fn added(event: Event, tiers: List[NewTier]) -> Outcome uses db {
   match tiers {
     Cons(head: NewTier(key, name, price, capacity), tail) -> {
       let 1 = sql_exec(
@@ -356,7 +361,7 @@ fn event_again(found: Option[Event]) -> Outcome {
   ShowEvent(status: 200, event)
 }
 
-fn new_tier(event: Int, body: View) -> Outcome {
+fn new_tier(event: Int, body: View) -> Outcome uses db {
   let Ok(value: NewTier(key, name, price, capacity)) = decode(json: body, as: NewTier) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -387,7 +392,7 @@ fn tier_again(found: Option[Tier]) -> Outcome {
 
 // Take the seats and write the hold in one transaction (no call in between). A retry with the same key finds
 // the hold it made and takes nothing.
-fn new_hold(body: View) -> Outcome {
+fn new_hold(body: View) -> Outcome uses clock, db, timer {
   let Ok(value: HoldReq(key, tier, buyer, qty, seconds)) = decode(json: body, as: HoldReq) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -441,7 +446,7 @@ fn hold_again(found: Option[Hold]) -> Outcome {
   }
 }
 
-fn load_hold(id: Int) -> Option[Hold] {
+fn load_hold(id: Int) -> Option[Hold] uses db {
   sql_first(row: Hold, query: "SELECT * FROM holds WHERE id = :id", id)
 }
 
@@ -454,7 +459,7 @@ fn shown_hold(found: Option[Hold]) -> Outcome {
 // The hold moves to paying (with the card) before the charge goes out: a call is a commit point, and a hold that
 // is paying is never expired. The charge is keyed by the hold, so a retry, a second click or the expiry timer
 // that sends it again learns the first outcome instead of charging twice.
-fn checkout(id: Int, body: View) -> Outcome {
+fn checkout(id: Int, body: View) -> Outcome uses clock, db, pay, timer {
   let Ok(value: Checkout(card)) = decode(json: body, as: Checkout) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -483,7 +488,7 @@ fn checkout(id: Int, body: View) -> Outcome {
   }
 }
 
-fn paying(moved: Move[Hold]) -> Outcome {
+fn paying(moved: Move[Hold]) -> Outcome uses db, pay, timer {
   match moved {
     Moved(value) -> charge(hold: value)
     Raced(now: hold = Hold(state: Paying)) -> charge(hold)
@@ -500,7 +505,7 @@ fn paying(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn charge(hold: Hold) -> Outcome {
+fn charge(hold: Hold) -> Outcome uses db, pay, timer {
   let Hold(id, card, amount, attempt) = hold
   charged(
     id,
@@ -517,7 +522,11 @@ fn charge(hold: Hold) -> Outcome {
   )
 }
 
-fn charged(id: Int, tries: Int, reply: Result[Charged, CallError[PayError]]) -> Outcome {
+fn charged(
+  id: Int,
+  tries: Int,
+  reply: Result[Charged, CallError[PayError]]
+) -> Outcome uses db, timer {
   match reply {
     Ok(value) -> confirmed(moved: sql_move(
       row: Hold,
@@ -548,7 +557,7 @@ fn pay_retry() -> Backoff {
   Backoff(first: 5000, factor: 2, most: 600000, tries: 10)
 }
 
-fn unknown(id: Int, n: Int) -> Outcome {
+fn unknown(id: Int, n: Int) -> Outcome uses db, timer {
   // first the shortest wait, so no way out of this run leaves the hold without a timer; ask_again moves it later
   do wake(after: 5000, key: id)
   match sql_move(
@@ -569,7 +578,7 @@ fn unknown(id: Int, n: Int) -> Outcome {
   }
 }
 
-fn ask_again(id: Int, decided: Retry) -> Outcome {
+fn ask_again(id: Int, decided: Retry) -> Outcome uses db, timer {
   match decided {
     RetryIn(after) -> {
       do wake(after, key: id)
@@ -601,7 +610,7 @@ fn gave_up(moved: Move[Hold]) -> Outcome {
 
 // Paid: one ticket per seat. INSERT OR IGNORE on (hold, seat), so two requests that both heard the charge's
 // stored reply write the tickets once.
-fn confirmed(moved: Move[Hold]) -> Outcome {
+fn confirmed(moved: Move[Hold]) -> Outcome uses db {
   match moved {
     Moved(value: hold = Hold(id, buyer, qty)) -> {
       do issue(hold: id, buyer, seat: 1, qty)
@@ -612,7 +621,7 @@ fn confirmed(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn issue(hold: Int, buyer: View, seat: Int, qty: Int) -> Done {
+fn issue(hold: Int, buyer: View, seat: Int, qty: Int) -> Done uses db {
   match {
     seat > qty -> Done
     else -> {
@@ -628,7 +637,7 @@ fn issue(hold: Int, buyer: View, seat: Int, qty: Int) -> Done {
   }
 }
 
-fn declined(reason: View, moved: Move[Hold]) -> Outcome {
+fn declined(reason: View, moved: Move[Hold]) -> Outcome uses timer {
   match moved {
     Moved(value: Hold(id)) -> {
       do wake(after: 0, key: id)
@@ -651,7 +660,7 @@ fn held_again(reason: View) -> Outcome {
 
 // ---- release, expiry, waitlist
 
-fn release(id: Int) -> Outcome {
+fn release(id: Int) -> Outcome uses clock, db, timer {
   ended(moved: sql_move(
     row: Hold,
     query: "UPDATE holds SET state = 'released' WHERE id = :id AND state = 'held' RETURNING *",
@@ -660,7 +669,7 @@ fn release(id: Int) -> Outcome {
 }
 
 // A hold that ended (released or expired) gives its seats back, then the waitlist is offered them.
-fn ended(moved: Move[Hold]) -> Outcome {
+fn ended(moved: Move[Hold]) -> Outcome uses clock, db, timer {
   match moved {
     Moved(value: hold = Hold(tier, qty)) -> {
       let 1 = sql_exec(
@@ -681,7 +690,7 @@ fn ended(moved: Move[Hold]) -> Outcome {
 
 // The oldest waiting entry whose seats fit gets a hold of its own, with its own timer. One per seats returned is
 // enough to keep the line moving: every ended hold promotes again.
-fn promote(tier: Int) -> Done {
+fn promote(tier: Int) -> Done uses clock, db, timer {
   let Some(
     value: Wait(id, buyer, qty)
   ) = sql_first(
@@ -736,7 +745,7 @@ fn promote(tier: Int) -> Done {
   }
 }
 
-fn join_waitlist(body: View) -> Outcome {
+fn join_waitlist(body: View) -> Outcome uses clock, db, timer {
   let Ok(value: WaitReq(key, tier, buyer, qty)) = decode(json: body, as: WaitReq) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -791,7 +800,7 @@ fn summary(outcome: Outcome) -> Woke {
   }
 }
 
-fn due(found: Option[Hold]) -> Outcome {
+fn due(found: Option[Hold]) -> Outcome uses clock, db, pay, timer {
   let Some(value: hold) = found else -> Problem(status: 404, reason: "no such hold")
   match hold {
     Hold(id, state: Held, expires) if expires <= now() -> ended(moved: sql_move(
@@ -821,7 +830,7 @@ fn due(found: Option[Hold]) -> Outcome {
 // The timer is set in the same commit as the move to refunding, before the call: a run cut short while the
 // refund is out (its object reset) leaves the hold refunding, and the timer's run (due) asks again with the same
 // once key. Without it nothing comes back for the hold: found by the prod Jepsen run, seed 1.
-fn refund(id: Int) -> Outcome {
+fn refund(id: Int) -> Outcome uses clock, db, pay, timer {
   match sql_move(
     row: Hold,
     query: "UPDATE holds SET state = 'refunding', tries = 0 WHERE id = :id \
@@ -837,7 +846,7 @@ fn refund(id: Int) -> Outcome {
   }
 }
 
-fn refund_again(found: Option[Hold]) -> Outcome {
+fn refund_again(found: Option[Hold]) -> Outcome uses clock, db, pay, timer {
   match found {
     Some(value: hold) -> refundable(hold, state: hold.state)
     None -> Problem(status: 404, reason: "no such hold")
@@ -847,7 +856,7 @@ fn refund_again(found: Option[Hold]) -> Outcome {
 // A refund asked again: one begun goes on, one done is shown, and a hold in any other state was never paid for.
 // The match is on the state, not on the row: a hold raced out of confirmed is refunding or past it, so the arms
 // for the states before it are never taken from a timer's run, and they set no timer.
-fn refundable(hold: Hold, state: HoldState) -> Outcome {
+fn refundable(hold: Hold, state: HoldState) -> Outcome uses clock, db, pay, timer {
   match state {
     Refunding -> refund_hold(hold)
     Refunded -> ShowHold(status: 200, hold)
@@ -869,7 +878,7 @@ fn unrefundable(state: HoldState) -> Outcome {
   )
 }
 
-fn refund_hold(hold: Hold) -> Outcome {
+fn refund_hold(hold: Hold) -> Outcome uses clock, db, pay, timer {
   let Hold(id, card, amount) = hold
   refunded(
     id,
@@ -887,7 +896,7 @@ fn refund_hold(hold: Hold) -> Outcome {
 }
 
 // The count of unknown answers as it was before an ask (refund_unknown moves it on from there).
-fn tries_of(id: Int) -> Int {
+fn tries_of(id: Int) -> Int uses db {
   match sql_first(row: Count, query: "SELECT tries AS n FROM holds WHERE id = :id", id) {
     Some(value: Count(n)) -> n
     None -> 0
@@ -911,7 +920,11 @@ fn refund_refused(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn refunded(id: Int, tries: Int, reply: Result[RefundMade, CallError[PayError]]) -> Outcome {
+fn refunded(
+  id: Int,
+  tries: Int,
+  reply: Result[RefundMade, CallError[PayError]]
+) -> Outcome uses clock, db, timer {
   match reply {
     Ok(value) -> settled(moved: sql_move(
       row: Hold,
@@ -939,7 +952,7 @@ fn refunded(id: Int, tries: Int, reply: Result[RefundMade, CallError[PayError]])
 // timer asked again every 5 s for ever. `n` is the count read before the ask, so two asks out at once (a request sent
 // twice) count once: the second's compare-and-set loses and takes the first's count (`tape sim` found a duplicate
 // request counting twice when the count was read after the call).
-fn refund_unknown(id: Int, n: Int) -> Outcome {
+fn refund_unknown(id: Int, n: Int) -> Outcome uses db, timer {
   do wake(after: 5000, key: id)
   match sql_move(
     row: Count,
@@ -960,7 +973,7 @@ fn refund_unknown(id: Int, n: Int) -> Outcome {
   }
 }
 
-fn refund_ask_again(id: Int, decided: Retry) -> Outcome {
+fn refund_ask_again(id: Int, decided: Retry) -> Outcome uses db, timer {
   match decided {
     RetryIn(after) -> {
       do wake(after, key: id)
@@ -977,7 +990,7 @@ fn refund_ask_again(id: Int, decided: Retry) -> Outcome {
   }
 }
 
-fn settled(moved: Move[Hold]) -> Outcome {
+fn settled(moved: Move[Hold]) -> Outcome uses clock, db, timer {
   match moved {
     Moved(value: hold = Hold(id, tier, qty)) -> {
       let tickets = sql_exec(
@@ -1013,7 +1026,7 @@ fn refunded_all(hold: Hold, tickets: Int) -> Outcome {
   }
 }
 
-fn cancel_event(id: Int) -> Outcome {
+fn cancel_event(id: Int) -> Outcome uses db, timer {
   match sql_move(
     row: Event,
     query: "UPDATE events SET state = 'canceled' WHERE id = :id AND state = 'onsale' RETURNING *",
@@ -1029,7 +1042,7 @@ fn cancel_event(id: Int) -> Outcome {
 }
 
 // Canceling a canceled event again: a sweep that gave up waiting (sweep_retry) starts again from no waits.
-fn resumed(event: Event) -> Outcome {
+fn resumed(event: Event) -> Outcome uses db, timer {
   let Event(id) = event
   let Some(value: Count(n)) = sql_first(
     row: Count,
@@ -1051,7 +1064,7 @@ fn resumed(event: Event) -> Outcome {
   }
 }
 
-fn restarted(event: Event, moved: Move[Count]) -> Outcome {
+fn restarted(event: Event, moved: Move[Count]) -> Outcome uses timer {
   let Event(id) = event
   match moved {
     Moved -> {
@@ -1065,7 +1078,7 @@ fn restarted(event: Event, moved: Move[Count]) -> Outcome {
 // One step of refunding a canceled event: end its open holds, drop its waitlist, then refund one confirmed order
 // and come back for the next. A charge still out (paying) is waited for: its own timer settles it, and it is
 // refunded on a later sweep.
-fn sweep(event: Int) -> Outcome {
+fn sweep(event: Int) -> Outcome uses clock, db, pay, timer {
   let _ = sql_exec(
     query: "UPDATE holds SET state = 'released' WHERE state = 'held' AND tier IN (SELECT id \
         FROM tiers WHERE event = :event)",
@@ -1137,7 +1150,7 @@ fn sweep_retry() -> Backoff {
 }
 
 // The count moves by compare-and-set, as a hold's tries do, so a sweep woken twice counts once.
-fn swept(event: Int, waits: Int, open: Option[Count]) -> Outcome {
+fn swept(event: Int, waits: Int, open: Option[Count]) -> Outcome uses db, timer {
   match open {
     Some(value: Count(n)) if n > 0 -> waited(
       event,
@@ -1153,7 +1166,7 @@ fn swept(event: Int, waits: Int, open: Option[Count]) -> Outcome {
   }
 }
 
-fn waited(event: Int, moved: Move[Count]) -> Outcome {
+fn waited(event: Int, moved: Move[Count]) -> Outcome uses timer {
   match moved {
     Moved(value: Count(n)) -> wait_more(event, decided: backoff(policy: sweep_retry(), failed: n))
     Raced(now: Count(n)) -> wait_more(event, decided: backoff(policy: sweep_retry(), failed: n))
@@ -1161,7 +1174,7 @@ fn waited(event: Int, moved: Move[Count]) -> Outcome {
   }
 }
 
-fn wait_more(event: Int, decided: Retry) -> Outcome {
+fn wait_more(event: Int, decided: Retry) -> Outcome uses timer {
   match decided {
     RetryIn(after) -> {
       do wake(after, key: 0 - event)
@@ -1177,7 +1190,7 @@ fn wait_more(event: Int, decided: Retry) -> Outcome {
 
 // ---- tickets
 
-fn transfer(id: Int, body: View) -> Outcome {
+fn transfer(id: Int, body: View) -> Outcome uses db {
   let Ok(value: Transfer(from, to)) = decode(json: body, as: Transfer) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -1197,7 +1210,7 @@ fn transfer(id: Int, body: View) -> Outcome {
 
 // ---- rendering (JSON)
 
-fn rendered(outcome: Outcome) -> Response {
+fn rendered(outcome: Outcome) -> Response uses db {
   match outcome {
     ShowEvent(status, event) -> buf() |> event_json(event) |> respond_as(status, content: Json)
     ShowHold(status, hold) -> json(status, value: hold)
@@ -1210,7 +1223,7 @@ fn rendered(outcome: Outcome) -> Response {
   }
 }
 
-fn event_page(found: Option[Event]) -> Response {
+fn event_page(found: Option[Event]) -> Response uses db {
   match found {
     Some(value: event) -> buf() |> event_json(event) |> respond_as(status: 200, content: Json)
     None -> rendered(outcome: Problem(status: 404, reason: "no such event"))
@@ -1219,7 +1232,7 @@ fn event_page(found: Option[Event]) -> Response {
 
 // An event with its tiers: {"id":…,…,"tiers":[…]}. write_json writes a flat record, so the tiers are spliced in
 // before its closing brace.
-fn event_json(out: Buf, event: Event) -> Buf {
+fn event_json(out: Buf, event: Event) -> Buf uses db {
   let Event(id, name, starts, state) = event
   out
     |> append(view: "{\"id\":\(id),\"name\":")
@@ -1235,7 +1248,7 @@ fn event_json(out: Buf, event: Event) -> Buf {
     |> append(view: "}")
 }
 
-fn events(out: Buf, rows: Rows[Event], first: Bool) -> Buf {
+fn events(out: Buf, rows: Rows[Event], first: Bool) -> Buf uses db {
   match next(rows) {
     Next(value, rest) if first -> events(
       out: event_json(out, event: value),
@@ -1274,7 +1287,7 @@ fn is_form(form: View) -> Bool {
   form == "buy" or form == "wait" or form == "pay" or form == "release" or form == "give"
 }
 
-fn form_post(form: View, query: View, body: View) -> Response {
+fn form_post(form: View, query: View, body: View) -> Response uses clock, db, pay, timer {
   let id = number(field: form_field(body: query, name: "id"))
   match form {
     "buy" -> held_page(outcome: new_hold(body: hold_json(form: body)))
@@ -1316,7 +1329,7 @@ fn hold_json(form: View) -> View {
   ) |> append(view: "}"))
 }
 
-fn held_page(outcome: Outcome) -> Response {
+fn held_page(outcome: Outcome) -> Response uses clock, db {
   match outcome {
     ShowHold(status, hold) -> hold_page(status, found: Some(value: hold))
     Problem(status, reason) -> message_page(status, title: "No hold", text: reason)
@@ -1325,7 +1338,7 @@ fn held_page(outcome: Outcome) -> Response {
   }
 }
 
-fn waited_page(outcome: Outcome) -> Response {
+fn waited_page(outcome: Outcome) -> Response uses clock, db {
   match outcome {
     ShowWait(
       status,
@@ -1352,7 +1365,7 @@ fn waiting_page(status: Int, buyer: View) -> Response {
     |> page_end(status)
 }
 
-fn after_page(outcome: Outcome) -> Response {
+fn after_page(outcome: Outcome) -> Response uses clock, db {
   match outcome {
     ShowHold(status, hold) -> hold_page(status, found: Some(value: hold))
     Problem(status, reason) -> message_page(status, title: "Not done", text: reason)
@@ -1361,7 +1374,7 @@ fn after_page(outcome: Outcome) -> Response {
   }
 }
 
-fn given_page(outcome: Outcome) -> Response {
+fn given_page(outcome: Outcome) -> Response uses db {
   match outcome {
     ShowTicket(status, ticket: Ticket(owner)) -> me_page(status, buyer: owner)
     Problem(status, reason) -> message_page(status, title: "Not transferred", text: reason)
@@ -1412,12 +1425,12 @@ fn me_link(out: Buf, buyer: View) -> Buf {
     |> append(view: "'s tickets</a>")
 }
 
-fn home(out: Buf) -> Response {
+fn home(out: Buf) -> Response uses db, dice {
   page_events(out, rows: sql_all(row: Event, query: "SELECT * FROM events ORDER BY id"))
     |> page_end(status: 200)
 }
 
-fn page_events(out: Buf, rows: Rows[Event]) -> Buf {
+fn page_events(out: Buf, rows: Rows[Event]) -> Buf uses db, dice {
   match next(rows) {
     Next(
       value: Event(id, name, starts, state),
@@ -1448,7 +1461,7 @@ fn event_state(state: EventState) -> View {
   }
 }
 
-fn page_tiers(out: Buf, rows: Rows[Tier], open: Bool) -> Buf {
+fn page_tiers(out: Buf, rows: Rows[Tier], open: Bool) -> Buf uses dice {
   match next(rows) {
     Next(value: Tier(id, name, price, capacity, left), rest) -> page_tiers(
       out: out
@@ -1467,7 +1480,7 @@ fn page_tiers(out: Buf, rows: Rows[Tier], open: Bool) -> Buf {
 }
 
 // The key is drawn with the page: the same form posted again is the same hold.
-fn tier_form(out: Buf, tier: Int, left: Int, open: Bool) -> Buf {
+fn tier_form(out: Buf, tier: Int, left: Int, open: Bool) -> Buf uses dice {
   match {
     not open -> out
     left > 0 -> out
@@ -1485,7 +1498,7 @@ fn tier_form(out: Buf, tier: Int, left: Int, open: Bool) -> Buf {
   }
 }
 
-fn hold_page(status: Int, found: Option[Hold]) -> Response {
+fn hold_page(status: Int, found: Option[Hold]) -> Response uses clock, db {
   let Some(
     value: hold = Hold(id, tier, buyer, qty, amount, state, expires, note)
   ) = found else -> message_page(
@@ -1516,7 +1529,7 @@ fn hold_note(out: Buf, note: View) -> Buf {
   }
 }
 
-fn hold_actions(out: Buf, hold: Hold) -> Buf {
+fn hold_actions(out: Buf, hold: Hold) -> Buf uses clock, db {
   let Hold(id, state, expires) = hold
   match state {
     Held -> out
@@ -1561,7 +1574,7 @@ fn ticket_rows(out: Buf, rows: Rows[Ticket]) -> Buf {
 type Mine { Mine(id: Int, seat: Int, state: TicketState, event: View, tier: View) }
 type MyHold { MyHold(id: Int, qty: Int, state: HoldState, tier: View) }
 
-fn me_page(status: Int, buyer: View) -> Response {
+fn me_page(status: Int, buyer: View) -> Response uses db {
   page_top(title: "Tickets of " ++ buyer)
     |> append(
       view: "<table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr>"
@@ -1647,7 +1660,7 @@ type HoldRow { HoldRow(
   note: View
 ) }
 
-fn audit(out: Buf) -> Buf {
+fn audit(out: Buf) -> Buf uses db {
   out
     |> append(view: "{\"tiers\":")
     |> write_rows(rows: sql_all(row: TierRow, query: "SELECT * FROM tiers ORDER BY id"))

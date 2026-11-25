@@ -146,7 +146,7 @@ fn handle(
 
 // The functions below use the capabilities handle and woken declare (db, inventory, payments, shipping, timer) by
 // name; the compiler passes them, and refuses an entry point that reaches one it does not declare (C72).
-fn routed(raw: View) -> Outcome {
+fn routed(raw: View) -> Outcome uses db, inventory, payments, shipping, timer {
   match request(raw) {
     Request(method: Post, path: "/orders", body) -> start(
       wait: 2000,
@@ -182,13 +182,16 @@ fn settled(outcome: Outcome) -> Result[Order, View] {
   }
 }
 
-fn load(id: Int) -> Option[Order] {
+fn load(id: Int) -> Option[Order] uses db {
   sql_first(row: Order, query: "SELECT * FROM orders WHERE id = :id", id)
 }
 
 // The order this request made; or the one an earlier request with this key made, carried on from where it stands;
 // or 422 when the key was used for another order.
-fn start(wait: Int, order: Result[NewOrder, View]) -> Outcome {
+fn start(
+  wait: Int,
+  order: Result[NewOrder, View]
+) -> Outcome uses db, inventory, payments, shipping, timer {
   let Ok(value: NewOrder(key, sku, qty, card, address)) = order else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -225,7 +228,10 @@ fn start(wait: Int, order: Result[NewOrder, View]) -> Outcome {
 // The state names the next step; each step is a call, and its reply decides the transition. A finished order
 // (done or failed) is shown as it is. The workflow goes on by advance calling itself with the order each
 // transition leaves.
-fn advance(wait: Int, found: Option[Order]) -> Outcome {
+fn advance(
+  wait: Int,
+  found: Option[Order]
+) -> Outcome uses db, inventory, payments, shipping, timer {
   match found {
     Some(value: Order(id, sku, qty, state: Reserving)) -> {
       let Ok(value: Reserved(price)) = call(
@@ -372,7 +378,7 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
 // One transition: from the state the step belonged to, to the next. Nothing changes if the order has moved on.
 // When another request moved the order first (a retry racing this one), the order as it is now: the workflow
 // carries on from there, and its steps' keys make anything sent again harmless.
-fn move(id: Int, from: OrderState, to: OrderState, note: View) -> Option[Order] {
+fn move(id: Int, from: OrderState, to: OrderState, note: View) -> Option[Order] uses db {
   latest(moved: sql_move(
     row: Order,
     query: "UPDATE orders SET state = :to, note = :note, stall = '', retries = 0, steps = steps + \
@@ -388,7 +394,12 @@ fn move(id: Int, from: OrderState, to: OrderState, note: View) -> Option[Order] 
 // tried again later, by a timer (retrying); a refusal while compensating (a refund or a release turned down) is
 // not, as it needs a person. Each write happens only while the order is still in that state: another request
 // may have finished the step meanwhile (a retry racing this one), and then the order is shown as that request left it.
-fn stalled[E](id: Int, state: OrderState, step: View, error: CallError[E]) -> Outcome {
+fn stalled[E](
+  id: Int,
+  state: OrderState,
+  step: View,
+  error: CallError[E]
+) -> Outcome uses db, timer {
   match error {
     Timeout -> retrying(id, why: step ++ " did not answer in time", found: failed_again(id, state))
     Unreachable -> retrying(id, why: step ++ " is unreachable", found: failed_again(id, state))
@@ -398,7 +409,7 @@ fn stalled[E](id: Int, state: OrderState, step: View, error: CallError[E]) -> Ou
 }
 
 // A compensation turned down: it is not asked again, as it needs a person.
-fn refused(id: Int, state: OrderState, step: View, reason: View) -> Outcome {
+fn refused(id: Int, state: OrderState, step: View, reason: View) -> Outcome uses db {
   show(
     status: 500,
     found: noted(id, state, stall: step ++ " was refused while compensating: " ++ reason)
@@ -422,7 +433,7 @@ fn payment_refusal(reason: PaymentError) -> View {
 }
 
 // One more failure in a row of the order's current step.
-fn failed_again(id: Int, state: OrderState) -> Move[Order] {
+fn failed_again(id: Int, state: OrderState) -> Move[Order] uses db {
   sql_move(
     row: Order,
     repeat: True,
@@ -433,7 +444,7 @@ fn failed_again(id: Int, state: OrderState) -> Move[Order] {
 }
 
 // Set a timer to try the step again (or give up, after the last attempt), and say which in `stall`.
-fn retrying(id: Int, why: View, found: Move[Order]) -> Outcome {
+fn retrying(id: Int, why: View, found: Move[Order]) -> Outcome uses db, timer {
   match found {
     Moved(value: Order(state, retries)) -> show(
       status: 202,
@@ -457,7 +468,7 @@ fn waiting(decided: Retry) -> View {
   }
 }
 
-fn noted(id: Int, state: OrderState, stall: View) -> Option[Order] {
+fn noted(id: Int, state: OrderState, stall: View) -> Option[Order] uses db {
   latest(moved: sql_move(
     row: Order,
     query: "UPDATE orders SET stall = :stall WHERE id = :id AND state = :state RETURNING *",

@@ -16,7 +16,8 @@ import type { Json } from '../../sim/values.ts';
 import { invariantsOf } from './invariants.ts';
 import { cardOf, entryOf, eventOf, holdOf, ticketOf, tierOf, waitOf } from './rows.ts';
 import type { State } from './rows.ts';
-import { readFlat } from '../../fmt.ts';
+import { readFlat, usesStripped, usesWritten } from '../../fmt.ts';
+import { std } from '../../std.ts';
 
 const here = new URL('./', import.meta.url).pathname;
 const text = { tickets: readFlat(`${here}tickets.tape`), pay: readFlat(`${here}pay.tape`) };
@@ -181,9 +182,14 @@ async function hunt(module: WebAssembly.Module): Promise<Hunt> {
   };
 }
 
-/** tickets.tape with one plant's replacements made. */
+/** tickets.tape with one plant's replacements made: to the program without its `uses` clauses, which are written
+ * again after them, as fmt would (apps/tickets/plants.ts). */
 const planted = (pairs: readonly (readonly [string, string])[]): string =>
-  pairs.reduce((t, [a, b]) => t.replace(a, b), text.tickets);
+  usesWritten(
+    pairs.reduce((t, [a, b]) => t.replace(a, b), usesStripped(text.tickets)),
+    'program.tape',
+    std,
+  );
 const scriptOf = (json: string): string[] => {
   const given: unknown = JSON.parse(json);
   return Array.isArray(given) ? given.map(String) : [];

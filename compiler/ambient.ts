@@ -19,8 +19,8 @@ import {
   eachPattern,
   partsOf,
 } from './ast.ts';
-import { fail, stemOf } from './common.ts';
-import { CAPABILITIES, key } from './types.ts';
+import { type Problem, fail, stemOf } from './common.ts';
+import { CAPABILITIES, INTRINSICS, key } from './types.ts';
 
 /** The capabilities a program names: name -> type. A name declared with two types is not ambient. */
 type Named = Map<string, TypeAst>;
@@ -78,8 +78,11 @@ function fillBuiltIns(prog: Program, types: Named): void {
   }
 }
 
-// the function a call from f means, by the name it is known by
+// the function a call from f means, by the name it is known by. A built-in's name left bare by shadow.ts is the
+// built-in: a program's own `next` is called `file.next` from its files, and std's fold_rows never reaches it (it
+// was taken for the program's, so std's fold_rows was given the capabilities of a program's `next`).
 function target(prog: Program, f: FnDecl, name: string): string | null {
+  if (INTRINSICS.has(name)) return null;
   const own = prog.byFile.get(f.file)?.get(name),
     all = prog.defs.get(name) ?? [],
     dot = name.indexOf('.');
@@ -104,8 +107,9 @@ function scan(prog: Program, types: Named, f: FnDecl): Scan {
   const call = (e: Call, bound: Set<string>): void => {
     const dot = e.name.indexOf('.'),
       head = dot > 0 ? e.name.slice(0, dot) : null;
-    // an interface method: repo.head(…)
-    if (head && (bound.has(head) || types.has(head))) {
+    // an interface method: repo.head(…). A capability that is not an interface has no methods: `http.until(…)` in
+    // std/http.tape is its own until (shadow.ts names it by its file), not a use of a program's `http: Http`
+    if (head && (bound.has(head) || prog.interfaces.has(types.get(head)?.name ?? ''))) {
       if (!bound.has(head)) out.free.add(head);
     } else if (!bound.has(e.name)) {
       const k = target(prog, f, e.name);
@@ -182,7 +186,57 @@ function addParameters(prog: Program, types: Named, need: Needs): void {
       const typeAst = types.get(n);
       if (typeAst) f.params.push({ name: n, typeAst, implicit: true });
     }
+    f.reached = new Map(missing.filter(([n]) => types.has(n)));
   }
+}
+
+/** The clause a function's signature must carry: the capabilities it takes by name, in alphabetical order; empty for
+ * one that takes none, and for an entry point, which declares each as a parameter. */
+export const clauseOf = (f: FnDecl): string[] =>
+  f.name === 'handle' || f.exported ? [] : [...(f.reached?.keys() ?? [])].toSorted();
+const written = (names: readonly string[]): string => `\`uses ${names.join(', ')}\``;
+
+/**
+ * C101: a function's signature says which capabilities it reaches. Every function but an entry point that uses a
+ * capability by name, itself or through a function it calls, writes `uses` and those names after its result type,
+ * in alphabetical order; one that reaches none writes no clause, and an entry point never does (the host grants
+ * capabilities there, as parameters). The clause is checked, not compiled: it changes no byte of the module. Run by
+ * the build after ambient (a fragment read by a tool has no program to infer from); `tape fmt` writes the clause.
+ */
+export function clauses(prog: Program): Problem[] {
+  const found: Problem[] = [];
+  for (const f of prog.fns.values()) {
+    const name = shortName(f),
+      want = clauseOf(f),
+      has = f.uses ?? [],
+      at = { file: f.file, line: f.line, code: 'C101' };
+    if (f.name === 'handle' || f.exported) {
+      if (f.uses)
+        found.push({
+          ...at,
+          message: `${name} is an entry point, and writes ${written(has)}: an entry point declares its capabilities as parameters`,
+          hint: `Remove ${written(has)}. The host grants capabilities where a request enters, so each one ${name} uses is a parameter (\`db: Sql\`); every other function says what it reaches with \`uses\`.`,
+        });
+      continue;
+    }
+    if (has.join(',') === want.join(',')) continue;
+    const fix =
+      want.length === 0
+        ? `Remove ${written(has)}: \`fn ${name}(…) -> ${key(f.retAst)} {\`.`
+        : `Write ${written(want)} after ${name}'s result type: \`fn ${name}(…) -> ${key(f.retAst)} uses ${want.join(', ')} {\`. \`tape fmt\` writes it.`;
+    const other = has.find(n => !want.includes(n)),
+      first = want.find(n => !has.includes(n)),
+      param = has.find(n => !want.includes(n) && f.params.some(pm => pm.name === n && !pm.implicit));
+    const message = first
+      ? `${name} uses the capability ${first} (${(f.reached?.get(first) ?? [name]).join(' → ')}), and its signature does not say so`
+      : param
+        ? `${name} names ${param} in its \`uses\`, and ${param} is its parameter: its signature says so already`
+        : other
+          ? `${name} names ${other} in its \`uses\`, and does not reach it by name`
+          : `${name} writes ${written(has)}: a clause names each capability once, in alphabetical order`;
+    found.push({ ...at, message, hint: fix });
+  }
+  return found;
 }
 // A built-in that takes a capability when the program has none of that type: no entry point was granted one, so
 // no function can have it. Refused at the call, with the parameter to add (written bare, `now(clock)` was then

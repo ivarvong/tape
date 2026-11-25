@@ -768,7 +768,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn moved(id: View, from: View, amount: Int) -> Response {
+fn moved(id: View, from: View, amount: Int) -> Response uses db {
   let Some(value: t) = sql_first(
     row: Transfer,
     query: "INSERT INTO transfers(transfer_id, from_id, amount) VALUES (:id, :from, :amount) CLAIM RETURNING *",
@@ -803,8 +803,8 @@ fn moved(id: View, from: View, amount: Int) -> Response {
     'C54: the debit before the claim is still refused',
     codes(
       claimed.replace(
-        'fn moved(id: View, from: View, amount: Int) -> Response {\n',
-        'fn moved(id: View, from: View, amount: Int) -> Response {\n  let _ = sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
+        'fn moved(id: View, from: View, amount: Int) -> Response uses db {\n',
+        'fn moved(id: View, from: View, amount: Int) -> Response uses db {\n  let _ = sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
       ),
       ['handle'],
     ).map(x => x.split(':')[0]),

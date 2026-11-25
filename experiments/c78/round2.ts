@@ -6,14 +6,17 @@
 import '../../node25.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile } from '../../compiler.ts';
-import { readFlat } from '../../fmt.ts';
+import { readFlat, usesStripped, usesWritten } from '../../fmt.ts';
 /** A replacement in a program's text: [what is there, what to put]. */
 export type Pair = readonly [string, string];
 /** What a mutant wants: nothing (it is accepted), or [code, the text whose line it is at, how]. */
 export type Want = readonly [] | readonly [string, string] | readonly [string, string, 'among' | 'with'];
 export type Mutant = readonly [name: string, file: string, pairs: readonly Pair[], want: Want];
 const here = (p: string): string => new URL(`../../${p}`, import.meta.url).pathname;
-const read = (p: string): string => (p.endsWith('.tape') ? readFlat(here(p)) : readFileSync(here(p), 'utf8'));
+// a program is read without its `uses` clauses, which the mutants were written before; run writes them again, as
+// fmt would after the edit (a mutant that drops a `wake` drops its function's `timer`: no catch, C101)
+const read = (p: string): string =>
+  p.endsWith('.tape') ? usesStripped(readFlat(here(p))) : readFileSync(here(p), 'utf8');
 const NOREFUNDWAKE: Pair = ['      do wake(after: 5000, key: id)\n      refund_hold(hold: value)', '      refund_hold(hold: value)'];
 const SWEEP = "h.state = 'confirmed' ORDER BY h.id LIMIT 1";
 const REFUNDING = "UPDATE holds SET state = 'refunding'";
@@ -74,8 +77,9 @@ function caughtBy(got: readonly string[], want: Want, w: string | null): boolean
   return JSON.stringify(got) === JSON.stringify([w]);
 }
 export const run = ([name, file, pairs, want]: Mutant) => {
-  const text = swap(read(file), pairs);
-  const errs = compile([...std, { name: file.split('/').pop() ?? file, text }]).errors;
+  const base = file.split('/').pop() ?? file;
+  const text = usesWritten(swap(read(file), pairs), base, std);
+  const errs = compile([...std, { name: base, text }]).errors;
   const got = errs.map(e => `${e.code}:${e.line}`);
   const [code, anchor] = want;
   const w = code !== undefined && anchor !== undefined ? `${code}:${lineOf(text, anchor)}` : null;

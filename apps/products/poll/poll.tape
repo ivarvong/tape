@@ -111,7 +111,7 @@ fn form_json(form: View) -> View {
   ))
 }
 
-fn made(body: View) -> Outcome {
+fn made(body: View) -> Outcome uses clock, db {
   let Ok(value: NewPoll(key, question, options)) = decode(json: body, as: NewPoll) else {
     Err(error) -> Failed(status: 400, error)
   }
@@ -139,7 +139,7 @@ fn again(found: Option[Poll]) -> Outcome {
 }
 
 // each option, numbered from 0; the claim of the poll's key above makes these run once
-fn add_options(poll: Int, options: List[Label], idx: Int) -> Done {
+fn add_options(poll: Int, options: List[Label], idx: Int) -> Done uses db {
   match options {
     Cons(head, tail) -> {
       let _ = sql_exec(
@@ -155,7 +155,7 @@ fn add_options(poll: Int, options: List[Label], idx: Int) -> Done {
 }
 
 // a vote answers JSON; from the page's form it answers 303 to the page, which shows the count
-fn voted(id: Int, body: View, form: Bool) -> Response {
+fn voted(id: Int, body: View, form: Bool) -> Response uses db {
   let Ok(value: Vote(voter, option)) = vote_of(body, form) else {
     Err(error) -> answer(id, form, outcome: Failed(status: 400, error))
   }
@@ -189,7 +189,7 @@ fn answer(id: Int, form: Bool, outcome: Outcome) -> Response {
   }
 }
 
-fn already(id: Int, voter: View) -> Outcome {
+fn already(id: Int, voter: View) -> Outcome uses db {
   match sql_first(
     row: Choice,
     query: "SELECT idx FROM votes WHERE poll = :id AND voter = :voter",
@@ -204,7 +204,7 @@ fn already(id: Int, voter: View) -> Outcome {
   }
 }
 
-fn results(id: Int) -> Option[Results] {
+fn results(id: Int) -> Option[Results] uses db {
   let Some(value: Poll(question)) = sql_first(
     row: Poll,
     query: "SELECT * FROM polls WHERE id = :id",
@@ -242,7 +242,7 @@ fn rendered(outcome: Outcome) -> Response {
   }
 }
 
-fn page(found: Option[Results], note: View) -> Response {
+fn page(found: Option[Results], note: View) -> Response uses dice {
   match found {
     Some(value: Results(id, question, total, options)) -> {
       let voter = voter_key(n: random())
@@ -333,7 +333,7 @@ fn letters(out: Buf, n: Int, left: Int) -> Buf {
   }
 }
 
-fn home() -> Response {
+fn home() -> Response uses db {
   let out = shell(title: "polls")
     |> append(view: "<p>Make a poll with a JSON POST; vote once per voter key. A vote claims its \
         voter's row ")

@@ -200,6 +200,7 @@ fn contextual(w: View) -> Bool {
     "final" -> True
     "read" -> True
     "write" -> True
+    "uses" -> True
     _ -> False
   }
 }

@@ -26,7 +26,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn added(acct: View, amt: Int) -> Response {
+fn added(acct: View, amt: Int) -> Response uses db {
   let _ = sql_exec(query: "INSERT INTO e(acct, amt) VALUES (:acct, :amt)", acct, amt, repeat: True)
   empty(status: 201)
 }

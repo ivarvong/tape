@@ -88,7 +88,7 @@ fn charged(reply: Result[Charged, CallError[Refusal]]) -> Response {
     ['buf() |> write_int(value: answered()) |> respond(status: 200)', 'db: Sql', 'sql_first'],
   ];
   const program = (body: string, params: string): string =>
-    `type N { N(n: Int) }\n\nfn handle(raw: View${params}) -> Response {\n  ${body}\n}\n\nfn answered() -> Int {\n  match sql_first(row: N, query: "SELECT 1 AS n") {\n    Some(value: N(n)) -> n\n    None -> 0\n  }\n}\n`;
+    `type N { N(n: Int) }\n\nfn handle(raw: View${params}) -> Response {\n  ${body}\n}\n\nfn answered() -> Int uses db {\n  match sql_first(row: N, query: "SELECT 1 AS n") {\n    Some(value: N(n)) -> n\n    None -> 0\n  }\n}\n`;
   for (const [body, param, fn] of cases) {
     const s = said(program(body, body.includes('answered') ? '' : ', db: Sql'));
     same(
@@ -282,13 +282,13 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn moved(id: View) -> Response {
+fn moved(id: View) -> Response uses db {
   let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> empty(status: 200)
   let 1 = sql_exec(query: "UPDATE a SET balance = balance - 5 WHERE id = :id AND balance >= 5", id@DEBIT) else -> rollback(out: empty(status: 409))
   empty(status: 201)
 }
 
-fn counted(key: View, used: Int) -> Response {
+fn counted(key: View, used: Int) -> Response uses db {
   let _ = sql_exec(query: "UPDATE k SET used = :used WHERE key = :key", key, used@SET)
   let _ = sql_exec(query: "INSERT INTO k(key, used) VALUES (:key, 0) ON CONFLICT(key) DO NOTHING", key@INSERT)
   empty(status: 200)
@@ -447,7 +447,7 @@ fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   }
 }
 
-fn charge(order: Order) -> Response {
+fn charge(order: Order) -> Response uses payments {
   @BODY
 }
 

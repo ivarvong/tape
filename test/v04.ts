@@ -55,7 +55,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn received(id: View) -> Response {
+fn received(id: View) -> Response uses db {
   let 1 = sql_exec(query: "INSERT INTO d(id, n) VALUES (:id, 1) ON CONFLICT(id) DO NOTHING", id) else -> buf() |> append(view: "dup") |> respond(status: 200)
   match id {
     "refund" -> credit(k: "acme", by: -5)
@@ -63,7 +63,7 @@ fn received(id: View) -> Response {
   }
 }
 
-fn credit(k: View, by: Int) -> Response {
+fn credit(k: View, by: Int) -> Response uses db {
   let _ = sql_exec(query: "INSERT INTO a(k, b) VALUES (:k, :by) ON CONFLICT(k) DO UPDATE SET b = b + :by", k, by)
   buf() |> append(view: "ok") |> respond(status: 200)
 }

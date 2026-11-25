@@ -21,7 +21,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn claimed(key: View) -> Response {
+fn claimed(key: View) -> Response uses db {
   let 1 = sql_exec(
     query: "INSERT INTO claims(key) VALUES (:key) ON CONFLICT(key) DO NOTHING",
     key

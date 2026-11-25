@@ -66,7 +66,7 @@ $ node tape.ts examples/hello.tape 'GET /hello/ada' 'GET /hello/ada'
 ← 200 ⏎ Hello again, ada #2!
 
   effect log
-    start   build f4992b77625bf202  flags {}  216 bytes of memory, 91 steps, step version 2
+    start   build 9980ea3d651d2843  flags {}  216 bytes of memory, 91 steps, step version 2
     sql     INSERT INTO greeted(name, n) VALUES (?1, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  …
 
   trace, from that log
@@ -106,7 +106,7 @@ fn handle(raw: View, db: Sql) -> Response {
 }
 
 // once per debit id: a second run finds the claim and stops there, so the debit needs no `repeat: True`
-fn debited(id: View) -> Response {
+fn debited(id: View) -> Response uses db {
   let 1 = sql_exec(
     query: "INSERT INTO debits(id) VALUES (:id) ON CONFLICT(id) DO NOTHING",
     id
@@ -169,7 +169,7 @@ From `examples/orders.tape`: an order is in SQLite before stock in another objec
 call can fail is an arm the compiler requires.
 
 ```
-fn reserve(order: Order) -> Response {
+fn reserve(order: Order) -> Response uses db, stock {
   let Order(id, item) = order
   let Ok(value: Reserved) = call(
     to: stock,

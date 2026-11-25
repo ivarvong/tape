@@ -66,7 +66,7 @@ fn minutes_of(query: Option[View]) -> Option[Int] {
   }
 }
 
-fn made(body: View, minutes: Option[Int]) -> Response {
+fn made(body: View, minutes: Option[Int]) -> Response uses clock, db, timer {
   let Some(value: m) = minutes else -> problem(status: 400, detail: "minutes: 1 to 1440")
   let ttl = m * 60000
   let True = len(body) >= 1 else -> problem(status: 400, detail: "empty paste")
@@ -113,7 +113,7 @@ fn answered(status: Int, paste: Paste) -> Response {
 }
 
 // a paste whose time is up is gone, even before its timer has run
-fn live(id: Int) -> Option[Paste] {
+fn live(id: Int) -> Option[Paste] uses clock, db {
   sql_first(
     row: Paste,
     query: "SELECT * FROM pastes WHERE id = :id AND expires > :at",
@@ -132,7 +132,7 @@ fn raw_text(found: Option[Paste]) -> Response {
   }
 }
 
-fn page(found: Option[Paste]) -> Response {
+fn page(found: Option[Paste]) -> Response uses clock {
   match found {
     Some(value: paste) -> {
       let id = id_text(paste.id)

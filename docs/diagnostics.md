@@ -4,7 +4,7 @@
 
 A code starts with the part of the compiler that gives it: L for the lexer (the characters of a file), P for the parser (its shape), C for the checker and the rules (what it means). A refusal is a code, a file and line, what is wrong there, and what to write instead; the line and the fix name what the program wrote. This page says what each code refuses whatever the program, and where [LANGUAGE.md](../LANGUAGE.md) or [the guide](guide.md) explains it.
 
-108 codes.
+109 codes.
 
 | Code | Refuses | Explained in |
 |---|---|---|
@@ -64,7 +64,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C41 | A `call` (a command) without `once`. The key lets the other side run it at most once, so it can be sent again after a timeout. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Timers: Timer, wake and woken](guide.md#timers-timer-wake-and-woken) |
 | C42 | An exported function that does not take capabilities and exactly one message, or does not return `Result[Reply, Error]`, which is how another program calls it. |  |
 | C43 | A call of a generic function where nothing says what one of its type parameters is. |  |
-| C44 | A function value with no parameter or more than two, or one that captures a Buf or a capability, which cannot be kept inside it. |  |
+| C44 | A function value with no parameter or more than two, or one that captures a Buf or a capability, which cannot be kept inside it. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C45 | A name two files other than the first define, used unqualified. Say which: `file.name`. | [the guide: Names: a program's own wins over std's](guide.md#names-a-programs-own-wins-over-stds) |
 | C46 | A method an interface does not have. |  |
 | C47 | A migration out of order. Migrations are numbered 1, 2, 3 in the order they are written, and never renumbered. |  |
@@ -116,6 +116,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C98 | The error of an exported method, or the `error:` a `call` or an `ask` names, that is not a type of the program's own with constructors (a View, an Int, a std type): the callee's refusals are the constructors a caller matches `Rejected(reason: …)` on, each of them, and text gives a match nothing to hold to. `woken`'s error may be text, as the host only logs it; a capability's (an `interface`) is text. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 | C99 | A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program. |  |
 | C100 | A fetch whose method is not written `Get` or `Head` without `key: Some(…)`. A request that timed out may have been received, so it is sent again, which is safe only when the other side can tell it for a repeat: std/http.tape's fetch sends the key as Idempotency-Key. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
+| C101 | A signature that does not say which capabilities its function reaches: a function that uses one by name, itself or through what it calls, without `uses` and those names in alphabetical order after its result type (`uses clock, db`), a clause that names one it does not reach, or a clause on an entry point, which declares each capability as a parameter. `tape fmt` writes the clause. | [LANGUAGE.md: 1. What a program is](../LANGUAGE.md#1-what-a-program-is); [the guide: Capabilities by name](guide.md#capabilities-by-name) |
 
 ## Reserved
 

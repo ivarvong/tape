@@ -130,11 +130,11 @@ export fn woken(
   }
 }
 
-fn load(id: Int) -> Option[Order] {
+fn load(id: Int) -> Option[Order] uses db {
   sql_first(row: Order, query: "SELECT * FROM orders WHERE id = :id", id)
 }
 
-fn placed(body: View) -> Outcome {
+fn placed(body: View) -> Outcome uses clock, db, payments, timer {
   let Ok(value: NewOrder(key, card, amount)) = decode(json: body, as: NewOrder) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -154,11 +154,11 @@ fn placed(body: View) -> Outcome {
   charging(order: o)
 }
 
-fn charging(order: Order) -> Outcome {
+fn charging(order: Order) -> Outcome uses clock, db, payments, timer {
   charge(order)
 }
 
-fn charge(order: Order) -> Outcome {
+fn charge(order: Order) -> Outcome uses clock, db, payments, timer {
   let Order(id, card, amount) = order
   charged(
     id,
@@ -176,7 +176,10 @@ fn charge(order: Order) -> Outcome {
 
 // Charged: placed, and the restaurant's deadline is a timer. Declined: done. No answer: the timer set before the
 // call asks again.
-fn charged(id: Int, reply: Result[Charged, CallError[PaymentError]]) -> Outcome {
+fn charged(
+  id: Int,
+  reply: Result[Charged, CallError[PaymentError]]
+) -> Outcome uses clock, db, timer {
   match reply {
     Ok(value) -> {
       do wake(after: flags.accept_ms, key: id)
@@ -214,7 +217,7 @@ fn waiting(found: Option[Order]) -> Outcome {
 }
 
 // Not accepted: refunding, with a timer for the refund, set before it goes out.
-fn cancel(id: Int, why: View) -> Outcome {
+fn cancel(id: Int, why: View) -> Outcome uses db, payments, timer {
   match sql_move(
     row: Order,
     query: "UPDATE orders SET state = 'refunding', note = :why WHERE id = :id \
@@ -231,11 +234,11 @@ fn cancel(id: Int, why: View) -> Outcome {
   }
 }
 
-fn refunding(order: Order) -> Outcome {
+fn refunding(order: Order) -> Outcome uses db, payments, timer {
   refund(order)
 }
 
-fn refund(order: Order) -> Outcome {
+fn refund(order: Order) -> Outcome uses db, payments, timer {
   let Order(id, card, amount) = order
   refunded(
     id,
@@ -251,7 +254,7 @@ fn refund(order: Order) -> Outcome {
   )
 }
 
-fn refunded(id: Int, reply: Result[Refunded, CallError[PaymentError]]) -> Outcome {
+fn refunded(id: Int, reply: Result[Refunded, CallError[PaymentError]]) -> Outcome uses db, timer {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -286,7 +289,7 @@ fn again(found: Option[Order]) -> Outcome {
 
 // The timer's run: a charge or a refund still out is asked again; a placed order past its deadline is canceled
 // (one not yet due is waited for again).
-fn due(found: Option[Order]) -> Outcome {
+fn due(found: Option[Order]) -> Outcome uses clock, db, payments, timer {
   let Some(value: o) = found else -> Problem(status: 404, reason: "no such order")
   match o {
     Order(state: Charging) -> charge(order: o)
@@ -309,7 +312,7 @@ fn due(found: Option[Order]) -> Outcome {
   }
 }
 
-fn latest(id: Int, m: Move[Order]) -> Option[Order] {
+fn latest(id: Int, m: Move[Order]) -> Option[Order] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

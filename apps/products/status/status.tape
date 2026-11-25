@@ -159,7 +159,7 @@ export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Ended, View] {
   }
 }
 
-fn changed(slug: View, body: View) -> Response {
+fn changed(slug: View, body: View) -> Response uses clock, db, timer {
   let Ok(value: Change(state, note, minutes)) = decode(json: body, as: Change) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -206,7 +206,7 @@ fn changed(slug: View, body: View) -> Response {
   }
 }
 
-fn back(slug: View, text: View, at: Int) -> Move[Component] {
+fn back(slug: View, text: View, at: Int) -> Move[Component] uses db {
   sql_move(
     row: Component,
     query: "UPDATE components SET state = 'operational', note = :text, since = :at, until = 0 \
@@ -217,7 +217,7 @@ fn back(slug: View, text: View, at: Int) -> Move[Component] {
   )
 }
 
-fn maintained(slug: View, minutes: Int, moved: Move[Component]) -> Response {
+fn maintained(slug: View, minutes: Int, moved: Move[Component]) -> Response uses timer {
   match moved {
     Moved(value) -> {
       do wake(after: minutes * 60000, key: value.id)
@@ -238,7 +238,7 @@ fn shown(moved: Move[Component]) -> Response {
   }
 }
 
-fn opened(body: View) -> Response {
+fn opened(body: View) -> Response uses clock, db {
   let Ok(
     value: NewIncident(key, component, title, impact, body: first)
   ) = decode(json: body, as: NewIncident) else {
@@ -294,7 +294,7 @@ fn opened(body: View) -> Response {
   incident_shown(status: 201, found: Some(value: incident))
 }
 
-fn updated(id: Int, body: View) -> Response {
+fn updated(id: Int, body: View) -> Response uses clock, db {
   let Ok(value: NewUpdate(key, state, body: text)) = decode(json: body, as: NewUpdate) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -372,7 +372,7 @@ fn moved_or_not(m: Move[Component]) -> Done {
   }
 }
 
-fn load(id: Int) -> Option[Incident] {
+fn load(id: Int) -> Option[Incident] uses db {
   sql_first(row: Incident, query: "SELECT * FROM incidents WHERE id = :id", id)
 }
 
@@ -383,7 +383,7 @@ fn incident_shown(status: Int, found: Option[Incident]) -> Response {
   }
 }
 
-fn overall() -> View {
+fn overall() -> View uses db {
   match sql_first(
     row: Counts,
     query: "SELECT coalesce(sum(state = 'outage'), 0) AS outage, coalesce(sum(state = \
@@ -397,11 +397,11 @@ fn overall() -> View {
   }
 }
 
-fn components() -> List[Component] {
+fn components() -> List[Component] uses db {
   listed(rows: sql_all(row: Component, query: "SELECT * FROM components ORDER BY id"))
 }
 
-fn open() -> List[Incident] {
+fn open() -> List[Incident] uses db {
   listed(rows: sql_all(
     row: Incident,
     query: "SELECT * FROM incidents WHERE state <> 'resolved' ORDER BY started DESC"
@@ -415,7 +415,7 @@ fn listed[T](rows: Rows[T]) -> List[T] {
   }
 }
 
-fn feed() -> Response {
+fn feed() -> Response uses db {
   let items = listed(rows: sql_all(
     row: Line,
     query: "SELECT u.id AS id, u.at AS at, i.title AS title, u.state AS state, u.body AS body \
@@ -442,7 +442,7 @@ fn feed() -> Response {
     |> header(name: "cache-control", value: "no-store")
 }
 
-fn page(at: Int) -> Response {
+fn page(at: Int) -> Response uses db {
   let state = overall()
   let out = buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
@@ -530,7 +530,7 @@ fn row(out: Buf, c: Component) -> Buf {
     |> append(view: "</div></div>")
 }
 
-fn incidents_html(out: Buf, rows: Rows[Incident]) -> Buf {
+fn incidents_html(out: Buf, rows: Rows[Incident]) -> Buf uses db {
   match next(rows) {
     Next(value: i, rest) -> timeline(
       out: out

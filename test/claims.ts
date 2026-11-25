@@ -72,7 +72,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Count, View] {
   ${woken || 'Ok(value: Count(n: key))'}
 }
 
-fn take(id: Int, buyer: View) -> Int {
+fn take(id: Int, buyer: View) -> Int uses db {
   sql_exec(
     query: "UPDATE seats SET state = 'taken', buyer = :buyer WHERE id = :id AND state = 'free'",
     buyer,

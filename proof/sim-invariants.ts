@@ -5,7 +5,7 @@
 //                                                                  exits 1 if the outcomes are not the ones recorded
 import '../node25.ts';
 import { auto, search } from '../sim.ts';
-import { arg, program, record } from './lib.ts';
+import { arg, edited, program, record } from './lib.ts';
 
 const seeds = Number(arg('seeds', '200')),
   only = arg('only', '');
@@ -231,11 +231,12 @@ function planted(files: readonly { name: string; text: string }[]): ReturnType<t
 async function tried([paths, at, from, to, want]: Plant): Promise<Row> {
   const label = `${(paths[at] ?? '').replace(/^(examples|apps|compare)\//, '')}: ${from.slice(0, 44)}`;
   const files = paths.map(program);
-  if (files[at]?.text.includes(from) !== true) {
+  const text = edited(files[at]?.text ?? '', [[from, to]]);
+  if (text === null) {
     console.log(`STALE   ${label}`);
     return { plant: label, result: 'no such text' };
   }
-  const a = planted(files.map((f, i) => (i === at ? { ...f, text: f.text.replace(from, to) } : f)));
+  const a = planted(files.map((f, i) => (i === at ? { ...f, text } : f)));
   if (a.errors) {
     const [no] = a.errors;
     console.log(`refused ${label}: ${no?.code} ${no?.message.slice(0, 90)}`);

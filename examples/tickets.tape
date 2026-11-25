@@ -76,7 +76,7 @@ fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, dice: Entropy) -> 
   }
 }
 
-fn buy(body: View) -> Response {
+fn buy(body: View) -> Response uses clock, db, dice, payments {
   let Ok(value: Buy(key, section, qty, card)) = decode(json: body, as: Buy) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -125,7 +125,7 @@ fn buy(body: View) -> Response {
 
 // No seats were taken: a sale with this key exists (this request is a retry of it), the key belongs to another
 // purchase, or the section has too few seats left.
-fn earlier(found: Option[Earlier], used: Option[Price]) -> Response {
+fn earlier(found: Option[Earlier], used: Option[Price]) -> Response uses db, payments {
   match found {
     Some(
       value: Earlier(id, section, qty, amount, state: Pending, card)
@@ -148,7 +148,7 @@ fn unused(used: Option[Price]) -> Response {
 }
 
 // The same command as the first attempt (same key), with more time: payments repeats what it answered then.
-fn retry(sale: Int) -> Response {
+fn retry(sale: Int) -> Response uses db, payments {
   let Some(
     value: Unpaid(id, section, qty, amount, card)
   ) = sql_first(
@@ -160,7 +160,14 @@ fn retry(sale: Int) -> Response {
 }
 
 // The hold is committed before the charge is sent: a call is a commit point. Each way the call can fail is an arm.
-fn charge(id: Int, section: View, qty: Int, card: View, amount: Int, within: Int) -> Response {
+fn charge(
+  id: Int,
+  section: View,
+  qty: Int,
+  card: View,
+  amount: Int,
+  within: Int
+) -> Response uses db, payments {
   let Ok(value: Charged) = call(
     to: payments,
     method: "charge",
@@ -199,7 +206,7 @@ fn charge(id: Int, section: View, qty: Int, card: View, amount: Int, within: Int
 }
 
 // One sale, in any state: with GET /sections, what a checker reads to reconcile seats and money.
-fn sale(id: Int) -> Response {
+fn sale(id: Int) -> Response uses db {
   let Some(value) = sql_first(
     row: Sale,
     query: "SELECT * FROM sales WHERE id = :id",
@@ -218,7 +225,7 @@ fn refusal(reason: PaymentError) -> View {
   }
 }
 
-fn declined(section: View, qty: Int, reason: View, moved: Move[Held]) -> Response {
+fn declined(section: View, qty: Int, reason: View, moved: Move[Held]) -> Response uses db {
   match moved {
     Moved(value) -> {
       let 1 = sql_exec(

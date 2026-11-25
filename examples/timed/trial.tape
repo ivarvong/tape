@@ -76,11 +76,11 @@ export fn woken(
   }
 }
 
-fn load(id: Int) -> Option[Signup] {
+fn load(id: Int) -> Option[Signup] uses db {
   sql_first(row: Signup, query: "SELECT * FROM trials WHERE id = :id", id)
 }
 
-fn started(body: View) -> Outcome {
+fn started(body: View) -> Outcome uses clock, db, timer {
   let Ok(value: NewTrial(key, email)) = decode(json: body, as: NewTrial) else {
     Err(error) -> Problem(status: 400, reason: error)
   }
@@ -102,7 +102,7 @@ fn started(body: View) -> Outcome {
 
 // The timer's run: a trial is reminded (and its end is a timer); a reminded trial past its end expires (one not
 // yet due is waited for again); a paid or expired one is left as it is.
-fn due(found: Option[Signup]) -> Outcome {
+fn due(found: Option[Signup]) -> Outcome uses clock, db, mail, timer {
   let Some(value: t) = found else -> Problem(status: 404, reason: "no such trial")
   match t {
     Signup(id, email, state: Trial) -> reminded(
@@ -135,7 +135,7 @@ fn due(found: Option[Signup]) -> Outcome {
   }
 }
 
-fn reminded(id: Int, reply: Result[Sent, CallError[SendError]]) -> Outcome {
+fn reminded(id: Int, reply: Result[Sent, CallError[SendError]]) -> Outcome uses clock, db, timer {
   match reply {
     Ok(value) -> ending(
       id,
@@ -169,7 +169,7 @@ fn reminded(id: Int, reply: Result[Sent, CallError[SendError]]) -> Outcome {
   }
 }
 
-fn ending(id: Int, found: Option[Signup]) -> Outcome {
+fn ending(id: Int, found: Option[Signup]) -> Outcome uses clock, timer {
   match found {
     Some(value: t = Signup(state: Reminded, ends)) -> {
       do wake(after: ends - now(), key: id)
@@ -182,7 +182,7 @@ fn ending(id: Int, found: Option[Signup]) -> Outcome {
   }
 }
 
-fn later_reminder(id: Int) -> Outcome {
+fn later_reminder(id: Int) -> Outcome uses db {
   shown(found: load(id))
 }
 
@@ -190,7 +190,7 @@ fn later(trial: Signup) -> Outcome {
   Shown(status: 200, trial)
 }
 
-fn latest(id: Int, m: Move[Signup]) -> Option[Signup] {
+fn latest(id: Int, m: Move[Signup]) -> Option[Signup] uses db {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)

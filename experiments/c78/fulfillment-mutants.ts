@@ -2,12 +2,15 @@
 import '../../node25.ts';
 import { readFileSync, readdirSync } from 'node:fs';
 import { compile } from '../../compiler.ts';
+import { usesWritten } from '../../fmt.ts';
 const R = new URL('../../', import.meta.url).pathname;
 const std = readdirSync(`${R}std`)
   .filter(f => f.endsWith('.tape'))
   .map(f => ({ name: `std/${f}`, text: readFileSync(`${R}std/${f}`, 'utf8') }));
 const codes = (text: string): string[] =>
-  compile([...std, { name: 'fulfillment.tape', text }]).errors.map(e => `${e.code}:${e.line}`);
+  compile([...std, { name: 'fulfillment.tape', text: usesWritten(text, 'fulfillment.tape', std) }]).errors.map(
+    e => `${e.code}:${e.line}`,
+  );
 const t = readFileSync(`${R}examples/fulfillment.tape`, 'utf8');
 export const fulfillmentMutants: Record<string, readonly [string, string]> = {
   'F1 a timed-out step is not tried again': ['Timeout -> retrying(id, why: step ++ " did not answer in time", found: failed_again(id, state))', 'Timeout -> show(status: 202, found: noted(id, state, stall: step))'],

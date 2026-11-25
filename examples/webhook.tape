@@ -24,7 +24,7 @@ fn handle(raw: View, signer: Remote, api: Remote) -> Response {
   }
 }
 
-fn hook(body: View, signature: View) -> Response {
+fn hook(body: View, signature: View) -> Response uses api, signer {
   let Ok(value: Verdict(valid: True)) = ask(
     to: signer,
     method: "verify",

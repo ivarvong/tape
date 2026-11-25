@@ -21,7 +21,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn create(body: View) -> Response {
+fn create(body: View) -> Response uses db {
   let Ok(value: Batch(batch, items)) = decode(json: body, as: Batch) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -47,7 +47,7 @@ fn create(body: View) -> Response {
     |> respond(status: 200)
 }
 
-fn insert_all(batch: Key, items: List[NewItem], made: Int) -> Int {
+fn insert_all(batch: Key, items: List[NewItem], made: Int) -> Int uses db {
   match items {
     Cons(head: NewItem(key, name, qty, cents), tail) -> insert_all(
       batch,

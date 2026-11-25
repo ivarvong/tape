@@ -9,8 +9,12 @@ import { lineOf, round2, run, swap } from '../experiments/c78/round2.ts';
 import type { Mutant, Pair } from '../experiments/c78/round2.ts';
 import { timedMutants } from '../experiments/c78/timed-mutants.ts';
 import { round3 } from '../experiments/c78/round3.ts';
-import { codes as codesOf, finish, problems, raw, read, same as T } from './harness.ts';
-const codes = (text: string, name: string): string[] => codesOf(text, {}, name);
+import { usesStripped, usesWritten } from '../fmt.ts';
+import { codes as codesOf, finish, problems, raw, read as readFile, same as T, std } from './harness.ts';
+// the mutants were written before the `uses` clauses: each is made to the program without them, which are written
+// again as fmt would after the edit (a mutant that drops a `wake` drops its function's `timer`, no catch: C101)
+const read = (path: string): string => usesStripped(readFile(path));
+const codes = (text: string, name: string): string[] => codesOf(usesWritten(text, name, std), {}, name);
 /** A mutant by the start of its name. */
 const named = (all: readonly Mutant[], start: string): Mutant => {
   const m = all.find(x => x[0].startsWith(start));
@@ -47,7 +51,8 @@ const pairsOf = (i: number): Pair[] => {
   return pairs;
 };
 const msg = (pairs: readonly Pair[], code: string): string =>
-  problems(swap(tickets, pairs), {}, 'tickets.tape').find(e => e.code === code)?.message ?? '';
+  problems(usesWritten(swap(tickets, pairs), 'tickets.tape', std), {}, 'tickets.tape').find(e => e.code === code)
+    ?.message ?? '';
 T(
   "1a: the key is shown and is not the row's",
   /keyed by `999999`, which is not this row's key/.test(msg(pairsOf(0), 'C78')),

@@ -24,13 +24,13 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn added(body: View) -> Response {
+fn added(body: View) -> Response uses db {
   let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else -> empty(status: 400)
   let _ = sql_exec(query: "INSERT INTO items(name, qty) VALUES (:name, :qty)", name, qty, repeat: True)
   empty(status: 201)
 }
 
-fn all() -> Rows[Item] {
+fn all() -> Rows[Item] uses db {
   sql_all(row: Item, query: "SELECT * FROM items ORDER BY id")
 }
 
@@ -40,11 +40,11 @@ ${walk}
 // the sum of the quantities three ways, and no walk at all; each writes the last digit, with push, which takes no
 // step (write_int takes one a digit)
 const SUM = {
-  rows: `fn walked(out: Buf) -> Buf {
+  rows: `fn walked(out: Buf) -> Buf uses db {
   let total = all() |> fold_rows(from: 0, by: fn(acc: Int, item: Item) -> Int { acc + item.qty })
   out |> push(byte: 48 + total % 10)
 }`,
-  hand: `fn walked(out: Buf) -> Buf {
+  hand: `fn walked(out: Buf) -> Buf uses db {
   out |> push(byte: 48 + summed(rows: all(), acc: 0) % 10)
 }
 
@@ -54,22 +54,22 @@ fn summed(rows: Rows[Item], acc: Int) -> Int {
     End -> acc
   }
 }`,
-  range: `fn walked(out: Buf) -> Buf {
+  range: `fn walked(out: Buf) -> Buf uses db {
   let Some(value: Count(n)) = sql_first(row: Count, query: "SELECT count(*) AS n FROM items") else -> out
   let total = range(from: 0, to: n) |> fold(from: 0, by: fn(acc: Int, k: Int) -> Int { acc + k })
   out |> push(byte: 48 + total % 10)
 }`,
-  none: `fn walked(out: Buf) -> Buf {
+  none: `fn walked(out: Buf) -> Buf uses db {
   let Some(value: Count(n)) = sql_first(row: Count, query: "SELECT count(*) AS n FROM items") else -> out
   out |> push(byte: 48 + n % 10)
 }`,
 };
 // the rows as JSON: write_rows, and the loop it was until fold_rows (std/json.tape before this test)
 const JSON_WAYS = {
-  rows: `fn walked(out: Buf) -> Buf {
+  rows: `fn walked(out: Buf) -> Buf uses db {
   out |> write_rows(rows: all())
 }`,
-  hand: `fn walked(out: Buf) -> Buf {
+  hand: `fn walked(out: Buf) -> Buf uses db {
   written(out: push(buf: out, byte: 91), rows: all(), first: True)
 }
 
@@ -90,7 +90,7 @@ const example = above
   .slice(start, above.indexOf('//   }', start) + 1)
   .map(l => l.replace(/^\/\/ {3}/, ''))
   .join('\n');
-const EXAMPLE = `fn walked(out: Buf) -> Buf {
+const EXAMPLE = `fn walked(out: Buf) -> Buf uses db {
   names(out)
 }
 

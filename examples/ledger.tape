@@ -29,7 +29,7 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn transfer(body: View) -> Response {
+fn transfer(body: View) -> Response uses db {
   let Ok(value: Transfer(key, from, to, amount)) = decode(json: body, as: Transfer) else {
     Err(error) -> problem(status: 400, detail: error)
   }

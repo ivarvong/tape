@@ -104,11 +104,11 @@ fn handle(raw: View, db: Sql) -> Response {
   }
 }
 
-fn load(id: Int) -> Option[Row] {
+fn load(id: Int) -> Option[Row] uses db {
   sql_first(row: Row, query: "SELECT id, n FROM t WHERE id = :id", id)
 }
 
-fn total(id: Int, scale: Int) -> Int {
+fn total(id: Int, scale: Int) -> Int uses db {
   let Some(value: Row(n)) = load(id) else -> 0
   n * scale
 }

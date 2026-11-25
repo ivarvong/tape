@@ -47,7 +47,7 @@ fn handle(raw: View, db: Sql) -> Response {
 
 // POST /orders: the client's key is claimed first, so a retried POST counts the sale once and answers the
 // order it made (new: False)
-fn placed(body: View) -> Response {
+fn placed(body: View) -> Response uses db {
   let Ok(value: NewOrder(key, item, amount)) = decode(json: body, as: NewOrder) else {
     Err(error) -> problem(status: 400, detail: error)
   }
@@ -71,7 +71,7 @@ fn placed(body: View) -> Response {
   answered(found: by_key(key), new: True)
 }
 
-fn by_key(key: View) -> Option[Order] {
+fn by_key(key: View) -> Option[Order] uses db {
   sql_first(row: Order, query: "SELECT * FROM orders WHERE key = :key", key)
 }
 
@@ -399,26 +399,40 @@ service; `?rules` lists it as one that would be refused today.
 
 ## Capabilities by name
 
-A capability (`Sql`, a `Remote`, `Timer`, `Clock`, `Entropy`, an interface) is granted by the host to an entry
-point, `handle` or an exported function, which declares it as a parameter. Any other function may use it by the
-name the entry point declares, without listing it: the compiler adds the parameter to each function that reads
-it or calls one that does, and passes it at each call. A built-in that takes one (`sql_*`'s `db`, `now`'s
-`clock`, `random`'s `from`, `wake`'s `timer`) is given it when the program names exactly one of that type.
+A capability (`Sql`, a `Remote`, `Timer`, `Clock`, `Entropy`, `Secrets`, `Http`, an interface) is granted by the
+host to an entry point, `handle` or an exported function, which declares it as a parameter. Any other function may
+use it by the name the entry point declares, without passing it: the compiler adds the parameter to each function
+that reads it or calls one that does, and passes it at each call. A built-in that takes one (`sql_*`'s `db`,
+`now`'s `clock`, `random`'s `from`, `wake`'s `timer`) is given it when the program names exactly one of that type.
+
+What such a function reaches is in its signature: `uses` after its result type, and the name of each capability it
+uses, itself or through what it calls, in alphabetical order. `routed` below reaches `db` through `load` and
+`payments` through a call; `load` only `db`:
 
 ```
 fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   routed(raw) |> rendered
 }
 
-fn load(id: Int) -> Option[Sub] {
+fn routed(raw: View) -> Outcome uses db, payments {
+  …
+}
+
+fn load(id: Int) -> Option[Sub] uses db {
   sql_first(row: Sub, query: "SELECT … FROM subs WHERE id = :id", id)
 }
 ```
 
+You do not keep the clauses by hand: `node tape.ts fmt file.tape` writes each one as the compiler infers it (and
+takes one away from a function that no longer reaches anything), and a build with a clause missing or wrong is
+C101, whose fix is the clause to write. An entry point writes none: its capabilities are its parameters. The
+clause is checked, not compiled.
+
 The check stays static. An entry point that reaches a capability it does not declare is refused with the call
 path (`C72 peek uses the capability db (peek → twice → count) but does not declare it`); a name no entry point
 declares is an unknown name; a name declared with two types is not ambient, and must be passed. Passing one
-explicitly still works and wins.
+explicitly still works and wins, and a capability a function is given as a parameter is in its signature already,
+so its clause leaves it out.
 
 ## Row types name their columns: `*`
 
