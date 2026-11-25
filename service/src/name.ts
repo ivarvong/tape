@@ -952,10 +952,7 @@ export class Name extends DurableObject {
         error = retired ? `v${version} is retired` : 'no such version';
       opened();
       note({ status: retired ? 410 : 404, error });
-      return carry(
-        reply({ error, ...outcomeBody('not_applied') }, retired ? 410 : 404),
-        'not_applied',
-      );
+      return carry(reply({ error, ...outcomeBody('not_applied') }, retired ? 410 : 404), 'not_applied');
     }
     const unbuilt = this.#fresh(version);
     if (unbuilt) {

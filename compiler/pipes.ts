@@ -92,12 +92,12 @@ export function resolvePipes(prog: Program): void {
       keys = own ? [own] : (prog.defs.get(name) ?? []).map(d => d.key);
     }
     const lists = keys.map(
-        k =>
-          prog.fns
-            .get(k)
-            ?.params.filter(pm => !pm.implicit)
-            .map(pm => pm.name) ?? [],
-      );
+      k =>
+        prog.fns
+          .get(k)
+          ?.params.filter(pm => !pm.implicit)
+          .map(pm => pm.name) ?? [],
+    );
     const [one] = lists;
     return one !== undefined && lists.every(l => l.join() === one.join()) ? one : null;
   };

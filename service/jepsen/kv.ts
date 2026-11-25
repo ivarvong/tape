@@ -213,9 +213,7 @@ const numberAt = (v: unknown, field: string): number | undefined => {
 const outcomeOf = (f: Op['f'], res: Pick<Reply, 'status' | 'body'>): Partial<Attempt> => {
   const b = fields(res.body),
     version = numberAt(b, 'version'),
-    rolledBack =
-      b.applied === false ||
-      (b.outcome === 'not_applied' && (res.status === 500 || b.transient === true)),
+    rolledBack = b.applied === false || (b.outcome === 'not_applied' && (res.status === 500 || b.transient === true)),
     unsent = res.status === 503 && b.outcome === 'not_applied' && b.transient !== true;
   if (f === 'get') {
     if (res.status === 200) return { type: 'ok', live: true, version, read: b.value };

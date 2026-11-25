@@ -390,11 +390,7 @@ same(
 const positional = (arg: string): string =>
   `fn scan(v: View, at: Int) -> Int {\n  len(v) + at\n}\nfn go(raw: View) -> Int {\n  scan(${arg}, at: 1)\n}\n`;
 same('its own scan takes a bare name as its first argument', codes(positional('raw'), { exports: ['go'] }), []);
-same(
-  'and an expression',
-  codes(positional('slice(raw, from: 0, to: 2)'), { exports: ['go'] }),
-  [],
-);
+same('and an expression', codes(positional('slice(raw, from: 0, to: 2)'), { exports: ['go'] }), []);
 same('which is the first parameter', runInt(instance(positional('raw'), ['go']), 'go', fill(4)).value, '5');
 same(
   "a later file's scan takes it too",
