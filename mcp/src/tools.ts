@@ -11,7 +11,7 @@ import type { StepVersion } from '../../compiler/step-version.ts';
 import { sha256 } from '../../compiler/sha256.ts';
 import type { Built, Source } from '../../compiler.ts';
 import { isHead } from '../../host.ts';
-import type { Effect, Header } from '../../host.ts';
+import type { Effect, Header, StubAnswer } from '../../host.ts';
 import { responseOf } from '../../host.ts';
 import { effectLine, queryNames } from '../../apps/playground/src/lines.ts';
 import { otlp } from '../../service/src/view.ts';
@@ -70,6 +70,7 @@ export type Deps = {
     requests: readonly RunRequest[],
     remotes: Scripts,
     secrets: Readonly<Record<string, string>>,
+    http: Readonly<Record<string, StubAnswer>>,
   ) => Promise<RanAll>;
   /** call a doc examples build's functions (doctest.ts), where Wasm can be instantiated: host/examples.ts */
   examples: (wasm: Uint8Array, fns: readonly string[]) => Promise<Called[]>;
@@ -116,6 +117,16 @@ export type EffectOut =
   | { kind: 'now'; now: number }
   | { kind: 'random'; random: number }
   | { kind: 'secret'; name: string; version: number | null }
+  | {
+      kind: 'fetch';
+      method: string;
+      url: string;
+      headers: { name: string; value: string }[];
+      key?: string;
+      within_ms: number;
+      status: string;
+      reply: unknown;
+    }
   | { kind: 'wake'; key: number; after_ms: number; due: number; undone?: true };
 export type TraceMode = (typeof TRACE_MODES)[number];
 export type EffectsMode = (typeof EFFECTS_MODES)[number];
@@ -246,6 +257,20 @@ export const SECRETS_SCHEMA = {
     'Values for the program\'s Secrets: {"stripe": "sk_test_…"}, each read by `secret(from: secrets, name: "stripe")` as version 1 (a name not given is None). The effect log and the trace say the name and the version, never the value, and the answer never repeats them.',
   additionalProperties: { type: 'string', maxLength: 4096 },
 } as const;
+export const HTTP_SCHEMA = {
+  type: 'object',
+  description:
+    'Answers for the program\'s fetch (`Http`), which otherwise answers Unreachable: {"GET https://api.example.com/rates": {"status": 200, "headers": {"content-type": "application/json"}, "body": "{…}"}}, by "METHOD URL" or the URL alone. A request with no answer here is Err(Rejected("host not allowed: …")); no request leaves the runner.',
+  additionalProperties: {
+    type: 'object',
+    properties: {
+      status: { type: 'integer', minimum: 100, maximum: 599 },
+      headers: { type: 'object', additionalProperties: { type: 'string' } },
+      body: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
+} as const;
 export const TRACE_MODES = ['lines', 'full', 'none'] as const;
 export const EFFECTS_MODES = ['compact', 'full'] as const;
 export const COMPILE_INPUT = {
@@ -267,6 +292,7 @@ export const RUN_INPUT = {
     },
     remotes: REMOTES_SCHEMA,
     secrets: SECRETS_SCHEMA,
+    http: HTTP_SCHEMA,
     effects: {
       type: 'string',
       enum: EFFECTS_MODES,
@@ -342,6 +368,44 @@ export function secretsOf(args: Fields): Record<string, string> | Refusal {
     out[name] = value;
   }
   if (Object.keys(out).length > 64) return bad('more than 64 secrets');
+  return out;
+}
+
+/** run's `http`, or why not: by "METHOD URL" or URL, an answer {status, headers, body} (host/call.ts stubHttp). */
+export function httpTableOf(args: Fields): Record<string, StubAnswer> | Refusal {
+  const given = args['http'];
+  if (given === undefined || given === null) return {};
+  const bad = (why: string): Refusal =>
+    refused(
+      400,
+      'bad_http',
+      `${why}; \`http\` is {"GET https://host/path": {"status": 200, "headers": {"name": "value"}, "body": "…"}}`,
+    );
+  if (!isFields(given)) return bad('`http` is not an object');
+  const out: Record<string, StubAnswer> = {};
+  for (const [at, a] of Object.entries(given)) {
+    if (!isFields(a)) return bad(`http[${JSON.stringify(at.slice(0, 80))}] is not an object`);
+    const { status, headers, body } = a;
+    const extra = Object.keys(a).filter(k => !['status', 'headers', 'body'].includes(k));
+    if (extra.length > 0) return bad(`http[${JSON.stringify(at.slice(0, 80))}] has ${extra.join(', ')}`);
+    if (
+      status !== undefined &&
+      !(typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599)
+    )
+      return bad(`http[${JSON.stringify(at.slice(0, 80))}].status is not a status`);
+    if (headers !== undefined && !(isFields(headers) && Object.values(headers).every(v => typeof v === 'string')))
+      return bad(`http[${JSON.stringify(at.slice(0, 80))}].headers is not {"name": "value"}`);
+    if (body !== undefined && typeof body !== 'string')
+      return bad(`http[${JSON.stringify(at.slice(0, 80))}].body is not text`);
+    const named: Record<string, string> = {};
+    if (isFields(headers)) for (const [k, v] of Object.entries(headers)) named[k] = String(v);
+    out[at] = {
+      ...(typeof status === 'number' ? { status } : {}),
+      headers: named,
+      ...(typeof body === 'string' ? { body } : {}),
+    };
+  }
+  if (Object.keys(out).length > LIMITS.requests * 4) return bad(`more than ${LIMITS.requests * 4} answers`);
   return out;
 }
 
@@ -662,6 +726,19 @@ function effectsOut(
     if ('now' in e) return [{ kind: 'now', now: e.now }];
     if ('random' in e) return [{ kind: 'random', random: e.random }];
     if ('secret' in e) return [{ kind: 'secret', name: e.secret, version: e.version }];
+    if ('fetch' in e)
+      return [
+        {
+          kind: 'fetch',
+          method: e.method,
+          url: e.fetch,
+          headers: e.headers,
+          ...(e.key === undefined ? {} : { key: e.key }),
+          within_ms: e.within,
+          status: e.status,
+          reply: unpacked(e.reply),
+        },
+      ];
     if ('wake' in e)
       return [
         { kind: 'wake', key: e.wake, after_ms: e.after, due: e.due, ...(e.undone ? { undone: true as const } : {}) },
@@ -760,6 +837,7 @@ export function lineTraceOf(
     else if ('random' in e) out.push(`      random -> ${e.random}`);
     else if ('secret' in e)
       out.push(`      secret ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`);
+    else if ('fetch' in e) out.push(`      fetch ${e.method} ${e.fetch} within ${e.within} ms -> ${e.status}`);
   }
   if (error !== null) out.push(`  ✗ ${error}${last ? ` at ${at(last.file, last.line)}` : ''}`);
   return out.length > TRACE_LINES
@@ -859,6 +937,8 @@ export async function runTool(
   if (isRefusal(remotes)) return { result: remotes, usage: null };
   const secrets = secretsOf(args);
   if (isRefusal(secrets)) return { result: secrets, usage: null };
+  const http = httpTableOf(args);
+  if (isRefusal(http)) return { result: http, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
   if (!built)
@@ -873,7 +953,7 @@ export async function runTool(
   const t0 = Date.now();
   let all: RanAll | 'timeout';
   try {
-    all = await within(deps.run(program, requests, remotes, secrets), deps.wallMs ?? LIMITS.wallMs);
+    all = await within(deps.run(program, requests, remotes, secrets, http), deps.wallMs ?? LIMITS.wallMs);
   } catch (e) {
     usage.run_ms = Date.now() - t0;
     return {

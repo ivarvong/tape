@@ -23,7 +23,7 @@ import { asRows, exact, isDec } from './value.ts';
 
 const EFFECTS = [
   ...(['sql_exec', 'sql_first', 'sql_all', 'sql_move', 'decode', 'write_json', 'next'] as const),
-  ...(['wake', 'now', 'random', 'call', 'ask', 'rollback', 'remote', 'secret'] as const),
+  ...(['wake', 'now', 'random', 'call', 'ask', 'rollback', 'remote', 'secret', 'http_send'] as const),
 ];
 type Effect = (typeof EFFECTS)[number];
 // a leading U+FEFF is part of the text: a decoder's default drops it
@@ -59,11 +59,18 @@ const typeArg = (s: Site, label: string): TypeAst => {
   return t ?? stop(`${s.name}: argument ${label} should be a type name`);
 };
 /** v written into `out` as JSON, its text by the program's own write_json_string */
-export const jsonInto = (it: Interp, out: Buf, v: Value, file: string): Buf =>
-  writeJson(it.prog, out, asAdt(v), (o, text) => {
+export const jsonInto = (it: Interp, out: Buf, v: Value, file: string): Buf => {
+  const string = (o: Buf, text: Uint8Array): void => {
     const g = find(it, 'write_json_string', file) ?? stop('std/json.tape is not among the sources');
     run(it, callable(g), [o, text]);
-  });
+  };
+  // a View alone is a JSON string (std/http.tape's fetch writes its request so)
+  if (v instanceof Uint8Array) {
+    string(out, v);
+    return out;
+  }
+  return writeJson(it.prog, out, asAdt(v), string);
+};
 const json = (it: Interp, v: Value, file: string): Uint8Array =>
   Uint8Array.from(jsonInto(it, { k: 'buf', buf: [] }, v, file).buf);
 
@@ -150,11 +157,38 @@ function remoteCall(s: Site): Value {
   }
 }
 
-// ---- secrets
+// ---- secrets, and std/http.tape's fetch
 function secret(s: Site): Value {
   const v = host(s.it, 'secret')(utf8.decode(asBytes(value(s, 'name'))));
   return v === null ? adt('None') : adt('Some', { value: v });
 }
+function httpSend(s: Site): Value {
+  const { status, reply } = host(
+    s.it,
+    'http',
+  )({
+    request: asBytes(value(s, 'request')),
+    body: asBytes(value(s, 'body')),
+    within: Number(asInt(value(s, 'within'))),
+  });
+  const refused = (why: string, reason?: Uint8Array): Value =>
+    adt('Err', { error: adt(why, reason ? { reason } : {}) });
+  switch (status) {
+    case 'ok':
+      return adt('Ok', { value: reply });
+    case 'timeout':
+      return refused('Timeout');
+    case 'unreachable':
+      return refused('Unreachable');
+    case 'rejected':
+      return refused('Rejected', reply);
+    case 'skew':
+      return refused('Skew', reply);
+    default:
+      return unreachable(status, 'fetch status');
+  }
+}
+
 // ---- timers, and the rest
 function wake(s: Site): Value {
   const key = exact(asInt(value(s, 'key')), 'wake'),
@@ -201,6 +235,8 @@ function effectOf(s: Site): Value {
       return remoteCall(s);
     case 'secret':
       return secret(s);
+    case 'http_send':
+      return httpSend(s);
     default:
       return unreachable(s.name, 'effect');
   }

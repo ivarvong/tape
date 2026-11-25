@@ -9,15 +9,16 @@
 // call gets more than what remains of it, and each service is told its budget so it can pass it on. A handler that
 // returns rollback(out) has that stretch's writes undone: the host throws out of `transaction`, so the storage
 // rolls back, and still answers with `out`; the log's first entry says `undone`.
-import { Pending, REAL_TIMERS, perform } from './call.ts';
+import { FetchPending, Pending, REAL_TIMERS, perform, performFetch } from './call.ts';
 import { transientBetween } from './failure.ts';
-import type { Service, Timers } from './call.ts';
+import type { HttpClient, Service, Timers } from './call.ts';
 import {
   STATUS,
   begin,
   clockUs,
   hex,
   isCall,
+  isFetch,
   isHead,
   isNow,
   isRandom,
@@ -41,7 +42,7 @@ import type {
   TraceEvent,
   WakeEffect,
 } from './log.ts';
-import { SECRET_NAME } from './secrets.ts';
+import { SECRET_NAME, hold, redacted, redactedText, release } from './secrets.ts';
 import type { Read, SecretStore } from './secrets.ts';
 import {
   answerAt,
@@ -194,6 +195,8 @@ export type LinkOptions = {
   observe?: ((run: Observed) => void) | null;
   /** what `secret(from:, name:)` reads; none: every secret is None. A replay asks it for the versions its log names */
   secrets?: SecretStore | null;
+  /** where std/http.tape's fetch goes; none: every fetch is Err(Unreachable) */
+  http?: HttpClient | null;
 };
 type Target = { name: string; params: readonly HostParam[]; method?: string };
 /** A rollback: the stretch's writes are undone, and the handler's answer is still given. */
@@ -395,6 +398,53 @@ function secretOf(L: Linked, ptr: number, len: number): number {
   return at;
 }
 
+/** The request std/http.tape's fetch wrote: { method, url, key, headers: [[name, value], …] }. */
+function fetchRequest(text: string, body: Uint8Array): FetchPending['request'] {
+  const v: unknown = JSON.parse(text);
+  const o = typeof v === 'object' && v !== null ? v : {};
+  const str = (k: string): string => {
+    const x: unknown = Reflect.get(o, k);
+    return typeof x === 'string' ? x : '';
+  };
+  const key: unknown = Reflect.get(o, 'key');
+  const list: unknown = Reflect.get(o, 'headers');
+  const headers = (Array.isArray(list) ? list : []).flatMap((h: unknown): [string, string][] =>
+    Array.isArray(h) && typeof h[0] === 'string' && typeof h[1] === 'string' ? [[h[0].toLowerCase(), h[1]]] : [],
+  );
+  return { method: str('method'), url: str('url'), headers, body, key: typeof key === 'string' ? key : null };
+}
+
+// env.http(request ptr, len, body ptr, len, within): the reply from the log, or stop this run so the host can make
+// the request, as a call does. The entry holds the request with every secret value the run read written out, and
+// the reply with each held (host/secrets.ts); a replay compares the request written the same way.
+function httpOut(L: Linked, rp: number, rn: number, bp: number, bn: number, within: number): number {
+  const request = fetchRequest(lenient.decode(copyOut(L.mem, rp, rn)), copyOut(L.mem, bp, bn));
+  const read = [...L.read];
+  const logged: FetchPending['logged'] = {
+    fetch: redactedText(request.url, read),
+    method: request.method,
+    headers: request.headers.map(([name, v]) => ({ name, value: redactedText(v, read) })),
+    body: pack(redacted(request.body, read)),
+    within,
+    ...(request.key === null ? {} : { key: redactedText(request.key, read) }),
+  };
+  const same = JSON.stringify([logged.fetch, logged.method, logged.headers, logged.body, logged.key ?? null]);
+  const e = effect(
+    L,
+    isFetch,
+    x => x.within === within && JSON.stringify([x.fetch, x.method, x.headers, x.body, x.key ?? null]) === same,
+    () => `a ${request.method} of ${logged.fetch} within ${within} ms`,
+    () => {
+      throw new FetchPending(request, logged);
+    },
+  );
+  L.o.trace?.push({ fetch: e.fetch, method: e.method, within: e.within, status: e.status });
+  const reply = e.status === 'ok' ? release(unpack(e.reply), read) : unpack(e.reply);
+  if (reply === null)
+    throw new Error('this fetch reply holds a secret the run did not read: the log was not made by this run');
+  return replyBlock(L.mem, STATUS.indexOf(e.status), reply);
+}
+
 // env.member(family, index): the Remote named <family>-<index>, added to this run's remotes. The same index gives
 // the same Remote, and a replay asks in the same order, so the numbers agree.
 function member(L: Linked, family: number, index: number): number {
@@ -517,6 +567,7 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     ask: (kind: number) => ask(get(), kind),
     wake: (key: number, after: number) => wake(get(), key, after),
     secret: (ptr: number, len: number) => secretOf(get(), ptr, len),
+    http: (rp: number, rn: number, bp: number, bn: number, within: number) => httpOut(get(), rp, rn, bp, bn, within),
     // a Float's text: the shortest digits that read back as it (ECMA-262 Number::toString), as interp/float.ts
     float_text: (x: number) => block(get().mem, String(x)),
     // a decimal number's nearest Float (ECMA-262 StringToNumber, correctly rounded), for parse_float; NaN for none
@@ -572,9 +623,9 @@ function argsOf(L: Linked, bytes: Uint8Array): number[] {
     if (p.type === 'View') return [copyIn(L.mem, bytes), bytes.length];
     if (p.type === 'Remote') return [L.remotes.indexOf(p.name)];
     if (p.type === 'Remotes') return [L.families.indexOf(p.name)];
-    if (['Sql', 'Clock', 'Entropy', 'Timer', 'Secrets'].includes(p.type)) return [];
+    if (['Sql', 'Clock', 'Entropy', 'Timer', 'Secrets', 'Http'].includes(p.type)) return [];
     throw new Error(
-      `handle's parameter ${p.name} is a ${p.type}; the host can pass a View (the request), Sql, Remote, Remotes, Clock, Entropy, Timer and Secrets`,
+      `handle's parameter ${p.name} is a ${p.type}; the host can pass a View (the request), Sql, Remote, Remotes, Clock, Entropy, Timer, Secrets and Http`,
     );
   });
 }
@@ -605,7 +656,7 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
   try {
     h = Number(call(L.target.name, args));
   } catch (err) {
-    if (err instanceof Pending) throw err;
+    if (err instanceof Pending || err instanceof FetchPending) throw err;
     // a run that stopped says how much memory it had used by then, and how many steps it had taken, as a finished
     // one does: the run to size is most often the one that ran out
     const [head] = L.effects;
@@ -625,7 +676,7 @@ function markUndone(L: Linked, effects: readonly Effect[]): void {
   if (!L.live) return;
   let from = 0;
   effects.forEach((e, i) => {
-    if (isCall(e)) from = i + 1;
+    if (isCall(e) || isFetch(e)) from = i + 1;
   });
   for (const e of effects.slice(from)) if ((isSql(e) && WRITE.test(L.Q[e.q]?.sql ?? '')) || isWake(e)) e.undone = true;
 }
@@ -674,7 +725,7 @@ export type RunOptions = {
   trace?: From;
 };
 export type Ran = { out: Uint8Array<ArrayBuffer>; effects: Effect[] };
-type Step = { out: Uint8Array<ArrayBuffer> } | { pending: Pending };
+type Step = { out: Uint8Array<ArrayBuffer> } | { pending: Pending | FetchPending };
 
 function handle(L: Linked, bytes: Uint8Array | null): Uint8Array<ArrayBuffer> {
   if (L.live) {
@@ -688,9 +739,9 @@ function handle(L: Linked, bytes: Uint8Array | null): Uint8Array<ArrayBuffer> {
     if (L.undone && L.live) throw new Undo(out);
     return out;
   } catch (err) {
-    throw err instanceof Pending
-      ? new Error(`this handler calls ${err.to}: use await app.run(bytes)`, { cause: err })
-      : err;
+    const waits =
+      err instanceof FetchPending ? `fetches ${err.logged.fetch}` : err instanceof Pending ? `calls ${err.to}` : null;
+    throw waits === null ? err : new Error(`this handler ${waits}: use await app.run(bytes)`, { cause: err });
   }
 }
 
@@ -712,7 +763,7 @@ function stretch(
         o.done(out);
         return { out };
       } catch (err) {
-        if (err instanceof Pending) return { pending: err };
+        if (err instanceof Pending || err instanceof FetchPending) return { pending: err };
         throw err;
       }
     });
@@ -720,7 +771,7 @@ function stretch(
     if (err instanceof Undo) return { out: err.out };
     // a run that failed (a trap, a storage error) rolled back; its log so far goes with the error, so the host
     // can record that it ran and what it did before the failure
-    if (!(err instanceof Pending)) markUndone(L, mine);
+    if (!(err instanceof Pending || err instanceof FetchPending)) markUndone(L, mine);
     const [head] = mine;
     if (head && isHead(head)) timeTook(head, me);
     if (
@@ -748,7 +799,7 @@ function runLogged(L: Linked, bytes: Uint8Array, options: RunOptions = {}): Prom
   const to: Target = method
     ? { name: `serve_${method.name}`, params: method.params, method: method.name }
     : { name: 'handle', params: L.E };
-  const caller = { services: L.o.services, name: L.o.name, timers: L.o.timers };
+  const caller = { services: L.o.services, name: L.o.name, timers: L.o.timers, http: L.o.http };
   const next = async (): Promise<Ran> => {
     const s = stretch(L, bytes, mine, to, me, { transaction, done });
     if ('out' in s) {
@@ -757,7 +808,13 @@ function runLogged(L: Linked, bytes: Uint8Array, options: RunOptions = {}): Prom
       if (mine.length > 0) L.o.sink?.(mine);
       return { out: s.out, effects: mine };
     }
-    mine.push(await perform(caller, s.pending, { trace: me.trace, parent: me.span }, end - Date.now()));
+    const parent = { trace: me.trace, parent: me.span },
+      left = end - Date.now();
+    if (s.pending instanceof FetchPending) {
+      // the values this run had read when it asked: the same ones a replay will have read at this point
+      const read = [...L.read];
+      mine.push(await performFetch(caller, s.pending, parent, left, reply => hold(reply, read)));
+    } else mine.push(await perform(caller, s.pending, parent, left));
     return next();
   };
   return next();
@@ -1032,7 +1089,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     name = null,
   } = options;
   const { sink = null, heap = null, random = null, timers = REAL_TIMERS, observe = null } = options;
-  const { secrets = null } = options;
+  const { secrets = null, http = null } = options;
   const holder: { L: Linked | null } = { L: null };
   let names: Map<number, string> | null = null;
   const raw = new WebAssembly.Instance(module, {
@@ -1064,6 +1121,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
       timers,
       observe,
       secrets,
+      http,
     },
     read: [],
     live: !recorded,

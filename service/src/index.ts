@@ -20,6 +20,8 @@
 //                                            secret(from:, name:) reads; each PUT is a new version
 //   DELETE /_secrets/:account/:name/:secret   every version of it
 //   GET    /_secrets/:account/:name           each secret's name, version, size and versions kept: never a value
+//   PUT    /_http/:account/:name   {"hosts": ["api.stripe.com"]}: the exact hosts the program's fetch may reach
+//   GET    /_http/:account/:name   that list
 //   PUT  /_faults/:account   body: a fault plan (see faults.ts), or null to stop; only accounts named jepsen-*
 //   GET  /_faults/:account   the faults injected so far, in order
 //
@@ -55,6 +57,8 @@ import { secured } from './headers.ts';
 import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
 import type { CallMeta, StoredSecret } from './records.ts';
 import { SECRET_MAX, SECRET_NAME } from '../../host/secrets.ts';
+import type { HttpAnswer, HttpRequest } from '../../host.ts';
+import { HOSTS_MOST, hostRefusal, outbound } from './outbound.ts';
 import { manifest, mcp, policyOf, refusal } from './tools.ts';
 import hosted, { RunTail } from '../../mcp/src/index.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
@@ -127,6 +131,13 @@ export class Calls extends WorkerEntrypoint<Env, { account: string; from: string
     if (from.startsWith('tool-')) return [];
     const held: StoredSecret[] = await this.ctx.exports.Name.getByName(`${account}/${from}`).secretValues(all);
     return held;
+  }
+  // An HTTP request of this program's (std/http.tape fetch), sent only to a host on its own list (outbound.ts).
+  // A tool has no list: no policy grants Http.
+  async http(request: HttpRequest, withinMs: number): Promise<HttpAnswer> {
+    const { account, from } = this.ctx.props;
+    const hosts = from.startsWith('tool-') ? [] : await this.ctx.exports.Name.getByName(`${account}/${from}`).hosts();
+    return outbound(request, hosts, withinMs);
   }
 }
 
@@ -465,6 +476,21 @@ const secretsRoute = async (request: Request, ctx: ExecutionContext, m: RegExpMa
   const set = await stub.putSecret(account, name, secret, value);
   return 'error' in set ? reply({ error: set.error }, set.status) : reply(set, 201);
 };
+// PUT or GET /_http/:account/:name: the hosts the program's fetch may reach, exact names (outbound.ts)
+const httpRoute = async (request: Request, ctx: ExecutionContext, m: RegExpMatchArray): Promise<Response> => {
+  const [, account = '', name = ''] = m;
+  if (!SEGMENT.test(account) || !SEGMENT.test(name)) return reply({ error: NAMES }, 400);
+  if (/^(kv|tool)-/.test(name)) return reply({ error: 'KV shards and tools make no HTTP requests' }, 400);
+  const stub = ctx.exports.Name.getByName(`${account}/${name}`);
+  if (request.method === 'GET') return reply({ account, name, hosts: await stub.hosts() });
+  if (request.method !== 'PUT') return reply({ error: 'PUT or GET' }, 405);
+  const { hosts } = fieldsOf(await jsonOf(request));
+  const shape = '{"hosts": ["api.stripe.com", …]}: exact host names, at most 32';
+  if (!Array.isArray(hosts) || hosts.length > HOSTS_MOST) return reply({ error: shape }, 400);
+  const why = hosts.map(hostRefusal).find(r => r !== null);
+  if (why !== undefined && why !== null) return reply({ error: why }, 400);
+  return reply({ account, name, ...(await stub.setHosts(account, name, hosts.map(String))) });
+};
 // PUT or GET /_faults/:account: a fault plan (faults.ts) for an account named jepsen-*, and the faults so far
 const faultsRoute = async (request: Request, ctx: ExecutionContext, account: string): Promise<Response> => {
   if (!FAULTY.test(account) || !SEGMENT.test(account))
@@ -587,6 +613,8 @@ const operatorRoute = (request: Request, env: Env, ctx: ExecutionContext, url: U
   if (faults) return faultsRoute(request, ctx, faults[1] ?? '');
   const secrets = SECRET_PATH.exec(path);
   if (secrets) return secretsRoute(request, ctx, secrets);
+  const http = /^\/_http\/([^/]+)\/([^/]+)$/.exec(path);
+  if (http) return httpRoute(request, ctx, http);
   const retention = /^\/_retention\/([^/]+)\/([^/]+)$/.exec(path);
   if (retention) return retentionRoute(request, ctx, retention);
   if (path === '/_ids' && request.method === 'POST') return idsRoute(request, ctx);

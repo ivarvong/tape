@@ -371,6 +371,10 @@ export const DIAGNOSTICS = {
     fixture:
       'none: each C99 is an invariant of the compiler that the checks before it make true for every program (a type is known, a match has an arm); a program that reaches one is a bug to report, and no test can hold one in place',
   },
+  C100: {
+    meaning:
+      "A fetch whose method is not written `Get` or `Head` without `key: Some(…)`. A request that timed out may have been received, so it is sent again, which is safe only when the other side can tell it for a repeat: std/http.tape's fetch sends the key as Idempotency-Key.",
+  },
 } as const satisfies Record<string, Diagnostic>;
 
 export type Code = keyof typeof DIAGNOSTICS;

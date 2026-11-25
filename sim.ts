@@ -4,6 +4,7 @@
 //
 //   which waiting request starts next          start c0
 //   what happens to each call between programs deliver | lose | drop | cut | cutafter   <call>
+//   (and to each fetch, which the model's `http` table answers: a lost or late one is a Timeout)
 //   when a due timer runs                      wake <program> <key>
 //   how far the clock moves                    tick <ms>
 //

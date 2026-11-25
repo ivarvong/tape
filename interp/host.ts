@@ -31,5 +31,7 @@ export type Host = {
   random(): number;
   /** a secret's value, or null for none (the host logs the version, never the value) */
   secret?(name: string): Uint8Array | null;
+  /** std/http.tape's fetch: the request as JSON and its body; the reply as host/run.ts httpOut gives it */
+  http?(request: { request: Uint8Array; body: Uint8Array; within: number }): { status: CallStatus; reply: Uint8Array };
 };
 export type Source = { name: string; text: string };

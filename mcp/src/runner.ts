@@ -11,8 +11,8 @@
 // request every timer due by then runs, oldest first (`woken`, as a result of its own), so a test can step past a
 // window or a retry delay. The host reads Date.now() (host/run.ts: now, wake and the due check), so the clock is
 // Date.now itself, replaced for the length of the run; runs in one isolate are taken one at a time for that.
-import { TimedOut, fixedSecrets, framed, instantiate, isEffect, replay, traceOf } from './host.ts';
-import type { App, Effect, SecretStore, Service, ServiceReply, TraceEvent } from './host.ts';
+import { TimedOut, fixedSecrets, framed, instantiate, isEffect, replay, stubHttp, traceOf } from './host.ts';
+import type { App, Effect, HttpClient, SecretStore, Service, ServiceReply, StubAnswer, TraceEvent } from './host.ts';
 import { loadSqlite, nodeSql, sqliteReady } from './sqlite.ts';
 import type { InitSqlJs, NodeSql, SqlJs } from './sqlite.ts';
 
@@ -235,9 +235,12 @@ export function runAll(
   traced: WebAssembly.Module | null = null,
   remotes: Scripts = {},
   secrets: Readonly<Record<string, string>> = {},
+  http: Readonly<Record<string, StubAnswer>> = {},
 ): Promise<RanAll> {
   const store = fixedSecrets(secrets);
-  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced, remotes, store));
+  // a stub: the table's answers, every other request refused; with no table, no Http (Unreachable)
+  const client = Object.keys(http).length > 0 ? stubHttp(http) : null;
+  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced, remotes, store, client));
   queue = mine.catch(() => null);
   return mine;
 }
@@ -305,6 +308,7 @@ async function runInOrder(
   traced: WebAssembly.Module | null,
   remotes: Scripts,
   secrets: SecretStore,
+  http: HttpClient | null,
 ): Promise<RanAll> {
   const own = requests.some(r => r.at_ms !== null);
   const realNow = Date.now,
@@ -312,7 +316,7 @@ async function runInOrder(
   let t = 0;
   if (own) Date.now = () => start + t;
   try {
-    return await runEach(module, traced, requests, own, start, { remotes, secrets }, (ms: number) => {
+    return await runEach(module, traced, requests, own, start, { remotes, secrets, http }, (ms: number) => {
       t = ms;
     });
   } finally {
@@ -326,14 +330,21 @@ async function runEach(
   requests: readonly RunRequest[],
   own: boolean,
   start: number,
-  { remotes, secrets }: { remotes: Scripts; secrets: SecretStore },
+  { remotes, secrets, http }: { remotes: Scripts; secrets: SecretStore; http: HttpClient | null },
   setClock: (ms: number) => void,
 ): Promise<RanAll> {
   const db: NodeSql = nodeSql();
   try {
     let app: ReturnType<typeof instantiate>;
     try {
-      app = instantiate(module, { sql: db, name: NAME, services: servicesOf(remotes), random: seeded(7), secrets });
+      app = instantiate(module, {
+        sql: db,
+        name: NAME,
+        services: servicesOf(remotes),
+        random: seeded(7),
+        secrets,
+        http,
+      });
     } catch (e) {
       return { ok: false, error: `the program could not be linked to a fresh database: ${messageOf(e)}` };
     }

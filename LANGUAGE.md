@@ -343,6 +343,7 @@ would otherwise take it without a word. A match that names too few is C24.
 | `sql_move(row: T, query: "UPDATE … WHERE … RETURNING *")` | `Sql` | a compare-and-set: `Moved(value)`, `Raced(now)` when another run moved the row first, `NoRow` |
 | `call(to:, method:, send:, reply:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError]`. A repeat of a `once` key gets the first run's reply and runs nothing: its stored reply, or, sent while the first run waits on a call, that run's reply when it comes (`Unreachable` if it does not come within the budget: send it again) |
 | `ask(to:, method:, send:, reply:, within:)` | `Remote` | a read: the same, with no key |
+| `fetch(to: http, method: Post, url:, headers:, body:, within:, key: Some(…))` | `Http` | an HTTP request to another service (std/http.tape): `Result[HttpReply, CallError]`, `HttpReply(status, headers, body)` whatever its status, a redirect not followed. Every method but `Get` and `Head` writes `key: Some(…)`, sent as Idempotency-Key, so it can be sent again after a `Timeout` (C100). The log records the request with each secret the run read written `[secret <name>]`; a replay answers from the log. On the service only a host on the name's list is reached ([docs/service.md](docs/service.md#outbound-http)); any other is `Rejected` |
 | `wake(after: ms, key: n)` | `Timer` | `Done`, run with `do`: asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again, and so does a run that fails on a storage error, after a wait that doubles each time (1 s up to 15 min); a run that traps is not retried |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
@@ -406,7 +407,7 @@ then each refinement, then what is inside its records and lists. So `{"key": "",
 "1.505"}]}` as an order is `key: expected Key, 1 to 64 bytes`, and with a right key, `items[0].price: expected a
 number with at most 2 decimals`.
 
-**A call is a commit point.** Writes made before a `call` or `ask` are durable when it is sent. The run may end
+**A call is a commit point.** Writes made before a `call`, an `ask` or a `fetch` are durable when it is sent. The run may end
 there (the object is reset, the reply is lost), so whatever must happen afterwards needs a timer set before the
 call, in the same commit.
 

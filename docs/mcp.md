@@ -158,6 +158,10 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   "stripe")` as version 1 (a name not given is None; at most 64, each at most 4,096 characters). The effect log and
   every trace name the secret and its version (`kind: "secret"`), never the value, and no part of the answer repeats
   `secrets`; only an answer the program itself writes the value into holds it.
+- `http` answers the program's `fetch`, which otherwise answers Unreachable: `{"GET https://rates.example/eur":
+  {"status": 200, "headers": {"content-type": "text/plain"}, "body": "1.08"}}`, by "METHOD URL" or the URL alone. A
+  request with no answer there is `Err(Rejected("host not allowed: …"))`; no request leaves the runner. Each fetch is
+  in the effect log (`kind: "fetch"`) and the replay answers it from there.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got
   the same bytes back (or, for a trap, the same trap). `replay_error` says why when it did not.
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive

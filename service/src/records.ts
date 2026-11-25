@@ -116,7 +116,7 @@ export type Step = MigrateStep | PrepareStep | MachinesStep;
 /** One entry of a stored log. */
 export type Entry = Exclude<Effect, Head> | RunHead | MigrationsHead | CheckHead | Step;
 
-const TAGS = ['build', 'q', 'call', 'secret', 'now', 'random', 'wake', 'migrate', 'prepare', 'machines'];
+const TAGS = ['build', 'q', 'call', 'fetch', 'secret', 'now', 'random', 'wake', 'migrate', 'prepare', 'machines'];
 /** Is this value, read from a stored log, one of its entries? Told by the field that names its kind. */
 export const isEntry = (v: unknown): v is Entry => typeof v === 'object' && v !== null && TAGS.some(tag => tag in v);
 export const isCheckHead = (e: Entry | undefined): e is CheckHead => e !== undefined && 'check' in e;

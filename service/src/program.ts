@@ -24,6 +24,8 @@ import type {
   App,
   Effect,
   Header,
+  HttpAnswer,
+  HttpRequest,
   MachineSpec,
   SecretStore,
   ServiceReply,
@@ -64,6 +66,8 @@ export type Env = {
   CALLS: {
     call: (to: string, meta: CallMeta, bytes: Uint8Array) => Promise<ServiceReply>;
     secrets: (all: boolean) => Promise<StoredSecret[]>;
+    /** this program's HTTP request, sent by the Worker to a host on the name's list (outbound.ts) */
+    http: (request: HttpRequest, withinMs: number) => Promise<HttpAnswer>;
   };
 };
 
@@ -170,6 +174,10 @@ const effectLine = (e: TraceEvent): Line[] | null => {
   if ('random' in e) return [['mut', `      random -> ${e.random}`]];
   if ('secret' in e)
     return [['mut', `      secret ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`]];
+  if ('fetch' in e)
+    return [
+      [e.status === 'ok' ? 'ok' : 'bad', `      fetch ${e.method} ${e.fetch} within ${e.within} ms → ${e.status}`],
+    ];
   if ('sql' in e)
     return [
       ['mut', `      sql ${e.sql} ${JSON.stringify(e.p)} → ${e.rows ? JSON.stringify(e.rows) : `${e.r} written`}`],
@@ -559,6 +567,7 @@ export class Program extends DurableObject<Env> {
       name: this.env.SELF,
       services,
       secrets: this.#secrets,
+      http: (request, { withinMs }) => calls.http(request, withinMs),
       migrations: false,
     });
     this.#apps.set(version, app);

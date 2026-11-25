@@ -371,6 +371,56 @@ function secret(u: Use): Type {
   return opt;
 }
 
+/**
+ * http_send(to: http, request, body, within) -> Result[View, CallError]: std/http.tape's fetch, and nothing else
+ * (C22 in any other file). `request` is the request's method, URL, headers and key as JSON, `body` its bytes. A
+ * reply not in the log stops the run, as a call does (a fetch is a commit point), and the host makes the request
+ * (host/run.ts httpOut). The host answers a block: the status as 4 bytes (0 ok, 1 timeout, 2 unreachable, 3
+ * rejected), a length as 4 and that many bytes: for ok, the reply's head as JSON, a line feed, and its body; for a
+ * refusal, why.
+ */
+function httpSend(u: Use): Type {
+  const { c } = u;
+  if (c.f.file !== PRIVATE_INTRINSICS.get('http_send'))
+    return fail(
+      u.e,
+      'C22',
+      'unknown function http_send',
+      'http_send is std/http.tape\'s own: a program fetches with `fetch(to: http, method: Get, url: …, headers: Nil, body: "", within: 2000, key: None)`.',
+    );
+  capability(u, 0, 'Http', 'http', 'makes HTTP requests');
+  const [rp, rn] = view(u, 1);
+  const [bp, bn] = view(u, 2);
+  const within = int(u, 3);
+  const [r, tag, pt, n] = [fresh(c, I32), fresh(c, I32), fresh(c, I32), fresh(c, I32)];
+  const errT = T('CallError');
+  const err = c.B.adtOf(errT, u.e);
+  const res = T('Result', VIEW, errT);
+  const adt = c.B.adtOf(res, u.e);
+  if (
+    !err.tagged ||
+    err.slots.length !== 3 ||
+    err.variants.map(x => x.name).join(',') !== 'Timeout,Unreachable,Rejected,Skew'
+  )
+    fail(
+      u.e,
+      'C99',
+      'std/core.tape: CallError must be Timeout, Unreachable, Rejected(reason: View), Skew(reason: View)',
+      'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
+    );
+  const which = (name: string): number => adt.variants.findIndex(v => v.name === name);
+  const asked = [...get(rp), ...get(rn), ...get(bp), ...get(bn), ...get(within), 0xb9, 0x10, ...uleb(c.B.HTTP_IMPORT)];
+  const tagged = [0x22, ...uleb(r), ...ld(0), ...i32(1), 0x6b, ...set(tag)];
+  const where = [...get(r), ...ld(4), ...set(n), ...get(r), ...i32(8), 0x6a, ...set(pt)];
+  c.code.push(...asked, ...tagged, ...where, ...get(tag), ...i32(-1), 0x46);
+  open(c, 0x04, adt.slots);
+  buildVariant(c, adt, which('Ok'), [pt, n]);
+  c.code.push(0x05);
+  buildVariant(c, adt, which('Err'), [tag, pt, n]);
+  close(c);
+  return res;
+}
+
 // remote(of: shards, index: i): one Remote of a family; which one is decided at run time, so the number of
 // members is not fixed when the program is built (a router over N shards)
 function remote(c: Ctx, e: Call): Type {
@@ -496,6 +546,7 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   append,
   answer_body: answerBody,
   secret,
+  http_send: httpSend,
   // rollback(out): the Response, as it was given, with the stretch's writes marked to be undone
   rollback: u => {
     const want = T(stdName(u.c.B.prog, 'types', 'Response'));

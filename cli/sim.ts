@@ -171,6 +171,12 @@ export async function simulate(args: readonly string[]): Promise<never> {
   });
   if (Object.keys(secrets).length > 0)
     Object.assign(model.model, { secrets: Object.fromEntries(files.map(f => [f.name, secrets])) });
+  // --http table.json: what every program's fetch is answered (each request waits for its decision, as a call does)
+  const table = option(args, 'http', '');
+  if (table !== '') {
+    const parsed: unknown = JSON.parse(readFileSync(table, 'utf8'));
+    Object.assign(model.model, { http: typeof parsed === 'object' && parsed !== null ? parsed : {} });
+  }
   const say: Say = args.includes('--quiet') ? () => {} : console.log;
   describe(say, files, model);
 

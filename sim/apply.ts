@@ -1,6 +1,7 @@
 // sim/apply.ts: one choice applied to a world. The kinds of choice are listed at the top of ../sim.ts.
 import { responseOf } from '../host.ts';
-import { drain, hash, isCut, messageOf, programOf, rng } from './world.ts';
+import { stubHttp } from '../host.ts';
+import { HTTP, drain, fetchOf, hash, isCut, messageOf, programOf, rng } from './world.ts';
 import type { Client, Model, Op, Reply, Request, Waiting, World } from './world.ts';
 import { valueOf } from './values.ts';
 
@@ -154,6 +155,20 @@ function standIn(world: World, model: Model, p: Waiting): Reply {
   return reply;
 }
 
+/** What the model's table answers a held fetch; a request it has no answer for is refused, as off a host's list. */
+async function stubbed(model: Model, p: Waiting): Promise<Reply> {
+  const r = fetchOf(p.bytes);
+  const got = await stubHttp(model.http ?? {})(
+    { ...r, body: enc.encode(r.body) },
+    { withinMs: p.meta.withinMs, signal: p.meta.signal, trace: null },
+  );
+  if ('refused' in got) return { status: 'rejected', body: enc.encode(got.refused) };
+  return {
+    status: 'ok',
+    body: enc.encode(JSON.stringify({ status: got.status, headers: got.headers, body: dec.decode(got.body) })),
+  };
+}
+
 /** How one decision about a call ends: the caller hears the reply, or is reset, or hears nothing. */
 function finisher(world: World, action: string, kind: string, p: Waiting, late: boolean) {
   const decision = kind === 'deliver' && late ? 'drop' : kind;
@@ -194,6 +209,8 @@ async function decideCall(world: World, model: Model, action: string, kind: stri
   const { decision, finish } = finisher(world, action, kind, p, late);
   const callee = world.programs[p.to];
   if (decision === 'lose' || decision === 'cut') finish(null, null);
+  // a fetch: the model's table answers it (a lost or late one is a Timeout, as for a call)
+  else if (p.to === HTTP) finish(await stubbed(model, p), null);
   // a Remote nobody supplied: a reply of the right type
   else if (!callee) finish(standIn(world, model, p), null);
   else {

@@ -1221,6 +1221,26 @@ export class Name extends DurableObject {
       value: r.value instanceof ArrayBuffer ? new Uint8Array(r.value) : new Uint8Array(0),
     }));
   }
+  // ---- Outbound HTTP (issue #13 part 3): the hosts this name's program may fetch (outbound.ts), set by the
+  // operator (PUT /_http/:account/:name). An empty list, the default, lets it reach none.
+  async setHosts(account: string, name: string, hosts: readonly string[]): Promise<{ hosts: string[] }> {
+    this.#sql.exec(
+      'CREATE TABLE IF NOT EXISTS _tape_http(one INTEGER PRIMARY KEY CHECK (one = 1), hosts TEXT NOT NULL)',
+    );
+    const list = [...new Set(hosts)].toSorted();
+    this.#sql.exec(
+      'INSERT INTO _tape_http VALUES (1, ?1) ON CONFLICT(one) DO UPDATE SET hosts = excluded.hosts',
+      JSON.stringify(list),
+    );
+    await this.enrol(account, name, 'program');
+    return { hosts: list };
+  }
+  hosts(): string[] {
+    if (!this.#has('_tape_http')) return [];
+    const [row] = this.#sql.exec('SELECT hosts FROM _tape_http').toArray();
+    const list: unknown = JSON.parse(str(row?.hosts) || '[]');
+    return Array.isArray(list) ? list.filter((h): h is string => typeof h === 'string') : [];
+  }
   // ---- An account's names (RUNTIME-SPEC R-RET-7), at <account>/~registry
   registryTable(): void {
     this.#sql.exec(

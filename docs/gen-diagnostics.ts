@@ -19,7 +19,7 @@ const slug = (heading: string): string =>
 /** The codes a text names: `C14`, and each of a range, `C83-C85` (or with an en dash). */
 function named(text: string): Set<string> {
   const out = new Set<string>();
-  for (const m of text.matchAll(/\b([CLP])(\d\d)(?:[-–]\1?(\d\d))?\b/g)) {
+  for (const m of text.matchAll(/\b([CLP])(\d{2,3})(?:[-–]\1?(\d{2,3}))?\b/g)) {
     const [, letter = '', from = '', to] = m;
     const last = to === undefined ? Number(from) : Number(to);
     for (let n = Number(from); n <= last; n++) out.add(`${letter}${String(n).padStart(2, '0')}`);

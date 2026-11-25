@@ -92,7 +92,7 @@ type Deps = ToolsM.Deps;
 const depsOf = (m: Mods, over: Partial<Deps> = {}): Deps => ({
   std,
   hello: { name: 'hello.tape', text: HELLO },
-  run: async (program, requests, remotes, secrets) => {
+  run: async (program, requests, remotes, secrets, http) => {
     await m.runner.startSqlite(init, sqlite3);
     return m.runner.runAll(
       new WebAssembly.Module(program.wasm),
@@ -100,6 +100,7 @@ const depsOf = (m: Mods, over: Partial<Deps> = {}): Deps => ({
       program.traced ? new WebAssembly.Module(program.traced) : null,
       remotes,
       secrets,
+      http,
     );
   },
   examples: (wasm, fns) => Promise.resolve(callExamples(new WebAssembly.Module(wasm), fns)),
@@ -658,6 +659,10 @@ const tests: Test[] = [
           { requests, trace: 'full', effects: 'full' },
           { requests, trace: 'none', remotes: { payments: { charge: [{ payment: 1 }, 'timeout'] } } },
           { requests, secrets: { stripe: 'sk_test_0123456789' } },
+          {
+            requests,
+            http: { 'GET https://rates/x': { status: 200, headers: { 'x-a': '1' }, body: 'ok' } },
+          },
         ],
         feedback: ['bug', 'confusing', 'missing', 'idea', 'praise'].map(kind => ({
           text: 'x',
@@ -1175,6 +1180,44 @@ const tests: Test[] = [
         const b = await tool(m, 'run', { files, requests: ['GET /'], secrets: bad });
         if (!b.isError || b.out['error'] !== 'bad_secrets')
           out.push(`secrets ${JSON.stringify(bad)}: ${JSON.stringify(b.out).slice(0, 200)}`);
+      }
+      return out;
+    },
+  },
+  {
+    name: 'http',
+    // run's `http`: the program's fetch is answered from the table, a request it has no answer for is refused (no
+    // request leaves the runner), each fetch is in the effect log and the replay answers it from there
+    run: async m => {
+      const out: string[] = [];
+      const text = `fn handle(raw: View, http: Http) -> Response {\n  match fetch(to: http, method: Get, url: "https://rates.example" ++ request(raw).path, headers: Nil, body: "", within: 500, key: None) {\n    Ok(value: HttpReply(status, body)) -> buf() |> write_int(value: status) |> append(view: " ") |> append(view: body) |> respond(status: 200)\n    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 502)\n    Err(_) -> empty(status: 503)\n  }\n}\n`;
+      const files = [{ name: 'rates.tape', text }];
+      const http = { 'GET https://rates.example/eur': { status: 200, body: '1.08' } };
+      const { out: r, isError } = await tool(m, 'run', { files, requests: ['GET /eur', 'GET /usd'], http });
+      const rs = RESULTS(r);
+      const got = rs.map(x => `${String(x['status'])} ${String(x['body'])}`);
+      const want = ['200 200 1.08', '502 host not allowed: no stub answer for GET https://rates.example/usd'];
+      if (isError || JSON.stringify(got) !== JSON.stringify(want)) out.push(`answers: ${JSON.stringify(got)}`);
+      const fetched = rs.map(x =>
+        F(
+          L(x['effects'])
+            .map(F)
+            .find(e => e['kind'] === 'fetch'),
+        ),
+      );
+      if (
+        JSON.stringify(fetched.map(f => [f['url'], f['status']])) !==
+        '[["https://rates.example/eur","ok"],["https://rates.example/usd","rejected"]]'
+      )
+        out.push(`effects: ${JSON.stringify(fetched)}`);
+      if (!rs.every(x => x['replayed'] === true))
+        out.push(`replayed: ${JSON.stringify(rs.map(x => x['replay_error']))}`);
+      const none = RESULTS((await tool(m, 'run', { files, requests: ['GET /eur'] })).out)[0];
+      if (none?.['status'] !== 503) out.push(`without http: ${String(none?.['status'])}`);
+      for (const bad of [[1], { x: 1 }, { x: { status: 'ok' } }, { x: { nope: 1 } }]) {
+        const b = await tool(m, 'run', { files, requests: ['GET /eur'], http: bad });
+        if (!b.isError || b.out['error'] !== 'bad_http')
+          out.push(`http ${JSON.stringify(bad)}: ${JSON.stringify(b.out).slice(0, 200)}`);
       }
       return out;
     },

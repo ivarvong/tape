@@ -8,6 +8,7 @@ import program from './program.wasm';
 import traced from './traced.wasm';
 import { runAll, startSqlite } from './runner.ts';
 import type { RanAll, RunRequest, Scripts } from './runner.ts';
+import type { StubAnswer } from './host.ts';
 import { callExamples } from './examples.ts';
 import type { Called } from './examples.ts';
 
@@ -22,10 +23,11 @@ export class Runner extends WorkerEntrypoint {
     remotes: Scripts = {},
     runId = '',
     secrets: Readonly<Record<string, string>> = {},
+    http: Readonly<Record<string, StubAnswer>> = {},
   ): Promise<RanAll> {
     if (runId) console.log(JSON.stringify({ 'tape-mcp.run_id': runId }));
     await startSqlite(initSqlJs, sqlite3);
-    return runAll(program, requests, trace ? traced : null, remotes, secrets);
+    return runAll(program, requests, trace ? traced : null, remotes, secrets, http);
   }
   /** program.wasm is a build of doc examples (doctest.ts): call each named one (the test tool) */
   examples(fns: string[]): Called[] {

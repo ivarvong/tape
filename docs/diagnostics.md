@@ -4,7 +4,7 @@
 
 A code starts with the part of the compiler that gives it: L for the lexer (the characters of a file), P for the parser (its shape), C for the checker and the rules (what it means). A refusal is a code, a file and line, what is wrong there, and what to write instead; the line and the fix name what the program wrote. This page says what each code refuses whatever the program, and where [LANGUAGE.md](../LANGUAGE.md) or [the guide](guide.md) explains it.
 
-106 codes.
+107 codes.
 
 | Code | Refuses | Explained in |
 |---|---|---|
@@ -114,6 +114,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C96 | A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none). A status that is a value is checked when the host answers, which says why in a 500. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 | C97 | A match on a machine's states with an arm that takes the states the arms beside it do not name (`_`, a name, a row pattern that leaves the state out). A state added to the machine would be taken there without a word; each state gets an arm of its own. | [LANGUAGE.md: 5. Patterns](../LANGUAGE.md#5-patterns); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C99 | A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program. |  |
+| C100 | A fetch whose method is not written `Get` or `Head` without `key: Some(…)`. A request that timed out may have been received, so it is sent again, which is safe only when the other side can tell it for a repeat: std/http.tape's fetch sends the key as Idempotency-Key. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 
 ## Reserved
 

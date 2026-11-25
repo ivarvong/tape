@@ -534,3 +534,130 @@ private fn html_from(out: Buf, text: View, at: Int) -> Buf {
     else -> html_from(out: push(buf: out, byte: text[at]), text, at: at + 1)
   }
 }
+
+// The answer to a request `fetch` made: its status, its headers in the order they came (names in lower case), and
+// its body, byte for byte.
+type HttpReply {
+  HttpReply(status: Int, headers: List[Header], body: View)
+}
+
+// An HTTP request to another service, through the program's `Http` capability, shaped like `call`: Ok with the
+// reply whatever its status (a 404 or a 500 is an answer; a redirect is not followed, its 3xx is the reply), or
+// Err(Timeout) when no reply came within `within` ms (the request may have been received), Err(Unreachable) when
+// the host has no network for the program, and Err(Rejected(reason)) when the host would not send it: a host not
+// on the program's list, a URL that is not https, a header it refuses, a body over 64 KB, a reply over 1 MB.
+// A fetch is a commit point, as a call is: what the run wrote before it is committed when it goes out.
+//
+// Every method but GET and HEAD carries `key: Some(…)`, sent as the Idempotency-Key header, so a request sent
+// again after a Timeout is one the other side can tell is a repeat (C100: a POST written with `key: None` does not
+// build; a method that is a value and a None key is refused by the host). A run replayed from its log is answered
+// from the log: the request is not made again.
+//
+// The log records the request with each secret the run read (`secret`) written `[secret <name>]` wherever it
+// stands in the URL, a header's value or the body, and the reply with each such value kept out of the log: a key
+// sent as `authorization: Bearer …` is never in a log, a trace or a span.
+//
+//   fetch(to: http, method: Post, url: "https://api.stripe.com/v1/refunds",
+//     headers: Cons(head: Header(name: "authorization", value: "Bearer " ++ key), tail: Nil),
+//     body: "charge=ch_1", within: 2000, key: Some(value: "refund-" ++ id))
+fn fetch(
+  to: Http,
+  method: Method,
+  url: View,
+  headers: List[Header],
+  body: View,
+  within: Int,
+  key: Option[View]
+) -> Result[HttpReply, CallError] {
+  let sent = buf()
+    |> append(view: "{\"method\":")
+    |> write_json(value: method_name(method))
+    |> append(view: ",\"url\":")
+    |> write_json(value: url)
+    |> append(view: ",\"key\":")
+    |> key_json(key)
+    |> append(view: ",\"headers\":[")
+    |> headers_json(headers, first: True)
+    |> append(view: "]}")
+  match http_send(to, request: freeze(buf: sent), body, within) {
+    Ok(value) -> Ok(value: reply_of(wire: value))
+    Err(error) -> Err(error)
+  }
+}
+
+// The key of a fetch, as JSON: its text, or null.
+private fn key_json(out: Buf, key: Option[View]) -> Buf {
+  match key {
+    Some(value) -> write_json(out, value)
+    None -> append(buf: out, view: "null")
+  }
+}
+
+// The headers of a fetch, as JSON: each one [name, value], in the order of the list.
+private fn headers_json(out: Buf, headers: List[Header], first: Bool) -> Buf {
+  match headers {
+    Nil -> out
+    Cons(head: Header(name, value), tail) -> {
+      let comma = match {
+        first -> out
+        else -> append(buf: out, view: ",")
+      }
+      let written = comma
+        |> append(view: "[")
+        |> write_json(value: name)
+        |> append(view: ",")
+        |> write_json(value)
+        |> append(view: "]")
+      headers_json(out: written, headers: tail, first: False)
+    }
+  }
+}
+
+// A Method as its token.
+//
+//   > method_name(method: Delete)
+//   "DELETE"
+fn method_name(method: Method) -> View {
+  match method {
+    Get -> "GET"
+    Head -> "HEAD"
+    Post -> "POST"
+    Put -> "PUT"
+    Patch -> "PATCH"
+    Delete -> "DELETE"
+    Options -> "OPTIONS"
+    Other(name) -> name
+  }
+}
+
+// The reply as the host gives it to http_send: the status and a line feed, each header as `name:value` and a line
+// feed, a line feed, then the body. A header's value has no line feed (HTTP has none in one).
+private fn reply_of(wire: View) -> HttpReply {
+  let first = scan(v: wire, at: 0, set: "\n")
+  let status = value_or(given: decimal(slice(v: wire, from: 0, to: first)), otherwise: 0)
+  reply_lines(wire, at: min(a: first + 1, b: len(wire)), status, found: Nil)
+}
+
+// The header lines from `at`, then the body after the empty line.
+private fn reply_lines(wire: View, at: Int, status: Int, found: List[Header]) -> HttpReply {
+  let end = scan(v: wire, at, set: "\n")
+  let last = end == at or end >= len(wire)
+  match {
+    last -> HttpReply(
+      status,
+      headers: reverse(list: found),
+      body: slice(v: wire, from: min(a: end + 1, b: len(wire)), to: len(wire))
+    )
+    else -> {
+      let line = slice(v: wire, from: at, to: end)
+      let colon = scan(v: line, at: 0, set: ":")
+      let value = slice(v: line, from: min(a: colon + 1, b: len(line)), to: len(line))
+      reply_lines(
+        wire,
+        at: end + 1,
+        status,
+        found: Cons(head: Header(name: slice(v: line, from: 0, to: colon), value), tail: found)
+      )
+    }
+  }
+}

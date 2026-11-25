@@ -84,31 +84,51 @@ export type CallEffect = {
   sent_us?: number;
   took_us?: number;
 };
+/** An HTTP request a program made (std/http.tape fetch): the request as sent, but with every secret value the run
+ * read written `[secret <name>]` (url, header values, body), and the reply. `reply` is, for ok, the reply's head as
+ * JSON, a line feed and its body, with each secret value the run read held as a mark (host/secrets.ts), so the log
+ * holds no secret; a replay puts the values back. For any other status it is why. */
+export type FetchEffect = {
+  fetch: string;
+  method: string;
+  headers: { name: string; value: string }[];
+  body: Packed;
+  within: number;
+  key?: string;
+  status: Status;
+  reply: Packed;
+  sent: number;
+  took: number;
+  sent_us?: number;
+  took_us?: number;
+};
 /** A secret read: its name and the version given (null: none of that name), never its value. */
 export type SecretEffect = { secret: string; version: number | null };
 export type NowEffect = { now: number };
 export type RandomEffect = { random: number };
 /** `undone`: a timer its run's rollback(out) or trap undid (its row in _wakes was rolled back; host/run.ts, markUndone) */
 export type WakeEffect = { wake: number; after: number; due: number; undone?: true };
-export type Effect = Head | SqlEffect | CallEffect | SecretEffect | NowEffect | RandomEffect | WakeEffect;
+export type Effect = Head | SqlEffect | CallEffect | FetchEffect | SecretEffect | NowEffect | RandomEffect | WakeEffect;
 
 /** One thing a traced run did, in order. `what` at a site: 2 the function was entered, 0 an arm or step was tried, 1 it matched. */
 export type TraceEvent =
   | { site: number; what: number }
   | { sql: number; p: SqlParam[]; r?: number | undefined; rows?: Cell[][] | undefined; undone?: true }
   | { call: string; method: string; within: number; status: Status }
+  | { fetch: string; method: string; within: number; status: Status }
   | SecretEffect
   | { flags: Flags }
   | NowEffect
   | RandomEffect
   | WakeEffect;
 
-const TAGS = ['build', 'q', 'call', 'secret', 'now', 'random', 'wake'];
+const TAGS = ['build', 'q', 'call', 'fetch', 'secret', 'now', 'random', 'wake'];
 /** Is this value, read from a stored log, an entry of an effect log? Told by the field that names its kind. */
 export const isEffect = (v: unknown): v is Effect => typeof v === 'object' && v !== null && TAGS.some(tag => tag in v);
 export const isHead = (e: Effect): e is Head => 'build' in e;
 export const isSql = (e: Effect): e is SqlEffect => 'q' in e;
 export const isCall = (e: Effect): e is CallEffect => 'call' in e;
+export const isFetch = (e: Effect): e is FetchEffect => 'fetch' in e;
 export const isSecret = (e: Effect): e is SecretEffect => 'secret' in e;
 export const isNow = (e: Effect): e is NowEffect => 'now' in e;
 export const isRandom = (e: Effect): e is RandomEffect => 'random' in e;

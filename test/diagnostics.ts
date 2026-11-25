@@ -22,7 +22,7 @@ const files = [
   'rules.ts',
   'sql.ts',
 ].filter(f => f !== 'compiler/diagnostics.ts');
-const raised = new Set(files.flatMap(f => [...raw(f).matchAll(/'([CLPM]\d\d)'/g)].map(m => m[1] ?? '')));
+const raised = new Set(files.flatMap(f => [...raw(f).matchAll(/'([CLPM]\d{2,3})'/g)].map(m => m[1] ?? '')));
 ok(`the toolchain raises codes (${raised.size})`, raised.size >= 100);
 same('every code raised has a row', [...raised].filter(c => !rows.has(c)).toSorted(), []);
 same(

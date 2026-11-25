@@ -28,6 +28,7 @@ import { tailLines } from './tail.ts';
 import { LIMITS } from './tools.ts';
 import type { Deps, Program } from './tools.ts';
 import type { RanAll, RunRequest, Scripts } from './runner.ts';
+import type { StubAnswer } from '../../host.ts';
 import type { Runner } from './loaded.ts';
 import type { Called } from '../../host/examples.ts';
 import type { Store } from './feedback.ts';
@@ -101,6 +102,7 @@ const runIn =
     requests: readonly RunRequest[],
     remotes: Scripts = {},
     secrets: Readonly<Record<string, string>> = {},
+    http: Readonly<Record<string, StubAnswer>> = {},
   ): Promise<RanAll> => {
     const traced = program.traced ?? program.wasm;
     const runner = await runnerOf(env, ctx, program.wasm, traced);
@@ -111,7 +113,7 @@ const runIn =
     // is logged after this response, so the wait is what a client can be shown: a wall-clock reading at 1 ms,
     // covering every request in the call, the replay and a line trace, because they share the invocation.
     const t0 = Date.now();
-    const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId, secrets);
+    const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId, secrets, http);
     // A clock step back is 0, so the field stays an integer at least 0, which is what the schema says. Date.now
     // is already a whole millisecond.
     return { ...ran, run_id: runId, invoke_wall_ms: Math.max(0, Date.now() - t0) };

@@ -2,7 +2,19 @@
 // simulator holds until a choice says what becomes of each.
 import '../node25.ts';
 import { NO_TIMERS, fixedSecrets, instantiate } from '../host.ts';
-import type { App, Cell, Observed, Service, ServiceOptions, ServiceReply, SqlParam, Transaction } from '../host.ts';
+import type {
+  App,
+  Cell,
+  HttpAnswer,
+  HttpClient,
+  Observed,
+  Service,
+  ServiceOptions,
+  ServiceReply,
+  SqlParam,
+  StubAnswer,
+  Transaction,
+} from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { NodeSql } from '../nodesql.ts';
 import type { Json, Schema } from './values.ts';
@@ -24,6 +36,9 @@ export type Model = {
   modules: Readonly<Record<string, WebAssembly.Module>>;
   /** the program the clients send to */
   entry: string;
+  /** what every program's fetch is answered, by "METHOD URL" or URL (host/call.ts stubHttp): each request waits for
+   * its decision as a call does (deliver, lose, drop, cut, cutafter), so a fetch can be dropped or answered late */
+  http?: Readonly<Record<string, StubAnswer>>;
   /** what each program's `secret(from:, name:)` reads, by program, then by name (version 1 of each) */
   secrets?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** Remotes no program here serves: the reply type of each method */
@@ -142,6 +157,74 @@ function servicesOf(world: World, model: Model, name: string): Record<string, Se
   return Object.fromEntries(others.map(to => [to, held(to)]));
 }
 
+/** The name a held fetch waits under: no program is named so (a name is a-z 0-9 _ -). */
+export const HTTP = '~http';
+const enc = new TextEncoder(),
+  dec = new TextDecoder();
+/** A held fetch's request, as the simulator keeps it while it waits. */
+export const fetchOf = (
+  bytes: Uint8Array,
+): { method: string; url: string; headers: [string, string][]; body: string; key: string | null } => {
+  const v: unknown = JSON.parse(dec.decode(bytes));
+  const o = typeof v === 'object' && v !== null ? v : {};
+  const at = (k: string): unknown => Reflect.get(o, k);
+  const text = (k: string): string => {
+    const x = at(k);
+    return typeof x === 'string' ? x : '';
+  };
+  const key = at('key');
+  const list = at('headers');
+  const headers = (Array.isArray(list) ? list : []).flatMap((h: unknown): [string, string][] =>
+    Array.isArray(h) && typeof h[0] === 'string' && typeof h[1] === 'string' ? [[h[0], h[1]]] : [],
+  );
+  return {
+    method: text('method'),
+    url: text('url'),
+    headers,
+    body: text('body'),
+    key: typeof key === 'string' ? key : null,
+  };
+};
+/** The program's Http: each request held until its decision, as a call to another program is. */
+function httpOf(world: World): HttpClient {
+  return (request, { withinMs, signal, trace }) =>
+    new Promise<HttpAnswer>((ok, no) => {
+      const run = world.cur ?? { id: '?' };
+      const n = (run.calls ?? 0) + 1;
+      run.calls = n;
+      const bytes = enc.encode(JSON.stringify({ ...request, body: dec.decode(request.body) }));
+      const meta = {
+        method: `${request.method} ${request.url}`,
+        fingerprint: '',
+        key: request.key,
+        withinMs,
+        signal,
+        trace,
+      };
+      const resolve = (reply: ServiceReply): void => {
+        const r = reply instanceof Uint8Array || reply instanceof ArrayBuffer ? { status: 'ok', body: reply } : reply;
+        const body = r.body ? dec.decode(r.body) : '';
+        if (r.status !== 'ok') {
+          ok({ refused: body });
+          return;
+        }
+        const a: unknown = JSON.parse(body);
+        const f = typeof a === 'object' && a !== null ? a : {};
+        const status: unknown = Reflect.get(f, 'status');
+        const hs: unknown = Reflect.get(f, 'headers');
+        const b: unknown = Reflect.get(f, 'body');
+        ok({
+          status: typeof status === 'number' ? status : 200,
+          headers: Array.isArray(hs)
+            ? hs.flatMap((h: unknown): [string, string][] => (Array.isArray(h) ? [[String(h[0]), String(h[1])]] : []))
+            : [],
+          body: enc.encode(typeof b === 'string' ? b : ''),
+        });
+      };
+      world.pending.push({ id: `${run.id}:${n}`, run, to: HTTP, bytes, meta, resolve, reject: no, sent: world.clock });
+    });
+}
+
 function programIn(world: World, model: Model, name: string, account: string): Program {
   const module = model.modules[name];
   if (!module) throw new Error(`no module ${name}`);
@@ -154,6 +237,7 @@ function programIn(world: World, model: Model, name: string, account: string): P
     random: dice(world.seed, name),
     timers: NO_TIMERS,
     secrets: fixedSecrets(model.secrets?.[name] ?? {}),
+    http: httpOf(world),
     observe: observe ? (r): void => observe(name, r) : null,
   });
   return { sql, tx: { transaction: f => sql.transaction(f) }, app, fired: new Map() };

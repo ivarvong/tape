@@ -183,6 +183,46 @@ answers. Elsewhere: `node tape.ts program.tape … --secret stripe=sk_test_…` 
 the value as version 1, and the hosted `/v1/run` takes `"secrets": {"stripe": "sk_test_…"}`, which no part of its
 answer repeats.
 
+### Outbound HTTP
+
+```
+PUT /_http/:account/:name   {"hosts": ["api.stripe.com"]} -> {hosts}: the hosts the program's fetch may reach
+GET /_http/:account/:name   {hosts}
+```
+
+A program that declares `http: Http` makes a request with std/http's `fetch(to: http, method:, url:, headers:, body:,
+within:, key:)`, and gets `Ok(HttpReply(status, headers, body))` whatever the status, or a `CallError`, as a call
+does: the request is logged, it is a commit point (what the run wrote before it is committed when it goes out), it
+has `within` ms, and a replay answers it from the log without sending it again. The Worker sends it, not the
+program's sandbox (which has no network), and only when all of these hold; otherwise the program gets
+`Err(Rejected("host not allowed: …"))` (or the reason) and nothing is sent:
+
+- the URL is `https:`, on the default port, with no user or password, and its host is exactly one the name lists
+  (no wildcard, no IP address, no `localhost`, `.local` or `.internal`; at most 32 hosts; an empty list, the default,
+  reaches none);
+- the method is a token other than CONNECT and TRACE; every method but GET and HEAD carries `key: Some(…)` (C100 when
+  it is written as a literal; refused here when it is a value), sent as `Idempotency-Key`; a GET or HEAD has no body;
+- the body is at most 64 KB; at most 32 headers and 16 KB of them, each a token name and a printable ASCII value,
+  none the host's (host, content-length, transfer-encoding, connection, proxy-…, forwarded, x-forwarded-…, cf-…, and
+  idempotency-key, which is the key's).
+
+A redirect is not followed (`redirect: "manual"`): the 3xx is the reply, so a listed host cannot pass the request on
+to one that is not. A reply's body is at most 1 MB; past that the fetch is `Rejected` and what was read is dropped.
+No reply within `within` (at most 60 s) is `Timeout`: the request may have arrived, so it is sent again with the same
+key. What Workers' fetch refuses on its own is not what this rests on: it goes out from Cloudflare's network, so a
+program cannot reach the machine it runs on or a private address of the operator's, but it would reach any public
+host and any port, and follow redirects. The list is what makes the hosts the operator's choice. A listed name is
+resolved as Workers resolves it, so list only hosts whose names you trust.
+
+The log entry is `{fetch: <url>, method, headers, body, key, within, status, reply}`, with each secret the run read
+written `[secret stripe]` in the URL, a header's value and the body (so `authorization: Bearer <key>` is logged as
+`Bearer [secret stripe]`), and the reply with each such value kept out of the log and put back by the replay; the
+trace page shows `fetch POST https://api.stripe.com/v1/refunds within 2000 ms → ok`, and its OTLP an
+`http.client.request` event. A tool cannot fetch: no policy grants Http. Elsewhere: `node tape.ts program.tape … --http
+table.json`, `tape sim … --http table.json` and `/v1/run`'s `"http"` answer from a table (`{"GET https://host/path":
+{status, headers, body}}`, or by the URL alone) and refuse every other request; the simulator holds each fetch as it
+holds a call, so a run can drop one or answer it late. A host with no table answers every fetch `Unreachable`.
+
 ## Tools for agents
 
 A tool is a program made only of exported functions. The operator sets what an account's tools may use; an agent
@@ -236,6 +276,8 @@ its trace id. Not supported: resharding, cross-key transactions, scans, backups.
 | Trace records kept per name | the newest 100,000 requests |
 | KV: shards, key, value | 1 to 64; 1 to 256 bytes; 64 KiB |
 | A timer's delay | 0 ms to 30 days |
+| A secret | 8 bytes to 4 KB; 64 a name, the last 5 versions of each kept |
+| A fetch | 64 KB of body, 32 headers and 16 KB of them; a reply of 1 MB; 60 s; 32 hosts a name |
 
 ## Running your own
 

@@ -119,6 +119,6 @@ describe('secrets', () => {
     const r = await call('/tools/sect/peek', { method: 'POST', body: tool });
     const body = await json(r);
     expect([r.status, at(body, 'error')]).toEqual([403, 'capability not granted']);
-    expect(text(at(body, 'hint'))).toContain('no policy grants Secrets');
+    expect(text(at(body, 'hint'))).toContain('no policy grants Secrets or Http');
   });
 });

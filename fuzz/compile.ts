@@ -206,7 +206,7 @@ function compiled(text: string, name: string): Out {
   if (ms > COMPILE_MS) return { kind: 'slow', detail: `${ms.toFixed(0)} ms`, ms };
   if (b.wasm === null) {
     const e = b.errors[0];
-    if (!e || typeof e.code !== 'string' || !/^[A-Z]\d\d$/.test(e.code))
+    if (!e || typeof e.code !== 'string' || !/^[A-Z]\d{2,3}$/.test(e.code))
       return { kind: 'crash', detail: `a refusal with no code: ${JSON.stringify(e)}`, ms };
     return { kind: 'refused', detail: e.code, ms };
   }
@@ -230,7 +230,8 @@ function formats(text: string, name: string, before: Out): string | null {
   } catch (e) {
     const m = e instanceof Error ? e.message : String(e);
     // the formatter refuses what does not parse, with the parser's problem
-    if (/^[A-Z]\d\d\b|line \d+/.test(m) || (e instanceof Error && e.constructor.name === 'CompileError')) return null;
+    if (/^[A-Z]\d{2,3}\b|line \d+/.test(m) || (e instanceof Error && e.constructor.name === 'CompileError'))
+      return null;
     return `format threw: ${e instanceof Error ? (e.stack ?? m).split('\n').slice(0, 3).join(' | ') : m}`;
   }
   if (twice !== once) return 'format is not a fixed point';

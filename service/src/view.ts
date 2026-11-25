@@ -2,7 +2,7 @@
 // the data Name.joined builds: { account, name, version, ...the request's view, calls: [{ e, served }] }, where
 // e is the call's entry in the caller's log and served is what the callee recorded for it (null: nothing).
 import { measuredText } from '../../host/log.ts';
-import type { CallEffect } from '../../host/log.ts';
+import type { CallEffect, FetchEffect } from '../../host/log.ts';
 import { isCheckHead, isMigrationsHead, isRunHead } from './records.ts';
 import type {
   CheckHead,
@@ -48,6 +48,17 @@ const callLine = (e: CallEffect): string => {
   const once = 'once' in e;
   return `${once ? 'call ' : 'ask  '}   ${e.call}.${e.method} ${packed(e.send, '(bytes)')} within ${e.within} ms${once ? ` once ${e.once}` : ''} -> ${e.status}${e.reply === '' ? '' : ` ${packed(e.reply, '')}`}`;
 };
+/** A fetch's reply status, from its reply (host/call.ts replyWire: the status, then a line feed); null for none. */
+const replyStatus = (e: FetchEffect): number | null => {
+  if (e.status !== 'ok' || typeof e.reply !== 'string') return null;
+  const n = Number(e.reply.slice(0, e.reply.indexOf('\n')));
+  return Number.isInteger(n) ? n : null;
+};
+const fetchLine = (e: FetchEffect): string => {
+  const got = replyStatus(e);
+  const why = e.status === 'ok' ? '' : e.reply === '' ? '' : ` ${packed(e.reply, '')}`;
+  return `fetch   ${e.method} ${e.fetch}${e.key === undefined ? '' : ` key ${e.key}`} within ${e.within} ms -> ${e.status}${got === null ? '' : ` ${got}`}${why}`;
+};
 // One effect-log entry on one line.
 const fx = (e: Entry): string => {
   if ('prepare' in e || 'machines' in e || 'migrate' in e) return stepLine(e);
@@ -57,6 +68,7 @@ const fx = (e: Entry): string => {
   if ('now' in e) return `now     -> ${e.now}`;
   if ('random' in e) return `random  -> ${e.random}`;
   if ('secret' in e) return `secret  ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`;
+  if ('fetch' in e) return fetchLine(e);
   return `sql ${e.q}   ${JSON.stringify(e.p)} -> ${e.rows ? JSON.stringify(e.rows) : `${e.r} written`}`;
 };
 
@@ -204,6 +216,19 @@ const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent
   // the name and the version read, never the value: the log has none
   if ('secret' in e)
     return [event(t, 'tape.secret', { 'tape.secret.name': e.secret, 'tape.secret.version': e.version ?? undefined })];
+  // the request as logged: each secret the run read written [secret <name>]
+  if ('fetch' in e)
+    return [
+      event(fine(e.sent_us, e.sent), 'http.client.request', {
+        'http.request.method': e.method,
+        'url.full': e.fetch,
+        'http.response.status_code': replyStatus(e) ?? undefined,
+        'tape.fetch.outcome': e.status,
+        'tape.fetch.within_ms': e.within,
+        'tape.fetch.key': e.key,
+        'tape.fetch.took_ms': e.took,
+      }),
+    ];
   if ('migrate' in e)
     return e.statements.map(st =>
       event(t, 'db.migration', {

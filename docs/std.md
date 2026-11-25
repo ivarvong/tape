@@ -265,7 +265,7 @@ Uses: [`hmac_sha256_verify`](#fn-hmac_sha256_verify), [`hmac_sha256`](#fn-hmac_s
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Done`](#type-done), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`value_or`](#fn-value_or), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at), [`utf8_end`](#fn-utf8_end)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex_value`](#fn-hex_value), [`is_json`](#fn-is_json), [`json_member`](#fn-json_member), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
-- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html)
+- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html), [`HttpReply`](#type-httpreply), [`fetch`](#fn-fetch), [`method_name`](#fn-method_name)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
@@ -1704,6 +1704,47 @@ Text into HTML, as text: & < > " and ' are written as entities, so a value from 
 ```
 > freeze(buf: write_html(out: buf(), text: "<b>Tom & \"Jo\"</b>"))
 "&lt;b&gt;Tom &amp; &quot;Jo&quot;&lt;/b&gt;"
+```
+
+### type HttpReply
+
+```tape
+type HttpReply {
+  HttpReply(status: Int, headers: List[Header], body: View)
+}
+```
+
+The answer to a request `fetch` made: its status, its headers in the order they came (names in lower case), and its body, byte for byte.
+
+### fn fetch
+
+```tape
+fn fetch(to: Http, method: Method, url: View, headers: List[Header], body: View, within: Int, key: Option[View]) -> Result[HttpReply, CallError]
+```
+
+An HTTP request to another service, through the program's `Http` capability, shaped like `call`: Ok with the reply whatever its status (a 404 or a 500 is an answer; a redirect is not followed, its 3xx is the reply), or Err(Timeout) when no reply came within `within` ms (the request may have been received), Err(Unreachable) when the host has no network for the program, and Err(Rejected(reason)) when the host would not send it: a host not on the program's list, a URL that is not https, a header it refuses, a body over 64 KB, a reply over 1 MB. A fetch is a commit point, as a call is: what the run wrote before it is committed when it goes out.
+
+Every method but GET and HEAD carries `key: Some(…)`, sent as the Idempotency-Key header, so a request sent again after a Timeout is one the other side can tell is a repeat (C100: a POST written with `key: None` does not build; a method that is a value and a None key is refused by the host). A run replayed from its log is answered from the log: the request is not made again.
+
+The log records the request with each secret the run read (`secret`) written `[secret <name>]` wherever it stands in the URL, a header's value or the body, and the reply with each such value kept out of the log: a key sent as `authorization: Bearer …` is never in a log, a trace or a span.
+
+```
+fetch(to: http, method: Post, url: "https://api.stripe.com/v1/refunds",
+  headers: Cons(head: Header(name: "authorization", value: "Bearer " ++ key), tail: Nil),
+  body: "charge=ch_1", within: 2000, key: Some(value: "refund-" ++ id))
+```
+
+### fn method_name
+
+```tape
+fn method_name(method: Method) -> View
+```
+
+A Method as its token.
+
+```
+> method_name(method: Delete)
+"DELETE"
 ```
 
 ## std/list.tape

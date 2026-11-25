@@ -4,6 +4,7 @@
 import { emptyProgram } from './ast.ts';
 import type { FnDecl, Program } from './ast.ts';
 import { ambient, granted } from './ambient.ts';
+import { fetchKeys } from './fetch.ts';
 import { CompileError, LEVEL_BASE, fail } from './common.ts';
 import { STEP_VERSION } from './step-version.ts';
 import type { Problem } from './common.ts';
@@ -103,7 +104,7 @@ function front(sources: readonly Source[]) {
   rowColumns(prog);
   // the rules, read from the program as written (before the generated functions are added); reported only once the
   // program has type-checked, so a type error is shown first
-  const ruled = [...rules(prog), ...tidy(prog), ...statusLiterals(prog)];
+  const ruled = [...rules(prog), ...tidy(prog), ...statusLiterals(prog), ...fetchKeys(prog)];
   const sqlFound: Problem[] = [];
   const invariants = checkInvariants(prog, sqlFound);
   // an interface's name is a capability type, like Remote, for this build only

@@ -13,11 +13,12 @@ export const BUILTIN_TYPES = new Set([
   'Entropy',
   'Timer',
   'Secrets',
+  'Http',
   'Rows',
   'Fn',
   'Fn2',
 ]);
-export const CAPABILITIES = ['Sql', 'Remote', 'Remotes', 'Clock', 'Entropy', 'Timer', 'Secrets'];
+export const CAPABILITIES = ['Sql', 'Remote', 'Remotes', 'Clock', 'Entropy', 'Timer', 'Secrets', 'Http'];
 
 // An interface's name is a capability type, like Remote, for the build that declares it and no longer: compile()
 // takes back what a build added, whether or not the build succeeded.
@@ -53,7 +54,10 @@ export const RETIRED: ReadonlyMap<string, string> = new Map([
   ],
 ]);
 /** Built-ins only one file of std may call, like its `private fn`s: in any other file the name is no function. */
-export const PRIVATE_INTRINSICS: ReadonlyMap<string, string> = new Map([['answer_body', 'std/http.tape']]);
+export const PRIVATE_INTRINSICS: ReadonlyMap<string, string> = new Map([
+  ['answer_body', 'std/http.tape'],
+  ['http_send', 'std/http.tape'],
+]);
 export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map<string, readonly string[] | null>(
   Object.entries({
     len: ['v'],
@@ -78,6 +82,7 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     random: null,
     wake: null,
     secret: ['from', 'name'],
+    http_send: ['to', 'request', 'body', 'within'],
     write_json: ['out', 'value'],
     write_float: ['out', 'value'],
     wrapping_add: ['a', 'b'],

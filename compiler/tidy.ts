@@ -26,6 +26,7 @@ const EFFECTS = [
   'now',
   'rollback',
   'secret',
+  'http_send',
 ];
 // what each effect gives but wake, whose value is Done, the one `do` runs (C82)
 const GIVES: Readonly<Record<string, string>> = {
@@ -39,6 +40,7 @@ const GIVES: Readonly<Record<string, string>> = {
   now: 'Int',
   rollback: 'a Response',
   secret: 'an Option',
+  http_send: 'a Result',
 };
 const typeText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(typeText).join(', ')}]` : t.name);
 /** How to run `name` as a step of its own: `do` for a Done, or, for a value `do` does not run, what to do with it. */

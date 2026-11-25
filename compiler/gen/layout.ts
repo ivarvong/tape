@@ -101,6 +101,7 @@ const FIXED: Readonly<Record<string, readonly number[]>> = {
   Entropy: [],
   Timer: [],
   Secrets: [],
+  Http: [],
 };
 
 /** The Wasm values a value of the type is. */

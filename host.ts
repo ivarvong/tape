@@ -25,10 +25,43 @@ import { dropMachines, installMachines, migrate } from './host/schema.ts';
 import type { Link, MachineSpec, Migrated } from './host/schema.ts';
 
 export { storageKind, transientAtEdge, transientBetween } from './host/failure.ts';
-export { NO_TIMERS, TimedOut } from './host/call.ts';
-export type { Service, ServiceOptions, ServiceReply, Timers } from './host/call.ts';
-export { isCall, isEffect, isHead, isNow, isRandom, isSecret, isSql, isWake, measuredText, spans } from './host/log.ts';
-export type { Cell, Effect, Flags, Head, Packed, SecretEffect, Sql, SqlParam, Status, TraceEvent } from './host/log.ts';
+export { HTTP_LIMITS, NO_TIMERS, TimedOut, refusalOf, replyWire, stubHttp } from './host/call.ts';
+export type {
+  HttpAnswer,
+  HttpClient,
+  HttpRequest,
+  Service,
+  ServiceOptions,
+  ServiceReply,
+  StubAnswer,
+  Timers,
+} from './host/call.ts';
+export {
+  isCall,
+  isEffect,
+  isFetch,
+  isHead,
+  isNow,
+  isRandom,
+  isSecret,
+  isSql,
+  isWake,
+  measuredText,
+  spans,
+} from './host/log.ts';
+export type {
+  Cell,
+  Effect,
+  FetchEffect,
+  Flags,
+  Head,
+  Packed,
+  SecretEffect,
+  Sql,
+  SqlParam,
+  Status,
+  TraceEvent,
+} from './host/log.ts';
 export { SECRET_MAX, SECRET_NAME, fixedSecrets, redacted, redactedText } from './host/secrets.ts';
 export type { SecretStore, SecretValue } from './host/secrets.ts';
 export { MAX_WAKE_MS, stepVersionOf } from './host/run.ts';
@@ -269,9 +302,9 @@ export function instantiate(
   module: WebAssembly.Module,
   options: InstantiateOptions = {},
 ): App & { migrated: Migrated[] } {
-  const { sql, log, services, name, sink, random, timers, observe, secrets } = options;
+  const { sql, log, services, name, sink, random, timers, observe, secrets, http } = options;
   const migrated = sql ? prepare(sql, module, options) : [];
-  const given = { sql, log, services, name, sink, random, timers, observe, secrets };
+  const given = { sql, log, services, name, sink, random, timers, observe, secrets, http };
   const set = Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined));
   return Object.assign(link(module, set), { migrated });
 }

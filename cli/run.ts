@@ -1,7 +1,8 @@
 // tape program.tape 'METHOD /path' …: compile one program with std, check its SQL against its schema, run the
 // requests against it on one in-memory SQLite, and print each response, its effect log, and the trace made
 // afterwards from that log. Remotes are not provided here. `--secret name=value` gives the program's Secrets that
-// secret (version 1); the log records its name and version, never its value.
+// secret (version 1; the log records its name and version, never its value), and `--http table.json` its Http: a stub that answers from the table ({"METHOD URL" or "URL":
+// {status, headers, body}}) and refuses every other request; without it every fetch is Err(Unreachable).
 import { readFileSync } from 'node:fs';
 import { checkQueries } from '../check.ts';
 import { compile } from '../compiler.ts';
@@ -11,6 +12,7 @@ import {
   instantiate,
   fixedSecrets,
   isCall,
+  isFetch,
   isHead,
   isSecret,
   isNow,
@@ -18,9 +20,10 @@ import {
   isWake,
   measuredText,
   responseOf,
+  stubHttp,
   traceOf,
 } from '../host.ts';
-import type { Cell, Effect, TraceEvent } from '../host.ts';
+import type { Cell, Effect, StubAnswer, TraceEvent } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 
@@ -34,6 +37,7 @@ function effectLine(plain: Built, e: Effect): string {
   const undone = 'undone' in e && e.undone ? '  (undone)' : '';
   if (isHead(e)) return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${measuredText(e)}${undone}`;
   if (isCall(e)) return `call    ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`;
+  if (isFetch(e)) return `fetch   ${e.method} ${e.fetch} within ${e.within} ms -> ${e.status}`;
   if (isSecret(e)) return `secret  ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`;
   if (isWake(e)) return `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})${undone}`;
   if (isNow(e)) return `now     -> ${e.now}`;
@@ -44,6 +48,7 @@ function effectLine(plain: Built, e: Effect): string {
 /** What the host did between two sites of a trace; null for what the trace does not show. */
 function hostLine(e: TraceEvent): string | null {
   if ('sql' in e) return `        sql ${JSON.stringify(e.p)} -> ${answer(e)}`;
+  if ('fetch' in e) return `        fetch ${e.method} ${e.fetch} -> ${e.status}`;
   return 'call' in e ? `        call ${e.call}.${e.method} -> ${e.status}` : null;
 }
 
@@ -82,10 +87,15 @@ function compiled(file: string, text: string): { plain: Built; traced: Built } {
   return { plain, traced };
 }
 
-/** The requests among the arguments, and the secrets the options give. */
-function options(args: readonly string[]): { requests: string[]; secrets: Record<string, string> } {
+/** The requests among the arguments, and the secrets and the stub table the options give. */
+function options(args: readonly string[]): {
+  requests: string[];
+  secrets: Record<string, string>;
+  table: Record<string, StubAnswer> | null;
+} {
   const requests: string[] = [],
     secrets: Record<string, string> = {};
+  let table: Record<string, StubAnswer> | null = null;
   for (let i = 0; i < args.length; i++) {
     const a = args[i] ?? '';
     if (a === '--secret') {
@@ -96,9 +106,30 @@ function options(args: readonly string[]): { requests: string[]; secrets: Record
         process.exit(2);
       }
       secrets[given.slice(0, eq)] = given.slice(eq + 1);
+    } else if (a === '--http') {
+      const parsed: unknown = JSON.parse(readFileSync(args[++i] ?? '', 'utf8'));
+      table = Object.fromEntries(
+        Object.entries(typeof parsed === 'object' && parsed !== null ? parsed : {}).map(
+          ([at, entry]: [string, unknown]) => {
+            const field = (k: string): unknown =>
+              typeof entry === 'object' && entry !== null ? Reflect.get(entry, k) : undefined;
+            const [status, headers, body] = [field('status'), field('headers'), field('body')];
+            const stub: StubAnswer = {
+              ...(typeof status === 'number' ? { status } : {}),
+              headers: Object.fromEntries(
+                Object.entries(typeof headers === 'object' && headers !== null ? headers : {}).map(
+                  ([k, v]: [string, unknown]) => [k, String(v)],
+                ),
+              ),
+              ...(typeof body === 'string' ? { body } : {}),
+            };
+            return [at, stub];
+          },
+        ),
+      );
     } else requests.push(a);
   }
-  return { requests, secrets };
+  return { requests, secrets, table };
 }
 
 export async function runRequests(file: string, args: readonly string[]): Promise<void> {
@@ -107,9 +138,14 @@ export async function runRequests(file: string, args: readonly string[]): Promis
   const { plain, traced } = compiled(file, text);
   const tmod = new WebAssembly.Module(traced.wasm);
   const db = nodeSql();
-  const { requests, secrets: given } = options(args);
+  const { requests, secrets: given, table } = options(args);
   const secrets = fixedSecrets(given);
-  const app = instantiate(new WebAssembly.Module(plain.wasm), { sql: db, name: 'cli', secrets });
+  const app = instantiate(new WebAssembly.Module(plain.wasm), {
+    sql: db,
+    name: 'cli',
+    secrets,
+    http: table ? stubHttp(table) : null,
+  });
   console.log(`${file}: ${plain.wasm.length} bytes of Wasm, ${plain.functions.length} functions`);
   for (const r of requests.length > 0 ? requests : ['']) {
     // `\n` ends the request line and `\r` starts a header on it (`'POST /x\rcontent-type: text/csv\nbody'`)
