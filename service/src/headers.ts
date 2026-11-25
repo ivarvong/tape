@@ -11,10 +11,10 @@
 // response here is nosniff, a route that needs
 // a token gets none from a page (there are no cookies), and a GET of a public route is what any page anywhere can
 // already cause. Nothing is fetched from another origin. Every response names the commit it was built from
-// (tape-version), the step accounting that compiler builds (tape-step-version) and the Worker version
-// (tape-worker-version).
+// (tape-version) and the Worker version (tape-worker-version). The step accounting is on the count it goes with
+// (the log, the trace), not on the response: a header from the compiler deployed now would disagree with a count
+// recorded earlier.
 // (Not in index.ts: with static assets, the main module may export only entrypoints.)
-import { STEP_VERSION } from '../../compiler/step-version.ts';
 import { COMPILER } from './build.ts';
 
 export const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
@@ -31,7 +31,6 @@ export const secured = (res: Response, path: string, version?: string): Response
     // HTML and SVG are rendered. XML documents (Atom, RSS, application/xml) are not: they stay on the API policy.
     active = /^(text\/html|image\/svg\+xml)\b/.test(type);
   h.set('tape-version', SHA);
-  h.set('tape-step-version', String(STEP_VERSION));
   // the hosted runner's answers (mcp/src) keep the compiler it names: the deploy's parity check compares the two
   if (!h.has('tape-compiler')) h.set('tape-compiler', COMPILER);
   if (version !== undefined) h.set('tape-worker-version', version);

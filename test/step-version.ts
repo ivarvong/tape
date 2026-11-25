@@ -5,7 +5,7 @@
 // and say what a step now is in LANGUAGE.md. Do not edit a version's counts.
 //   node test/step-version.ts
 import '../node25.ts';
-import { STEP_DEFINITION, STEP_VERSION } from '../compiler/step-version.ts';
+import { STEP_DEFINITIONS, STEP_VERSION, isStepVersion } from '../compiler/step-version.ts';
 import type { StepVersion } from '../compiler/step-version.ts';
 import type { Options } from '../compiler.ts';
 import { instantiate, isHead, stepVersionOf } from '../host.ts';
@@ -99,7 +99,15 @@ same(
 );
 if (want.inlineOffMatches)
   same('inlining and the local step counter leave these step counts unchanged', measure(OFF), got);
-same('the current definition', { version: STEP_DEFINITION.version, unit: STEP_DEFINITION.unit }, STEP_DEFINITION);
+const versions = STEP_DEFINITIONS.map(d => d.version);
+ok(
+  'step versions are 1, 2, 3, … in the order appended, none skipped or repeated',
+  versions.every((v, i) => v === i + 1),
+);
+ok(
+  'only a named whole version is one',
+  isStepVersion(STEP_VERSION) && !isStepVersion(STEP_VERSION + 1) && !isStepVersion(1.5) && !isStepVersion('1'),
+);
 
 const mod = moduleOf(built(FOLD, { exports: ['folded'] }));
 same('a module carries its step version as a number', sectionText(mod, 'step_version'), String(STEP_VERSION));

@@ -64,16 +64,19 @@ parameters reach the latest version of the program with that name in the same ac
 
 Every response names its request (`tape-request-id`), says what the request did (`tape-outcome`), and carries a
 trace link (`traceparent`). An operator's response also carries signed links to its trace as a page
-(`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`), and names the step accounting the deployed compiler builds
-(`tape-step-version`). It also carries `server-timing`
+(`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`). It also carries `server-timing`
 (`tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>`): `<ms>` is the whole milliseconds this Worker waited on
 the program's object, the same reading `kv.ts` puts on a shard call. The same header is on a published name's
 response. What the number measures, and the precision it has on Workers, is in
 [telemetry](telemetry_and_profiling.md#what-a-client-can-read-of-a-requests-cost). The run's span in the OTLP says
 what the run used of the limits below, `tape.memory_bytes`, `tape.steps` and `tape.step_version` (the first entry
-of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them; a module built
-before the tag has no `step_version`), whether it finished or stopped. A storage failure at commit answers 503
-with `retry-after: 1` and says whether anything was kept (`applied`, and `outcome`); a trap answers 500.
+of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them), whether it
+finished or stopped. A log recorded before the tag has no `step_version`. A stored module is rebuilt with the
+compiler that is deployed before it runs, so the module that runs carries the current accounting and the log keeps
+the version recorded with that run. The `build` id is a hash of the source, so after the accounting changes the
+same program version and the same build can count the same request differently, and `step_version` is what tells
+the two counts apart. A storage failure at commit answers 503 with `retry-after: 1` and says whether anything was
+kept (`applied`, and `outcome`); a trap answers 500.
 
 ### What a client should do
 
@@ -84,7 +87,7 @@ with `retry-after: 1` and says whether anything was kept (`applied`, and `outcom
 | `applied` | The request finished. Anything it wrote was kept. | Do not send it again: sending it again can apply it a second time. |
 | `not applied` | Nothing this request wrote was kept. The run rolled back, or it failed before its log began (a Durable Object storage reset: the log is written in the same transaction as the writes, so no log means nothing was kept). | Send the same request again, with the same idempotency key. `retry-after` says how long to wait. |
 | `partly` | The writes before the run's last call were kept. The rest was rolled back. | Send it again only with the same idempotency key. |
-| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | Send it again only with the same idempotency key, and treat another success as the same effect. There is no `retry-after`: that header is only on `not applied`. |
+| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | Send the same request again only with the same idempotency key, and treat another success as the same effect. There is no `retry-after`: that header is only on `not applied`. |
 
 The service does not retry a request itself. A storage reset fails the requests in flight on that object together, and an immediate retry hits the object while it is being reset. A GET is not a read: a program may write on any method, so the method is not a reason to retry. `not applied` is the reason, and the client is the one that waits and sends the same key again.
 
