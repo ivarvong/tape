@@ -3,7 +3,9 @@
 This is the definition of Tape as it stands: what a program is made of, and the one way to do each job. It is
 short on purpose. [The guide](docs/guide.md) teaches; this states. Where the two disagree, this file is right, and where this file
 and the compiler disagree, that is a bug in one of them: `test/definition.ts` compiles every program in this file, makes
-every edit it shows, and fails when the compiler does not say what the file says.
+every edit it shows, and fails when the compiler does not say what the file says. Where this file says something is
+refused, the code the compiler gives follows in brackets; [docs/diagnostics.md](docs/diagnostics.md) lists every code
+with what it refuses.
 
 This is version 0.3. A form that is here has one meaning and one way to be written, and the tests hold the
 compiler to it. Before 1.0 a form may still go: when one does, the old way is a compile error that says the new
@@ -798,6 +800,6 @@ What each release changed, and each form that went with the form that replaced i
 
 - What a version built by an older compiler may rely on. Today: its source is built again by the current compiler (the rules not asked again), and it runs if that builds; it has no claim to what the old build did.
 - The order in which two requests' effects interleave beyond "a call is a commit point".
-- Who is calling. A program is handed the request; identity is its own business.
+- Who is calling, beyond `Operator` and `Anyone`. std/http's `Request(caller: …)` says whether a request came with the operator's token or through a published name's public route ([docs/service.md](docs/service.md#public-routes)); which person or client sent it is not defined, and a program that needs to know reads what the request carries (a header, a key in the body) and decides itself.
 - JSON for bytes and maps.
 - A Dec beyond ±2^53 units in the database; a Dec flag; functions generic over a Dec's scale.

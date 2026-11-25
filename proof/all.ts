@@ -168,6 +168,11 @@ const all: Part[] = [
     /^docs\/std\.md is current/m,
   ],
   [
+    'docs/gen-diagnostics.ts --check: docs/diagnostics.md is current',
+    [node, 'docs/gen-diagnostics.ts', '--check'],
+    /^docs\/diagnostics\.md is current/m,
+  ],
+  [
     'proof/verify.ts: the interpreter against three builds, and the rest of its table',
     [node, 'proof/verify.ts', '300'],
   ],
