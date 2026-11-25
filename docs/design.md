@@ -215,9 +215,18 @@ orders. A hold declined while its expiry timer ran went back to `held` with no t
 - **C79** reads every outcome of a timer's run that leaves the row where it was: each must move it out, set the
   timer again, or end at an outcome declared `final`.
 - **C80** checks a `final` declaration: nothing on the way to the constructor reads the clock in a way that can
-  flip, or an `ask`'s reply. It follows a value a bounded number of steps, and it refuses two programs the tests
-  hold up as correct, because a call counts as reading the clock when anything in the function called does. That
-  imprecision is still there.
+  flip, or an `ask`'s reply. Until 25 November 2026 a call counted as reading the clock when anything in the
+  function called did, and a query's result when any value given to it was. That refused programs that are
+  correct: `examples/timed/outbox.tape` with the time of each failed attempt stored in the UPDATE that counts it,
+  or stamped by a helper that gives the count back, was refused at std's `backoff` and `retry_at`, though the
+  count that decides is the stored one. C80 now follows the clock only where its value goes: into a function's
+  value through what it returns and the decisions on the way there (a `do` that stamps a row decides nothing), into
+  a part of a value by the path to it (a row's `tries` is not its `tried_at`), and into an UPDATE's outcome (Moved,
+  Raced, NoRow, the count an exec gives) through its WHERE only; a SET's value reaches only the column it sets. An
+  INSERT and a SELECT are still read whole. Within a function and into what it calls a value is followed however
+  deep; up from a parameter to its callers, 8 steps. Every C80 fixture and round-3 mutant, and the 7 planted timer
+  bugs of `experiments/c78/timed-mutants.ts`, are refused as before (`test/timers-keys.ts`); the repository's
+  programs had no C80 before and have none after.
 
 These are rules rather than a branded key type because `wake(after:, key: Int)` and `Wake(key: Int)` are std's
 types, used by the timer runtime and every uploaded version; the facts a branded type would carry are already in

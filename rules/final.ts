@@ -8,64 +8,252 @@
 // `t < now()`) with t not itself read from the clock, true on the arm it guards; `now() < t`, false on the arms
 // after it. A matched final constructor is the other half: C79 lets a path end there only when the value comes
 // from a call (with its once key), not from an ask.
+// What a decision reads is followed only where the clock's value flows into it (issue 21): into a function's value
+// through what it returns and the decisions on the way to that, not through every step it takes (a `do` that
+// stamps a row with the time decides nothing); into a part of a value by the path to that part (a row's `tries`
+// read back from an UPDATE whose SET stores the time in another column is the stored count); into the outcome of
+// an UPDATE (Moved, Raced, NoRow, or how many rows it changed) only through its WHERE, not its SET.
 import { eachExpr, partsOf } from '../compiler/ast.ts';
-import type { Call, CondArm, Ctor, Expr, FnDecl, Match, PatArm, Program } from '../compiler/ast.ts';
+import type { Call, CondArm, Ctor, Expr, FnDecl, Match, PatArm, Pattern, Program } from '../compiler/ast.ts';
 import { bindsOf, resultsOf } from './origins.ts';
-import { argFor, calleeOf } from './syntax.ts';
+import { argFor, calleeOf, lc } from './syntax.ts';
 import { isRemote, pathsOf } from './timers.ts';
-import type { CallSite, Report } from './types.ts';
+import type { CallSite, Query, Report } from './types.ts';
 
 type Calls = ReadonlyMap<string, readonly CallSite[]>;
-/** `memo`: for each expression, whether it is volatile, by how many steps were left to follow it. */
-type Reader = { readonly prog: Program; readonly calls: Calls; readonly memo: Map<Expr, (boolean | undefined)[]> };
+/**
+ * A part of a value, from the outside in: `Ctor.field` (or `*.field` for `x.field`, whatever the constructor), and
+ * last, SHAPE for which constructor it is. [] is the whole value.
+ */
+type Path = readonly string[];
+const SHAPE = '#ctor';
+const keyOf = (p: Path): string => p.join('/');
+const pathOf = (k: string): Path => (k === '' ? [] : k.split('/'));
+/** What a value read in a function depends on: the clock (or an ask's reply), and the parts of its parameters. */
+type Dep = { clock: boolean; params: Map<string, Set<string>> };
+/**
+ * `memo`: for each expression and path, whether it is volatile, by how many steps were left to follow it; `deps`:
+ * for each expression and path, what it depends on in its function; `busy`: the function bodies being read.
+ */
+type Reader = {
+  readonly prog: Program;
+  readonly calls: Calls;
+  readonly queries: ReadonlyMap<Expr, Query>;
+  readonly memo: Map<Expr, Map<string, (boolean | undefined)[]>>;
+  readonly deps: Map<Expr, Map<string, Dep>>;
+  readonly busy: Set<string>;
+};
 /** A decision a second run may make otherwise: its line, what it is, and the caller it was found in. */
 type Doubt = { readonly at: number; readonly what: string; readonly via?: string };
 
-// How far a value is followed from where it is read: through the `let` or pattern that binds a name, a parameter's
-// arguments at each call site, and the body of a function called. An expression itself is read whole, however deep
-// it is written. Past this many steps a value counts as one a second run reads the same.
+// How far a value is followed up the callers of a function, from a parameter to what each call site passes for it.
+// Within a function, and into the functions it calls, a value is followed whole. Past this many steps a value
+// counts as one a second run reads the same.
 const STEPS = 8;
 
 const isNow = (e: Expr): boolean => e.k === 'call' && e.name === 'now';
 const keyed = (e: Call): boolean => e.args.some(a => a.label === 'once');
-const argsOf = (e: Call): Expr[] => e.args.map(a => a.value);
-
-/** Does a name hold what the clock or an ask's reply gave: through its `let`, its pattern's subject, or its callers. */
-function volatileName(rd: Reader, e: Extract<Expr, { k: 'var' }>, f: FnDecl, steps: number): boolean {
-  if (steps === 0) return false;
-  const b = bindsOf(f).get(e);
-  if (b?.k === 'let') return volatile(rd, b.value, b.fn, steps - 1);
-  if (b?.k === 'pat') return !!b.subject && volatile(rd, b.subject, b.fn, steps - 1);
-  if (b?.k !== 'param') return false;
-  return (rd.calls.get(f.name) ?? []).some(({ from, node }) => {
-    const arg = argFor(node, f, b.name);
-    return !!arg && volatile(rd, arg, from, steps - 1);
-  });
+const none = (): Dep => ({ clock: false, params: new Map() });
+const clock = (): Dep => ({ clock: true, params: new Map() });
+function union(ds: readonly Dep[]): Dep {
+  const out = none();
+  for (const d of ds) {
+    out.clock ||= d.clock;
+    for (const [p, ks] of d.params) out.params.set(p, new Set([...(out.params.get(p) ?? []), ...ks]));
+  }
+  return out;
 }
 
-function volatileCall(rd: Reader, e: Call, f: FnDecl, steps: number): boolean {
-  const inArgs = argsOf(e).some(x => volatile(rd, x, f, steps));
-  if (isRemote(e)) return !keyed(e) || inArgs;
-  if (inArgs) return true;
+/** The parts of a subject a pattern looks at: each constructor it names, and each value it compares. */
+function tested(pat: Pattern, at: Path): Path[] {
+  switch (pat.k) {
+    case 'any':
+    case 'bind':
+      return [];
+    case 'as':
+      return tested(pat.pat, at);
+    case 'ctor':
+      return [[...at, SHAPE], ...pat.subs.flatMap(sb => tested(sb.pat, [...at, `${pat.name}.${sb.field}`]))];
+    default:
+      return [at];
+  }
+}
+
+/** The numbered values of a statement, those read outside a SET (all of them but in an UPDATE), and by column the
+ * values a SET gives it. */
+type SqlParts = { all: Set<string>; where: Set<string>; setting: Map<string, Set<string>> };
+const PARTS = new WeakMap<Query, SqlParts>();
+function sqlParts(q: Query): SqlParts {
+  const known = PARTS.get(q);
+  if (known) return known;
+  const all = new Set(Object.keys(q.args));
+  const ast = q.ast;
+  // only an UPDATE is read apart: what an INSERT inserts decides whether it conflicts, and a SELECT's values decide
+  // what it finds
+  const parts: SqlParts = { all, where: all, setting: new Map() };
+  if (ast?.k === 'update') {
+    const count = (n: unknown, into: Map<string, number>): void => {
+      if (typeof n !== 'object' || n === null) return;
+      if ('k' in n && n.k === 'param' && 'n' in n) into.set(String(n.n), (into.get(String(n.n)) ?? 0) + 1);
+      for (const [k, v] of Object.entries(n)) if (k !== 's' && k !== 'e') count(v, into);
+    };
+    const everywhere = new Map<string, number>(),
+      inSet = new Map<string, number>();
+    count(ast, everywhere);
+    for (const a of ast.set) {
+      const here = new Map<string, number>();
+      count(a.expr, here);
+      for (const [n, c] of here) {
+        inSet.set(n, (inSet.get(n) ?? 0) + c);
+        parts.setting.set(lc(a.col), new Set([...(parts.setting.get(lc(a.col)) ?? []), n]));
+      }
+    }
+    parts.where = new Set([...all].filter(n => (everywhere.get(n) ?? 0) > (inSet.get(n) ?? 0)));
+  }
+  PARTS.set(q, parts);
+  return parts;
+}
+
+/** The numbered values of a query a part of its result depends on. */
+function sqlNeeds(q: Query, path: Path): Set<string> {
+  const { all, where, setting } = sqlParts(q);
+  const [head, ...rest] = path;
+  if (q.via === 'sql_exec') return where; // how many rows it changed
+  if (head === undefined || q.via === 'sql_all') return all;
+  // which outcome it is, and the row as another run left it
+  if (head === SHAPE || head === 'Raced.now') return where;
+  if (!['Moved.value', 'Some.value', '*.value'].includes(head)) return all;
+  const [col] = rest;
+  if (col === undefined) return all;
+  if (col === SHAPE) return where;
+  return new Set([...where, ...(setting.get(lc(col.slice(col.indexOf('.') + 1))) ?? [])]);
+}
+
+/** What a function's value, at a path, depends on: of its parameters, and the clock. */
+function summary(rd: Reader, g: FnDecl, path: Path): Dep {
+  const key = `${g.name}|${keyOf(path)}`;
+  // read again while it is being read (it calls itself): every parameter, whole
+  if (rd.busy.has(key)) return { clock: false, params: new Map(g.params.map(p => [p.name, new Set([''])])) };
+  rd.busy.add(key);
+  try {
+    return deps(rd, g.body, g, path);
+  } finally {
+    rd.busy.delete(key);
+  }
+}
+
+function callDeps(rd: Reader, e: Call, f: FnDecl, path: Path): Dep {
+  const args = (): Dep => union(e.args.map(a => deps(rd, a.value, f, [])));
+  if (isNow(e)) return clock();
+  if (isRemote(e)) return keyed(e) ? args() : clock();
+  const q = rd.queries.get(e);
+  if (q) {
+    const needs = sqlNeeds(q, path);
+    return union(Object.entries(q.args).flatMap(([n, x]) => (needs.has(n) ? [deps(rd, x, f, [])] : [])));
+  }
   const callee = calleeOf(rd.prog, e.name, f);
   const g = callee === null ? undefined : rd.prog.fns.get(callee);
-  return !!g && steps > 0 && volatile(rd, g.body, g, steps - 1);
+  if (!g) return args(); // a built-in: its value is made from its arguments
+  const s = summary(rd, g, path);
+  return union([
+    { clock: s.clock, params: new Map() },
+    ...[...s.params].flatMap(([p, ks]) => {
+      const arg = argFor(e, g, p);
+      return arg ? [...ks].map(k => deps(rd, arg, f, pathOf(k))) : [];
+    }),
+  ]);
 }
 
-/** Does an expression read the clock or an ask's reply (directly, through its names, or in what it calls)? */
-function volatile(rd: Reader, e: Expr, f: FnDecl, steps = STEPS): boolean {
-  const known = rd.memo.get(e) ?? [];
+function ctorDeps(rd: Reader, e: Ctor, f: FnDecl, path: Path): Dep {
+  const [head, ...rest] = path;
+  if (head === undefined) return union(e.args.map(a => deps(rd, a.value, f, [])));
+  if (head === SHAPE) return none();
+  const dot = head.indexOf('.');
+  const [name, field] = [head.slice(0, dot), head.slice(dot + 1)];
+  if (name !== '*' && name !== e.name) return none(); // the part is of another constructor: not this value
+  const arg = e.args.find(a => a.label === field) ?? (e.args.length === 1 ? e.args[0] : undefined);
+  return arg ? deps(rd, arg.value, f, rest) : union(e.args.map(a => deps(rd, a.value, f, [])));
+}
+
+/**
+ * What the decisions of a match read, up to its arm `upTo`: the parts of its subject its patterns look at, its
+ * guards and its conditions.
+ */
+function decisionDeps(rd: Reader, mt: Match, f: FnDecl, upTo = Infinity): Dep {
+  const arms: readonly (PatArm | CondArm)[] = mt.arms;
+  const seen = arms.slice(0, upTo + 1);
+  const subject = mt.subject;
+  const parts = subject
+    ? seen.flatMap(a => ('pat' in a ? tested(a.pat, []) : [])).map(p => deps(rd, subject, f, p))
+    : [];
+  const tests = seen.flatMap(a => ('pat' in a ? (a.guard ? [a.guard] : []) : a.cond ? [a.cond] : []));
+  return union([...parts, ...tests.map(t => deps(rd, t, f, []))]);
+}
+
+/** What the part `path` of an expression's value depends on, within its function. */
+function deps(rd: Reader, e: Expr, f: FnDecl, path: Path): Dep {
+  const k = keyOf(path);
+  const known = rd.deps.get(e)?.get(k);
+  if (known) return known;
+  const d = depsOf(rd, e, f, path);
+  rd.deps.set(e, (rd.deps.get(e) ?? new Map<string, Dep>()).set(k, d));
+  return d;
+}
+function depsOf(rd: Reader, e: Expr, f: FnDecl, path: Path): Dep {
+  switch (e.k) {
+    case 'int':
+    case 'float':
+    case 'dec':
+    case 'str':
+    case 'held':
+    case 'lambda':
+      return none();
+    case 'var': {
+      const b = bindsOf(f).get(e);
+      if (b?.k === 'param') return { clock: false, params: new Map([[b.name, new Set([keyOf(path)])]]) };
+      if (b?.k === 'let') return deps(rd, b.value, b.fn, path);
+      if (b?.k === 'pat' && b.subject) return deps(rd, b.subject, b.fn, [...b.path, ...path]);
+      return none();
+    }
+    case 'field':
+      return deps(rd, e.e, f, [`*.${e.name}`, ...path]);
+    case 'call':
+      return callDeps(rd, e, f, path);
+    case 'ctor':
+      return ctorDeps(rd, e, f, path);
+    case 'block':
+      return deps(rd, e.result, f, path);
+    case 'match':
+      return union([decisionDeps(rd, e, f), ...e.arms.map(a => deps(rd, a.body, f, path))]);
+    default:
+      return union(partsOf(e).map(x => deps(rd, x, f, [])));
+  }
+}
+
+/**
+ * Does the part `path` of an expression read the clock or an ask's reply: in its function, in what it calls, or,
+ * through a parameter, in what its callers pass?
+ */
+function volatile(rd: Reader, e: Expr, f: FnDecl, steps = STEPS, path: Path = []): boolean {
+  const k = keyOf(path);
+  const byPath = rd.memo.get(e) ?? new Map<string, (boolean | undefined)[]>();
+  rd.memo.set(e, byPath);
+  const known = byPath.get(k) ?? [];
+  byPath.set(k, known);
   const had = known[steps];
   if (had !== undefined) return had;
+  known[steps] = false; // asked again while it is being answered: what the first asking finds
+  const d = deps(rd, e, f, path);
   const is =
-    isNow(e) ||
-    (e.k === 'call'
-      ? volatileCall(rd, e, f, steps)
-      : e.k === 'var'
-        ? volatileName(rd, e, f, steps)
-        : e.k !== 'lambda' && partsOf(e).some(x => volatile(rd, x, f, steps)));
+    d.clock ||
+    (steps > 0 &&
+      [...d.params].some(([p, ks]) =>
+        (rd.calls.get(f.name) ?? []).some(({ from, node }) => {
+          const arg = argFor(node, f, p);
+          return !!arg && [...ks].some(pk => volatile(rd, arg, from, steps - 1, pathOf(pk)));
+        }),
+      ));
   known[steps] = is;
-  rd.memo.set(e, known);
   return is;
 }
 
@@ -88,8 +276,10 @@ function stableAs(rd: Reader, c: Expr, truth: boolean, f: FnDecl): boolean {
 
 /** The first decision of a match, up to its arm i, that a second run may make otherwise. */
 function doubtIn(rd: Reader, mt: Match, i: number, f: FnDecl): Doubt | null {
-  if (mt.subject && volatile(rd, mt.subject, f))
-    return { at: mt.subject.line ?? mt.line, what: 'the value it matches on' };
+  const subject = mt.subject;
+  const looked = mt.arms.slice(0, i + 1).flatMap(a => ('pat' in a ? tested(a.pat, []) : []));
+  if (subject && looked.some(p => volatile(rd, subject, f, STEPS, p)))
+    return { at: subject.line ?? mt.line, what: 'the value it matches on' };
   const arms: readonly (PatArm | CondArm)[] = mt.arms;
   for (const [j, a] of arms.slice(0, i + 1).entries()) {
     const [test, word] = 'pat' in a ? [a.guard, 'guard'] : [a.cond, 'condition'];
@@ -133,8 +323,15 @@ function madeFinal(prog: Program): { n: Ctor; f: FnDecl }[] {
   return made;
 }
 
-export function finalRules(prog: Program, calls: Calls, bad: Report): void {
-  const rd: Reader = { prog, calls, memo: new Map() };
+export function finalRules(prog: Program, calls: Calls, queries: readonly Query[], bad: Report): void {
+  const rd: Reader = {
+    prog,
+    calls,
+    queries: new Map(queries.map(q => [q.at, q])),
+    memo: new Map(),
+    deps: new Map(),
+    busy: new Set(),
+  };
   for (const { n, f } of madeFinal(prog)) {
     const u = unstable(rd, f, n);
     if (!u) continue;

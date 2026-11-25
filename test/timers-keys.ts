@@ -9,7 +9,7 @@ import { lineOf, round2, run, swap } from '../experiments/c78/round2.ts';
 import type { Mutant, Pair } from '../experiments/c78/round2.ts';
 import { timedMutants } from '../experiments/c78/timed-mutants.ts';
 import { round3 } from '../experiments/c78/round3.ts';
-import { codes as codesOf, finish, problems, read, same as T } from './harness.ts';
+import { codes as codesOf, finish, problems, raw, read, same as T } from './harness.ts';
 const codes = (text: string, name: string): string[] => codesOf(text, {}, name);
 /** A mutant by the start of its name. */
 const named = (all: readonly Mutant[], start: string): Mutant => {
@@ -198,6 +198,88 @@ fn handle(raw: View, clock: Clock) -> Buf {
       'C80:12',
     ]);
   T('C80: no clock, twelve calls deep', codes(deciding(`${nested(12, 'n')} > 2`), 'p.tape'), []);
+}
+
+// ---- 5. C80 follows the clock only where its value goes (issue 21). It counted a call as reading the clock when
+// anything in the function called did, and a query's result as read from the clock when any value given to it was:
+// the two programs below, examples/timed/outbox.tape with the time of each failed attempt stored, were refused
+// (GaveUp, made in std's backoff and retry_at: C80 at both). The count that decides is the stored one.
+{
+  const outbox = raw('examples/timed/outbox.tape');
+  const edit = (text: string, pairs: readonly (readonly [string, string])[]): string =>
+    pairs.reduce((t, [a, b]) => {
+      if (!t.includes(a)) throw new Error(`not in the program: ${a}`);
+      return t.replace(a, b);
+    }, text);
+  const CLOCK = [
+    ['hook: Remote, timer: Timer) -> Buf {', 'hook: Remote, clock: Clock, timer: Timer) -> Buf {'],
+    ['hook: Remote, timer: Timer, message: Wake)', 'hook: Remote, clock: Clock, timer: Timer, message: Wake)'],
+    [
+      "    note TEXT NOT NULL DEFAULT ''\n",
+      "    note TEXT NOT NULL DEFAULT '',\n    tried_at INTEGER NOT NULL DEFAULT 0\n",
+    ],
+  ] as const;
+  // the time goes into the SET of the UPDATE that counts the attempt; the count read back decides
+  const stored = edit(outbox, [
+    ...CLOCK,
+    ['SET tries = :tries + 1 WHERE id = :id', 'SET tries = :tries + 1, tried_at = :at WHERE id = :id'],
+    ['        tries,\n        id\n      )\n    )', '        tries,\n        at: now(),\n        id\n      )\n    )'],
+  ]);
+  // a helper stamps the delivery with the time, in a table of its own, and gives back the count it was given
+  const helper = (
+    gives: string,
+    stamp = 'do sql_exec(query: "UPDATE stamps SET at = :at WHERE delivery = :id", at: now(), id)\n  ',
+  ): string =>
+    edit(outbox, [
+      ...CLOCK,
+      [
+        '  )\n}\n\nmachine deliveries.state',
+        '  );\n  CREATE TABLE stamps(delivery INTEGER PRIMARY KEY, at INTEGER NOT NULL)\n}\n\nmachine deliveries.state',
+      ],
+      ['        failed: tries\n', '        failed: stamped(id, tries)\n'],
+      ['fn decided(', `fn stamped(id: Int, tries: Int) -> Int {\n  ${stamp}${gives}\n}\n\nfn decided(`],
+    ]);
+  const c80 = (text: string): string[] => codes(text, 'outbox.tape').filter(c => c.startsWith('C80'));
+  T(
+    'C80: the UPDATE that counts stores the time, the count read back decides: accepted',
+    codes(stored, 'outbox.tape'),
+    [],
+  );
+  T('C80: a helper stamps the delivery and gives back the count: accepted', codes(helper('tries'), 'outbox.tape'), []);
+  const EXEC = (where: string): string =>
+    `tries + sql_exec(query: "UPDATE stamps SET at = :at WHERE delivery = :id${where}", at: now(), id) - 1`;
+  T(
+    'C80: the count of rows an UPDATE changed, the time in its SET only: accepted',
+    codes(helper(EXEC(''), ''), 'outbox.tape'),
+    [],
+  );
+  // the same programs, deciding on the clock: refused
+  T(
+    'C80: the helper gives back a count made with the clock: refused',
+    c80(helper('tries + now() % 2')).length > 0,
+    true,
+  );
+  T(
+    'C80: the helper decides on the clock before it gives the count back: refused',
+    c80(helper('match {\n    now() % 2 == 0 -> tries\n    else -> tries + 1\n  }')).length > 0,
+    true,
+  );
+  T(
+    'C80: the count of rows an UPDATE changed, the time in its WHERE: refused',
+    c80(helper(EXEC(' AND at < :at'), '')).length > 0,
+    true,
+  );
+  T(
+    'C80: the column the clock was stored in decides: refused',
+    c80(
+      edit(stored, [
+        ['  round: Int,\n  note: View\n) }', '  round: Int,\n  note: View,\n  tried_at: Int\n) }'],
+        ['Moved(value: Delivery(tries)) -> decided(', 'Moved(value: Delivery(tried_at)) -> decided('],
+        ['        failed: tries\n', '        failed: tried_at % 9\n'],
+      ]),
+    ).length > 0,
+    true,
+  );
 }
 
 finish();

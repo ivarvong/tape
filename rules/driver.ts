@@ -40,7 +40,7 @@ export function rules(prog: Program): Problem[] {
   };
   declaredRules(reading); // C51-C53, C63, C66-C68
   machineRules(prog, reading.bad); // C57-C62, C70, C77-C79
-  finalRules(prog, reading.calls, reading.bad); // C80
+  finalRules(prog, reading.calls, reading.queries, reading.bad); // C80
   // a schema that does not build (C67, C68) leaves the tables unknown: the rules that read a write against its
   // table's keys and columns would refuse what is fine, so they wait for the schema to be fixed
   const schemaRead = reading.model.errors.length === 0;

@@ -68,16 +68,14 @@ Bugs that are reproduced and not fixed, and gaps in the checks that can hide one
    tracked file opts out of the type checker today, but a second-line comment would pass the test.
 6. **A row whose machine column holds an undeclared state traps** at a match on it with a bare `unreachable`, not a
    message that names the state. The triggers keep such rows out unless the data is changed past them.
-7. **C80 (`final`) is imprecise.** It follows a value a bounded number of steps and refuses two programs the tests
-   hold up as correct, because a call counts as reading the clock when anything in the called function does.
-8. **Published pages share the API's host.** A public route can answer `text/html`, `image/svg+xml`, or XML
+7. **Published pages share the API's host.** A public route can answer `text/html`, `image/svg+xml`, or XML
     (`application/atom+xml`, `application/rss+xml`, `application/xml`) from the same host as the API. Each response
     has `X-Content-Type-Options: nosniff` and a `Content-Security-Policy` with `sandbox` and no script
     (`service/src/headers.ts`). Chrome renders the XML types as pages; that policy is what stops a script in the
     document, and nosniff does not. The API's credentials are bearer tokens, not cookies. The sandbox gives the
     document an opaque origin, so it cannot read the API. The isolation is that policy: a host that serves these
     types has to send it.
-9. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
+8. **The effect log and the trace show a statement as the database was given it (`?1`), not as the program wrote
     it (`:name`).**
 
 The language's own limits are in [`LANGUAGE.md` section 12](LANGUAGE.md#12-not-defined-yet). In short: a Float's text is the host's `String`;
