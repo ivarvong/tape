@@ -314,7 +314,7 @@ private fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
     raw[at] == 37
       and at + 2 < len(raw)
       and is_hex(raw[at + 1])
-      and is_hex(raw[at + 2]) -> name[n] == (hex(raw[at + 1]) << 4) | hex(raw[at + 2])
+      and is_hex(raw[at + 2]) -> name[n] == (hex_value(raw[at + 1]) << 4) | hex_value(raw[at + 2])
       and form_named(raw, name, at: at + 3, n: n + 1)
     else -> name[n] == raw[at] and form_named(raw, name, at: at + 1, n: n + 1)
   }
@@ -336,7 +336,7 @@ private fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
       and at + 2 < len(raw)
       and is_hex(raw[at + 1])
       and is_hex(raw[at + 2]) -> form_bytes(
-        out: push(buf: out, byte: (hex(raw[at + 1]) << 4) | hex(raw[at + 2])),
+        out: push(buf: out, byte: (hex_value(raw[at + 1]) << 4) | hex_value(raw[at + 2])),
         raw,
         at: at + 3
       )
@@ -388,7 +388,7 @@ private fn percent_bytes(out: Buf, text: View, at: Int) -> Buf {
     p + 2 < len(text)
       and is_hex(text[p + 1])
       and is_hex(text[p + 2]) -> percent_bytes(
-        out: push(buf: copied, byte: (hex(text[p + 1]) << 4) | hex(text[p + 2])),
+        out: push(buf: copied, byte: (hex_value(text[p + 1]) << 4) | hex_value(text[p + 2])),
         text,
         at: p + 3
       )

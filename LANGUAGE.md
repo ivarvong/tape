@@ -592,6 +592,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Read a request header | `header_of(request: r, name: "if-none-match")`, an `Option[View]`; the host passes only those it means a program to see | |
 | Write a date | `rfc3339(ms: now())` for JSON, a feed or a log (`2026-11-25T14:03:07.123Z`), `http_date(ms: …)` for a header (`Wed, 25 Nov 2026 14:03:07 GMT`), `civil(ms: …)` for the parts (`Civil(year, month, day, hour, minute, second, millisecond)`), all in UTC; the instant is an argument, so only the `now()` that reads it needs `Clock` | |
 | Read a path segment | bind it in the route, and decode it there: `path: "/users/" ++ percent_decoded(name) ++ "/tickets"`. `path` is as sent, so the route matches the encoded path and a `%2F` stays inside its segment; `percent_decoded` is `None` for a bad escape or bytes that are not UTF-8, and leaves a `+` a `+` (a query is form-encoded: `form_field`) | |
+| Check a signature | `hmac_sha256_verify(key:, data:, mac:)`, after `from_base64(text:)` or `from_base64url(text:)` of the mac sent: it reads every byte whatever they hold, where `mac == hmac_sha256(key:, data:)` stops at the first byte that differs and shows how many were right in its time and steps. `sha256(data:)` and `hmac_sha256(key:, data:)` are 32 raw bytes; `hex`, `base64` and `base64url` write bytes as text (std/crypto.tape) | |
 
 ```diff C83
 -  do wake(after: 5000, key: order.id)

@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 const [program] = process.argv.slice(2);
 if (program === undefined) throw new Error('usage: hash.ts <program.tape>');
 const root = `${import.meta.dirname}/../..`;
-const std = ['core', 'text', 'json', 'http', 'list', 'map', 'retry', 'time', 'math'].map(n => ({
+const std = ['core', 'text', 'json', 'http', 'list', 'map', 'retry', 'time', 'math', 'crypto'].map(n => ({
   name: `std/${n}.tape`,
   text: readFileSync(`${root}/std/${n}.tape`, 'utf8'),
 }));

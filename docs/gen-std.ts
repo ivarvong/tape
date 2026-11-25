@@ -533,6 +533,27 @@ fn handle(raw: View) -> Buf {
 }
 `,
   },
+  {
+    title: 'Check a signature',
+    uses: ['fn hmac_sha256_verify', 'fn hmac_sha256', 'fn from_base64', 'fn sha256', 'fn hex', 'fn base64url'],
+    text: '`hmac_sha256_verify(key:, data:, mac:)` is True when `mac` is the HMAC-SHA-256 of `data` under `key`, and compares every byte whatever they hold; `==` on two Views stops at the first byte that differs, which a caller can see in the time and the steps, so a signature is never checked with `==`. The mac arrives as text: `from_base64` reads it, or `from_base64url` for base64url without padding (each `None` for text that is not exactly an encoding). `sha256(data:)` and `hmac_sha256(key:, data:)` give 32 raw bytes; `hex`, `base64` and `base64url` write bytes as text. All are std code, metered in steps like any other (66 a 64-byte block). Standard Webhooks signs `id.timestamp.body` and sends `v1,<base64>`; the example signs the body alone.',
+    program: `fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  let Request(method: "POST", path: "/hook", body) = r else -> respond(status: 404)
+  let Some(value: sent) = header_of(request: r, name: "x-signature") else -> respond(status: 401)
+  let Some(value: mac) = from_base64(text: sent) else -> respond(status: 401)
+  match hmac_sha256_verify(key: signing_key(), data: body, mac) {
+    True -> respond(status: 204)
+    False -> respond(status: 401)
+  }
+}
+
+// the key the sender signs with
+fn signing_key() -> View {
+  "a key shared with the sender"
+}
+`,
+  },
 ];
 
 // ---- the page

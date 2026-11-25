@@ -574,6 +574,7 @@ T(
   );
   T('doctest: std has examples in every file', [...new Set(results.map(r => r.file))].toSorted(), [
     'std/core.tape',
+    'std/crypto.tape',
     'std/http.tape',
     'std/json.tape',
     'std/list.tape',

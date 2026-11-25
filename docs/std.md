@@ -240,18 +240,43 @@ fn handle(raw: View) -> Buf {
 
 Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-request).
 
+### Check a signature
+
+`hmac_sha256_verify(key:, data:, mac:)` is True when `mac` is the HMAC-SHA-256 of `data` under `key`, and compares every byte whatever they hold; `==` on two Views stops at the first byte that differs, which a caller can see in the time and the steps, so a signature is never checked with `==`. The mac arrives as text: `from_base64` reads it, or `from_base64url` for base64url without padding (each `None` for text that is not exactly an encoding). `sha256(data:)` and `hmac_sha256(key:, data:)` give 32 raw bytes; `hex`, `base64` and `base64url` write bytes as text. All are std code, metered in steps like any other (66 a 64-byte block). Standard Webhooks signs `id.timestamp.body` and sends `v1,<base64>`; the example signs the body alone.
+
+```tape
+fn handle(raw: View) -> Buf {
+  let r = request(raw)
+  let Request(method: "POST", path: "/hook", body) = r else -> respond(status: 404)
+  let Some(value: sent) = header_of(request: r, name: "x-signature") else -> respond(status: 401)
+  let Some(value: mac) = from_base64(text: sent) else -> respond(status: 401)
+  match hmac_sha256_verify(key: signing_key(), data: body, mac) {
+    True -> respond(status: 204)
+    False -> respond(status: 401)
+  }
+}
+
+// the key the sender signs with
+fn signing_key() -> View {
+  "a key shared with the sender"
+}
+```
+
+Uses: [`hmac_sha256_verify`](#fn-hmac_sha256_verify), [`hmac_sha256`](#fn-hmac_sha256), [`from_base64`](#fn-from_base64), [`sha256`](#fn-sha256), [`hex`](#fn-hex), [`base64url`](#fn-base64url).
+
 ## Contents
 
 - [Built-ins](#built-ins): [`len`](#builtin-len), [`slice`](#builtin-slice), [`buf`](#builtin-buf), [`wrapping_add`](#builtin-wrapping_add), [`wrapping_sub`](#builtin-wrapping_sub), [`wrapping_mul`](#builtin-wrapping_mul), [`float`](#builtin-float), [`dec`](#builtin-dec), [`rescale`](#builtin-rescale), [`round`](#builtin-round), [`to_int`](#builtin-to_int), [`mul`](#builtin-mul), [`div`](#builtin-div), [`parse_dec`](#builtin-parse_dec), [`write_dec`](#builtin-write_dec), [`to_dec`](#builtin-to_dec), [`trunc`](#builtin-trunc), [`floor`](#builtin-floor), [`ceil`](#builtin-ceil), [`sqrt`](#builtin-sqrt), [`sin`](#builtin-sin), [`cos`](#builtin-cos), [`tan`](#builtin-tan), [`asin`](#builtin-asin), [`acos`](#builtin-acos), [`exp`](#builtin-exp), [`log`](#builtin-log), [`atan2`](#builtin-atan2), [`pow`](#builtin-pow), [`abs`](#builtin-abs), [`min`](#builtin-min), [`max`](#builtin-max), [`write_float`](#builtin-write_float), [`parse_float`](#builtin-parse_float), [`scan_plain`](#builtin-scan_plain), [`scan`](#builtin-scan), [`push`](#builtin-push), [`append`](#builtin-append), [`freeze`](#builtin-freeze), [`size`](#builtin-size), [`write_json`](#builtin-write_json), [`decode`](#builtin-decode), [`next`](#builtin-next), [`sql_first`](#builtin-sql_first), [`sql_all`](#builtin-sql_all), [`sql_exec`](#builtin-sql_exec), [`sql_move`](#builtin-sql_move), [`call`](#builtin-call), [`ask`](#builtin-ask), [`remote`](#builtin-remote), [`now`](#builtin-now), [`random`](#builtin-random), [`wake`](#builtin-wake), [`rollback`](#builtin-rollback)
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Done`](#type-done), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`value_or`](#fn-value_or), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at), [`utf8_end`](#fn-utf8_end)
-- [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`is_json`](#fn-is_json), [`json_member`](#fn-json_member), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
+- [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex_value`](#fn-hex_value), [`is_json`](#fn-is_json), [`json_member`](#fn-json_member), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 - [std/time.tape](#stdtimetape): [`Civil`](#type-civil), [`civil`](#fn-civil), [`rfc3339`](#fn-rfc3339), [`http_date`](#fn-http_date)
 - [std/math.tape](#stdmathtape): [`pi`](#fn-pi)
+- [std/crypto.tape](#stdcryptotape): [`sha256`](#fn-sha256), [`hmac_sha256`](#fn-hmac_sha256), [`hmac_sha256_verify`](#fn-hmac_sha256_verify), [`hex`](#fn-hex), [`base64`](#fn-base64), [`base64url`](#fn-base64url), [`from_base64`](#fn-from_base64), [`from_base64url`](#fn-from_base64url)
 
 ## Built-ins
 
@@ -1275,16 +1300,16 @@ True
 False
 ```
 
-### fn hex
+### fn hex_value
 
 ```tape
-fn hex(b: Int) -> Int
+fn hex_value(b: Int) -> Int
 ```
 
 The value of a hex digit (is_hex(b) must hold).
 
 ```
-> hex(b: 'f')
+> hex_value(b: 'f')
 15
 ```
 
@@ -1994,4 +2019,142 @@ pi, as the Float nearest it (0x400921FB54442D18, which JavaScript's Math.PI is).
 True
 > 2f * asin(x: 1f) == pi()
 True
+```
+
+## std/crypto.tape
+
+SHA-256 (FIPS 180-4), HMAC-SHA-256 (RFC 2104) and the encodings that carry their bytes: hex and base64 (RFC 4648). They are written in Tape, so they need no capability, give the same bytes on every host and in a replay, and cost steps as any other code does (LANGUAGE.md section 10).
+
+A digest is 32 raw bytes. SHA-256 works on 32-bit words; an Int holds 64 bits, so each word is kept from 0 to 2^32 - 1: a sum is taken back to 32 bits with `& 4294967295`, which is 2^32 - 1, and a rotation is two shifts of a value that is never negative.
+
+### fn sha256
+
+```tape
+fn sha256(data: View) -> View
+```
+
+The SHA-256 digest of `data`: 32 bytes. Its cost is 66 steps for each 64-byte block hashed, and 1 more: the data with its padding (a 128 byte, zeros and its length in bits, 9 bytes at least) is a whole number of blocks, so 0 to 55 bytes are one block, 56 to 119 two, and n bytes (n + 72) / 64 blocks. It makes no copy of `data`.
+
+```
+> hex(bytes: sha256(data: ""))
+"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+> hex(bytes: sha256(data: "abc"))
+"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+> len(sha256(data: "abc"))
+32
+```
+
+### fn hmac_sha256
+
+```tape
+fn hmac_sha256(key: View, data: View) -> View
+```
+
+The HMAC-SHA-256 of `data` under `key` (RFC 2104): 32 bytes. A key longer than the 64-byte block is hashed first, as the RFC says. Its cost is 65 steps for each of the two padded keys and the steps of its two digests, of 64 + len(data) bytes and then of 96 (133 steps): 396 steps for up to 55 bytes of data, and 66 more for each further 64 bytes; a key longer than 64 bytes adds the steps of its own digest. It copies the data once.
+
+```
+> hex(bytes: hmac_sha256(key: "Jefe", data: "what do ya want for nothing?"))
+"5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"
+```
+
+### fn hmac_sha256_verify
+
+```tape
+fn hmac_sha256_verify(key: View, data: View, mac: View) -> Bool
+```
+
+Is `mac` the HMAC-SHA-256 of `data` under `key`? Check a signature with this, not with `==`: `==` on two Views stops at the first byte that differs, so how long it takes, and how many steps a request takes when the check is written as a loop that stops, tells a caller how many leading bytes of a forged mac were right. This walks all 32 bytes whatever they hold and takes the OR of their XORs, so its steps and its time are the same wherever the bytes differ: hmac_sha256's steps and 33 more. A mac that is not 32 bytes long is False before any byte is compared (its length is not a secret).
+
+```
+> hmac_sha256_verify(key: "k", data: "body", mac: hmac_sha256(key: "k", data: "body"))
+True
+> hmac_sha256_verify(key: "k", data: "body", mac: hmac_sha256(key: "K", data: "body"))
+False
+> hmac_sha256_verify(key: "k", data: "body", mac: "")
+False
+```
+
+### fn hex
+
+```tape
+fn hex(bytes: View) -> View
+```
+
+The bytes in lower-case hex, two digits a byte. One step a byte, and 1.
+
+```
+> hex(bytes: "Tape")
+"54617065"
+> hex(bytes: sha256(data: "")) |> slice(from: 0, to: 8)
+"e3b0c442"
+```
+
+### fn base64
+
+```tape
+fn base64(bytes: View) -> View
+```
+
+The bytes in base64 (RFC 4648 section 4): A-Z, a-z, 0-9, + and /, padded with = to a multiple of 4. One step for each 3 bytes, and 1.
+
+```
+> base64(bytes: "hello")
+"aGVsbG8="
+> base64(bytes: ">>?")
+"Pj4/"
+> base64(bytes: "")
+""
+```
+
+### fn base64url
+
+```tape
+fn base64url(bytes: View) -> View
+```
+
+The bytes in base64url (RFC 4648 section 5): - and _ where base64 has + and /, and no padding, as JWT and Standard Webhooks' signatures write it (so it can stand in a URL or a header unescaped). One step for each 3 bytes, and 1.
+
+```
+> base64url(bytes: "hello")
+"aGVsbG8"
+> base64url(bytes: ">>?")
+"Pj4_"
+```
+
+### fn from_base64
+
+```tape
+fn from_base64(text: View) -> Option[View]
+```
+
+The bytes that base64 text stands for, or None. It takes exactly what `base64` writes and nothing else: None for a byte outside A-Z, a-z, 0-9, + and / (a space, a line break, base64url's - or _, an = that is not padding), for a length that is not a multiple of 4, and for a last character whose bits past the data are not zero ("aGVsbG9=" is not canonical: base64 of "hello" is "aGVsbG8="), so each value has one encoding. One step a character and one for each 4 characters, and 2.
+
+```
+> from_base64(text: "aGVsbG8=")
+Some(value: "hello")
+> from_base64(text: "aGVsbG8")
+None
+> from_base64(text: "aGVsbG9=")
+None
+> from_base64(text: "aGVs bG8=")
+None
+```
+
+### fn from_base64url
+
+```tape
+fn from_base64url(text: View) -> Option[View]
+```
+
+The bytes that base64url text stands for, or None. It takes exactly what `base64url` writes: None for a byte outside A-Z, a-z, 0-9, - and _ (base64's + or /, and = too: base64url here has no padding), for a length that leaves 1 character over a multiple of 4 (no bytes give that), and for a last character whose bits past the data are not zero. One step a character and one for each 4 characters, and 2.
+
+```
+> from_base64url(text: "aGVsbG8")
+Some(value: "hello")
+> from_base64url(text: "Pj4_")
+Some(value: ">>?")
+> from_base64url(text: "aGVsbG8=")
+None
+> from_base64url(text: "Pj4/")
+None
 ```

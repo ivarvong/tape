@@ -291,9 +291,9 @@ fn unit_at(v: View, at: Int) -> Int {
       and is_hex(v[at])
       and is_hex(v[at + 1])
       and is_hex(v[at + 2])
-      and is_hex(v[at + 3]) -> (hex(v[at]) << 12) | (hex(v[at + 1]) << 8) | (
-        hex(v[at + 2]) << 4
-      ) | hex(v[at + 3])
+      and is_hex(v[at + 3]) -> (hex_value(v[at]) << 12) | (hex_value(v[at + 1]) << 8) | (
+        hex_value(v[at + 2]) << 4
+      ) | hex_value(v[at + 3])
     else -> -1
   }
 }

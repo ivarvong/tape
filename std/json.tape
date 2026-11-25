@@ -336,9 +336,9 @@ private fn hex4(v: View, at: Int) -> Option[Int] {
       and is_hex(v[at])
       and is_hex(v[at + 1])
       and is_hex(v[at + 2])
-      and is_hex(v[at + 3]) -> Some(
-        (hex(v[at]) << 12) | (hex(v[at + 1]) << 8) | (hex(v[at + 2]) << 4) | hex(v[at + 3])
-      )
+      and is_hex(v[at + 3]) -> Some((hex_value(v[at]) << 12) | (hex_value(v[at + 1]) << 8) | (
+        hex_value(v[at + 2]) << 4
+      ) | hex_value(v[at + 3]))
     else -> None
   }
 }
@@ -355,9 +355,9 @@ fn is_hex(b: Int) -> Bool {
 
 // The value of a hex digit (is_hex(b) must hold).
 //
-//   > hex(b: 'f')
+//   > hex_value(b: 'f')
 //   15
-fn hex(b: Int) -> Int {
+fn hex_value(b: Int) -> Int {
   match {
     b <= '9' -> b - '0'
     b >= 'a' -> b - 87

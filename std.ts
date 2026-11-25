@@ -3,7 +3,7 @@
 // order. The service bundles the same files itself (service/src), because it cannot read a directory.
 import { readFileSync } from 'node:fs';
 
-export const std = ['core', 'text', 'json', 'http', 'list', 'map', 'retry', 'time', 'math'].map(n => ({
+export const std = ['core', 'text', 'json', 'http', 'list', 'map', 'retry', 'time', 'math', 'crypto'].map(n => ({
   name: `std/${n}.tape`,
   text: readFileSync(new URL(`./std/${n}.tape`, import.meta.url), 'utf8'),
 }));
