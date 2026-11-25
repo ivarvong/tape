@@ -580,6 +580,7 @@ T(
     'std/map.tape',
     'std/retry.tape',
     'std/text.tape',
+    'std/time.tape',
   ]);
   const bad = doctests(
     [

@@ -903,25 +903,27 @@ fn digest_span(text: View, at: Int, end: Int, h: Int) -> Int {
   }
 }
 
-// civil date-time in UTC from milliseconds since 1970, as YYYY-MM-DDTHH:MM:SSZ
+// civil date-time in UTC from milliseconds since 1970, as YYYY-MM-DDTHH:MM:SSZ (std's civil; rfc3339 would add
+// the milliseconds)
 fn iso_utc(ms: Int) -> View {
   match {
     ms <= 0 -> "1970-01-01T00:00:00Z"
     else -> {
-      let s = ms / 1000
-      let z = s / 86400
-      let rem = s % 86400
-      freeze(buf: write_civil(
-        out: buf(),
-        days: z
-      )
-          |> push(byte: 'T')
-          |> pad2(n: rem / 3600)
-          |> push(byte: ':')
-          |> pad2(n: rem % 3600 / 60)
-          |> push(byte: ':')
-          |> pad2(n: rem % 60)
-          |> push(byte: 'Z'))
+      let Civil(year, month, day, hour, minute, second) = civil(ms)
+      let out = buf()
+        |> pad4(n: year)
+        |> push(byte: '-')
+        |> pad2(n: month)
+        |> push(byte: '-')
+        |> pad2(n: day)
+        |> push(byte: 'T')
+        |> pad2(n: hour)
+        |> push(byte: ':')
+        |> pad2(n: minute)
+        |> push(byte: ':')
+        |> pad2(n: second)
+        |> push(byte: 'Z')
+      freeze(buf: out)
     }
   }
 }
@@ -930,37 +932,6 @@ fn pad2(out: Buf, n: Int) -> Buf {
   match {
     n < 10 -> append(buf: out, view: "0") |> append(view: decimal_text(value: n))
     else -> append(buf: out, view: decimal_text(value: n))
-  }
-}
-
-fn write_civil(out: Buf, days: Int) -> Buf {
-  shift_year(out, days: days, year: 1970)
-}
-
-fn shift_year(out: Buf, days: Int, year: Int) -> Buf {
-  let span = days_in_year(year)
-  match {
-    days >= span -> shift_year(out, days: days - span, year: year + 1)
-    else -> shift_month(out, days, year, month: 1)
-  }
-}
-
-fn days_in_year(year: Int) -> Int {
-  match leap(year) {
-    True -> 366
-    False -> 365
-  }
-}
-
-fn shift_month(out: Buf, days: Int, year: Int, month: Int) -> Buf {
-  let span = days_in(year, month)
-  match {
-    days >= span -> shift_month(out, days: days - span, year, month: month + 1)
-    else -> pad4(out, n: year)
-      |> push(byte: '-')
-      |> pad2(n: month)
-      |> push(byte: '-')
-      |> pad2(n: days + 1)
   }
 }
 

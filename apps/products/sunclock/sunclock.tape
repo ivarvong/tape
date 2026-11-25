@@ -366,27 +366,13 @@ fn floor_div(a: Int, b: Int) -> Int {
   }
 }
 
-// Days since 1970 as YYYY-MM-DD.
+// Days since 1970 as YYYY-MM-DD, from std's civil.
 //
 //   > date_of(day: 20780)
 //   "2026-11-23"
 fn date_of(day: Int) -> View {
-  let z = day + 719468
-  let era = z / 146097
-  let doe = z - era * 146097
-  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
-  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-  let mp = (5 * doy + 2) / 153
-  let d = doy - (153 * mp + 2) / 5 + 1
-  let m = match {
-    mp < 10 -> mp + 3
-    else -> mp - 9
-  }
-  let y = yoe + era * 400 + match {
-    m <= 2 -> 1
-    else -> 0
-  }
-  "\(y)-\(two(n: m))-\(two(n: d))"
+  let Civil(year, month, day: d) = civil(ms: day * 86400000)
+  "\(year)-\(two(n: month))-\(two(n: d))"
 }
 
 fn two(n: Int) -> View {

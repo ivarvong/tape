@@ -7,8 +7,9 @@
 // bytes of code (a content type, scan, form_field) without the blog doing anything different. The record's
 // step_version is the accounting those step counts were measured with.
 // Both are as the host records them, with the effect log on; the log off must come out the same. The clock is
-// pinned to 2026-11-24T12:00:00.000Z: the feed formats it by walking years from 1970, so an unpinned run would
-// change steps on New Year's Day. bench/blog.json is that record. The same Wasm bytes are in bench/sizes.json, so
+// pinned to 2026-11-24T12:00:00.000Z, so the record's etags and bytes are one run's. The feed formats it with
+// std's civil, which loops over nothing; before 25 November 2026 it walked years from 1970, and an unpinned run
+// changed steps on New Year's Day. bench/blog.json is that record. The same Wasm bytes are in bench/sizes.json, so
 // a change that moves a module is recorded twice: here, and `node test/wasm-size.ts --write`. The feed is
 // `respond_as(content: Atom)`, application/atom+xml.
 //   node bench/blog.ts           compare

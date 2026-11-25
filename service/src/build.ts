@@ -12,12 +12,13 @@ import http from '../../std/http.tape?raw';
 import list from '../../std/list.tape?raw';
 import map from '../../std/map.tape?raw';
 import retry from '../../std/retry.tape?raw';
+import time from '../../std/time.tape?raw';
 
 /** The compiler built in (scripts/sha.ts, vite.config.ts), or "dev" in the tests. A stored build says which compiler
  * made it; one made by another is made again from its source (name.ts, #fresh). */
 export const COMPILER = typeof TAPE_COMPILER === 'string' ? TAPE_COMPILER : 'dev';
 /** The standard library as the compiler takes it (std.ts in Node); mcp/ uses the same list. */
-export const STD = Object.entries({ core, text, json, http, list, map, retry }).map(([n, t]) => ({
+export const STD = Object.entries({ core, text, json, http, list, map, retry, time }).map(([n, t]) => ({
   name: `std/${n}.tape`,
   text: t,
 }));

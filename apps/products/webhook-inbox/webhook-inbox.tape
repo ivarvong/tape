@@ -446,32 +446,15 @@ fn word_end(v: View, at: Int) -> Int {
 
 // ---------- dates ----------
 
-// Milliseconds since 1970 as YYYY-MM-DD HH:MM:SS (UTC), by Howard Hinnant's days-to-civil.
+// Milliseconds since 1970 as YYYY-MM-DD HH:MM:SS (UTC), from std's civil.
 //
 //   > date_time(ms: 0)
 //   "1970-01-01 00:00:00"
 //   > date_time(ms: 951825600123)
 //   "2000-02-29 12:00:00"
 fn date_time(ms: Int) -> View {
-  let days = ms / 86400000
-  let secs = ms % 86400000 / 1000
-  let z = days + 719468
-  let era = z / 146097
-  let doe = z - era * 146097
-  let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
-  let doy = doe - (365 * yoe + yoe / 4 - yoe / 100)
-  let mp = (5 * doy + 2) / 153
-  let d = doy - (153 * mp + 2) / 5 + 1
-  let m = match {
-    mp < 10 -> mp + 3
-    else -> mp - 9
-  }
-  let y = yoe + era * 400 + match {
-    m <= 2 -> 1
-    else -> 0
-  }
-  "\(y)-\(two(n: m))-\(two(n: d)) \
-      \(two(n: secs / 3600)):\(two(n: secs / 60 % 60)):\(two(n: secs % 60))"
+  let Civil(year, month, day, hour, minute, second) = civil(ms)
+  "\(year)-\(two(n: month))-\(two(n: day)) \(two(n: hour)):\(two(n: minute)):\(two(n: second))"
 }
 
 fn two(n: Int) -> View {

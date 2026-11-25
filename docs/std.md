@@ -250,6 +250,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
+- [std/time.tape](#stdtimetape): [`Civil`](#type-civil), [`civil`](#fn-civil), [`rfc3339`](#fn-rfc3339), [`http_date`](#fn-http_date)
 
 ## Built-ins
 
@@ -1810,3 +1811,76 @@ fn retry_later(timer: Timer, key: Int, policy: Backoff, failed: Int) -> Retry
 ```
 
 backoff, and when it says to try again, a timer for then: `woken` gets Wake(key) that many ms from now. The key names what to retry (an order's id, say); setting it again moves its time, so a key is retried once.
+
+## std/time.tape
+
+An instant, milliseconds since 1970-01-01T00:00:00Z as `now()` gives it, as a date and a time of day in UTC. Each function takes the instant as an argument and needs no capability: the clock is read once, with `now()`, and what is shown of it is computed. The calendar is the proleptic Gregorian one, with no leap seconds (a day is 86,400,000 ms), as JavaScript's Date and Unix time count. Every Int is an instant, before 1970 too: the days are counted by Howard Hinnant's civil_from_days, a few operations and no loop over the years.
+
+### type Civil
+
+```tape
+type Civil {
+  Civil(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int, millisecond: Int)
+}
+```
+
+An instant in UTC, by its parts: `month` 1 to 12, `day` 1 to 31, `hour` 0 to 23, `minute` and `second` 0 to 59, `millisecond` 0 to 999. `year` is astronomical: the year before 1 is 0, and before that -1.
+
+### fn civil
+
+```tape
+fn civil(ms: Int) -> Civil
+```
+
+The date and time of day in UTC of an instant, milliseconds since 1970. For every Int: an instant before 1970 is negative, and its parts count forward from the start of its day as any other's (-1 is 1969-12-31 at 23:59:59.999); the least Int is in the year -292275055 and the largest in 292278994. It loops over nothing, so it costs no steps.
+
+```
+> civil(ms: 0)
+Civil(year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0, millisecond: 0)
+> civil(ms: 1795615387123)
+Civil(year: 2026, month: 11, day: 25, hour: 14, minute: 3, second: 7, millisecond: 123)
+> civil(ms: 951782400000)
+Civil(year: 2000, month: 2, day: 29, hour: 0)
+> civil(ms: -1)
+Civil(year: 1969, month: 12, day: 31, hour: 23, minute: 59, second: 59, millisecond: 999)
+> civil(ms: -62198755200000).year
+-1
+```
+
+### fn rfc3339
+
+```tape
+fn rfc3339(ms: Int) -> View
+```
+
+An instant as RFC 3339 text in UTC, `2026-11-25T14:03:07.123Z`: always the three digits of its milliseconds and `Z`, so every one is 24 bytes from 0000 to 9999 and they sort as text in the order of time. For JSON, Atom feeds and logs. RFC 3339 has years 0000 to 9999 only, from -62167219200000 to 253402300799999; outside them the year is ISO 8601's expanded one, a sign and at least six digits (`+010000-01-01T00:00:00.000Z`), as JavaScript's toISOString writes it. Its steps are its numbers' digits, one each as a hole writes them: 20 for 2026.
+
+```
+> rfc3339(ms: 1795615387123)
+"2026-11-25T14:03:07.123Z"
+> rfc3339(ms: 0)
+"1970-01-01T00:00:00.000Z"
+> rfc3339(ms: -1)
+"1969-12-31T23:59:59.999Z"
+> rfc3339(ms: 253402300800000)
+"+010000-01-01T00:00:00.000Z"
+> rfc3339(ms: -62198755200000)
+"-000001-01-01T00:00:00.000Z"
+```
+
+### fn http_date
+
+```tape
+fn http_date(ms: Int) -> View
+```
+
+An instant as an HTTP date (RFC 9110 section 5.6.7, IMF-fixdate), `Wed, 25 Nov 2026 14:03:07 GMT`: for the date, last-modified, expires and retry-after headers. The milliseconds are dropped: the second it falls in. The same text as JavaScript's toUTCString. An HTTP date has years 0000 to 9999 only; outside them the year is written as toUTCString writes it, its digits after a `-` for a year before 0 (`-0001`), and a header should not be sent with one. Its steps are its numbers' digits, one each as a hole writes them: 16 for 2026.
+
+```
+> http_date(ms: 1795615387123)
+"Wed, 25 Nov 2026 14:03:07 GMT"
+> http_date(ms: 784111777000)
+"Sun, 06 Nov 1994 08:49:37 GMT"
+> http_date(ms: -1)
+"Wed, 31 Dec 1969 23:59:59 GMT"
+```

@@ -6,8 +6,8 @@
     "functions": 168
   },
   "blog": {
-    "bytes": 96787,
-    "functions": 281
+    "bytes": 97411,
+    "functions": 278
   },
   "render": {
     "steps": 63515,
@@ -30,7 +30,7 @@
     "bytes": 40832
   },
   "feed": {
-    "steps": 494,
+    "steps": 358,
     "bytes": 133368
   }
 }
