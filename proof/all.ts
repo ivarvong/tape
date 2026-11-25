@@ -245,6 +245,11 @@ const all: Part[] = [
     /^204 requests answered three ways, 0 differ$/m,
   ],
   [
+    "bench/suite/check.ts: each suite workload's program answers as its JavaScript twin, the log on and off",
+    [node, 'bench/suite/check.ts'],
+    /^6 workloads, 0 differ$/m,
+  ],
+  [
     'bench/blog.ts: the renderer and the blog, steps exactly and bytes within 2%, against bench/blog.json',
     [node, 'bench/blog.ts'],
     /the record matches/,
