@@ -111,7 +111,9 @@ const passedHeaders = (request: Request): string =>
     .join('');
 
 // The program's request: METHOD SP TARGET (CR name: value)* LF BODY; through a published name's public route,
-// METHOD SP TARGET SP public … (std/http: caller Anyone). The target is percent-encoded by the URL, so it has no
+// METHOD SP TARGET SP public … (std/http: caller Anyone); on the name's own origin with a session the Worker
+// checked (session.ts), METHOD SP TARGET SP session …, its id (base64url) in the host's header tape-session
+// (std/http: caller Session(id)). A client's tape-… header is not on the allow-list, so neither can be sent. The target is percent-encoded by the URL, so it has no
 // space. Null when the body is over BODY_MAX.
 // base: where the program is mounted, the URL its `/` is at without the last slash
 // (https://host/p/<account>/<name>, or …/<account>/<name>/v/<version>). It is the first header, tape-base, the
@@ -123,11 +125,14 @@ export const tapeRequest = async (
   search: string,
   via: string | null = null,
   base: string | null = null,
+  session: string | null = null,
 ): Promise<Uint8Array<ArrayBuffer> | null> => {
   // HEAD is GET without the body (RFC 9110 9.3.2): the program is asked GET, and the runtime sends no body for a HEAD
   const method = request.method === 'HEAD' ? 'GET' : request.method;
-  const mounted = base === null ? '' : `\rtape-base: ${base.replaceAll(/[\0\r\n]/g, ' ')}`;
-  const head = `${method} ${path}${search}${via === null || via === '' ? '' : ` ${via}`}${mounted}${passedHeaders(request)}\n`,
+  // the session's id first (std/http reads it there), printable ASCII (host.ts responseOf refuses any other id)
+  const held = session !== null && /^[ -~]+$/.test(session) ? `\rtape-session: ${session}` : '';
+  const mounted = `${held}${base === null ? '' : `\rtape-base: ${base.replaceAll(/[\0\r\n]/g, ' ')}`}`;
+  const head = `${method} ${path}${search}${held !== '' ? ' session' : via === null || via === '' ? '' : ` ${via}`}${mounted}${passedHeaders(request)}\n`,
     body = await bodyOf(request, BODY_MAX);
   return body === null ? null : new Uint8Array(await new Blob([head, body]).arrayBuffer());
 };

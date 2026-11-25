@@ -150,12 +150,25 @@ const NO_BODY = new Set([204, 205, 304]);
 const MAGIC = [0, 0x74, 0x61, 0x70];
 const VERSION = 1;
 export type Header = { name: string; value: string };
-export type Answer = { status: number; type: string | undefined; headers: Header[]; body: Uint8Array };
+/** What an answer does to the client's session (std/http.tape start_session and end_session, which set the host's
+ * own headers `:session` and `:session-end`, names no HTTP header can have): null, nothing. A host with no origin of
+ * the program's own (docs/service.md#identity) does nothing with it. */
+export type SessionChange = { start: string } | { end: true } | null;
+/** The longest session id; an id is printable ASCII. */
+export const SESSION_ID_MAX = 256;
+export type Answer = {
+  status: number;
+  type: string | undefined;
+  headers: Header[];
+  body: Uint8Array;
+  session: SessionChange;
+};
 const refusedAs = (text: string): Answer => ({
   status: 500,
   type: CONTENT_TYPES.get('text/plain'),
   headers: [],
   body: new TextEncoder().encode(text),
+  session: null,
 });
 const refused = (why: string): Answer => refusedAs(`the program set a response header the host refuses: ${why}`);
 const refusedStatus = (why: string): Answer => refusedAs(`the program answered a response the host refuses: ${why}`);
@@ -211,12 +224,21 @@ export function responseOf(out: Uint8Array): Answer {
   const size = f.heads.reduce((n, [name, value]) => n + name.length + value.length, 0);
   if (size > HEADER_LIMITS.head) return refused(`more than ${HEADER_LIMITS.head} bytes of headers`);
   const headers: Header[] = [];
+  let session: SessionChange = null;
   for (const [name, value] of f.heads) {
-    const h = headerOf(name, value);
-    if (typeof h === 'string') return refused(h);
-    headers.push(h);
+    // the host's own: the last one set is what the answer does
+    if (name === ':session-end') session = { end: true };
+    else if (name === ':session') {
+      if (value.length === 0 || value.length > SESSION_ID_MAX || /[^ -~]/.test(value))
+        return refusedStatus(`a session id is 1 to ${SESSION_ID_MAX} bytes of printable ASCII`);
+      session = { start: value };
+    } else {
+      const h = headerOf(name, value);
+      if (typeof h === 'string') return refused(h);
+      headers.push(h);
+    }
   }
-  return { status, type: CONTENT_TYPES.get(type), headers, body: f.body };
+  return { status, type: CONTENT_TYPES.get(type), headers, body: f.body, session };
 }
 /** An answer as text, for tests and tools that print one: `STATUS[ TYPE](CR name: value)* LF BODY`, the type left
  * out for text/plain. It is a picture of the Answer, never what a host serves. */

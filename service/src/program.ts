@@ -28,6 +28,7 @@ import type {
   HttpRequest,
   MachineSpec,
   SecretStore,
+  SessionChange,
   ServiceReply,
   Sql,
   TraceEvent,
@@ -160,6 +161,15 @@ const schemaFirst = (sql: Sql): void => {
   }
 };
 
+/** What the answer did to the client's session, for the Worker (programs.ts): the program's own headers are never
+ * tape-…, so these are the host's. The Worker turns them into a cookie on the program's own origin, and drops them
+ * everywhere else. */
+const sessionHeaders = (s: SessionChange): Record<string, string> => {
+  if (s === null) return {};
+  if ('end' in s) return { 'tape-session-end': '1' };
+  const id = btoa(s.start).replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+  return { 'tape-session-start': id };
+};
 // The program's Response, as the frame its generated `handle` writes (host.ts responseOf): the status, the content
 // type, the headers and the body, each checked; a status or a header the host refuses is a 500 that says why.
 const split = responseOf;
@@ -755,7 +765,7 @@ export class Program extends DurableObject<Env> {
     try {
       await this.#loadSecrets(version);
       const ran = await app.runLogged(bytes, { transaction, trace: parent });
-      const { status, body, type, headers } = split(ran.out);
+      const { status, body, type, headers, session } = split(ran.out);
       // A stretch that committed has a log id before this write. runLogged returning means each of those
       // transactions returned. A program rollback (rollback(out)) undoes the stretch it is in and still answers.
       const prior = log.id() !== null;
@@ -770,6 +780,7 @@ export class Program extends DurableObject<Env> {
           ...this.#headers(log.id(), ran.effects[0]),
           ...encodeOutcome(finished).headers,
           ...(type === undefined ? {} : { 'content-type': type }),
+          ...sessionHeaders(session),
         },
       });
       // the program's own headers (std/http's header), checked by responseOf: none is one the host sets

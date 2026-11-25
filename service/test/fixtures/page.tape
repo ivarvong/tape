@@ -44,5 +44,6 @@ fn who(caller: Caller) -> View {
   match caller {
     Operator -> "operator"
     Anyone -> "anyone"
+    Session -> "session"
   }
 }

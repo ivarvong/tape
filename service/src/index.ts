@@ -55,6 +55,8 @@ import { kv } from './kv.ts';
 import { Name, WIPED_ERROR } from './name.ts';
 import { secured } from './headers.ts';
 import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
+import type { Site } from './programs.ts';
+import { programOrigin, sessionOf } from './session.ts';
 import type { CallMeta, StoredSecret } from './records.ts';
 import { SECRET_MAX, SECRET_NAME } from '../../host/secrets.ts';
 import type { HttpAnswer, HttpRequest } from '../../host.ts';
@@ -393,15 +395,25 @@ const isPublished = async (ctx: ExecutionContext, key: string): Promise<boolean>
     throw e;
   }
 };
-const publicRoute = async (
+const publicRoute = (
   request: Request,
   env: Env,
   ctx: ExecutionContext,
   url: URL,
   m: RegExpMatchArray,
 ): Promise<Response> => {
-  const [, account = '', name = '', path = '/'] = m,
-    bodiless = request.method === 'GET' || request.method === 'HEAD';
+  const [, account = '', name = '', path = '/'] = m;
+  return servePublic(request, env, ctx, url, { account, name, path });
+};
+// The public route of account/name at `path`: /p/:account/:name/<path>, or the name's own origin (site).
+const servePublic = async (
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url: URL,
+  { account, name, path, site }: { account: string; name: string; path: string; site?: Site },
+): Promise<Response> => {
+  const bodiless = request.method === 'GET' || request.method === 'HEAD';
   if (!SEGMENT.test(account) || !SEGMENT.test(name) || /^(kv|tool)-/.test(name))
     return reply({ error: 'no such page' }, 404);
   if (!bodiless && request.method !== 'POST') return reply({ error: 'GET, HEAD or POST' }, 405);
@@ -422,7 +434,7 @@ const publicRoute = async (
   try {
     return await run(
       { request: again, stub, account, name, url, token: env.TOKEN, ctx },
-      { version: 0, path, via: 'public', published: true },
+      { version: 0, path, via: 'public', published: true, ...(site ? { site } : {}) },
     );
   } catch (e) {
     stopped(e);
@@ -660,6 +672,29 @@ const programRoute = async (request: Request, env: Env, ctx: ExecutionContext, u
   return reply({ error: 'no such route' }, 404);
 };
 
+// A program's own origin (session.ts): with PROGRAM_DOMAIN set, `<name>--<account>.<PROGRAM_DOMAIN>` is that name's
+// public route at every path, and nothing else of the service is reached there (no operator route, no hosted runner,
+// no trace page). The request's session cookie, when it verifies for this account and name, makes it a Session.
+const siteRoute = async (
+  request: Request,
+  env: Env,
+  ctx: ExecutionContext,
+  url: URL,
+  at: { account: string; name: string } | { none: string },
+): Promise<Response> => {
+  if ('none' in at) return reply({ error: 'no such page' }, 404);
+  // a version without its secret has no key to check a session with, and opens nothing
+  if (typeof env.TOKEN !== 'string' || env.TOKEN === '') return reply({ error: 'no such page' }, 404);
+  const { account, name } = at;
+  const session = await sessionOf(request, env.TOKEN, account, name);
+  return servePublic(request, env, ctx, url, {
+    account,
+    name,
+    path: url.pathname,
+    site: { origin: url.origin, session },
+  });
+};
+
 // The hosted compiler and runner (docs/mcp.md) is mcp/src, called in this Worker with its bindings (until 2026-11-22
 // it was a Worker of its own, tape-mcp, behind a service binding). Its routes need no token, so they are served
 // before the token check, with the request as it came: it keys its rate limit and log on the client's address
@@ -668,7 +703,10 @@ const HOSTED: ReadonlySet<string> = new Set(['/mcp', '/v1/compile', '/v1/run', '
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const path = new URL(request.url).pathname;
+    const url = new URL(request.url),
+      site = programOrigin(url.hostname, env.PROGRAM_DOMAIN);
+    if (site) return secured(await siteRoute(request, env, ctx, url, site), url.pathname, env.VERSION?.id, true);
+    const path = url.pathname;
     if (HOSTED.has(path)) return secured(await hosted.fetch(request, env, ctx), path, env.VERSION?.id);
     return secured(await route(request, env, ctx), path, env.VERSION?.id);
   },

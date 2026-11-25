@@ -22,7 +22,8 @@ you do on it is logged and used to improve it, and content that breaks the accep
 | The operator token, `authorization: Bearer <token>` | every route |
 | An account's agent token (`GET /_agent/:account`, operator) | `/tools/:account…` and `/mcp/:account` only |
 | A signed link (`/t/…?exp=…&sig=…`, `/otlp/…`) | one trace, without a token, for seven days |
-| Nothing | a published name's public route, `/p/:account/:name/…` |
+| Nothing | a published name's public route, `/p/:account/:name/…`, and its own origin `<name>--<account>.<PROGRAM_DOMAIN>` |
+| A session cookie (`__Host-tape-session`, set by the program's `start_session`) | nothing more: on the name's own origin, the program's request is `Session(id)` instead of `Anyone` |
 
 Account and name are 1 to 64 of `a-z 0-9 _ -`, starting with a letter or digit.
 
@@ -148,13 +149,47 @@ is not published is answered by the list of published names and never calls the 
 `tape-request-id`, `traceparent` or `tape-outcome`), and a request the
 route refuses before that call (405, 413) has no `server-timing` from the host. A HEAD is run as the GET it stands
 for (the program sees `GET`, and the body is not sent), on this route and every other. The program sees who called:
-the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)` says so.
+the request line ends in ` public`, and std/http's `Request(caller: …)` says so: `Anyone` (or `Session(id)` on the name's own origin, [Identity](#identity)), where the operator's route is `Operator`.
 For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
 box office served this way.
 
 `{"published": false}` takes effect at once: the name's own object checks that it is published in the same call that
 runs each public request. The Worker keeps a name's "published" from the account-wide list for up to ten minutes per
 isolate, which only saves that lookup; for those ten minutes an unpublished name's object is asked and answers 404 itself.
+
+### Identity
+
+Every published name answers on the service's one origin, at `/p/:account/:name/`, and a cookie's Path is no
+boundary between two programs there, so the service sets no cookie on it. When the deploy sets `PROGRAM_DOMAIN`
+(unset, the default, keeps everything as it was), each published name also has an origin of its own:
+`https://<name>--<account>.<PROGRAM_DOMAIN>/<path>` is its public route, the same as `/p/:account/:name/<path>`
+(published names only, GET, HEAD and POST, 64 KB), and nothing else of the service answers there: no operator route,
+trace page or hosted runner, whatever the path or token. A name or an account with `--` or `_` in it, or a label of
+more than 63 characters, has no such origin (its host could be read two ways, or is not a host name) and stays at
+`/p/` only. `tape-base` there is the origin itself, so a program's links and redirects stay on it.
+
+On its own origin, and only there, an answer with `start_session(id:)` (std/http.tape; the id 1 to 256 bytes of printable ASCII,
+chosen by the program, say a user's id once it has checked a password) has the Worker set
+`__Host-tape-session=<expiry>.<id>.<mac>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=2592000`, the mac an
+HMAC-SHA-256, under a key made from the service's token, of the account, the name, the expiry and the id. A request
+that carries a cookie that verifies for this account and name and has not expired is `Request(caller: Session(id))`;
+anything else (no cookie, a forged or altered one, an expired one, one another program's answer set, one made under
+another token) is `Anyone`, with no error. The program never sees the cookie (`cookie` is not among the headers it is
+passed), cannot set one (`set-cookie` is the host's), and a client cannot pass itself off as a session (the host's
+`tape-session` header is not one a client can send). A session lasts 30 days from its last use: a request with one
+at least a day old is answered with the cookie again, its expiry moved on. `end_session()` clears the cookie. The
+answer that sets or clears one is `cache-control: no-store`. A session is a signed cookie, not a row: ending one
+clears it in that browser, and a copy taken before stays good until it expires; changing the token ends every
+session. The same answers on `/p/` or the operator's route set nothing. On its own origin a program's HTML keeps that
+origin in its sandbox (`sandbox allow-forms allow-same-origin`, still no script), so a form it posts to itself carries
+its SameSite=Lax cookie.
+
+The deploy step, once: choose a domain that is not the service's own and not shared with anything else (a new one;
+ideally on the Public Suffix List, so that each program's origin is also a site of its own to the browser, and one
+program's page cannot make a same-site request to another's), add a proxied wildcard DNS record `*.<domain>` and a
+Workers route `*.<domain>/*` to this Worker (in the dashboard, or a `routes` entry with your account's zone), and set
+the Worker variable `PROGRAM_DOMAIN=<domain>`. The repository's `cloudflare.config.ts` sets none of these: production
+routes are the operator's. The tests run with `PROGRAM_DOMAIN=tape.test` (service/vitest.config.ts).
 
 ### Secrets
 

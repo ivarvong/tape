@@ -4,6 +4,7 @@ import { build, isRefusal } from './build.ts';
 import { FAULTY, through } from './faults.ts';
 import type { InvokeOptions, Name } from './name.ts';
 import { RouterTrace, store } from './spans.ts';
+import { endedCookie, fromB64url, sessionCookie, stale } from './session.ts';
 import { APPLY, encodeOutcome } from './records.ts';
 import {
   BODY_MAX,
@@ -178,16 +179,27 @@ const invoked = (
   bytes: Uint8Array,
   options: InvokeOptions,
 ): Promise<Response> => stub.invoke(account, name, version, bytes, options);
-export type Target = { version: number; path: string; via: string | null; published?: boolean };
+/** A request on the name's own origin (session.ts): that origin, and the session the request carries, if any. */
+export type Site = { origin: string; session: { id: string; exp: number } | null };
+export type Target = { version: number; path: string; via: string | null; published?: boolean; site?: Site };
 // One request to one version of a program (the operator's /v/:version/… route, and a published name's public
 // route, via: 'public', with its latest version).
 export async function run(
   { request, stub, account, name, url, token, ctx }: Omit<Args, 'm' | 'origin'>,
-  { version, path, via, published = false }: Target,
+  { version, path, via, published = false, site }: Target,
 ): Promise<Response> {
   const open = via !== null && via !== '';
   const mount = open ? `/p/${account}/${name}` : `/${account}/${name}/v/${version}`;
-  const bytes = await tapeRequest(request, path, url.search, via, `${url.origin}${mount}`);
+  const base = site ? site.origin : `${url.origin}${mount}`;
+  const held = site?.session ? fromB64url(site.session.id) : null;
+  const bytes = await tapeRequest(
+    request,
+    path,
+    url.search,
+    via,
+    base,
+    held === null ? null : new TextDecoder().decode(held),
+  );
   if (bytes === null) return tooLarge("a request's body", BODY_MAX);
   // the Worker's span for this request, and its call to the object (spans.ts); stored there before the reply
   const rt = await new RouterTrace(
@@ -240,6 +252,7 @@ export async function run(
     stopped(e);
     out = unknownStop(messageOf(e), `00-${rt.trace}-${rt.span}-01`);
   }
+  await sessionSet(out, token, account, name, site);
   rt.finish(out.status);
   const waited = (call.end ?? call.start) - call.start;
   // Every answer names its request, says what the request did, and carries the router's traceparent. A public
@@ -278,6 +291,28 @@ export async function run(
   out.headers.set('tape-trace-complete', lost === null ? 'true' : 'false');
   out.headers.delete('tape-supervisor-span');
   return out;
+}
+
+// What the program's answer did to the client's session (program.ts sessionHeaders), as a cookie: only on the name's
+// own origin, and the host's headers that said it are never passed on. A session a day or more old is set again,
+// its expiry moved on; an answer that sets a cookie is not to be stored by any cache.
+async function sessionSet(out: Response, token: string, account: string, name: string, site?: Site): Promise<void> {
+  const start = out.headers.get('tape-session-start'),
+    end = out.headers.get('tape-session-end');
+  out.headers.delete('tape-session-start');
+  out.headers.delete('tape-session-end');
+  if (!site) return;
+  const cookie =
+    start !== null
+      ? await sessionCookie(token, account, name, start)
+      : end !== null
+        ? endedCookie
+        : site.session && stale(site.session.exp)
+          ? await sessionCookie(token, account, name, site.session.id)
+          : null;
+  if (cookie === null) return;
+  out.headers.append('set-cookie', cookie);
+  out.headers.set('cache-control', 'no-store');
 }
 
 const upload = async ({ request, stub, account, name, origin, token }: Args): Promise<Response> => {

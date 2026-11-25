@@ -24,10 +24,14 @@ export const API_CSP = "default-src 'none'; frame-ancestors 'none'; sandbox";
 export const TRACE_CSP = "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; sandbox";
 export const PROGRAM_CSP =
   "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms";
+// On a program's own origin (session.ts) its page keeps that origin (allow-same-origin), so a form it posts to
+// itself carries its SameSite=Lax session cookie; it still runs no script. The origin is the program's alone.
+export const SITE_CSP =
+  "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'; sandbox allow-forms allow-same-origin";
 const PROGRAM_PATH = /^\/p\/|^\/[^/]+\/[^/]+\/v\/\d+(\/|$)/;
 /** The commit this Worker was built from (vite.config.ts), or "dev" in the tests. */
 const SHA = typeof TAPE_VERSION === 'string' ? TAPE_VERSION : 'dev';
-export const secured = (res: Response, path: string, version?: string): Response => {
+export const secured = (res: Response, path: string, version?: string, site = false): Response => {
   const out = new Response(res.body, res),
     h = out.headers,
     type = h.get('content-type') ?? '',
@@ -42,6 +46,9 @@ export const secured = (res: Response, path: string, version?: string): Response
   h.set('x-frame-options', 'DENY');
   h.set('referrer-policy', 'no-referrer');
   h.set('x-robots-tag', 'noindex');
-  h.set('content-security-policy', !active ? API_CSP : PROGRAM_PATH.test(path) ? PROGRAM_CSP : TRACE_CSP);
+  h.set(
+    'content-security-policy',
+    !active ? API_CSP : site ? SITE_CSP : PROGRAM_PATH.test(path) ? PROGRAM_CSP : TRACE_CSP,
+  );
   return out;
 };

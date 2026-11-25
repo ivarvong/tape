@@ -31,6 +31,9 @@ declare namespace Cloudflare {
   interface Env {
     LOADER: WorkerLoader;
     TOKEN: string;
+    /** where each published program has an origin of its own, <name>--<account>.<PROGRAM_DOMAIN> (session.ts); unset,
+     * none has (the deploy step is in docs/service.md) */
+    PROGRAM_DOMAIN?: string;
     // the version this is (cloudflare.config.ts); the tests have none
     VERSION?: WorkerVersionMetadata;
     // the hosted compiler and runner (mcp/src, cloudflare.config.ts)

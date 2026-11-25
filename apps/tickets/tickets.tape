@@ -266,6 +266,7 @@ fn posted(path: View, body: View, caller: Caller) -> Outcome {
   match caller {
     Operator -> operator_post(path, body)
     Anyone -> buyer_post(path, body)
+    Session -> buyer_post(path, body)
   }
 }
 

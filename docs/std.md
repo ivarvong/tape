@@ -265,7 +265,7 @@ Uses: [`hmac_sha256_verify`](#fn-hmac_sha256_verify), [`hmac_sha256`](#fn-hmac_s
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Done`](#type-done), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`value_or`](#fn-value_or), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at), [`utf8_end`](#fn-utf8_end)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex_value`](#fn-hex_value), [`is_json`](#fn-is_json), [`json_member`](#fn-json_member), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
-- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html), [`HttpReply`](#type-httpreply), [`fetch`](#fn-fetch), [`method_name`](#fn-method_name)
+- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`start_session`](#fn-start_session), [`end_session`](#fn-end_session), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html), [`HttpReply`](#type-httpreply), [`fetch`](#fn-fetch), [`method_name`](#fn-method_name)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
@@ -1411,7 +1411,7 @@ Every row of a query as a JSON array, each row written as write_json writes it.
 
 ## std/http.tape
 
-A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY. A request that came through a published name's public route (no token: anyone) ends its line with a word, METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. The request headers the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case. `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests. What `handle` gives back is a Response (below), never bytes: the host writes the status and the headers from it.
+A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY. A request that came through a published name's public route (no token: anyone) ends its line with a word, METHOD SP TARGET SP public, and `caller` is Anyone; one on the name's own origin with a session the host checked ends with ` session`, its id in the first header, the host's tape-session, and is Session(id); every other request is the operator's. The request headers the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case. `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests. What `handle` gives back is a Response (below), never bytes: the host writes the status and the headers from it.
 
 ### type Caller
 
@@ -1419,10 +1419,11 @@ A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH 
 type Caller {
   Operator
   Anyone
+  Session(id: View)
 }
 ```
 
-Who sent a request: the operator (with the token), or Anyone, through a published name's public route.
+Who sent a request. Operator: it came with the operator's token. Anyone: it came through a published name's public route (`/p/:account/:name/…`, or the name's own origin) with no session. Session(id): it came on the name's own origin (`<name>--<account>.<PROGRAM_DOMAIN>`, docs/service.md#identity) with the cookie an answer of this program's `start_session(id:)` set there, which the host checked: signed with the service's key over this account, this name, the id and its expiry (30 days from its last use), so no other program's session, no expired one and no forged one is a Session. The id is what the program chose: Session says the client is the one this program started that session with, nothing about who that is beyond what the program knew when it started it. A Session request is public as Anyone's is: the program decides what it may do.
 
 ### type Method
 
@@ -1476,6 +1477,8 @@ The request `handle` is given, parsed.
 ```
 > request(raw: "POST /holds?x=1 public\nqty=1")
 Request(method: Post, path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
+> request(raw: "GET /me session\rtape-session: ada\n")
+Request(path: "/me", caller: Session(id: "ada"))
 > request(raw: "PROPFIND /k\n").method
 Other(name: "PROPFIND")
 > request(raw: "GET /k/a b\n")
@@ -1619,6 +1622,32 @@ A redirect to `to`, a path or a URL: 303 See Other with a location. 303 is the o
 ```
 > redirect(to: "/links/7")
 Response(status: 303, headers: Cons(head: Header(name: "location", value: "/links/7"), tail: Nil))
+```
+
+### fn start_session
+
+```tape
+fn start_session(out: Response, id: View) -> Response
+```
+
+The answer, and a session started with `id`, 1 to 256 bytes of printable ASCII (a user's id once a password or a mailed link checked out): on the program's own origin (docs/service.md#identity) the host sets a cookie the program never sees, HttpOnly, Secure, SameSite=Lax, signed with the service's key over this account, this name, the id and its expiry, and the client's requests are `Session(id)` for 30 days from their last use. Anywhere else (the operator's route, /p/, a host with no origins of the programs' own) the host sets nothing. It is a header of the host's own, `:session`, which no answer sends.
+
+```
+> redirect(to: "/") |> start_session(id: "ada")
+Response(status: 303, headers: Cons(head: Header(name: ":session", value: "ada"), tail: Cons(head: Header(name: "location", value: "/"), tail: Nil)))
+```
+
+### fn end_session
+
+```tape
+fn end_session(out: Response) -> Response
+```
+
+The answer, and the client's session ended: on the program's own origin the host clears the cookie, and the next request is Anyone. A header of the host's own, `:session-end`.
+
+```
+> empty(status: 204) |> end_session()
+Response(status: 204, headers: Cons(head: Header(name: ":session-end", value: ""), tail: Nil))
 ```
 
 ### fn header

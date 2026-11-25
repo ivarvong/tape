@@ -8,6 +8,8 @@ const miniflare = {
   workerLoaders: { LOADER: {} },
   bindings: {
     TOKEN: 'test-token',
+    // programs' own origins (src/session.ts): a test sends to <name>--<account>.tape.test
+    PROGRAM_DOMAIN: 'tape.test',
     JEPSEN_SEEDS: process.env.JEPSEN_SEEDS ?? '1,2,3,4',
     KV_SEEDS: process.env.KV_SEEDS ?? '1,2,3',
     DUMP_SEEDS: process.env.DUMP_SEEDS ?? '',
