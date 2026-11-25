@@ -38,13 +38,17 @@ function refuse(prog: Program, h: FnDecl): never {
 
 // ---- C96: a status the host would refuse, written as a literal
 
-/** std/http.tape's functions that take a status, and whether each takes a body */
+/** std/http.tape's functions that take a status, and whether each takes a body (a problem writes its own) */
 const STATUSED: ReadonlyMap<string, boolean> = new Map([
   ['respond', true],
   ['respond_as', true],
   ['json', true],
   ['empty', false],
+  ['problem', false],
+  ['problem_with', false],
 ]);
+/** the functions whose status is an error's: 400 to 599 */
+const ERRORS = new Set(['problem', 'problem_with']);
 const NO_BODY = new Set([204n, 205n, 304n]);
 /** The std/http.tape function a call in a program's file names, or null for any other. */
 function stdHttp(prog: Program, name: string): string | null {
@@ -60,7 +64,7 @@ const argOf = (e: Call, name: string, first: boolean): Expr | undefined =>
     ?.value;
 /**
  * The statuses written as literals that the host refuses (host.ts responseOf): outside 200 to 599, and a 204, 205
- * or 304 with a body that is not a bare `buf()`. A status that is a value is checked by the host when it answers.
+ * or 304 with a body that is not a bare `buf()`; and a problem's that is not an error, 200 to 399. A status that is a value is checked by the host when it answers.
  */
 export function statusLiterals(prog: Program): Problem[] {
   const found: Problem[] = [];
@@ -73,6 +77,12 @@ export function statusLiterals(prog: Program): Problem[] {
       const s = status?.k === 'int' ? status.v : status?.k === 'neg' && status.e.k === 'int' ? -status.e.v : null;
       if (fn === null || s === null) return;
       const at = { file: f.file, line: e.line, code: 'C96' };
+      if (ERRORS.has(fn) && s >= 200n && s < 400n)
+        found.push({
+          ...at,
+          message: `${fn} answers an error, and status ${s} is not one`,
+          hint: `A problem is a client's error (400 to 499) or the program's (500 to 599): \`${fn}(status: 400, …)\` for a request it cannot take, 404 for what is not there, 409 for a conflict. An answer that succeeded is \`json(status: ${s}, value: …)\` or \`respond(status: ${s})\`.`,
+        });
       if (s < 200n || s > 599n)
         found.push({
           ...at,

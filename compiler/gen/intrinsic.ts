@@ -372,7 +372,7 @@ function secret(u: Use): Type {
 }
 
 /**
- * http_send(to: http, request, body, within) -> Result[View, CallError]: std/http.tape's fetch, and nothing else
+ * http_send(to: http, request, body, within) -> Result[View, CallError[View]]: std/http.tape's fetch, and nothing else
  * (C22 in any other file). `request` is the request's method, URL, headers and key as JSON, `body` its bytes. A
  * reply not in the log stops the run, as a call does (a fetch is a commit point), and the host makes the request
  * (host/run.ts httpOut). The host answers a block: the status as 4 bytes (0 ok, 1 timeout, 2 unreachable, 3
@@ -393,7 +393,7 @@ function httpSend(u: Use): Type {
   const [bp, bn] = view(u, 2);
   const within = int(u, 3);
   const [r, tag, pt, n] = [fresh(c, I32), fresh(c, I32), fresh(c, I32), fresh(c, I32)];
-  const errT = T('CallError');
+  const errT = T('CallError', VIEW);
   const err = c.B.adtOf(errT, u.e);
   const res = T('Result', VIEW, errT);
   const adt = c.B.adtOf(res, u.e);
@@ -405,7 +405,7 @@ function httpSend(u: Use): Type {
     fail(
       u.e,
       'C99',
-      'std/core.tape: CallError must be Timeout, Unreachable, Rejected(reason: View), Skew(reason: View)',
+      'std/core.tape: CallError[View] must be Timeout, Unreachable, Rejected(reason: View), Skew(reason: View)',
       'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
     );
   const which = (name: string): number => adt.variants.findIndex(v => v.name === name);

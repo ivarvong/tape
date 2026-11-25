@@ -10,6 +10,7 @@ import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
 import hostFailure from '../../host/failure.ts?erased';
+import hostProblem from '../../host/problem.ts?erased';
 import hostSecrets from '../../host/secrets.ts?erased';
 import programSrc from './program.ts?erased';
 import recordsSrc from './records.ts?erased';
@@ -57,6 +58,7 @@ const HOST_PARTS = {
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
   'host/failure.js': hostFailure,
+  'host/problem.js': hostProblem,
   'host/secrets.js': hostSecrets,
 };
 
@@ -972,8 +974,8 @@ export class Name extends DurableObject {
       return carry(
         reply(
           {
-            error,
-            message: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
+            error: `v${version} was built by an older compiler, and this one cannot build its source; it is not run until a version that builds is uploaded`,
+            code: error,
             errors: unbuilt,
             ...outcomeBody('not_applied'),
           },
@@ -1728,7 +1730,9 @@ export class Name extends DurableObject {
     bytes: Uint8Array | ArrayBuffer,
     fault: string | null = null,
   ): Promise<{ status: string; body: Uint8Array }> {
-    if (!this.#alive()) return { status: 'rejected', body: enc.encode(`there is no program named ${name}`) };
+    // nothing answers to the name: Unreachable, which a caller sends again with the same key (a refusal is a value of
+    // the method's own error type, which only the program gives)
+    if (!this.#alive()) return { status: 'unreachable', body: enc.encode(`there is no program named ${name}`) };
     const faulty = FAULTY.test(account) ? fault : null;
     if (faulty === 'reset_callee_before') this.reset('jepsen: the callee was reset before it ran');
     const began = (await fresh()).now,
@@ -1875,7 +1879,7 @@ export class Name extends DurableObject {
   // One call of a tool function: the latest version's method, logged like any call this program serves.
   async tool(account: string, name: string, method: string, bytes: Uint8Array | ArrayBuffer): Promise<ToolAnswer> {
     if (!this.#alive())
-      return { status: 'rejected', body: enc.encode(`there is no tool ${name}`), version: 0, id: null };
+      return { status: 'unreachable', body: enc.encode(`there is no tool ${name}`), version: 0, id: null };
     const answer = await this.data(account, name).tool(method, bytes);
     return answer;
   }

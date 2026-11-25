@@ -251,7 +251,7 @@ const REFUSAL = tickets.slice(
 );
 ok(
   'the refusal arm is where this test expects it',
-  REFUSAL.includes('Err(error: Rejected(reason)) -> refund_refused('),
+  REFUSAL.includes('Err(error: Rejected(reason: refused)) -> refund_refused('),
 );
 // and, as it was then, an unknown answer asked about again every 5 s with no cap (apps/tickets/tickets.tape now backs
 // off and gives up, refund_unknown, so without the arm a refused refund ends in refund_unresolved instead)

@@ -1,5 +1,5 @@
 // tools.ts: Tape programs as tools for agents. A tool is a program made only of exported functions
-// (`export fn quote(message: Basket) -> Result[Price, View]`): one JSON message in, one JSON reply or a refusal
+// (`export fn quote(message: Basket) -> Result[Price, QuoteError]`): one JSON message in, one JSON reply or a refusal
 // out. Its capabilities are its parameters, and nothing else can give it any: a Tape function reaches storage
 // only through a Sql value, another program only through a Remote, the time only through a Clock, randomness
 // only through an Entropy, and the host passes them only as parameters of the exported function. The module
@@ -149,7 +149,7 @@ export function refusal(name: string, built: Tool, policy: Policy | null | undef
   if (built.methods.length === 0)
     return {
       status: 400,
-      error: `tool ${name} exports no function; a tool is \`export fn name(capabilities…, message: Type) -> Result[Reply, View]\``,
+      error: `tool ${name} exports no function; a tool is \`export fn name(capabilities…, message: Type) -> Result[Reply, Error]\`, Error a type of its own`,
     };
   if (built.entry.length > 0)
     return {
@@ -225,7 +225,15 @@ export function manifest(name: string, version: number, built: Tool, source: str
 }
 
 /** What calling a tool gave: its output or its refusal, and where its trace is. */
-export type ToolResult = { ok: boolean; output?: unknown; error?: string; trace_url?: string; otlp_url?: string };
+/** A tool's answer: its output, or why not (`refusal`: the value of its error type it refused with, as JSON). */
+export type ToolResult = {
+  ok: boolean;
+  output?: unknown;
+  error?: string;
+  refusal?: unknown;
+  trace_url?: string;
+  otlp_url?: string;
+};
 export type McpHost = {
   version: string;
   list: () => Promise<ToolEntry[]> | ToolEntry[];

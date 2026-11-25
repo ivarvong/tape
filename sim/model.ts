@@ -186,11 +186,12 @@ type Named = { name: string; text: string };
 type Ready = Named & BuiltProgram & { prog: Program };
 type Stubs = Record<string, Record<string, Schema | null>>;
 
-// Remotes that some program calls and no file serves: { remote: { method: reply schema } }
-function unserved(programs: readonly Ready[]): Stubs {
+// Remotes that some program calls and no file serves: { remote: { method: reply schema } }, and the schema of the
+// error each call names, for the refusals the stand-in gives
+function unserved(programs: readonly Ready[], part: 'replies' | 'refusals' = 'replies'): Stubs {
   const stubs: Stubs = {};
   for (const program of programs)
-    for (const [call, schema] of Object.entries(program.info.json.replies)) {
+    for (const [call, schema] of Object.entries(program.info.json[part])) {
       const [to = '', method = ''] = call.split('.');
       if (to !== '' && !programs.some(p => p.name === to)) (stubs[to] ??= {})[method] = schema;
     }
@@ -286,6 +287,7 @@ export function auto(files: readonly Named[], options: AutoOptions = {}): Auto |
     modules: Object.fromEntries(programs.map(p => [p.name, p.module])),
     entry: entry.name,
     stubs,
+    refusals: unserved(programs, 'refusals'),
     machines: Object.fromEntries(programs.map(p => [p.name, p.info.machines])),
     queries: Object.fromEntries(programs.map(p => [p.name, p.info.queries])),
     clients: rand => Array.from({ length: clients }, () => Array.from({ length: ops }, () => request(rand))),

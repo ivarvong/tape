@@ -7,7 +7,10 @@ schema "INSERT OR IGNORE INTO rates VALUES ('EUR', 92), ('GBP', 79), ('JPY', 153
 type Pair { Pair(to: View) }
 type Rate { Rate(per_hundred: Int) }
 
-export fn rate(db: Sql, message: Pair) -> Result[Rate, View] {
+// why fx refuses: it has no rate for the currency asked
+type RateError { NoRate }
+
+export fn rate(db: Sql, message: Pair) -> Result[Rate, RateError] {
   known(found: sql_first(
     row: Rate,
     query: "SELECT per_hundred FROM rates WHERE currency = :to",
@@ -15,10 +18,10 @@ export fn rate(db: Sql, message: Pair) -> Result[Rate, View] {
   ))
 }
 
-fn known(found: Option[Rate]) -> Result[Rate, View] {
+fn known(found: Option[Rate]) -> Result[Rate, RateError] {
   match found {
     Some(value) -> Ok(value)
-    None -> Err(error: "no rate for that currency")
+    None -> Err(error: NoRate)
   }
 }
 

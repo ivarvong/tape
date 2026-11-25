@@ -37,7 +37,10 @@ describe('tools', () => {
     // no policy: only pure tools
     expect((await json(await agent(`/tools/${A}/notes`, { method: 'POST', body: notes }))).body).toEqual({
       tool: 'notes',
-      error: 'capability not granted',
+      type: 'about:blank',
+      title: 'Forbidden',
+      status: 403,
+      detail: 'capability not granted',
       hint: 'An operator grants capabilities with PUT /_policy/:account, for example {"sql": true}; nothing was stored.',
       problems: ['Sql is not granted: export fn put takes db: Sql'],
       granted: [],
@@ -79,7 +82,7 @@ describe('tools', () => {
       await agent(`/tools/${A}/price/quote`, { method: 'POST', body: '{"unit_cents":1999,"qty":0,"tax_percent":8}' }),
     );
     expect([bad.status, at(bad.body, 'ok')]).toEqual([422, false]);
-    expect(at(bad.body, 'error')).toMatch(/qty/);
+    expect(at(bad.body, 'detail')).toMatch(/qty/);
 
     // a Sql tool: its own database, kept across calls
     expect((await agent(`/tools/${A}/notes`, { method: 'POST', body: notes })).status).toBe(201);
@@ -116,7 +119,10 @@ describe('tools', () => {
       status: 403,
       body: {
         tool: 'ledger',
-        error: 'capability not granted',
+        type: 'about:blank',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'capability not granted',
         problems: ['Remote payments is not granted: export fn pay takes payments: Remote, the program named payments'],
         granted: ['sql', 'remote:fx'],
         hint: 'An operator grants capabilities with PUT /_policy/:account, for example {"remote": ["payments"]}; nothing was stored.',
@@ -178,7 +184,11 @@ describe('tools', () => {
     expect(at(called, '_meta', 'tape/trace_url')).toMatch(/tool-convert/);
     expect(
       await rpc('tools/call', { name: 'convert_convert', arguments: { usd_cents: 250, to: 'XXX' } }),
-    ).toMatchObject({ isError: true, content: [{ type: 'text', text: 'no rate for that currency' }] });
+    ).toMatchObject({
+      isError: true,
+      // the tool's refusal is a value of its error type, ConvertError, as JSON
+      content: [{ type: 'text', text: 'the tool refused: {"Unpriced":{"currency":"XXX"}}' }],
+    });
 
     // revoking Remote fx stops the tool at once: at the call, and at the hop to fx
     await operator(`/_policy/${A}`, { method: 'PUT', body: '{"sql":true}' });
@@ -199,12 +209,15 @@ describe('tools', () => {
       status: 400,
       body: {
         tool: 'h',
-        error:
-          'tool h exports no function; a tool is `export fn name(capabilities…, message: Type) -> Result[Reply, View]`',
+        type: 'about:blank',
+        title: 'Bad Request',
+        status: 400,
+        detail:
+          'tool h exports no function; a tool is `export fn name(capabilities…, message: Type) -> Result[Reply, Error]`, Error a type of its own',
       },
     });
     const schemaOnly =
-      'schema "CREATE TABLE t(a INTEGER)"\ntype A { A(a: Int) }\nexport fn echo(message: A) -> Result[A, View] {\n  Ok(value: message)\n}\n';
+      'schema "CREATE TABLE t(a INTEGER)"\ntype A { A(a: Int) }\ntype Nope { Nope }\nexport fn echo(message: A) -> Result[A, Nope] {\n  Ok(value: message)\n}\n';
     expect(
       at(await body(await operator('/tools/agents2/echo', { method: 'POST', body: schemaOnly })), 'problems'),
     ).toEqual(['Sql is not granted: it declares schema statements, which run on its database']);
@@ -221,7 +234,10 @@ describe('tools', () => {
       status: 403,
       body: {
         tool: 'later',
-        error: 'capability not granted',
+        type: 'about:blank',
+        title: 'Forbidden',
+        status: 403,
+        detail: 'capability not granted',
         problems: ['Timer is not granted: export fn woken takes timer: Timer'],
         granted: ['sql', 'clock', 'entropy'],
         hint: 'A tool runs only when an agent calls it, so no policy grants Timer: take the timer out, or upload it as a program (POST /:account/:name); nothing was stored.',

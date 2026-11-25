@@ -12,8 +12,11 @@ type Basket { Basket(
 ) }
 type Price { Price(subtotal_cents: Int, discount_cents: Int, tax_cents: Int, total_cents: Int) }
 
+// A quote is never refused: what a basket can hold is checked as it is decoded. The type says so to a caller.
+type QuoteError { Unpriced }
+
 // Price a basket: unit price times quantity, less an optional discount, plus tax on what is left (rounded down).
-export fn quote(message: Basket) -> Result[Price, View] {
+export fn quote(message: Basket) -> Result[Price, QuoteError] {
   priced(
     subtotal: message.unit_cents * message.qty,
     off: percent_of(message.discount_percent),
@@ -28,11 +31,11 @@ fn percent_of(p: Option[Percent]) -> Int {
   }
 }
 
-fn priced(subtotal: Int, off: Int, tax: Int) -> Result[Price, View] {
+fn priced(subtotal: Int, off: Int, tax: Int) -> Result[Price, QuoteError] {
   taxed(subtotal, discount: subtotal * off / 100, tax)
 }
 
-fn taxed(subtotal: Int, discount: Int, tax: Int) -> Result[Price, View] {
+fn taxed(subtotal: Int, discount: Int, tax: Int) -> Result[Price, QuoteError] {
   Ok(value: Price(
     subtotal_cents: subtotal,
     discount_cents: discount,

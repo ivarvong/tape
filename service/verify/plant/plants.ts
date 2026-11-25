@@ -24,8 +24,8 @@ const R7: Edit = {
 // program.ts: a callee whose commit failed answers `rejected`
 const S2: Edit = {
   file: 'service/src/program.ts',
-  find: "const status = transient ? 'unreachable' : 'rejected';",
-  replace: "const status = transient ? 'rejected' : 'rejected';",
+  find: "const status = transient ? 'unreachable' : 'skew';",
+  replace: "const status = transient ? 'skew' : 'skew';",
 };
 
 export const PLANTS: readonly Plant[] = [
@@ -128,7 +128,7 @@ export const PLANTS: readonly Plant[] = [
   },
   {
     id: 'S2',
-    what: 'a callee whose commit fails answers rejected: the caller compensates, a retry of the key succeeds',
+    what: 'a callee whose commit fails answers a final outcome (skew; rejected until a refusal had to be a value of the error type): the caller gives up a call its key would have made',
     edits: [S2],
     detect: {
       cmd: ['npx', 'vitest', 'run', 'test/service.test.ts', '-t', 'a callee whose commit fails'],

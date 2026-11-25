@@ -134,14 +134,14 @@ const PAY = (() => {
   const text = `schema "CREATE TABLE IF NOT EXISTS charges(who TEXT PRIMARY KEY, n INTEGER NOT NULL)"
 type Pay { Pay(who: View) }
 type Done { Done(n: Int) }
-type Ack { Ack(ok: Int) }
-export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, View] {
+type Ack { Ack(ok: Int) } type Refusal { Refused(reason: View) }
+export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, Refusal] {
   let _ = sql_exec(
     query: "INSERT INTO charges(who, n) VALUES (:who, 1) ON CONFLICT(who) DO UPDATE SET n = n + 1",
     who: message.who
   )
-  let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, within: 1000, once: message.who) else -> Err(
-    error: "bank"
+  let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, error: Refusal, within: 1000, once: message.who) else -> Err(
+    error: Refused(reason: "bank")
   )
   Ok(value: Done(n: ok))
 }

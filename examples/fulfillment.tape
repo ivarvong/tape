@@ -107,6 +107,18 @@ type Refund { Refund(card: View, amount: Int) }
 type Refunded { Refunded(balance: Int) }
 type Ship { Ship(address: View, sku: View, qty: Int) }
 type Shipped { Shipped(label: Int) }
+// what payments refuses with: the same type payments.tape declares, so the fingerprints agree
+type PaymentError {
+  Insufficient
+  NoSuchCard
+}
+// what inventory refuses with
+type StockError {
+  NotEnough
+  NoSuchSku
+}
+// what shipping refuses with
+type ShipError { NoCarrier(address: View) }
 
 // What a run of the workflow comes to: the order as it now stands, or why there is none. handle writes it as an
 // HTTP response; woken, run by a timer, returns it as its reply.
@@ -221,12 +233,13 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         method: "reserve",
         send: Reserve(sku, qty),
         reply: Reserved,
+        error: StockError,
         within: wait,
         once: ForOrder(order: id)
       ) else {
         Err(error: Rejected(reason)) -> show(
           status: 409,
-          found: move(id, from: Reserving, to: Failed, note: reason)
+          found: move(id, from: Reserving, to: Failed, note: stock_refusal(reason))
         )
         Err(error) -> stalled(id, state: Reserving, step: "inventory.reserve", error)
       }
@@ -248,12 +261,13 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         method: "charge",
         send: Charge(card, amount),
         reply: Charged,
+        error: PaymentError,
         within: wait,
         once: ForOrder(order: id)
       ) else {
         Err(error: Rejected(reason)) -> advance(
           wait,
-          found: move(id, from: Charging, to: Releasing, note: reason)
+          found: move(id, from: Charging, to: Releasing, note: payment_refusal(reason))
         )
         Err(error) -> stalled(id, state: Charging, step: "payments.charge", error)
       }
@@ -265,12 +279,18 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         method: "label",
         send: Ship(address, sku, qty),
         reply: Shipped,
+        error: ShipError,
         within: wait,
         once: ForOrder(order: id)
       ) else {
-        Err(error: Rejected(reason)) -> advance(
+        Err(error: Rejected) -> advance(
           wait,
-          found: move(id, from: Shipping, to: Refunding, note: reason)
+          found: move(
+            id,
+            from: Shipping,
+            to: Refunding,
+            note: "no carrier delivers to that address"
+          )
         )
         Err(error) -> stalled(id, state: Shipping, step: "shipping.label", error)
       }
@@ -292,15 +312,16 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         method: "refund",
         send: Refund(card, amount),
         reply: Refunded,
+        error: PaymentError,
         within: wait,
         once: ForOrder(order: id)
       ) else {
         // a compensation that is refused stalls like one with no answer: stalled stops after its retries
-        Err(error: refusal = Rejected(reason)) -> stalled(
+        Err(error: Rejected(reason)) -> refused(
           id,
           state: Refunding,
           step: "payments.refund",
-          error: refusal
+          reason: payment_refusal(reason)
         )
         Err(error) -> stalled(id, state: Refunding, step: "payments.refund", error)
       }
@@ -320,14 +341,15 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         method: "release",
         send: Release(sku, qty),
         reply: Released,
+        error: StockError,
         within: wait,
         once: ForOrder(order: id)
       ) else {
-        Err(error: refusal = Rejected(reason)) -> stalled(
+        Err(error: Rejected(reason)) -> refused(
           id,
           state: Releasing,
           step: "inventory.release",
-          error: refusal
+          reason: stock_refusal(reason)
         )
         Err(error) -> stalled(id, state: Releasing, step: "inventory.release", error)
       }
@@ -366,15 +388,36 @@ fn move(id: Int, from: OrderState, to: OrderState, note: View) -> Option[Order] 
 // tried again later, by a timer (retrying); a refusal while compensating (a refund or a release turned down) is
 // not, as it needs a person. Each write happens only while the order is still in that state: another request
 // may have finished the step meanwhile (a retry racing this one), and then the order is shown as that request left it.
-fn stalled(id: Int, state: OrderState, step: View, error: CallError) -> Outcome {
+fn stalled[E](id: Int, state: OrderState, step: View, error: CallError[E]) -> Outcome {
   match error {
     Timeout -> retrying(id, why: step ++ " did not answer in time", found: failed_again(id, state))
     Unreachable -> retrying(id, why: step ++ " is unreachable", found: failed_again(id, state))
-    Rejected(reason) -> show(
-      status: 500,
-      found: noted(id, state, stall: step ++ " was refused while compensating: " ++ reason)
-    )
+    Rejected -> show(status: 500, found: noted(id, state, stall: step ++ " was refused"))
     Skew(reason) -> show(status: 502, found: noted(id, state, stall: step ++ ": " ++ reason))
+  }
+}
+
+// A compensation turned down: it is not asked again, as it needs a person.
+fn refused(id: Int, state: OrderState, step: View, reason: View) -> Outcome {
+  show(
+    status: 500,
+    found: noted(id, state, stall: step ++ " was refused while compensating: " ++ reason)
+  )
+}
+
+// What inventory's refusal says, in the order's note.
+fn stock_refusal(reason: StockError) -> View {
+  match reason {
+    NotEnough -> "not enough stock"
+    NoSuchSku -> "no such sku"
+  }
+}
+
+// What payments' refusal says, in the order's note.
+fn payment_refusal(reason: PaymentError) -> View {
+  match reason {
+    Insufficient -> "card declined: not enough funds"
+    NoSuchCard -> "no such card"
   }
 }
 
@@ -454,11 +497,7 @@ fn show(status: Int, found: Option[Order]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, order) -> write_json(out: buf(), value: order) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

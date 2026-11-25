@@ -20,17 +20,13 @@ type Total { Total(customers: Int, total: Int) }
 fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(method: Post, path: "/hooks", body) -> deliver(body)
-    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn deliver(body: View) -> Response {
   let Ok(value: Delivery(source, events)) = decode(json: body, as: Delivery) else {
-    Err(error) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: error)
-      |> append(view: "}")
-      |> respond(status: 400)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let out = route_all(source, events, out: buf() |> append(view: "{\"results\":["), first: True)
   let Some(

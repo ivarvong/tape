@@ -32,7 +32,8 @@ import type { Cluster, InvokeOptions, Name, Retention, Upload } from './name.ts'
 import { RouterTrace, store } from './spans.ts';
 import type { Step } from './spans.ts';
 import { requestOtlp } from './view.ts';
-import { hex, messageOf } from './web.ts';
+// json: a body as JSON; an error (400 and up) as a problem, its `error` the detail (web.ts reply)
+import { hex, messageOf, reply as json } from './web.ts';
 import { APPLY, encodeOutcome } from './records.ts';
 
 export const MAX_SHARDS = 64;
@@ -41,8 +42,6 @@ export const MAX_VALUE = 65536;
 export const CLUSTER = /^[a-z0-9][a-z0-9_-]{0,57}$/; // kv-<cluster>-<i> is a name: at most 64
 export const KEY = /^[A-Za-z0-9\-._~:%]{1,256}$/;
 const enc = new TextEncoder();
-const json = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
-  Response.json(body, { status, headers });
 type Fields = Readonly<Record<string, unknown>>;
 const fieldsOf = (v: unknown): Fields => (typeof v === 'object' && v !== null ? { ...v } : {});
 

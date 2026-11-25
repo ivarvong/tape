@@ -10,9 +10,14 @@ type Put { Put(key: Key, text: Text) }
 type Get { Get(key: Key) }
 type Stored { Stored(key: View, revision: Int) }
 type Note { Note(key: View, text: View, revision: Int) }
+// why notes refuses: a save that was not stored, a key with no note
+type NoteError {
+  NotSaved
+  NoNote
+}
 
 // Save a note under a key, replacing what was there; each save of a key adds one to its revision.
-export fn put(db: Sql, message: Put) -> Result[Stored, View] {
+export fn put(db: Sql, message: Put) -> Result[Stored, NoteError] {
   stored(found: sql_first(
     row: Stored,
     query: "INSERT INTO notes VALUES (:key, :text, 1) ON CONFLICT(key) \
@@ -23,7 +28,7 @@ export fn put(db: Sql, message: Put) -> Result[Stored, View] {
 }
 
 // Read the note saved under a key.
-export fn get(db: Sql, message: Get) -> Result[Note, View] {
+export fn get(db: Sql, message: Get) -> Result[Note, NoteError] {
   found(note: sql_first(
     row: Note,
     query: "SELECT key, text, revision FROM notes WHERE key = :key",
@@ -31,17 +36,17 @@ export fn get(db: Sql, message: Get) -> Result[Note, View] {
   ))
 }
 
-fn stored(found: Option[Stored]) -> Result[Stored, View] {
+fn stored(found: Option[Stored]) -> Result[Stored, NoteError] {
   match found {
     Some(value) -> Ok(value)
-    None -> Err(error: "the note was not saved")
+    None -> Err(error: NotSaved)
   }
 }
 
-fn found(note: Option[Note]) -> Result[Note, View] {
+fn found(note: Option[Note]) -> Result[Note, NoteError] {
   match note {
     Some(value) -> Ok(value)
-    None -> Err(error: "no note under that key")
+    None -> Err(error: NoNote)
   }
 }
 

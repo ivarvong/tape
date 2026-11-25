@@ -1,6 +1,8 @@
 // mcp.ts: MCP over streamable HTTP (2025-06-18), JSON responses only: initialize, ping, tools/list, tools/call.
 // What a server serves is its tools, already in MCP's shape, and what calling one gives. Two servers use it: the
 // service's tools of an account (tools.ts, mcp()) and the hosted compiler and runner (mcp/, served at /mcp).
+import { PROBLEM_TYPE, problemOf } from '../../host/problem.ts';
+
 export type Fields = Readonly<Record<string, unknown>>;
 export const fieldsOf = (v: unknown): Fields => (typeof v === 'object' && v !== null ? { ...v } : {});
 
@@ -18,7 +20,11 @@ export type McpServer = {
 const PROTOCOLS = new Set(['2025-06-18', '2025-03-26']);
 
 export async function serveMcp(request: Request, server: McpServer): Promise<Response> {
-  if (request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
+  if (request.method !== 'POST')
+    return new Response(
+      JSON.stringify(problemOf(405, 'an MCP endpoint takes POST (JSON-RPC); it opens no event stream')),
+      { status: 405, headers: { allow: 'POST', 'content-type': PROBLEM_TYPE } },
+    );
   let msg: Fields;
   try {
     msg = fieldsOf(await request.json());

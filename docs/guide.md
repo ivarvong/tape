@@ -34,7 +34,6 @@ type NewOrder { NewOrder(key: Key, item: View, amount: Amount) }
 type Order { Order(id: Int, key: View, item: View, amount: Int) }
 type Item { Item(item: View, sold: Int) }
 type Placed { Placed(order: Int, new: Bool) }
-type Problem { Problem(error: View) }
 
 fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
@@ -42,7 +41,7 @@ fn handle(raw: View, db: Sql) -> Response {
     Request(method: Get, path: "/items/" ++ item) -> shown(
       found: sql_first(row: Item, query: "SELECT item, sold FROM items WHERE item = :item", item)
     )
-    _ -> problem(status: 404, error: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -50,9 +49,9 @@ fn handle(raw: View, db: Sql) -> Response {
 // order it made (new: False)
 fn placed(body: View) -> Response {
   let Ok(value: NewOrder(key, item, amount)) = decode(json: body, as: NewOrder) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
-  let True = item != "" else -> problem(status: 400, error: "item: empty")
+  let True = item != "" else -> problem(status: 400, detail: "item: empty")
   let 1 = sql_exec(
     query: "INSERT INTO orders(key, item, amount) VALUES (:key, :item, :amount) ON CONFLICT(key) \
         DO NOTHING",
@@ -67,7 +66,7 @@ fn placed(body: View) -> Response {
     query: "UPDATE items SET sold = sold + 1 WHERE item = :item",
     item
   ) else -> rollback(
-    out: problem(status: 404, error: "no such item \(item)")
+    out: problem(status: 404, detail: "no such item \(item)")
   )
   answered(found: by_key(key), new: True)
 }
@@ -79,19 +78,15 @@ fn by_key(key: View) -> Option[Order] {
 fn answered(found: Option[Order], new: Bool) -> Response {
   match found {
     Some(value: Order(id)) -> json(status: 201, value: Placed(order: id, new))
-    None -> problem(status: 500, error: "the order is gone")
+    None -> problem(status: 500, detail: "the order is gone")
   }
 }
 
 fn shown(found: Option[Item]) -> Response {
   match found {
     Some(value) -> json(status: 200, value)
-    None -> problem(status: 404, error: "no such item")
+    None -> problem(status: 404, detail: "no such item")
   }
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 ```
 
@@ -113,17 +108,17 @@ Sent to the `run` tool ([`mcp.md`](mcp.md)):
 }
 ```
 
-The answers, one a request (every one `application/json`):
+The answers, one a request (`application/json`, and each error `application/problem+json`):
 
 ```text orders.tape
 201 {"order":1,"new":true}
 201 {"order":1,"new":false}
 201 {"order":2,"new":true}
-400 {"error":"item: empty"}
-404 {"error":"no such item desk"}
-400 {"error":"key: expected Key, 1 to 64 bytes"}
+400 {"type":"about:blank","title":"Bad Request","status":400,"detail":"item: empty"}
+404 {"type":"about:blank","title":"Not Found","status":404,"detail":"no such item desk"}
+400 {"type":"about:blank","title":"Bad Request","status":400,"detail":"key: expected Key, 1 to 64 bytes"}
 200 {"item":"lamp","sold":2}
-404 {"error":"no such route"}
+404 {"type":"about:blank","title":"Not Found","status":404,"detail":"no such route"}
 ```
 
 What to notice:
@@ -139,6 +134,8 @@ What to notice:
   claim needs nothing more (C54 sees the claim); `repeat: True` is only for a write meant to apply on every attempt.
   Without the `UNIQUE` key and its `ON CONFLICT` the compiler refuses the INSERT (C55).
 - **`rollback(out:)`** answers and undoes this request's writes: the claim of an order for an unknown item goes too.
+- **An error is a problem**: `problem(status: 404, detail: …)` answers RFC 9457's application/problem+json, the
+  shape the service gives its own errors too, so a client reads `detail` whoever refused.
 - **An answer is a value**, a `Response`, never bytes: `json(status: …, value: …)` answers a record as JSON;
   `buf() |> append(view: …) |> respond(status: 200)` writes a body and gives its status last; `empty(status: 204)`
   has no body. The host writes the status and the headers from it, so a body that echoes a request stays a body.
@@ -301,8 +298,8 @@ binds are in scope for the rest of the block; otherwise the first `else` arm tha
 fn advance(run: Run) -> Outcome {
   match run {
     Run(id, step, tool, input, state: "acting") -> {
-      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: AtStep(run: id, step)) else {
-        Err(error: Rejected(reason)) -> carry(id, found: told(id, last: "error: " ++ reason))
+      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, error: Refusal, within: 50, once: AtStep(run: id, step)) else {
+        Err(error: Rejected(reason: Refused(reason))) -> carry(id, found: told(id, last: "error: " ++ reason))
         Err(error) -> show(status: 202, found: load(id))
       }
       carry(id, found: told(id, last: output))

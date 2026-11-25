@@ -3,7 +3,12 @@ schema "CREATE TABLE IF NOT EXISTS pings(n INTEGER PRIMARY KEY)"
 type Ping { Ping(n: Int) }
 type Pong { Pong(n: Int) }
 type Count { Count(n: Int) }
-export fn ping(db: Sql, message: Ping) -> Result[Pong, View] {
+// why pong refuses: the row it wrote or the count it read did not come back
+type PongError {
+  Unwritten
+  Uncounted
+}
+export fn ping(db: Sql, message: Ping) -> Result[Pong, PongError] {
   ponged(found: sql_first(
     db,
     row: Pong,
@@ -11,18 +16,18 @@ export fn ping(db: Sql, message: Ping) -> Result[Pong, View] {
     n: message.n
   ))
 }
-fn ponged(found: Option[Pong]) -> Result[Pong, View] {
+fn ponged(found: Option[Pong]) -> Result[Pong, PongError] {
   match found {
     Some(value) -> Ok(value)
-    None -> Err(error: "no row")
+    None -> Err(error: Unwritten)
   }
 }
-export fn peek(db: Sql, message: Ping) -> Result[Pong, View] {
+export fn peek(db: Sql, message: Ping) -> Result[Pong, PongError] {
   counted(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM pings"))
 }
-fn counted(found: Option[Count]) -> Result[Pong, View] {
+fn counted(found: Option[Count]) -> Result[Pong, PongError] {
   match found {
     Some(value: Count(n)) -> Ok(value: Pong(n))
-    None -> Err(error: "no count")
+    None -> Err(error: Uncounted)
   }
 }

@@ -18,13 +18,13 @@ fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
       status: 200,
       found: sql_first(row: Link, query: "SELECT * FROM links WHERE id = :id", id)
     )
-    _ -> problem(status: 404, reason: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn create(body: View) -> Response {
   let Ok(value: NewLink(key, url)) = decode(json: body, as: NewLink) else {
-    Err(error) -> problem(status: 400, reason: error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let Some(value) = sql_first(
     row: Link,
@@ -48,23 +48,15 @@ fn create(body: View) -> Response {
 fn again(found: Option[Link]) -> Response {
   match found {
     Some(value) -> buf() |> write_json(value) |> respond(status: 200)
-    None -> problem(status: 422, reason: "the key was already used for another link")
+    None -> problem(status: 422, detail: "the key was already used for another link")
   }
 }
 
 fn one(status: Int, found: Option[Link]) -> Response {
   match found {
     Some(value) -> buf() |> write_json(value) |> respond(status)
-    None -> problem(status: 404, reason: "no such link")
+    None -> problem(status: 404, detail: "no such link")
   }
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  buf()
-    |> append(view: "{\"error\":")
-    |> write_json_string(text: reason)
-    |> append(view: "}")
-    |> respond(status)
 }
 
 invariant "a stored link is as long as its type allows" {

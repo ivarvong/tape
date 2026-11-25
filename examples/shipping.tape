@@ -10,8 +10,10 @@ schema "INSERT OR IGNORE INTO unserved VALUES ('Atlantis')"
 type Ship { Ship(address: View, sku: View, qty: Int) }
 type Shipped { Shipped(label: Int) }
 type Label { Label(id: Int, address: View, sku: View, qty: Int) }
+// why shipping refuses a label: no carrier delivers to the address
+type ShipError { NoCarrier(address: View) }
 
-export fn label(db: Sql, message: Ship) -> Result[Shipped, View] {
+export fn label(db: Sql, message: Ship) -> Result[Shipped, ShipError] {
   let Some(value) = sql_first(
     row: Shipped,
     query: "INSERT INTO labels(address, sku, qty) SELECT :address, :sku, :qty WHERE :address \
@@ -19,7 +21,7 @@ export fn label(db: Sql, message: Ship) -> Result[Shipped, View] {
     address: message.address,
     sku: message.sku,
     qty: message.qty
-  ) else -> Err(error: "no carrier delivers to that address")
+  ) else -> Err(error: NoCarrier(address: message.address))
   Ok(value)
 }
 
@@ -28,7 +30,7 @@ fn handle(raw: View, db: Sql) -> Response {
     Request(method: Get, path: "/labels") -> buf()
       |> write_rows(rows: sql_all(row: Label, query: "SELECT * FROM labels ORDER BY id"))
       |> respond(status: 200)
-    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 

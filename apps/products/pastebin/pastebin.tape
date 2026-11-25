@@ -30,7 +30,6 @@ flag max_bytes: Int = 16384
 type Paste { Paste(id: Int, body: View, created: Int, expires: Int) }
 type Made { Made(id: View, bytes: Int, expires: Int) }
 type Gone { Gone(deleted: Int) }
-type Problem { Problem(error: View) }
 
 fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
@@ -38,7 +37,7 @@ fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
     Request(method: Post, path: "/", query, body) -> made(body, minutes: minutes_of(query))
     Request(method: Get, path: "/" ++ paste_id(id) ++ "/raw") -> raw_text(found: live(id))
     Request(method: Get, path: "/" ++ paste_id(id)) -> page(found: live(id))
-    _ -> problem(status: 404, error: "no such paste")
+    _ -> problem(status: 404, detail: "no such paste")
   }
 }
 
@@ -68,12 +67,12 @@ fn minutes_of(query: Option[View]) -> Option[Int] {
 }
 
 fn made(body: View, minutes: Option[Int]) -> Response {
-  let Some(value: m) = minutes else -> problem(status: 400, error: "minutes: 1 to 1440")
+  let Some(value: m) = minutes else -> problem(status: 400, detail: "minutes: 1 to 1440")
   let ttl = m * 60000
-  let True = len(body) >= 1 else -> problem(status: 400, error: "empty paste")
+  let True = len(body) >= 1 else -> problem(status: 400, detail: "empty paste")
   let True = len(body) <= flags.max_bytes else -> problem(
     status: 413,
-    error: "a paste is at most \(flags.max_bytes) bytes; this one is \(len(body))"
+    detail: "a paste is at most \(flags.max_bytes) bytes; this one is \(len(body))"
   )
   let id = fnv(v: body, at: 0, h: -3750763034362895579) & 1099511627775
   let at = now()
@@ -99,11 +98,11 @@ fn again(body: View, found: Option[Paste]) -> Response {
     Some(value: paste) if paste.body == body -> answered(status: 200, paste)
     Some(value) -> problem(
       status: 409,
-      error: "another paste has this id; change the text by a byte"
+      detail: "another paste has this id; change the text by a byte"
     )
     None -> problem(
       status: 503,
-      error: "the paste was deleted while this request ran; send it again"
+      detail: "the paste was deleted while this request ran; send it again"
     )
   }
 }
@@ -129,7 +128,7 @@ fn raw_text(found: Option[Paste]) -> Response {
       |> append(view: paste.body)
       |> respond_as(status: 200, content: Text)
       |> header(name: "cache-control", value: "no-store")
-    None -> problem(status: 404, error: "no such paste, or it has expired")
+    None -> problem(status: 404, detail: "no such paste, or it has expired")
   }
 }
 
@@ -203,10 +202,6 @@ fn foot(out: Buf, status: Int) -> Response {
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/pastebin/pastebin.tape\">source</a></footer></html>")
     |> respond_as(status, content: Html)
     |> header(name: "cache-control", value: "no-store")
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 
 // "23 h 59 min", "4 min", "less than a minute"

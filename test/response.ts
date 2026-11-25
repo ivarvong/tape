@@ -3,7 +3,7 @@
 // why, compiled and interpreted alike, and the forms that are gone are refused with the new one as their fix.
 import '../node25.ts';
 import { interpret } from '../interp.ts';
-import { answerText, framed, instantiate, responseOf } from '../host.ts';
+import { answerText, framed, instantiate, isProblem, responseOf } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { Answer } from '../host.ts';
 import { BUF_ANSWER_HINT } from '../compiler/gen/answer.ts';
@@ -45,6 +45,16 @@ both(
   );
 });
 
+const parsed = (text: string): unknown => {
+  const v: unknown = JSON.parse(text);
+  return v;
+};
+/** Why the host refused an answer: the detail of its application/problem+json 500; a body it did not refuse as it is. */
+const refusal = (a: Answer): string => {
+  const body: unknown = a.type === 'application/problem+json' ? JSON.parse(dec.decode(a.body)) : null;
+  return isProblem(body) ? body.detail : dec.decode(a.body);
+};
+
 // ---- 2. a status the host refuses, computed (the literal one is C96): a 500 that says why, before any Response
 const computed =
   'fn handle(raw: View) -> Response {\n  let Some(value: n) = parse_int(text: request(raw).body) else -> empty(status: 400)\n  match {\n    n == 2040 -> buf() |> append(view: "x") |> respond(status: n / 10)\n    n == 1 -> empty(status: 200) |> header(name: "set-cookie", value: "a=1")\n    n == 2 -> empty(status: 200) |> header(name: "x-a", value: "line\\r\\nx-b: 1")\n    n == 3 -> empty(status: 200) |> header(name: "bad name", value: "1")\n    else -> empty(status: n)\n  }\n}\n';
@@ -69,7 +79,7 @@ both(
   refusals.map(([n]) => `POST /\n${n}`),
 ).forEach((a, i) => {
   const [n, status, why] = refusals[i] ?? ['', 0, ''];
-  same(`a computed answer ${n}: ${status}`, [a.status, dec.decode(a.body)], [status, why]);
+  same(`a computed answer ${n}: ${status}`, [a.status, refusal(a)], [status, why]);
 });
 
 // ---- 3. what a Response is: content, headers in the order set, names in lower case; json, empty, redirect
@@ -111,15 +121,25 @@ for (const [what, bytes] of [
   const a = responseOf(bytes);
   ok(
     `${what} is not a frame: 500, and it says so`,
-    a.status === 500 && dec.decode(a.body).startsWith("the program's answer is not a response frame"),
+    a.status === 500 && refusal(a).startsWith("the program's answer is not a response frame"),
     dec.decode(a.body),
   );
 }
 const many = framed({ status: 200, headers: Array.from({ length: 33 }, (_, i) => ({ name: `x-${i}`, value: '1' })) });
 same(
   'more than 32 headers is a 500',
-  dec.decode(responseOf(many).body),
+  refusal(responseOf(many)),
   'the program set a response header the host refuses: more than 32 headers',
+);
+same(
+  "a refused answer is the host's problem+json: its type, title and status say it is a 500",
+  parsed(dec.decode(responseOf(many).body)),
+  {
+    type: 'about:blank',
+    title: 'Internal Server Error',
+    status: 500,
+    detail: 'the program set a response header the host refuses: more than 32 headers',
+  },
 );
 
 // ---- 5. refused at compile time: a Buf as the answer, a literal status the host refuses, a misspelt method

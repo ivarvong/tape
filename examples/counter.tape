@@ -31,13 +31,14 @@ fn handle(raw: View, db: Sql) -> Response {
       )
       add(name, op)
     }
-    Request(method: Post) -> buf()
-      |> append(view: "{\"error\":\"POST /<name>?op=<id>: an op id makes a retry add once\"}")
-      |> respond(status: 428)
+    Request(method: Post) -> problem(
+      status: 428,
+      detail: "POST /<name>?op=<id>: an op id makes a retry add once"
+    )
     Request(method: Get, path: "/" ++ name) -> show(
       found: sql_first(row: Count, query: "SELECT n FROM counters WHERE name = :name", name)
     )
-    _ -> buf() |> append(view: "{\"error\":\"method_not_allowed\"}") |> respond(status: 405)
+    _ -> problem(status: 405, detail: "GET /<name>, or POST /<name>?op=<id>")
   }
 }
 

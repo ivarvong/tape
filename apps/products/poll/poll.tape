@@ -54,7 +54,6 @@ type Poll { Poll(id: Int, question: View, created: Int) }
 type Tally { Tally(option: Int, label: View, votes: Int) }
 type Results { Results(id: Int, question: View, total: Int, options: List[Tally]) }
 type Counted { Counted(poll: Int, option: Int, counted: Bool) }
-type Problem { Problem(error: View) }
 type Choice { Choice(idx: Int) }
 
 type Outcome {
@@ -239,7 +238,7 @@ fn rendered(outcome: Outcome) -> Response {
     Made(status, poll) -> json(status, value: poll)
       |> header(name: "location", value: "polls/\(poll.id)")
     Voted(status, vote) -> json(status, value: vote)
-    Failed(status, error) -> json(status, value: Problem(error))
+    Failed(status, error) -> problem(status, detail: error)
   }
 }
 

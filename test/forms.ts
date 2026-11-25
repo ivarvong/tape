@@ -857,12 +857,12 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   T(
     'fulfillment: a read of an order that does not exist is 404, not the 409 of a step that lost a race (P2)',
     answered((await fapp.runLogged(enc.encode('GET /orders/9999'), { transaction: ftx })).out),
-    '404\n{"error":"no such order"}',
+    '404 application/problem+json\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such order"}',
   );
   T(
     'fulfillment: woken cannot be reached from HTTP, only from the timer',
     answered((await fapp.runLogged(enc.encode('POST /woken\n{"key":1}'), { transaction: ftx })).out),
-    '404\n{"error":"no such route"}',
+    '404 application/problem+json\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such route"}',
   );
 }
 
@@ -894,8 +894,8 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     'kv: a shard with no placement serves nothing',
     [await one('GET /k/a'), await one('GET /stats')],
     [
-      '503\n{"error":"this shard has no placement yet: its cluster is still being created"}',
-      '503\n{"error":"this shard has no placement yet"}',
+      '503 application/problem+json\n{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"this shard has no placement yet: its cluster is still being created"}',
+      '503 application/problem+json\n{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"this shard has no placement yet"}',
     ],
   );
   T(
@@ -911,8 +911,8 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
       '200\n{"shard":0,"shards":1,"window_ms":3600000,"skew_ms":300000}',
       '200\n{"shard":0,"shards":1,"window_ms":3600000,"skew_ms":300000}',
       '409\n{"shard":0,"shards":1,"window_ms":3600000,"skew_ms":300000}',
-      '400\n{"error":"a placement is shard i of n, 0 <= i < n <= 64"}',
-      '400\n{"error":"a placement is shard i of n, 0 <= i < n <= 64"}',
+      '400 application/problem+json\n{"type":"about:blank","title":"Bad Request","status":400,"detail":"a placement is shard i of n, 0 <= i < n <= 64"}',
+      '400 application/problem+json\n{"type":"about:blank","title":"Bad Request","status":400,"detail":"a placement is shard i of n, 0 <= i < n <= 64"}',
     ],
   );
   T(
@@ -934,12 +934,12 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
       '201\n{"key":"a","version":1}',
       '200\n{"key":"a","version":2}',
       '200\n{"key":"a","value":"y","version":2}',
-      '409\n{"error":"version mismatch","key":"a","version":2,"expected":1}',
+      '409 application/problem+json\n{"type":"about:blank","title":"Conflict","status":409,"detail":"version mismatch","key":"a","version":2,"expected":1}',
       '200\n{"key":"a","version":3}',
       '200\n{"key":"a","version":4}',
-      '404\n{"error":"no such key","key":"a","version":4}',
-      '404\n{"error":"no such key","key":"a","version":4}',
-      '409\n{"error":"version mismatch","key":"a","version":4,"expected":0}',
+      '404 application/problem+json\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such key","key":"a","version":4}',
+      '404 application/problem+json\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such key","key":"a","version":4}',
+      '409 application/problem+json\n{"type":"about:blank","title":"Conflict","status":409,"detail":"version mismatch","key":"a","version":4,"expected":0}',
       '200\n{"key":"a","version":5}',
       '200\n{"shard":0,"shards":1,"keys":1,"live":1}',
     ],
@@ -947,17 +947,17 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   T(
     'kv: limits and malformed requests are typed errors',
     [
-      (await one(`PUT /k/${'k'.repeat(257)}`, 'v')).split('\n')[0],
-      (await one(`PUT /k/${'k'.repeat(256)}?op=${NOW}_l1`, 'v')).split('\n')[0],
-      (await one('PUT /k/a b', 'v')).split('\n')[0],
-      (await one('PUT /k/big', 'v'.repeat(65537))).split('\n')[0],
-      (await one(`PUT /k/big?op=${NOW}_l2`, 'é'.repeat(32768))).split('\n')[0],
-      (await one('PUT /k/bad', new Uint8Array([0x61, 0xc0, 0x80]))).split('\n')[0],
-      (await one('PUT /k/a?if=-1', 'v')).split('\n')[0],
-      (await one('PUT /k/a?if=99999999999999999999', 'v')).split('\n')[0],
-      (await one('GET /k/a?if=1')).split('\n')[0],
-      (await one('POST /k/a', 'v')).split('\n')[0],
-      (await one('GET /nope')).split('\n')[0],
+      (await one(`PUT /k/${'k'.repeat(257)}`, 'v')).split('\n')[0]?.split(' ')[0],
+      (await one(`PUT /k/${'k'.repeat(256)}?op=${NOW}_l1`, 'v')).split('\n')[0]?.split(' ')[0],
+      (await one('PUT /k/a b', 'v')).split('\n')[0]?.split(' ')[0],
+      (await one('PUT /k/big', 'v'.repeat(65537))).split('\n')[0]?.split(' ')[0],
+      (await one(`PUT /k/big?op=${NOW}_l2`, 'é'.repeat(32768))).split('\n')[0]?.split(' ')[0],
+      (await one('PUT /k/bad', new Uint8Array([0x61, 0xc0, 0x80]))).split('\n')[0]?.split(' ')[0],
+      (await one('PUT /k/a?if=-1', 'v')).split('\n')[0]?.split(' ')[0],
+      (await one('PUT /k/a?if=99999999999999999999', 'v')).split('\n')[0]?.split(' ')[0],
+      (await one('GET /k/a?if=1')).split('\n')[0]?.split(' ')[0],
+      (await one('POST /k/a', 'v')).split('\n')[0]?.split(' ')[0],
+      (await one('GET /nope')).split('\n')[0]?.split(' ')[0],
     ],
     ['400', '201', '400', '413', '201', '400', '400', '400', '400', '405', '404'],
   );
@@ -971,7 +971,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
       await one('PUT /k/r?if=1', 'y'),
     ],
     [
-      '428\n{"error":"an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"}',
+      '428 application/problem+json\n{"type":"about:blank","title":"Precondition Required","status":428,"detail":"an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"}',
       '201\n{"key":"r","version":1}',
       '201\n{"key":"r","version":1}',
       '200\n{"key":"r","value":"x","version":1}',
@@ -999,7 +999,8 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   );
   T(
     'kv: the shard and the router agree on fnv1a(key) mod 64 for 1000 keys (served by shard 5, or 421 naming the owner)',
-    named.every((n, i) => n === fnv1a(enc.encode(keys[i])) % 64) && answers.every(([s]) => s === '201' || s === '421'),
+    named.every((n, i) => n === fnv1a(enc.encode(keys[i])) % 64) &&
+      answers.every(([s]) => s === '201' || s === '421 application/problem+json'),
     true,
   );
   T(

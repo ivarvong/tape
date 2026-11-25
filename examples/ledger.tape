@@ -25,20 +25,20 @@ fn handle(raw: View, db: Sql) -> Response {
     Request(method: Get, path: "/accounts") -> buf()
       |> write_rows(rows: sql_all(row: Account, query: "SELECT * FROM accounts ORDER BY name"))
       |> respond(status: 200)
-    _ -> problem(status: 404, reason: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn transfer(body: View) -> Response {
   let Ok(value: Transfer(key, from, to, amount)) = decode(json: body, as: Transfer) else {
-    Err(error) -> problem(status: 400, reason: error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   // A key seen before is that transfer again: the same one answers as it did, another one is refused.
   let None = sql_first(row: Done, query: "SELECT * FROM transfers WHERE key = :key", key) else {
     Some(value: Done(payer, payee, amount: a)) if payer == from
       and payee == to
       and a == amount -> moved()
-    Some(value) -> problem(status: 422, reason: "the key was already used for another transfer")
+    Some(value) -> problem(status: 422, detail: "the key was already used for another transfer")
   }
   let 1 = sql_exec(
     query: "UPDATE accounts SET balance = balance - :amount WHERE name = :from \
@@ -47,7 +47,7 @@ fn transfer(body: View) -> Response {
     amount,
     from,
     key
-  ) else -> problem(status: 409, reason: "insufficient funds, or no such payer")
+  ) else -> problem(status: 409, detail: "insufficient funds, or no such payer")
   // The debit has been written. If there is no one to credit, undo it and say why; otherwise record the transfer
   // under its key, in the same request as the two updates.
   let 1 = sql_exec(
@@ -57,7 +57,7 @@ fn transfer(body: View) -> Response {
     to,
     key
   ) else -> rollback(
-    out: problem(status: 404, reason: "no such payee")
+    out: problem(status: 404, detail: "no such payee")
   )
   let 1 = sql_exec(
     query: "INSERT INTO transfers(key, payer, payee, amount) VALUES (:key, :from, :to, :amount) \
@@ -67,21 +67,13 @@ fn transfer(body: View) -> Response {
     to,
     amount
   ) else -> rollback(
-    out: problem(status: 422, reason: "the key was already used for another transfer")
+    out: problem(status: 422, detail: "the key was already used for another transfer")
   )
   moved()
 }
 
 fn moved() -> Response {
   buf() |> append(view: "{\"moved\":true}") |> respond(status: 200)
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  buf()
-    |> append(view: "{\"error\":")
-    |> write_json_string(text: reason)
-    |> append(view: "}")
-    |> respond(status)
 }
 
 // What must hold after every commit (checked by `tape sim` and by app.invariants() in the host).

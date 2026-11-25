@@ -248,7 +248,7 @@ export const REQUESTS_SCHEMA = {
 export const REMOTES_SCHEMA = {
   type: 'object',
   description:
-    'Answers for calls to other programs, which otherwise answer Unreachable: {"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout", "unreachable"]}}, by the Remote parameter\'s name and the method. Each call takes the next answer for its method: the reply\'s value as JSON, a refusal ({"error": "Skew", …} for a key used for another message), no answer in time, or none; once they run out, Unreachable. A repeated `once` key gets the reply or refusal it got before; after a timeout or none, it takes the next answer.',
+    'Answers for calls to other programs, which otherwise answer Unreachable: {"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "declined"}, "timeout", "unreachable"]}}, by the Remote parameter\'s name and the method. Each call takes the next answer for its method: the reply\'s value as JSON, a refusal (a value of the call\'s error type; {"error": "Skew", …} for a key used for another message), no answer in time, or none; once they run out, Unreachable. A repeated `once` key gets the reply or refusal it got before; after a timeout or none, it takes the next answer.',
   additionalProperties: { type: 'object', additionalProperties: { type: 'array', items: {} } },
 } as const;
 export const SECRETS_SCHEMA = {
@@ -323,7 +323,7 @@ export function remotesOf(args: Fields): Scripts | Refusal {
     refused(
       400,
       'bad_remotes',
-      `${why}; \`remotes\` is {"<Remote>": {"<method>": [answers]}}, an answer the reply's value, {"error": "Rejected", "reason": "…"}, "timeout" or "unreachable"`,
+      `${why}; \`remotes\` is {"<Remote>": {"<method>": [answers]}}, an answer the reply's value, {"error": "Rejected", "reason": <the error as JSON>}, "timeout" or "unreachable"`,
     );
   if (!isFields(given)) return bad('`remotes` is not an object');
   let answers = 0;
@@ -344,9 +344,11 @@ export function remotesOf(args: Fields): Scripts | Refusal {
         if (
           isFields(a) &&
           'error' in a &&
-          !((a['error'] === 'Rejected' || a['error'] === 'Skew') && typeof a['reason'] === 'string')
+          !((a['error'] === 'Rejected' && 'reason' in a) || (a['error'] === 'Skew' && typeof a['reason'] === 'string'))
         )
-          return bad(`${at} has "error" but is not {"error": "Rejected" or "Skew", "reason": "…"}`);
+          return bad(
+            `${at} has "error" but is not {"error": "Rejected", "reason": <a value of the callee's error type>} or {"error": "Skew", "reason": "…"}`,
+          );
       }
     }
   }

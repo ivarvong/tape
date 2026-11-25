@@ -173,7 +173,7 @@ export const DIAGNOSTICS = {
   },
   C42: {
     meaning:
-      'An exported function that does not take capabilities and exactly one message, or does not return `Result[Reply, View]`, which is how another program calls it.',
+      'An exported function that does not take capabilities and exactly one message, or does not return `Result[Reply, Error]`, which is how another program calls it.',
   },
   C43: {
     meaning: 'A call of a generic function where nothing says what one of its type parameters is.',
@@ -359,11 +359,15 @@ export const DIAGNOSTICS = {
   },
   C96: {
     meaning:
-      'A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none). A status that is a value is checked when the host answers, which says why in a 500.',
+      'A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none); or a `problem` whose status is not an error (200 to 399). A status that is a value is checked when the host answers, which says why in a 500.',
   },
   C97: {
     meaning:
       "A match on a machine's states with an arm that takes the states the arms beside it do not name (`_`, a name, a row pattern that leaves the state out). A state added to the machine would be taken there without a word; each state gets an arm of its own.",
+  },
+  C98: {
+    meaning:
+      "The error of an exported method, or the `error:` a `call` or an `ask` names, that is not a type of the program's own with constructors (a View, an Int, a std type): the callee's refusals are the constructors a caller matches `Rejected(reason: …)` on, each of them, and text gives a match nothing to hold to. `woken`'s error may be text, as the host only logs it; a capability's (an `interface`) is text.",
   },
   C99: {
     meaning:

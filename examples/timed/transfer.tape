@@ -51,6 +51,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what a bank refuses a withdrawal or a deposit with
+type BankError { Refused(reason: View) }
+
 fn policy() -> Backoff {
   Backoff(first: 1000, factor: 2, most: 60000, tries: 6)
 }
@@ -142,10 +145,11 @@ fn advance(found: Option[Transfer]) -> Outcome {
         method: "withdraw",
         send: Entry(account: source, amount),
         reply: Booked,
+        error: BankError,
         within: 2000,
         once: Step(transfer: id, step: "withdraw")
       ) else {
-        Err(error: Rejected(reason)) -> shown(
+        Err(error: Rejected(reason: Refused(reason))) -> shown(
           found: moved(id, from: Withdrawing, to: Failed, note: reason)
         )
         Err(error) -> failed(id, state: Withdrawing, tries)
@@ -158,10 +162,11 @@ fn advance(found: Option[Transfer]) -> Outcome {
         method: "deposit",
         send: Entry(account: target, amount),
         reply: Booked,
+        error: BankError,
         within: 2000,
         once: Step(transfer: id, step: "deposit")
       ) else {
-        Err(error: Rejected(reason)) -> advance(
+        Err(error: Rejected(reason: Refused(reason))) -> advance(
           found: moved(id, from: Depositing, to: Refunding, note: reason)
         )
         Err(error) -> failed(id, state: Depositing, tries)
@@ -174,11 +179,12 @@ fn advance(found: Option[Transfer]) -> Outcome {
         method: "deposit",
         send: Entry(account: source, amount),
         reply: Booked,
+        error: BankError,
         within: 2000,
         once: Step(transfer: id, step: "refund")
       ) else {
         // the bank refusing the refund is counted like no answer: failed gives up after its tries
-        Err(error: Rejected(reason)) -> failed(id, state: Refunding, tries)
+        Err(error: Rejected(reason: Refused(reason))) -> failed(id, state: Refunding, tries)
         Err(error) -> failed(id, state: Refunding, tries)
       }
       shown(found: moved(id, from: Refunding, to: Failed, note: "refunded"))
@@ -262,11 +268,7 @@ fn shown(found: Option[Transfer]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, transfer) -> write_json(out: buf(), value: transfer) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

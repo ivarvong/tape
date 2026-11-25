@@ -52,7 +52,7 @@ describe('upgrade: a cluster whose program cannot be rebuilt', () => {
     // today's compiler cannot build it: the shard says so, and runs nothing
     const stale = await call(`/kv/${a}/${c}/k/k0`);
     expect(stale.status).toBe(503);
-    expect(at(await body(stale), 'error')).toBe('rebuild_failed');
+    expect(at(await body(stale), 'code')).toBe('rebuild_failed');
     const dry = await call(`/kv/${a}/${c}/upgrade`, {
       method: 'POST',
       body: JSON.stringify({ confirm: c, dry_run: true }),

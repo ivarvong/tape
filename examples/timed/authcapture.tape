@@ -55,6 +55,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the gateway refuses with: why it turned an authorization, a capture or a void down
+type GatewayError { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, gateway: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
     Request(method: Post, path: "/payments", body) -> made(body) |> rendered
@@ -112,13 +115,14 @@ fn authorize(payment: Payment) -> Outcome {
       method: "authorize",
       send: Auth(card, amount),
       reply: Authorization,
+      error: GatewayError,
       within: 2000,
       once: Step(payment: id, step: "authorize")
     )
   )
 }
 
-fn authorized(id: Int, reply: Result[Authorization, CallError]) -> Outcome {
+fn authorized(id: Int, reply: Result[Authorization, CallError[GatewayError]]) -> Outcome {
   match reply {
     Ok(value) -> {
       do wake(after: flags.void_ms, key: id)
@@ -133,7 +137,7 @@ fn authorized(id: Int, reply: Result[Authorization, CallError]) -> Outcome {
         )
       ))
     }
-    Err(error: Rejected(reason)) -> shown(found: latest(
+    Err(error: Rejected(reason: Refused(reason))) -> shown(found: latest(
       id,
       m: sql_move(
         row: Payment,
@@ -203,13 +207,14 @@ fn captured(payment: Payment) -> Outcome {
       method: "capture",
       send: Ref(amount),
       reply: Done,
+      error: GatewayError,
       within: 2000,
       once: Step(payment: id, step: "capture")
     )
   )
 }
 
-fn settled(id: Int, void_at: Int, reply: Result[Done, CallError]) -> Outcome {
+fn settled(id: Int, void_at: Int, reply: Result[Done, CallError[GatewayError]]) -> Outcome {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -220,7 +225,7 @@ fn settled(id: Int, void_at: Int, reply: Result[Done, CallError]) -> Outcome {
         id
       )
     ))
-    Err(error: Rejected(reason)) -> {
+    Err(error: Rejected(reason: Refused(reason))) -> {
       do wake(after: left(until: void_at), key: id)
       held(found: latest(
         id,
@@ -273,13 +278,14 @@ fn void(payment: Payment) -> Outcome {
       method: "void",
       send: Ref(amount),
       reply: Done,
+      error: GatewayError,
       within: 2000,
       once: Step(payment: id, step: "void")
     )
   )
 }
 
-fn voided(id: Int, reply: Result[Done, CallError]) -> Outcome {
+fn voided(id: Int, reply: Result[Done, CallError[GatewayError]]) -> Outcome {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -291,7 +297,7 @@ fn voided(id: Int, reply: Result[Done, CallError]) -> Outcome {
       )
     ))
     // a void the gateway refuses will be refused again: the payment rests in void_failed, for a person
-    Err(error: Rejected(reason)) -> shown(found: latest(
+    Err(error: Rejected(reason: Refused(reason))) -> shown(found: latest(
       id,
       m: sql_move(
         row: Payment,
@@ -344,11 +350,7 @@ fn shown(found: Option[Payment]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, payment) -> write_json(out: buf(), value: payment) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

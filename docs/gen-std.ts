@@ -300,13 +300,13 @@ const BUILT_INS: BuiltIn[] = [
   },
   {
     name: 'call',
-    sig: 'call(to: Remote, method: "…", send: Msg, reply: Reply, within: Int, once: Key) -> Result[Reply, CallError]',
+    sig: 'call(to: Remote, method: "…", send: Msg, reply: Reply, error: E, within: Int, once: Key) -> Result[Reply, CallError[E]]',
     needs: 'Remote',
-    doc: "A command to another program's `export fn`. The same `once` key runs at most once and gets the stored reply.",
+    doc: "A command to another program's `export fn`. The same `once` key runs at most once and gets the stored reply. `error:` names the callee's error type, which both programs declare: a refusal is `Err(error: Rejected(reason: …))`, a value of it, and a match names each constructor.",
   },
   {
     name: 'ask',
-    sig: 'ask(to: Remote, method: "…", send: Msg, reply: Reply, within: Int) -> Result[Reply, CallError]',
+    sig: 'ask(to: Remote, method: "…", send: Msg, reply: Reply, error: E, within: Int) -> Result[Reply, CallError[E]]',
     needs: 'Remote',
     doc: 'A read from another program: `call` without a key.',
   },
@@ -343,20 +343,32 @@ type Task = { title: string; uses: string[]; text: string; program: string };
 const TASKS: Task[] = [
   {
     title: 'Respond with JSON',
-    uses: ['fn json', 'fn respond_as', 'type Content', 'builtin write_json', 'fn write_rows', 'fn empty'],
-    text: '`json(status: …, value: …)` answers a value as `application/json`. For a body written in steps, write it first and give it its type last: `buf() |> write_rows(rows: …) |> respond_as(status: 200, content: Json)`. `empty(status: …)` answers no body. An error body is a record too.',
+    uses: ['fn json', 'fn respond_as', 'type Content', 'builtin write_json', 'fn write_rows', 'fn empty', 'fn problem'],
+    text: '`json(status: …, value: …)` answers a value as `application/json`. For a body written in steps, write it first and give it its type last: `buf() |> write_rows(rows: …) |> respond_as(status: 200, content: Json)`. `empty(status: …)` answers no body. An error is `problem(status: …, detail: …)`, application/problem+json (RFC 9457), the shape the service answers its own errors in.',
     program: `type Item {
   Item(id: Int, name: View)
-}
-
-type Problem {
-  Problem(error: View)
 }
 
 fn handle(raw: View) -> Response {
   match request(raw) {
     Request(method: Get, path: "/item") -> json(status: 200, value: Item(id: 1, name: "lamp"))
-    _ -> json(status: 404, value: Problem(error: "not_found"))
+    _ -> problem(status: 404, detail: "no such item")
+  }
+}
+`,
+  },
+  {
+    title: 'Answer an error',
+    uses: ['fn problem', 'fn problem_with', 'type Content'],
+    text: '`problem(status: 404, detail: "no such link")` answers `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such link"}` as `application/problem+json` (RFC 9457): the title is the status\'s reason phrase, and `detail` says what went wrong with this request. The service answers its own errors in the same shape, so a client reads one. What a client needs to act on goes in members of the problem\'s own: `problem_with(status:, detail:, members: R)` writes the fields of the record `R` after `detail`. A status written as a literal outside 400 to 599 is C96.',
+    program: `type Conflict {
+  Conflict(key: View, version: Int)
+}
+
+fn handle(raw: View) -> Response {
+  match request(raw) {
+    Request(method: Put, path: "/k/" ++ key) -> problem_with(status: 409, detail: "version mismatch", members: Conflict(key, version: 3))
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 `,
@@ -411,17 +423,13 @@ fn handle(raw: View) -> Response {
   },
   {
     title: 'Decode a JSON body, with a 400 that says why',
-    uses: ['builtin decode', 'type Result'],
-    text: '`decode(json: body, as: T)` is `Ok(value)` or `Err(error)`, where `error` names the field and what is wrong. Refined types validate while decoding; an `Option` field may be absent. Go on with `let Ok(…) = … else { … }`.',
+    uses: ['builtin decode', 'type Result', 'fn problem'],
+    text: '`decode(json: body, as: T)` is `Ok(value)` or `Err(error)`, where `error` names the field and what is wrong: the `detail` of a 400 problem. Refined types validate while decoding; an `Option` field may be absent. Go on with `let Ok(…) = … else { … }`.',
     program: `type Name = View where len(self) >= 1 and len(self) <= 80
 type Qty = Int where self >= 1 and self <= 1000
 
 type NewItem {
   NewItem(name: Name, qty: Qty, note: Option[View])
-}
-
-type Problem {
-  Problem(error: View)
 }
 
 fn handle(raw: View) -> Response {
@@ -433,7 +441,7 @@ fn handle(raw: View) -> Response {
 
 fn created(body: View) -> Response {
   let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
-    Err(error) -> json(status: 400, value: Problem(error))
+    Err(error) -> problem(status: 400, detail: error)
   }
   buf() |> append(view: "\\(qty) of \\(name)") |> respond(status: 201)
 }

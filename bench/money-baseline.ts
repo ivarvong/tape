@@ -26,7 +26,8 @@ function halfEven(n: number, d: number): number {
     r = n - q * d;
   return 2 * r > d || (2 * r === d && q % 2 !== 0) ? q + 1 : q;
 }
-const refused = (error: string): Uint8Array => enc.encode(JSON.stringify({ error }));
+const refused = (detail: string): Uint8Array =>
+  enc.encode(JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400, detail }));
 export function handle(bytes: Uint8Array): Uint8Array {
   let cart: unknown;
   try {

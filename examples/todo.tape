@@ -166,9 +166,9 @@ fn update(id: Id, body: View) -> Response {
 
 fn error(status: Int) -> Response {
   match status {
-    400 -> append(buf: buf(), view: "{\"error\":\"bad_request\"}") |> respond(status)
-    404 -> append(buf: buf(), view: "{\"error\":\"not_found\"}") |> respond(status)
-    _ -> append(buf: buf(), view: "{\"error\":\"method_not_allowed\"}") |> respond(status)
+    400 -> problem(status, detail: "the body is not a todo")
+    404 -> problem(status, detail: "no such todo")
+    _ -> problem(status, detail: "that method is not allowed here")
   }
 }
 

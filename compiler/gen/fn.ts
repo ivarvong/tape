@@ -31,7 +31,7 @@ export type Build = Imports & {
   FLAG_BASE: number;
   G_COST: number;
   G_UNDO: number;
-  SIMJSON: { replies: Record<string, unknown>; decodes: Record<string, unknown> };
+  SIMJSON: { replies: Record<string, unknown>; refusals: Record<string, unknown>; decodes: Record<string, unknown> };
   WIRE: Wire;
   adtOf: (t: Type, at: Place) => Adt;
   adtOrNull: (t: Type, at: Place) => Adt | null;
@@ -39,7 +39,7 @@ export type Build = Imports & {
   callsOf: CallGraph;
   ctors: Program['ctors'];
   find: (n: string, file: string, at?: Place) => FnDecl | null;
-  fingerprint: (method: string, send: Type, reply: Type, at: Place) => string;
+  fingerprint: (method: string, send: Type, reply: Type, error: Type, at: Place) => string;
   flagRead: Set<string>;
   fnIndex: (n: string) => number;
   /** the function at an index of the module, once named (fnIndex); none for an import or the runtime's */

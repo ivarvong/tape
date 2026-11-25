@@ -346,16 +346,18 @@ export class Workbench {
   #standInReply(caller: string, to: string, meta: ServiceOptions, fault: Fault): ServiceReply {
     const remembered = meta.key ? this.#standIn.get(`${to}/${meta.key}`) : undefined;
     if (remembered) return remembered;
-    const schema = this.slots.get(caller)?.built?.json.replies[`${to}.${meta.method}`] ?? undefined;
+    const built = this.slots.get(caller)?.built;
+    const schema = built?.json.replies[`${to}.${meta.method}`] ?? undefined;
+    // a refusal is a value of the error type the call names (a Skew when the stand-in has none to make)
+    const refusal = built?.json.refusals[`${to}.${meta.method}`] ?? undefined;
+    const made = (s: typeof schema): Uint8Array =>
+      enc.encode(JSON.stringify(valueOf(s, this.#dice, { ids: [1, 2, 3], dict: {}, keys: [], said: {}, blank: 0 })));
     const reply: ServiceReply =
       fault === 'reject'
-        ? { status: 'rejected', body: enc.encode(`declined by the playground's stand-in for ${to}`) }
-        : {
-            status: 'ok',
-            body: enc.encode(
-              JSON.stringify(valueOf(schema, this.#dice, { ids: [1, 2, 3], dict: {}, keys: [], said: {}, blank: 0 })),
-            ),
-          };
+        ? refusal
+          ? { status: 'rejected', body: made(refusal) }
+          : { status: 'skew', body: enc.encode(`declined by the playground's stand-in for ${to}`) }
+        : { status: 'ok', body: made(schema) };
     if (meta.key) this.#standIn.set(`${to}/${meta.key}`, reply);
     return reply;
   }
@@ -515,7 +517,9 @@ export class Workbench {
       return { e, to: e.call, standIn: rec?.standIn ?? false, fault: rec?.fault ?? 'deliver', run, why };
     });
     const answer =
-      method === null ? responseOf(out) : { status: out[0] === 48 ? 'ok' : 'rejected', body: out.subarray(1) };
+      method === null
+        ? responseOf(out)
+        : { status: out[0] === 48 ? 'ok' : out[0] === 49 ? 'rejected' : 'skew', body: out.subarray(1) };
     return {
       program: slot.name,
       span: head && isHead(head) ? (head.span ?? '') : '',

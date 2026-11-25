@@ -121,7 +121,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 
 std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `Err(error)`), `Rounding`
 (`HalfEven`, `HalfUp`, `Down`, `Up`, `Floor`, `Ceiling`), `Move[T]`
-(`Moved(value)`, `Raced(now)`, `NoRow`), `CallError` (`Timeout`, `Unreachable`, `Rejected(reason)`,
+(`Moved(value)`, `Raced(now)`, `NoRow`), `CallError[E]` (`Timeout`, `Unreachable`, `Rejected(reason: E)`,
 `Skew(reason)`), `Map[T]`, `List[T]`, `Request`, `Wake`, and what a request and its answer are (std/http.tape):
 
 | Type | What it is |
@@ -342,9 +342,9 @@ would otherwise take it without a word. A match that names too few is C24.
 | `sql_all(row: T, query: "…")` | `Sql` | `Rows[T]` |
 | `sql_exec(query: "…")` | `Sql` | the number of rows changed |
 | `sql_move(row: T, query: "UPDATE … WHERE … RETURNING *")` | `Sql` | a compare-and-set: `Moved(value)`, `Raced(now)` when another run moved the row first, `NoRow` |
-| `call(to:, method:, send:, reply:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError]`. A repeat of a `once` key gets the first run's reply and runs nothing: its stored reply, or, sent while the first run waits on a call, that run's reply when it comes (`Unreachable` if it does not come within the budget: send it again) |
-| `ask(to:, method:, send:, reply:, within:)` | `Remote` | a read: the same, with no key |
-| `fetch(to: http, method: Post, url:, headers:, body:, within:, key: Some(…))` | `Http` | an HTTP request to another service (std/http.tape): `Result[HttpReply, CallError]`, `HttpReply(status, headers, body)` whatever its status, a redirect not followed. Every method but `Get` and `Head` writes `key: Some(…)`, sent as Idempotency-Key, so it can be sent again after a `Timeout` (C100). The log records the request with each secret the run read written `[secret <name>]`; a replay answers from the log. On the service only a host on the name's list is reached ([docs/service.md](docs/service.md#outbound-http)); any other is `Rejected` |
+| `call(to:, method:, send:, reply:, error:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError[Error]]`, `error:` the callee's error type (C98 for a View). A repeat of a `once` key gets the first run's reply and runs nothing: its stored reply, or, sent while the first run waits on a call, that run's reply when it comes (`Unreachable` if it does not come within the budget: send it again) |
+| `ask(to:, method:, send:, reply:, error:, within:)` | `Remote` | a read: the same, with no key |
+| `fetch(to: http, method: Post, url:, headers:, body:, within:, key: Some(…))` | `Http` | an HTTP request to another service (std/http.tape): `Result[HttpReply, CallError[View]]`, `HttpReply(status, headers, body)` whatever its status, a redirect not followed. Every method but `Get` and `Head` writes `key: Some(…)`, sent as Idempotency-Key, so it can be sent again after a `Timeout` (C100). The log records the request with each secret the run read written `[secret <name>]`; a replay answers from the log. On the service only a host on the name's list is reached ([docs/service.md](docs/service.md#outbound-http)); any other is `Rejected` |
 | `wake(after: ms, key: n)` | `Timer` | `Done`, run with `do`: asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again, and so does a run that fails on a storage error, after a wait that doubles each time (1 s up to 15 min); a run that traps is not retried |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
@@ -412,17 +412,30 @@ number with at most 2 decimals`.
 there (the object is reset, the reply is lost), so whatever must happen afterwards needs a timer set before the
 call, in the same commit.
 
-`export fn name(db: Sql, message: Record) -> Result[Reply, View]` is a method other programs call. `handle(raw:
-View, …capabilities) -> Response` serves requests (C14 for any other type: a `Buf` is the body being written, not an
-answer). `woken` serves timers.
+`export fn name(db: Sql, message: Record) -> Result[Reply, Error]` is a method other programs call. `Error` is a
+type of the program's own whose constructors are what the method refuses for (`type ReserveError { OutOfStock(left:
+Int)  NoSuchItem }`); a View is C98, with that fix. A caller declares the same type and names it, `call(…, reply:
+Reserved, error: ReserveError, …)`, and its refusal is `Err(error: Rejected(reason: OutOfStock(left)))`, a value
+matched like any other: a match on `Rejected(reason: …)` names each constructor, or C24 says which it leaves out. On
+the wire the error is JSON, as write_json writes it (`"no_such_item"` for a type whose constructors have no fields),
+and the two sides' fingerprints cover the message, the reply and the error, so a caller built against another error
+type gets `Skew` and nothing runs; a refusal it cannot decode is `Skew` too, never a `Rejected` it cannot read.
+**Adding a constructor to an error type is a breaking change**: every caller with a match that names each
+constructor stops compiling until it says what the new one means, and a caller not rebuilt gets `Skew`, as for any
+change of the message or the reply. Removing one breaks no match, and still changes the fingerprint. `woken`'s
+error may be a View: the host logs it, and no program calls it. `handle(raw: View, …capabilities) -> Response`
+serves requests (C14 for any other type: a `Buf` is the body being written, not an answer). `woken` serves timers.
 
 **An answer is a value.** The body is written first and its status given last, `buf() |> append(view: …) |>
 respond(status: 200)`; `respond_as(status:, content:)` names its type, `json(status:, value:)` answers a value as
 JSON, `empty(status:)` answers no body, and `redirect(to:)` is a 303 to `to` (the status a browser follows with a GET
-whatever the request was; another redirect is `empty(status: 308) |> header(name: "location", value: …)`).
+whatever the request was; another redirect is `empty(status: 308) |> header(name: "location", value: …)`). An error
+is `problem(status: 404, detail: "no such order")`: application/problem+json (RFC 9457), `{"type":"about:blank",
+"title":"Not Found","status":404,"detail":"no such order"}`, the shape the service answers its own errors in;
+`problem_with(status:, detail:, members: R)` adds the fields of the record `R` after `detail`.
 `header(out, name:, value:)` adds a header to a Response and copies nothing. The function the compiler generates
 around `handle` gives the host the Response; the program writes no byte of the head. A status written as a literal
-outside 200 to 599, or a 204, 205 or 304 given a body, is C96; one computed at run time, and a header the host
+outside 200 to 599, or a 204, 205 or 304 given a body, or a problem's outside 400 to 599, is C96; one computed at run time, and a header the host
 refuses (a name that is not a token, a value that is not printable ASCII, a name the host sets itself, more than 32),
 are answered 500 with the reason.
 
@@ -475,6 +488,8 @@ type NewOrder { NewOrder(key: Key, amount: Amount) }
 type Order { Order(id: Int, amount: Int, state: OrderState, note: View) }
 type Charge { Charge(order: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
+// what payments refuses a charge with: the type its `export fn charge` returns in Err
+type ChargeError { Declined(reason: View) }
 type ForOrder { ForOrder(order: Int) }
 
 type Outcome {
@@ -531,10 +546,11 @@ fn charge(order: Order) -> Outcome {
         method: "charge",
         send: Charge(order: id, amount),
         reply: Charged,
+        error: ChargeError,
         within: 2000,
         once: ForOrder(order: id)
       ) else {
-        Err(error: Rejected(reason)) -> moved(m: sql_move(
+        Err(error: Rejected(reason: Declined(reason))) -> moved(m: sql_move(
           row: Order,
           query: "UPDATE orders SET state = 'failed', note = :reason WHERE id = :id \
               AND state = 'paying' RETURNING *",
@@ -579,11 +595,7 @@ fn shown(status: Int, found: Option[Order]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, order) -> json(status, value: order)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond_as(status, content: Json)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 ```
@@ -619,11 +631,11 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Filter by a value that may be absent | an `Option` argument, NULL for `None`, and the query says what None means: `WHERE (:region IS NULL OR region = :region)` for no filter, `WHERE region IS :region` for the rows whose region is NULL. An Option compared with `=` and never asked `IS NULL` is refused, since `= NULL` takes no row; into a NOT NULL column, too | C69 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
 | Take the next one (a lease, a free seat) | write the client's key into the row the claim takes (`SET lease = :key`), and before choosing, read the row that key already holds (`SELECT … WHERE lease = :key`) and answer with it | C95 |
-| Command another program | `call` with `within:` and a `once:` key that names the command: the row's id (`ForOrder(order: id)`), or a key the client sent | C39, C41, C64, C65, C71 |
-| Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer. An arm that takes both may only answer the client: a write, a call or a timer there acts on an outcome nobody knows | C24, C87 |
+| Command another program | `call` with `error:` (the callee's error type), `within:` and a `once:` key that names the command: the row's id (`ForOrder(order: id)`), or a key the client sent | C39, C41, C64, C65, C71 |
+| Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), or one for each of the callee's reasons (`Rejected(reason: OutOfStock(left))`), one for no answer. An arm that takes both may only answer the client: a write, a call or a timer there acts on an outcome nobody knows | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |
-| Answer | functions return a value (`Outcome`); one function turns it into a `Response`, the body written first and the status given last: `json(status: …, value: …)` for a value as JSON, `buf() \|> … \|> respond(status: …)` for text, `respond_as(status: …, content: Html)` for a type, `empty(status: 204)` for no body, `redirect(to: …)` for a 303. `handle` gives that Response, never bytes: the host writes the status and the headers from it, so no byte of a body can become one | C14, C96 |
+| Answer | functions return a value (`Outcome`); one function turns it into a `Response`, the body written first and the status given last: `json(status: …, value: …)` for a value as JSON, `problem(status: …, detail: …)` for an error, `buf() \|> … \|> respond(status: …)` for text, `respond_as(status: …, content: Html)` for a type, `empty(status: 204)` for no body, `redirect(to: …)` for a 303. `handle` gives that Response, never bytes: the host writes the status and the headers from it, so no byte of a body can become one | C14, C96 |
 | Set a response header | `json(status: 201, value: v) \|> header(name: "location", value: url)`: `header` takes and gives a Response, and copies nothing. A name is a token, a value printable ASCII; the host refuses those it sets itself (content-type, set-cookie, the security headers) and answers 500 with the reason | |
 | Route a request | `match request(raw) { Request(method: Get, path: "/items/" ++ decimal(id)) -> … }`: the method is a `Method` (`Get`, `Post`, `Put`, `Patch`, `Delete`, `Options`, `Head`, `Other(name)`), so a misspelt one is an unknown constructor | C20 |
 | Read a request header | `header_of(request: r, name: "if-none-match")`, an `Option[View]`; the host passes only those it means a program to see | |
@@ -663,7 +675,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 ```
 
 ```diff C87
--        Err(error: Rejected(reason)) -> moved(m: sql_move(
+-        Err(error: Rejected(reason: Declined(reason))) -> moved(m: sql_move(
 -          row: Order,
 -          query: "UPDATE orders SET state = 'failed', note = :reason WHERE id = :id \
 -              AND state = 'paying' RETURNING *",

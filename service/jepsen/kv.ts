@@ -281,7 +281,9 @@ export const attempter =
       res = { status: 0, body: { error: thrown(e) } };
     }
     if (timer) clearTimeout(timer);
-    const failure = fields(res.body).error,
+    // a problem's detail (the service's errors, and the shard's, are application/problem+json); `error` is the
+    // client's own note of a connection that failed
+    const failure = fields(res.body).detail ?? fields(res.body).error,
       said = failure === undefined || failure === null || failure === '' ? null : shown(failure);
     h.end = clock.n++;
     h.trace_complete = res.headers?.['tape-trace-complete'] ?? null;

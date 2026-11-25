@@ -93,7 +93,7 @@ function peekCall(c: Ctx, e: Call): Type | null {
   }
   if (e.name === 'wake') return T(stdName(c.B.prog, 'types', 'Done'));
   if (e.name === 'secret') return T('Option', VIEW);
-  if (e.name === 'http_send') return T('Result', VIEW, T('CallError'));
+  if (e.name === 'http_send') return T('Result', VIEW, T('CallError', VIEW));
   if (INTRINSICS.has(e.name)) return MONO.get(e.name) ?? null;
   const g = c.B.find(e.name, c.f.file, e);
   if (!g) return null;
@@ -445,6 +445,8 @@ function emitInterfaceCall(c: Ctx, e: Call, cap: Binding, iface: Interface): Typ
       { label: 'to', value: { k: 'var', name: cap.name, pos: 'read', ...at }, ...at },
       { label: 'method', value: { k: 'str', bytes: utf8(mn), ...at }, ...at },
       { label: 'reply', value: { k: 'ctor', name: key(m.reply), args: [], ...at }, ...at },
+      // a capability the host binds refuses with text: Rejected(reason: View)
+      { label: 'error', value: { k: 'ctor', name: 'View', args: [], ...at }, ...at },
       ...extra,
     ],
   });

@@ -11,7 +11,7 @@ import { machinePlan } from '../rules.ts';
 import { integerParams } from '../sql.ts';
 import { instantiate, machineTriggers, machineTriggersIn, installMachines } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
-import { portKeys, portMachines, portWith } from '../experiments/lang/port-keys.ts';
+import { portErrors, portKeys, portMachines, portWith } from '../experiments/lang/port-keys.ts';
 import type { Problem } from '../compiler/common.ts';
 import { std } from '../std.ts';
 import { answerBody, answered, built, finish, same as T, sleep } from './harness.ts';
@@ -332,7 +332,7 @@ T(
   ],
   [[], [], ['C59:15']],
 );
-const exportedFn = `schema "${S}"\n${M}type Pay { Pay(id: Int, to: View) }\ntype Done { Done(n: Int) }\nexport fn pay(db: Sql, message: Pay) -> Result[Done, View] {\n  Ok(value: Done(n: sql_exec(db, query: "UPDATE s SET state = :to WHERE id = :id AND state = 'pending'", to: message.to, id: message.id)))\n}\n`;
+const exportedFn = `schema "${S}"\n${M}type Pay { Pay(id: Int, to: View) } type Refusal { Refused(reason: View) }\ntype Done { Done(n: Int) }\nexport fn pay(db: Sql, message: Pay) -> Result[Done, Refusal] {\n  Ok(value: Done(n: sql_exec(db, query: "UPDATE s SET state = :to WHERE id = :id AND state = 'pending'", to: message.to, id: message.id)))\n}\n`;
 T('an exported method is checked too, and its message is unknown (C60)', codes(exportedFn), ['C60:9']);
 const r0 = builtP(moving("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending' RETURNING id AS n"));
 T(
@@ -374,7 +374,7 @@ const fx = (f: string) =>
     {
       name: f,
       text: portMachines(
-        portWith(portKeys(read(`experiments/lang/bugs/${f}`).replaceAll(/^private type /gm, 'type '))),
+        portErrors(portWith(portKeys(read(`experiments/lang/bugs/${f}`).replaceAll(/^private type /gm, 'type ')))),
       ),
     },
   ])
@@ -789,7 +789,7 @@ T(
   T('V1: a program function that std also names is reached, and its write checked (C54)', all(v1prog), ['C54:6']);
 }
 const fx6 = (f: string) =>
-  compile([...std, { name: f, text: portMachines(portKeys(read(`experiments/lang/bugs/${f}`))) }])
+  compile([...std, { name: f, text: portErrors(portMachines(portKeys(read(`experiments/lang/bugs/${f}`)))) }])
     .errors.map(e => `${e.code}:${e.line}`)
     .filter(c => /^C6[23]/.test(c));
 T(
@@ -835,7 +835,7 @@ T(
     [],
   );
   const forged =
-    'type M { M(n: Int) }\nfn handle(raw: View) -> Response {\n  said(r: Err(error: Rejected(reason: "no")))\n}\nfn said(r: Result[M, CallError]) -> Response {\n  match r {\n    Err(error: Rejected(reason)) -> append(buf: buf(), view: reason) |> respond(status: 409)\n    _ -> empty(status: 200)\n  }\n}\n';
+    'type M { M(n: Int) } type Refusal { Refused(reason: View) }\nfn handle(raw: View) -> Response {\n  said(r: Err(error: Rejected(reason: Refused(reason: "no"))))\n}\nfn said(r: Result[M, CallError[Refusal]]) -> Response {\n  match r {\n    Err(error: Rejected(reason: Refused(reason))) -> append(buf: buf(), view: reason) |> respond(status: 409)\n    _ -> empty(status: 200)\n  }\n}\n';
   T(
     'CallError is private to std/core.tape: a program matches on Rejected, and cannot make one (J1 at the program level)',
     all(forged),

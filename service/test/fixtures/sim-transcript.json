@@ -1,6 +1,6 @@
 {
  "made_by": "node proof/sim-transcript.ts",
- "sources": "c03e3d0f97d15579",
+ "sources": "3c282ec43e8c5989",
  "requests": [
   {
    "method": "POST",
@@ -14,7 +14,7 @@
    "path": "/ann",
    "body": "{\"key\":\"k2\",\"tier\":3,\"buyer\":\"balcony\",\"qty\":1,\"seconds\":3000}",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
@@ -35,7 +35,7 @@
    "path": "/holds/1/release",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -70,7 +70,7 @@
    "path": "/events/3/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
@@ -84,14 +84,14 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k4\",\"name\":\"floor\",\"price\":2,\"capacity\":2}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k4\",\"name\":\"floor\",\"price\":2,\"capacity\":2}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "GET",
@@ -133,21 +133,21 @@
    "path": "/holds/1/release",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
    "path": "/events/3/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "GET",
    "path": "/holds/5/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "GET",
@@ -161,7 +161,7 @@
    "path": "/holds/4/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -182,7 +182,7 @@
    "path": "/holds/1/release",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "POST",
@@ -203,7 +203,7 @@
    "path": "/holds/1/release",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -217,7 +217,7 @@
    "path": "/holds/5/checkout",
    "body": "{\"card\":\"visa-4242\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -231,35 +231,35 @@
    "path": "/holds/3/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
    "path": "/events/3/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k5\",\"name\":\"balcony\",\"price\":2,\"capacity\":1}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/2/transfer",
    "body": "{\"from\":\"general\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/2/transfer",
    "body": "{\"from\":\"general\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "GET",
@@ -273,28 +273,28 @@
    "path": "/events/3/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k6\",\"name\":\"general\",\"price\":3,\"capacity\":2}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k4\",\"name\":\"Tape Live: The Retry Tour\",\"price\":1,\"capacity\":3}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/holds/2/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "POST",
@@ -308,14 +308,14 @@
    "path": "/events/2/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
    "path": "/holds/4/checkout",
    "body": "{\"card\":\"visa-4242\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -350,14 +350,14 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k8\",\"name\":\"front row\",\"price\":2,\"capacity\":6}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/holds/4/checkout",
    "body": "{\"card\":\"visa-4242\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -385,7 +385,7 @@
    "path": "/holds/5/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -406,14 +406,14 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k9\",\"name\":\"Tape Live: The Retry Tour\",\"price\":1}",
    "status": 400,
-   "answer": "{\"error\":\"capacity: missing\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"capacity: missing\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k4\",\"name\":\"front row\",\"price\":6,\"capacity\":2}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "GET",
@@ -441,7 +441,7 @@
    "path": "/holds/5/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -476,14 +476,14 @@
    "path": "/holds",
    "body": "{\"key\":\"k10\",\"tier\":6,\"buyer\":\"balcony\",\"qty\":2}",
    "status": 409,
-   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
   },
   {
    "method": "GET",
    "path": "/holds/2",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "GET",
@@ -525,7 +525,7 @@
    "path": "/holds",
    "body": "{\"key\":\"k10\",\"tier\":6,\"buyer\":\"balcony\",\"qty\":2}",
    "status": 409,
-   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
   },
   {
    "method": "POST",
@@ -539,7 +539,7 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k12\",\"name\":\"cy\",\"price\":4,\"capacity\":2}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
@@ -553,28 +553,28 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k4\",\"name\":\"general\",\"price\":1}",
    "status": 400,
-   "answer": "{\"error\":\"capacity: missing\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"capacity: missing\"}"
   },
   {
    "method": "GET",
    "path": "/events/3/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k4\",\"name\":\"front row\",\"price\":6,\"capacity\":2}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/holds",
    "body": "{\"key\":\"k13\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":1,\"seconds\":3000}",
    "status": 400,
-   "answer": "{\"error\":\"seconds: expected Seconds, 2 to 900\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"seconds: expected Seconds, 2 to 900\"}"
   },
   {
    "method": "POST",
@@ -595,14 +595,14 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k14\",\"name\":\"demo-1\",\"price\":3,\"capacity\":3}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k15\",\"name\":\"Tape Live: The Retry Tour\",\"price\":4,\"capacity\":4}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "GET",
@@ -616,14 +616,14 @@
    "path": "/events/3/cancel",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
    "path": "/holds",
    "body": "{\"key\":\"k16\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":7}",
    "status": 409,
-   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
   },
   {
    "method": "GET",
@@ -644,14 +644,14 @@
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k18\",\"name\":\"Tape Live: The Retry Tour\",\"price\":7,\"capacity\":5}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k19\",\"name\":\"Tape Live: The Retry Tour\",\"price\":9,\"capacity\":5}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
@@ -672,28 +672,28 @@
    "path": "/holds/6",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such hold\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such hold\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/4/transfer",
    "body": "{\"from\":\"2026-12-05T20:00\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "POST",
    "path": "/events/3/tiers",
    "body": "{\"key\":\"k14\",\"name\":\"demo-1\",\"price\":3,\"capacity\":3}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
    "path": "/holds",
    "body": "{\"key\":\"k16\",\"tier\":7,\"buyer\":\"balcony\",\"qty\":7}",
    "status": 409,
-   "answer": "{\"error\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"not enough seats left in that tier, or the event is not on sale; POST /waitlist to wait for one\"}"
   },
   {
    "method": "GET",
@@ -714,7 +714,7 @@
    "path": "/events/9/tiers",
    "body": "{\"key\":\"k20\",\"name\":\"general\",\"price\":3,\"capacity\":1}",
    "status": 404,
-   "answer": "{\"error\":\"no such event on sale\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such event on sale\"}"
   },
   {
    "method": "POST",
@@ -742,42 +742,42 @@
    "path": "/holds/8/refund",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/8/transfer",
    "body": "{\"from\":\"general\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/4/transfer",
    "body": "{\"from\":\"2026-12-05T20:00\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/4/transfer",
    "body": "{\"from\":\"2026-12-05T20:00\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "POST",
    "path": "/tickets/5/transfer",
    "body": "{\"from\":\"demo-1\",\"to\":\"front row\"}",
    "status": 404,
-   "answer": "{\"error\":\"no such ticket\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such ticket\"}"
   },
   {
    "method": "GET",
    "path": "/holds/3/release",
    "body": "",
    "status": 404,
-   "answer": "{\"error\":\"no such route\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such route\"}"
   },
   {
    "method": "POST",
@@ -798,7 +798,7 @@
    "path": "/events/6/tiers",
    "body": "{\"key\":\"k11\",\"price\":7,\"capacity\":2}",
    "status": 400,
-   "answer": "{\"error\":\"name: missing\"}"
+   "answer": "{\"type\":\"about:blank\",\"title\":\"Bad Request\",\"status\":400,\"detail\":\"name: missing\"}"
   },
   {
    "method": "POST",

@@ -53,7 +53,7 @@ describe('a storage reset before the log begins', () => {
     const body = await json(put);
     // one answer, the failure: a retry inside the request would have come back 201
     expect(put.status).toBe(503);
-    expect(at(body, 'error')).toBe(`nothing was applied: ${RESET}`);
+    expect(at(body, 'detail')).toBe(`nothing was applied: ${RESET}`);
     expect(at(body, 'reason')).toBe(RESET);
     expect(at(body, 'outcome')).toBe('not_applied');
     expect(at(body, 'transient')).toBe(true);
@@ -92,7 +92,7 @@ describe('a storage reset before the log begins', () => {
     const body = await json(got503);
     expect(got503.status).toBe(503);
     expect(at(body, 'outcome')).toBe('not_applied');
-    expect(String(at(body, 'error'))).toContain(RESET);
+    expect(String(at(body, 'detail'))).toContain(RESET);
     expect(got503.headers.get('tape-request-id')).toMatch(/^[0-9a-f-]{36}$/);
     expect(got503.headers.get('tape-outcome')).toBe('not_applied');
     expect(got503.headers.get('traceparent')).toMatch(new RegExp(`^00-${trace}-[0-9a-f]{16}-01$`));

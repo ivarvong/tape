@@ -30,7 +30,6 @@ type NewEvent { NewEvent(key: Key, name: Name, at: View) }
 type Event { Event(id: Int, name: View, at: View, at_ms: Int, created: Int) }
 type Made { Made(id: Int, name: View, at: View, at_ms: Int) }
 type Left { Left(id: Int, name: View, at: View, left_ms: Int, days: Dec[2], done: Bool) }
-type Problem { Problem(error: View) }
 
 fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   match request(raw) {
@@ -41,7 +40,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
       path: "/events/" ++ decimal(id) ++ ".json"
     ) -> left(found: load(id), at: now())
     Request(method: Get, path: "/events/" ++ decimal(id)) -> page(found: load(id), at: now())
-    _ -> problem(status: 404, error: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -51,17 +50,17 @@ fn load(id: Int) -> Option[Event] {
 
 fn made(body: View) -> Response {
   let Ok(value: NewEvent(key, name, at)) = decode(json: body, as: NewEvent) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let Some(value: at_ms) = utc_ms(at) else -> problem(
     status: 400,
-    error: "at: a UTC time, 2026-12-31T23:59:59Z, 2026-12-31T23:59Z or 2026-12-31"
+    detail: "at: a UTC time, 2026-12-31T23:59:59Z, 2026-12-31T23:59Z or 2026-12-31"
   )
   let created = now()
   let True = at_ms >= created
     and at_ms <= created + 315576000000 else -> problem(
       status: 400,
-      error: "at: from now to ten years ahead"
+      detail: "at: from now to ten years ahead"
     )
   match sql_first(
     row: Event,
@@ -76,7 +75,7 @@ fn made(body: View) -> Response {
     Some(value) -> shown_made(status: 201, event: value)
     None -> match sql_first(row: Event, query: "SELECT * FROM events WHERE client = :key", key) {
       Some(value) -> shown_made(status: 200, event: value)
-      None -> problem(status: 500, error: "the countdown is gone")
+      None -> problem(status: 500, detail: "the countdown is gone")
     }
   }
 }
@@ -103,7 +102,7 @@ fn left(found: Option[Event], at: Int) -> Response {
       )
         |> header(name: "cache-control", value: "no-store")
     }
-    None -> problem(status: 404, error: "no such countdown")
+    None -> problem(status: 404, detail: "no such countdown")
   }
 }
 
@@ -380,10 +379,6 @@ fn upcoming(out: Buf, rows: Rows[Event], at: Int) -> Buf {
         |> write_html(text: event.name)
         |> append(view: "</a> <span class=meta>in \(spelled(ms: event.at_ms - at))</span></li>")
     })
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 
 fn shell(title: View) -> Buf {

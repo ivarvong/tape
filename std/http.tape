@@ -193,6 +193,7 @@ private fn asked(target: View) -> Option[View] {
 // as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's
 // content-security-policy does, and any host that serves these types must send that policy.
 // application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed.
+// Problem is application/problem+json (RFC 9457), what `problem` answers: an error a client reads as one shape.
 type Content {
   Html
   Json
@@ -203,6 +204,7 @@ type Content {
   Atom
   Rss
   Xml
+  Problem
 }
 
 // A response header, as `header` adds one: the name in lower case, and the value as given.
@@ -265,6 +267,114 @@ fn redirect(to: View) -> Response {
   empty(status: 303) |> header(name: "location", value: to)
 }
 
+// An error, answered as application/problem+json (RFC 9457): `{"type":"about:blank","title":<the status's reason
+// phrase>,"status":<status>,"detail":<detail>}`. The one shape for every error a program answers, and the one the
+// service answers for its own (docs/service.md), so a client reads `detail` whichever said no. `detail` is for the
+// person reading it (what went wrong with this request), the status says what kind of failure it is; a client that
+// needs more to act on (a key, a version) is given members of its own with problem_with. A status written as a
+// literal outside 400 to 599 is C96.
+//
+//   > problem(status: 404, detail: "no such link")
+//   Response(status: 404, content: Problem, body: "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such link\"}")
+//   > problem(status: 422, detail: "qty: expected an integer").body
+//   "{\"type\":\"about:blank\",\"title\":\"Unprocessable Content\",\"status\":422,\"detail\":\"qty: expected an integer\"}"
+fn problem(status: Int, detail: View) -> Response {
+  problem_head(status, detail) |> push(byte: 125) |> respond_as(status, content: Problem)
+}
+
+// An error with members of its own (RFC 9457's extension members): the fields of `members`, a record of one
+// constructor, written after `detail` as write_json writes them (an Option that is None has no key). Name no field
+// type, title, status or detail: those are the problem's own.
+//
+//   > problem_with(status: 409, detail: "taken", members: Header(name: "key", value: "a")).body
+//   "{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"taken\",\"name\":\"key\",\"value\":\"a\"}"
+fn problem_with[T](status: Int, detail: View, members: T) -> Response {
+  let more = freeze(buf: write_json(out: buf(), value: members))
+  problem_head(status, detail) |> problem_members(more) |> respond_as(status, content: Problem)
+}
+
+// A problem up to its detail, the closing brace not written.
+private fn problem_head(status: Int, detail: View) -> Buf {
+  buf()
+    |> append(view: "{\"type\":\"about:blank\",\"title\":\"")
+    |> append(view: status_title(status))
+    |> append(view: "\",\"status\":")
+    |> write_int(value: status)
+    |> append(view: ",\"detail\":")
+    |> write_json_string(text: detail)
+}
+
+// The members' object, its own braces dropped, after the detail; an empty one adds nothing. A value that is not an
+// object (a list, a number) is not members, and is left out.
+private fn problem_members(out: Buf, more: View) -> Buf {
+  match {
+    len(more) > 2 and more[0] == 123 -> out
+      |> push(byte: 44)
+      |> append(view: slice(v: more, from: 1, to: len(more)))
+    else -> push(buf: out, byte: 125)
+  }
+}
+
+// The reason phrase RFC 9110 (and the IANA registry) gives a status, a problem's title: "Client Error" or "Server
+// Error" for a 4xx or 5xx it names none of, "Error" for any other. host/problem.ts holds the same table.
+//
+//   > status_title(status: 413)
+//   "Content Too Large"
+//   > status_title(status: 499)
+//   "Client Error"
+private fn status_title(status: Int) -> View {
+  match status {
+    400 -> "Bad Request"
+    401 -> "Unauthorized"
+    402 -> "Payment Required"
+    403 -> "Forbidden"
+    404 -> "Not Found"
+    405 -> "Method Not Allowed"
+    406 -> "Not Acceptable"
+    407 -> "Proxy Authentication Required"
+    408 -> "Request Timeout"
+    409 -> "Conflict"
+    410 -> "Gone"
+    411 -> "Length Required"
+    412 -> "Precondition Failed"
+    413 -> "Content Too Large"
+    414 -> "URI Too Long"
+    415 -> "Unsupported Media Type"
+    416 -> "Range Not Satisfiable"
+    417 -> "Expectation Failed"
+    421 -> "Misdirected Request"
+    422 -> "Unprocessable Content"
+    423 -> "Locked"
+    424 -> "Failed Dependency"
+    425 -> "Too Early"
+    426 -> "Upgrade Required"
+    428 -> "Precondition Required"
+    429 -> "Too Many Requests"
+    431 -> "Request Header Fields Too Large"
+    451 -> "Unavailable For Legal Reasons"
+    500 -> "Internal Server Error"
+    501 -> "Not Implemented"
+    502 -> "Bad Gateway"
+    503 -> "Service Unavailable"
+    504 -> "Gateway Timeout"
+    505 -> "HTTP Version Not Supported"
+    506 -> "Variant Also Negotiates"
+    507 -> "Insufficient Storage"
+    508 -> "Loop Detected"
+    511 -> "Network Authentication Required"
+    _ -> status_class(status)
+  }
+}
+
+// The title of a status the table does not name.
+private fn status_class(status: Int) -> View {
+  match {
+    status >= 400 and status < 500 -> "Client Error"
+    status >= 500 and status < 600 -> "Server Error"
+    else -> "Error"
+  }
+}
+
 // The answer, and a session started with `id`, 1 to 256 bytes of printable ASCII (a user's id once a password or
 // a mailed link checked out): on the program's own origin (docs/service.md#identity) the host sets a cookie the
 // program never sees, HttpOnly, Secure, SameSite=Lax, signed with the service's key over this account, this name,
@@ -320,7 +430,7 @@ fn header(out: Response, name: View, value: View) -> Response {
 
 // The answer `handle` gave, as the host reads it (host/run.ts answered, then host.ts responseOf), written by the
 // function the compiler generates around `handle`, and by nothing a program can call. A 0 byte and "tap", the
-// version (1), the status as 8 bytes, the content as one (its constructor's place in Content, Html 0 to Xml 8), the
+// version (1), the status as 8 bytes, the content as one (its constructor's place in Content, Html 0 to Problem 9), the
 // number of headers as 4, then each header in the order it was set: its name's length as 4 bytes, the name, its
 // value's length as 4 bytes and the value; then where the body is, its address and its length as 4 bytes each
 // (answer_body): the body is not copied after the head, the host reads it where it lies. Every number is
@@ -387,6 +497,7 @@ private fn content_tag(content: Content) -> Int {
     Atom -> 6
     Rss -> 7
     Xml -> 8
+    Problem -> 9
   }
 }
 
@@ -400,6 +511,8 @@ private fn content_tag(content: Content) -> Int {
 //   "application/rss+xml"
 //   > content_type(content: Xml)
 //   "application/xml"
+//   > content_type(content: Problem)
+//   "application/problem+json"
 fn content_type(content: Content) -> View {
   match content {
     Html -> "text/html"
@@ -411,6 +524,7 @@ fn content_type(content: Content) -> View {
     Atom -> "application/atom+xml"
     Rss -> "application/rss+xml"
     Xml -> "application/xml"
+    Problem -> "application/problem+json"
   }
 }
 // One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and
@@ -629,7 +743,7 @@ fn fetch(
   body: View,
   within: Int,
   key: Option[View]
-) -> Result[HttpReply, CallError] {
+) -> Result[HttpReply, CallError[View]] {
   let sent = buf()
     |> append(view: "{\"method\":")
     |> write_json(value: method_name(method))

@@ -22,17 +22,22 @@ type Result[T, E] {
   Err(error: E)
 }
 
-// Why a call to another object or Worker gave no reply. Timeout: the time budget ran out, and for a call that
-// changes something the outcome is unknown until it is sent again with the same key. Unreachable: nothing answers
-// to that name. Rejected: it refused, and says why. Skew: the two sides disagree, so nothing ran this time: they
-// were built from different definitions of the method, or the key was used before for another message (which may
-// have run; do not compensate for a Skew as for a refusal). Rejected and Skew are final: the callee runs a key at
-// most once and repeats its stored reply, so the same call sent again gets the same answer; a timer that asks
-// again does not change it (rules.ts C79 lets such an outcome leave a row for a request to move on).
-private type CallError {
+// Why a call to another object or Worker gave no reply, with E the callee's refusal: `call(…, reply: Charged,
+// error: ChargeError, …)` gives `Result[Charged, CallError[ChargeError]]`. Timeout: the time budget ran out, and for
+// a call that changes something the outcome is unknown until it is sent again with the same key. Unreachable:
+// nothing answers to that name. Rejected: it refused, and `reason` is the value of the callee's own error type, so
+// `Err(error: Rejected(reason: Declined(why)))` is matched like any value, and a match names each constructor of E.
+// Skew: the two sides disagree, so nothing ran this time: they were built from different definitions of the method
+// (its message, its reply or its error: a constructor added to E on one side is a Skew, never a Rejected the other
+// cannot read), the callee could not read the message, or the key was used before for another message (which may
+// have run; do not compensate for a Skew as for a refusal); `reason` says which. Rejected and Skew are final: the
+// callee runs a key at most once and repeats its stored reply, so the same call sent again gets the same answer; a
+// timer that asks again does not change it (rules.ts C79 lets such an outcome leave a row for a request to move on).
+// A capability the host binds (an `interface`) refuses with text: its E is View.
+private type CallError[E] {
   Timeout
   Unreachable
-  Rejected(reason: View) final
+  Rejected(reason: E) final
   Skew(reason: View) final
 }
 

@@ -17,13 +17,13 @@ type Sum { Sum(n: Int, units: Int, cents: Int) }
 fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(method: Post, path: "/items", body) -> create(body)
-    _ -> problem(status: 404, reason: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn create(body: View) -> Response {
   let Ok(value: Batch(batch, items)) = decode(json: body, as: Batch) else {
-    Err(error) -> problem(status: 400, reason: error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let made = insert_all(batch, items, made: 0)
   let Some(
@@ -33,7 +33,7 @@ fn create(body: View) -> Response {
     query: "SELECT count(*) AS n, coalesce(sum(qty), 0) AS units, coalesce(sum(qty * cents), 0) \
         AS cents FROM items WHERE batch = :batch",
     batch
-  ) else -> problem(status: 500, reason: "no totals")
+  ) else -> problem(status: 500, detail: "no totals")
   buf()
     |> append(
       view: "{\"created\":\(made),\"n\":\(n),\"units\":\(units),\"cents\":\(cents),\"items\":"
@@ -64,12 +64,4 @@ fn insert_all(batch: Key, items: List[NewItem], made: Int) -> Int {
     )
     Nil -> made
   }
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  buf()
-    |> append(view: "{\"error\":")
-    |> write_json_string(text: reason)
-    |> append(view: "}")
-    |> respond(status)
 }

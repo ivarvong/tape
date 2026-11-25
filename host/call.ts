@@ -142,7 +142,7 @@ function answered(reply: unknown): [Status, Uint8Array] {
   if (reply instanceof Uint8Array || reply instanceof ArrayBuffer) return ['ok', new Uint8Array(reply)];
   const status = typeof reply === 'object' && reply !== null && 'status' in reply ? reply.status : undefined;
   if (typeof status !== 'string' || !isStatus(status))
-    return ['rejected', enc.encode('the service answered with neither bytes nor { status, body }')];
+    return ['skew', enc.encode('the service answered with neither bytes nor { status, body }')];
   const body = typeof reply === 'object' && reply !== null && 'body' in reply ? reply.body : undefined;
   return [status, body instanceof Uint8Array || body instanceof ArrayBuffer ? new Uint8Array(body) : NONE];
 }

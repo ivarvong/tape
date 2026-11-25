@@ -160,7 +160,7 @@ fn handle(raw: View, db: Sql) -> Response {
 T('ambient: db reaches count through twice', codes(A), []);
 const A2 =
   A +
-  'type Q { Q(id: Int) }\ntype Got { Got(n: Int) }\nexport fn peek(message: Q) -> Result[Got, View] {\n  let Q(id) = message\n  Ok(value: Got(n: twice(id)))\n}\n';
+  'type Q { Q(id: Int) } type Refusal { Refused(reason: View) }\ntype Got { Got(n: Int) }\nexport fn peek(message: Q) -> Result[Got, Refusal] {\n  let Q(id) = message\n  Ok(value: Got(n: twice(id)))\n}\n';
 T('ambient: an entry that does not declare it is C72', codes(A2)[0], 'C72:17');
 {
   const e = compile([...std, { name: 't.tape', text: A2 }]).errors[0];
@@ -327,8 +327,8 @@ T(
     {
       program: 'order',
       file: 'examples/fulfillment.tape',
-      from: 'reply: Charged, within: wait, once: ForOrder(order: id))',
-      to: 'reply: Charged, within: wait, once: card)',
+      from: 'reply: Charged, error: PaymentError, within: wait, once: ForOrder(order: id))',
+      to: 'reply: Charged, error: PaymentError, within: wait, once: card)',
       what: "the charge keyed by card: a second order on the card gets the first one's charge",
     },
     {
@@ -341,8 +341,8 @@ T(
     {
       program: 'agent',
       file: 'testdata/compare/agent.tape',
-      from: '    Run(id, step, tool, input, state: Acting) -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: AtStep(run: id, step))',
-      to: '    Run(id, prompt, step, tool, input, state: Acting) -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: prompt ++ "/" ++ decimal_text(value: step))',
+      from: '    Run(id, step, tool, input, state: Acting) -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, error: Refusal, within: 50, once: AtStep(run: id, step))',
+      to: '    Run(id, prompt, step, tool, input, state: Acting) -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, error: Refusal, within: 50, once: prompt ++ "/" ++ decimal_text(value: step))',
       what: 'the tool call keyed by prompt and step: two runs of one prompt share it',
     },
   ];
@@ -362,7 +362,7 @@ T(
     );
   }
   const mini = (key: string, extra = '') =>
-    `migration 1 "t" {\n  CREATE TABLE runs(id INTEGER PRIMARY KEY, prompt TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0)\n}\ntype Run { Run(id: Int, prompt: View, step: Int) }\ntype Use { Use(prompt: View) }\ntype AtStep { AtStep(run: Int, step: Int) }\ntype Used { Used(n: Int) }\nfn handle(raw: View, db: Sql, tools: Remote) -> Response {\n  match sql_first(db, row: Run, query: "SELECT id, prompt, step FROM runs WHERE id = :id", id: len(raw)) {\n    Some(value: Run(id, prompt, step)) -> done(r: call(to: tools, method: "tool", send: Use(prompt), reply: Used, within: 50, once: ${key}))\n    None -> empty(status: 404)\n  }\n}\nfn done(r: Result[Used, CallError]) -> Response {\n  match r {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 502)\n  }\n}\n${extra}`;
+    `migration 1 "t" {\n  CREATE TABLE runs(id INTEGER PRIMARY KEY, prompt TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0)\n}\ntype Run { Run(id: Int, prompt: View, step: Int) } type Refusal { Refused(reason: View) }\ntype Use { Use(prompt: View) }\ntype AtStep { AtStep(run: Int, step: Int) }\ntype Used { Used(n: Int) }\nfn handle(raw: View, db: Sql, tools: Remote) -> Response {\n  match sql_first(db, row: Run, query: "SELECT id, prompt, step FROM runs WHERE id = :id", id: len(raw)) {\n    Some(value: Run(id, prompt, step)) -> done(r: call(to: tools, method: "tool", send: Use(prompt), reply: Used, error: Refusal, within: 50, once: ${key}))\n    None -> empty(status: 404)\n  }\n}\nfn done(r: Result[Used, CallError[Refusal]]) -> Response {\n  match r {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 502)\n  }\n}\n${extra}`;
   T('C71 key with the row id and step', codes(mini('AtStep(run: id, step)')), []);
   T('C71 key without the row id', codes(mini('AtStep(run: step, step)')), ['C71:10']);
 }

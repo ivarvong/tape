@@ -66,7 +66,7 @@ describe('the hosted compiler and runner, in this Worker', () => {
   it('refuses a request with an Origin, even with the operator token, and drains its body', async () => {
     for (const path of ['/mcp', '/v1/compile', '/v1/run', '/v1/test', '/v1/feedback']) {
       const r = await call(path, { method: 'POST', headers: { ...client, origin: 'https://a.example' }, body: '{}' });
-      expect([path, r.status, fields(await r.json())['error']]).toEqual([path, 403, 'origin_refused']);
+      expect([path, r.status, fields(await r.json())['code']]).toEqual([path, 403, 'origin_refused']);
       expect(r.headers.get('content-security-policy')).toBe(API_CSP);
     }
   });

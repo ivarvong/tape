@@ -118,7 +118,6 @@ type Item { Item(id: View, title: View, content_text: View, date_published: View
 type Feed { Feed(version: View, title: View, home_page_url: View, items: List[Item]) }
 type Line { Line(id: Int, at: Int, title: View, state: View, body: View) }
 type Ended { Ended(component: Int, state: ComponentState) }
-type Problem { Problem(error: View) }
 
 fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
@@ -131,7 +130,7 @@ fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
     Request(method: Get, path: "/feed.json") -> feed()
     Request(method: Post, caller: Anyone) -> problem(
       status: 403,
-      error: "only the operator writes here"
+      detail: "only the operator writes here"
     )
     Request(method: Post, path: "/components/" ++ slug, body) -> changed(slug, body)
     Request(method: Post, path: "/incidents", body) -> opened(body)
@@ -140,7 +139,7 @@ fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
       path: "/incidents/" ++ decimal(id) ++ "/updates",
       body
     ) -> updated(id, body)
-    _ -> problem(status: 404, error: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -162,7 +161,7 @@ export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Ended, View] {
 
 fn changed(slug: View, body: View) -> Response {
   let Ok(value: Change(state, note, minutes)) = decode(json: body, as: Change) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let text = match note {
     Some(value) -> value
@@ -184,7 +183,7 @@ fn changed(slug: View, body: View) -> Response {
           until: at + m * 60000
         )
       )
-      None -> problem(status: 400, error: "minutes: missing")
+      None -> problem(status: 400, detail: "minutes: missing")
     }
     "degraded" -> shown(moved: sql_move(
       row: Component,
@@ -203,7 +202,7 @@ fn changed(slug: View, body: View) -> Response {
       at
     ))
     "operational" -> shown(moved: back(slug, text, at))
-    _ -> problem(status: 400, error: "state: degraded, outage, maintenance or operational")
+    _ -> problem(status: 400, detail: "state: degraded, outage, maintenance or operational")
   }
 }
 
@@ -233,9 +232,9 @@ fn shown(moved: Move[Component]) -> Response {
     Moved(value) -> json(status: 200, value)
     Raced(now) -> problem(
       status: 409,
-      error: "\(now.slug) is \(component_text(state: now.state)), and cannot move there from it"
+      detail: "\(now.slug) is \(component_text(state: now.state)), and cannot move there from it"
     )
-    NoRow -> problem(status: 404, error: "no such component")
+    NoRow -> problem(status: 404, detail: "no such component")
   }
 }
 
@@ -243,15 +242,15 @@ fn opened(body: View) -> Response {
   let Ok(
     value: NewIncident(key, component, title, impact, body: first)
   ) = decode(json: body, as: NewIncident) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let True = impact == "degraded"
-    or impact == "outage" else -> problem(status: 400, error: "impact: degraded or outage")
+    or impact == "outage" else -> problem(status: 400, detail: "impact: degraded or outage")
   let Some(value: c) = sql_first(
     row: Component,
     query: "SELECT * FROM components WHERE slug = :component",
     component
-  ) else -> problem(status: 404, error: "no component \(component)")
+  ) else -> problem(status: 404, detail: "no component \(component)")
   let at = now()
   let Some(value: incident) = sql_first(
     row: Incident,
@@ -297,7 +296,7 @@ fn opened(body: View) -> Response {
 
 fn updated(id: Int, body: View) -> Response {
   let Ok(value: NewUpdate(key, state, body: text)) = decode(json: body, as: NewUpdate) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let at = now()
   let 1 = sql_exec(
@@ -356,11 +355,11 @@ fn updated(id: Int, body: View) -> Response {
       found: Some(value)
     )
     Raced(now) -> rollback(
-      out: problem(status: 409, error: "incident \(id) is \(incident_text(state: now.state))")
+      out: problem(status: 409, detail: "incident \(id) is \(incident_text(state: now.state))")
     )
     NoRow -> rollback(out: problem(
       status: 400,
-      error: "state: identified, monitoring or resolved, of an incident that exists"
+      detail: "state: identified, monitoring or resolved, of an incident that exists"
     ))
   }
 }
@@ -380,12 +379,8 @@ fn load(id: Int) -> Option[Incident] {
 fn incident_shown(status: Int, found: Option[Incident]) -> Response {
   match found {
     Some(value) -> json(status, value)
-    None -> problem(status: 404, error: "no such incident")
+    None -> problem(status: 404, detail: "no such incident")
   }
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 
 fn overall() -> View {

@@ -6,7 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
-import { instantiate, responseOf } from '../host.ts';
+import { instantiate, isProblem, responseOf } from '../host.ts';
 import { rng } from '../sim.ts';
 import { nodeSql } from '../nodesql.ts';
 import { call, finish, functionsOf, same as T, answered } from './harness.ts';
@@ -922,9 +922,11 @@ fn handle(raw: View) -> Response {
       [200, PLAIN, [], 'none'],
     ],
   );
+  // the host's refusal is a 500 problem (application/problem+json), and its detail says why
   const why = (req: string): unknown => {
     const x = both(req);
-    return Array.isArray(x) ? [x[0], x[3]] : x;
+    const body: unknown = Array.isArray(x) && typeof x[3] === 'string' ? JSON.parse(x[3]) : null;
+    return Array.isArray(x) ? [x[0], isProblem(body) ? body.detail : x[3]] : x;
   };
   T(
     'a header the host owns, a value that would split the head, a name that is not a token: 500, and why',

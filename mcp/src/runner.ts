@@ -142,7 +142,8 @@ const unreachable: Service = (): ServiceReply => ({ status: 'unreachable', body:
 
 /**
  * run's `remotes`: for a Remote (by its parameter's name), for a method, the answers its calls get, in order. An
- * answer is the reply's value (its JSON), {"error": "Rejected", "reason": …}, "timeout" or "unreachable" (tools.ts
+ * answer is the reply's value (its JSON), {"error": "Rejected", "reason": <a value of the callee's error type, as
+ * JSON>}, {"error": "Skew", "reason": "…"}, "timeout" or "unreachable" (tools.ts
  * remotesOf checks the shape). The host makes each call as it makes any other (host/call.ts), so each lands in the
  * effect log with its status and reply, and a replay answers it from there.
  */
@@ -155,12 +156,15 @@ function replyOf(answer: unknown): ServiceReply | 'timeout' {
   if (answer === undefined) return { status: 'unreachable', body: enc.encode(SCRIPTED_OUT) };
   if (answer === 'timeout') return 'timeout';
   if (answer === 'unreachable') return { status: 'unreachable', body: enc.encode(UNREACHABLE) };
-  // {"error": "Rejected" or "Skew", "reason": …}: the callee refused, or found the key used for another message
-  if (typeof answer === 'object' && answer !== null && 'error' in answer)
-    return {
-      status: answer.error === 'Skew' ? 'skew' : 'rejected',
-      body: enc.encode(String('reason' in answer ? answer.reason : '')),
-    };
+  // {"error": "Rejected", "reason": <the error as JSON>}: the callee refused, with a value of its error type (the
+  // caller decodes it as Rejected's reason; one that does not decode is Skew); {"error": "Skew", "reason": "…"}: the
+  // two sides disagree, or the key was used for another message
+  if (typeof answer === 'object' && answer !== null && 'error' in answer) {
+    const reason = 'reason' in answer ? answer.reason : '';
+    return answer.error === 'Skew'
+      ? { status: 'skew', body: enc.encode(String(reason)) }
+      : { status: 'rejected', body: enc.encode(JSON.stringify(reason)) };
+  }
   return enc.encode(JSON.stringify(answer));
 }
 /**

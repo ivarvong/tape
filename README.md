@@ -66,7 +66,7 @@ $ node tape.ts examples/hello.tape 'GET /hello/ada' 'GET /hello/ada'
 ← 200 ⏎ Hello again, ada #2!
 
   effect log
-    start   build 4b573619cd5c32aa  flags {}  216 bytes of memory, 91 steps, step version 2
+    start   build f4992b77625bf202  flags {}  216 bytes of memory, 91 steps, step version 2
     sql     INSERT INTO greeted(name, n) VALUES (?1, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  …
 
   trace, from that log
@@ -176,6 +176,7 @@ fn reserve(order: Order) -> Response {
     method: "reserve",
     send: Reserve(item),
     reply: Reserved,
+    error: StockError,
     within: flags.stock_budget_ms,
     once: ForOrder(order: id)
   ) else {
@@ -190,12 +191,12 @@ fn reserve(order: Order) -> Response {
     )
     Err(error: Timeout) -> problem(
       status: 504,
-      reason: "stock did not answer in time; the order stays pending"
+      detail: "stock did not answer in time; the order stays pending"
     )
-    Err(error: Skew(reason)) -> problem(status: 502, reason)
+    Err(error: Skew(reason)) -> problem(status: 502, detail: reason)
     Err(error: Unreachable) -> problem(
       status: 503,
-      reason: "stock is unreachable; the order stays pending"
+      detail: "stock is unreachable; the order stays pending"
     )
   }
   // confirmed by this request or, when a retry racing it moved the order first (both heard the same stored reply),
@@ -207,7 +208,7 @@ fn reserve(order: Order) -> Response {
   ) {
     Moved(value) -> shown(status: 201, order: value)
     Raced(now) -> shown(status: 201, order: now)
-    NoRow -> problem(status: 500, reason: "the order vanished")
+    NoRow -> problem(status: 500, detail: "the order vanished")
   }
 }
 ```

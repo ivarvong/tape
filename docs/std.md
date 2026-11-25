@@ -10,26 +10,41 @@ The examples under a function (`> expression`, then what it gives) are run by `t
 
 ### Respond with JSON
 
-`json(status: …, value: …)` answers a value as `application/json`. For a body written in steps, write it first and give it its type last: `buf() |> write_rows(rows: …) |> respond_as(status: 200, content: Json)`. `empty(status: …)` answers no body. An error body is a record too.
+`json(status: …, value: …)` answers a value as `application/json`. For a body written in steps, write it first and give it its type last: `buf() |> write_rows(rows: …) |> respond_as(status: 200, content: Json)`. `empty(status: …)` answers no body. An error is `problem(status: …, detail: …)`, application/problem+json (RFC 9457), the shape the service answers its own errors in.
 
 ```tape
 type Item {
   Item(id: Int, name: View)
 }
 
-type Problem {
-  Problem(error: View)
-}
-
 fn handle(raw: View) -> Response {
   match request(raw) {
     Request(method: Get, path: "/item") -> json(status: 200, value: Item(id: 1, name: "lamp"))
-    _ -> json(status: 404, value: Problem(error: "not_found"))
+    _ -> problem(status: 404, detail: "no such item")
   }
 }
 ```
 
-Uses: [`json`](#fn-json), [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`write_json`](#builtin-write_json), [`write_rows`](#fn-write_rows), [`empty`](#fn-empty).
+Uses: [`json`](#fn-json), [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`write_json`](#builtin-write_json), [`write_rows`](#fn-write_rows), [`empty`](#fn-empty), [`problem`](#fn-problem).
+
+### Answer an error
+
+`problem(status: 404, detail: "no such link")` answers `{"type":"about:blank","title":"Not Found","status":404,"detail":"no such link"}` as `application/problem+json` (RFC 9457): the title is the status's reason phrase, and `detail` says what went wrong with this request. The service answers its own errors in the same shape, so a client reads one. What a client needs to act on goes in members of the problem's own: `problem_with(status:, detail:, members: R)` writes the fields of the record `R` after `detail`. A status written as a literal outside 400 to 599 is C96.
+
+```tape
+type Conflict {
+  Conflict(key: View, version: Int)
+}
+
+fn handle(raw: View) -> Response {
+  match request(raw) {
+    Request(method: Put, path: "/k/" ++ key) -> problem_with(status: 409, detail: "version mismatch", members: Conflict(key, version: 3))
+    _ -> problem(status: 404, detail: "no such route")
+  }
+}
+```
+
+Uses: [`problem`](#fn-problem), [`problem_with`](#fn-problem_with), [`Content`](#type-content).
 
 ### Respond with an Atom feed
 
@@ -90,7 +105,7 @@ Uses: [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#
 
 ### Decode a JSON body, with a 400 that says why
 
-`decode(json: body, as: T)` is `Ok(value)` or `Err(error)`, where `error` names the field and what is wrong. Refined types validate while decoding; an `Option` field may be absent. Go on with `let Ok(…) = … else { … }`.
+`decode(json: body, as: T)` is `Ok(value)` or `Err(error)`, where `error` names the field and what is wrong: the `detail` of a 400 problem. Refined types validate while decoding; an `Option` field may be absent. Go on with `let Ok(…) = … else { … }`.
 
 ```tape
 type Name = View where len(self) >= 1 and len(self) <= 80
@@ -98,10 +113,6 @@ type Qty = Int where self >= 1 and self <= 1000
 
 type NewItem {
   NewItem(name: Name, qty: Qty, note: Option[View])
-}
-
-type Problem {
-  Problem(error: View)
 }
 
 fn handle(raw: View) -> Response {
@@ -113,13 +124,13 @@ fn handle(raw: View) -> Response {
 
 fn created(body: View) -> Response {
   let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
-    Err(error) -> json(status: 400, value: Problem(error))
+    Err(error) -> problem(status: 400, detail: error)
   }
   buf() |> append(view: "\(qty) of \(name)") |> respond(status: 201)
 }
 ```
 
-Uses: [`decode`](#builtin-decode), [`Result`](#type-result).
+Uses: [`decode`](#builtin-decode), [`Result`](#type-result), [`problem`](#fn-problem).
 
 ### Build a JSON list
 
@@ -265,7 +276,7 @@ Uses: [`hmac_sha256_verify`](#fn-hmac_sha256_verify), [`hmac_sha256`](#fn-hmac_s
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Done`](#type-done), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`value_or`](#fn-value_or), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at), [`utf8_end`](#fn-utf8_end)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex_value`](#fn-hex_value), [`is_json`](#fn-is_json), [`json_member`](#fn-json_member), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
-- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`start_session`](#fn-start_session), [`end_session`](#fn-end_session), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html), [`HttpReply`](#type-httpreply), [`fetch`](#fn-fetch), [`method_name`](#fn-method_name)
+- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`problem`](#fn-problem), [`problem_with`](#fn-problem_with), [`start_session`](#fn-start_session), [`end_session`](#fn-end_session), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html), [`HttpReply`](#type-httpreply), [`fetch`](#fn-fetch), [`method_name`](#fn-method_name)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
@@ -656,15 +667,15 @@ Needs `Sql`. A compare-and-set: `Moved(value)`, `Raced(now)` when the row was no
 ### builtin call
 
 ```tape
-call(to: Remote, method: "…", send: Msg, reply: Reply, within: Int, once: Key) -> Result[Reply, CallError]
+call(to: Remote, method: "…", send: Msg, reply: Reply, error: E, within: Int, once: Key) -> Result[Reply, CallError[E]]
 ```
 
-Needs `Remote`. A command to another program's `export fn`. The same `once` key runs at most once and gets the stored reply.
+Needs `Remote`. A command to another program's `export fn`. The same `once` key runs at most once and gets the stored reply. `error:` names the callee's error type, which both programs declare: a refusal is `Err(error: Rejected(reason: …))`, a value of it, and a match names each constructor.
 
 ### builtin ask
 
 ```tape
-ask(to: Remote, method: "…", send: Msg, reply: Reply, within: Int) -> Result[Reply, CallError]
+ask(to: Remote, method: "…", send: Msg, reply: Reply, error: E, within: Int) -> Result[Reply, CallError[E]]
 ```
 
 Needs `Remote`. A read from another program: `call` without a key.
@@ -758,15 +769,15 @@ A value or the reason there is none. Errors are values: match on them, or go on 
 ### type CallError
 
 ```tape
-private type CallError {
+private type CallError[E] {
   Timeout
   Unreachable
-  Rejected(reason: View) final
+  Rejected(reason: E) final
   Skew(reason: View) final
 }
 ```
 
-Why a call to another object or Worker gave no reply. Timeout: the time budget ran out, and for a call that changes something the outcome is unknown until it is sent again with the same key. Unreachable: nothing answers to that name. Rejected: it refused, and says why. Skew: the two sides disagree, so nothing ran this time: they were built from different definitions of the method, or the key was used before for another message (which may have run; do not compensate for a Skew as for a refusal). Rejected and Skew are final: the callee runs a key at most once and repeats its stored reply, so the same call sent again gets the same answer; a timer that asks again does not change it (rules.ts C79 lets such an outcome leave a row for a request to move on).
+Why a call to another object or Worker gave no reply, with E the callee's refusal: `call(…, reply: Charged, error: ChargeError, …)` gives `Result[Charged, CallError[ChargeError]]`. Timeout: the time budget ran out, and for a call that changes something the outcome is unknown until it is sent again with the same key. Unreachable: nothing answers to that name. Rejected: it refused, and `reason` is the value of the callee's own error type, so `Err(error: Rejected(reason: Declined(why)))` is matched like any value, and a match names each constructor of E. Skew: the two sides disagree, so nothing ran this time: they were built from different definitions of the method (its message, its reply or its error: a constructor added to E on one side is a Skew, never a Rejected the other cannot read), the callee could not read the message, or the key was used before for another message (which may have run; do not compensate for a Skew as for a refusal); `reason` says which. Rejected and Skew are final: the callee runs a key at most once and repeats its stored reply, so the same call sent again gets the same answer; a timer that asks again does not change it (rules.ts C79 lets such an outcome leave a row for a request to move on). A capability the host binds (an `interface`) refuses with text: its E is View.
 
 ### type Done
 
@@ -1534,10 +1545,11 @@ type Content {
   Atom
   Rss
   Xml
+  Problem
 }
 ```
 
-The content types the service serves: respond_as(body: b, status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed.
+The content types the service serves: respond_as(body: b, status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed. Problem is application/problem+json (RFC 9457), what `problem` answers: an error a client reads as one shape.
 
 ### type Header
 
@@ -1624,6 +1636,34 @@ A redirect to `to`, a path or a URL: 303 See Other with a location. 303 is the o
 Response(status: 303, headers: Cons(head: Header(name: "location", value: "/links/7"), tail: Nil))
 ```
 
+### fn problem
+
+```tape
+fn problem(status: Int, detail: View) -> Response
+```
+
+An error, answered as application/problem+json (RFC 9457): `{"type":"about:blank","title":<the status's reason phrase>,"status":<status>,"detail":<detail>}`. The one shape for every error a program answers, and the one the service answers for its own (docs/service.md), so a client reads `detail` whichever said no. `detail` is for the person reading it (what went wrong with this request), the status says what kind of failure it is; a client that needs more to act on (a key, a version) is given members of its own with problem_with. A status written as a literal outside 400 to 599 is C96.
+
+```
+> problem(status: 404, detail: "no such link")
+Response(status: 404, content: Problem, body: "{\"type\":\"about:blank\",\"title\":\"Not Found\",\"status\":404,\"detail\":\"no such link\"}")
+> problem(status: 422, detail: "qty: expected an integer").body
+"{\"type\":\"about:blank\",\"title\":\"Unprocessable Content\",\"status\":422,\"detail\":\"qty: expected an integer\"}"
+```
+
+### fn problem_with
+
+```tape
+fn problem_with[T](status: Int, detail: View, members: T) -> Response
+```
+
+An error with members of its own (RFC 9457's extension members): the fields of `members`, a record of one constructor, written after `detail` as write_json writes them (an Option that is None has no key). Name no field type, title, status or detail: those are the problem's own.
+
+```
+> problem_with(status: 409, detail: "taken", members: Header(name: "key", value: "a")).body
+"{\"type\":\"about:blank\",\"title\":\"Conflict\",\"status\":409,\"detail\":\"taken\",\"name\":\"key\",\"value\":\"a\"}"
+```
+
 ### fn start_session
 
 ```tape
@@ -1680,6 +1720,8 @@ The media type a Content is served as. The host writes the Content-Type header f
 "application/rss+xml"
 > content_type(content: Xml)
 "application/xml"
+> content_type(content: Problem)
+"application/problem+json"
 ```
 
 ### fn form_field
@@ -1748,7 +1790,7 @@ The answer to a request `fetch` made: its status, its headers in the order they 
 ### fn fetch
 
 ```tape
-fn fetch(to: Http, method: Method, url: View, headers: List[Header], body: View, within: Int, key: Option[View]) -> Result[HttpReply, CallError]
+fn fetch(to: Http, method: Method, url: View, headers: List[Header], body: View, within: Int, key: Option[View]) -> Result[HttpReply, CallError[View]]
 ```
 
 An HTTP request to another service, through the program's `Http` capability, shaped like `call`: Ok with the reply whatever its status (a 404 or a 500 is an answer; a redirect is not followed, its 3xx is the reply), or Err(Timeout) when no reply came within `within` ms (the request may have been received), Err(Unreachable) when the host has no network for the program, and Err(Rejected(reason)) when the host would not send it: a host not on the program's list, a URL that is not https, a header it refuses, a body over 64 KB, a reply over 1 MB. A fetch is a commit point, as a call is: what the run wrote before it is committed when it goes out.

@@ -1,14 +1,15 @@
-// compiler/gen/callout.ts: call(to, send, within, once) and ask(to, send, within): one request to another object
-// or Worker. The host answers from the effect log; when the reply is not there yet it stops this run, makes the
+// compiler/gen/callout.ts: call(to, method, send, reply, error, within, once) and ask(to, method, send, reply,
+// error, within): one request to another object or Worker, whose value is Result[Reply, CallError[Error]]. The host answers from the effect log; when the reply is not there yet it stops this run, makes the
 // call with the time budget, and runs the handler again.
 import { partsOf } from '../ast.ts';
 import type { Arg, At, Expr } from '../ast.ts';
-import { I32, fail, sleb, uleb } from '../common.ts';
+import { F64, I32, f64, fail, sleb, uleb } from '../common.ts';
 import { stdName } from '../shadow.ts';
 import { BUILTIN_TYPES, INT, REMOTE, T, VIEW, key } from '../types.ts';
 import type { Type } from '../types.ts';
 import { decodeTo } from './decode.ts';
-import { buildVariant, close, fresh, get, inLocals, need, open, set } from './fn.ts';
+import { buildVariant, close, fresh, get, inLocals, need, open, set, store } from './fn.ts';
+import { isErrorType, refuseErrorType } from './served.ts';
 import type { CallOut, Ctx, Stored } from './fn.ts';
 import type { Adt } from './layout.ts';
 
@@ -20,15 +21,18 @@ type Named = {
   method: Arg;
   send: Arg;
   reply: Arg;
+  error: Arg;
   methodName: string;
   replyT: Type;
+  /** what the callee refuses with: a type of the program's own, or text for a capability's method */
+  errorT: Type;
 };
 const text = (bytes: readonly number[]): string => new TextDecoder().decode(new Uint8Array(bytes));
 const variantOf = (adt: Adt, name: string): number => adt.variants.findIndex(x => x.name === name);
 
 function named(e: CallOut): Named {
   const keyed = e.name === 'call';
-  const takes = ['to', 'method', 'send', 'reply', 'within', ...(keyed ? ['once'] : [])];
+  const takes = ['to', 'method', 'send', 'reply', 'error', 'within', ...(keyed ? ['once'] : [])];
   const arg = (n: string): Arg | undefined => e.args.find(a => a.label === n);
   const must = (n: string, hint: string): Arg => arg(n) ?? fail(e, 'C13', `${e.name} is missing argument ${n}`, hint);
   for (const a of e.args)
@@ -62,6 +66,10 @@ function named(e: CallOut): Named {
   const method = must('method', 'Name the method, for example `method: "reserve"`.');
   const send = must('send', 'Pass the message record.');
   const reply = must('reply', 'Name the reply type, for example `reply: Reserved`.');
+  const error = must(
+    'error',
+    "Name the callee's error type, for example `error: ReserveError`: a refusal is `Err(error: Rejected(reason: …))`, a value of it.",
+  );
   if (method.value.k !== 'str')
     return fail(
       method,
@@ -76,7 +84,25 @@ function named(e: CallOut): Named {
       'argument reply should be a type name',
       'Name the reply type itself, `reply: Reserved`, not a value of it.',
     );
-  return { within, once, to, method, send, reply, methodName: text(method.value.bytes), replyT: T(reply.value.name) };
+  if (error.value.k !== 'ctor' || error.value.args.length > 0)
+    return fail(
+      error,
+      'C14',
+      'argument error should be a type name',
+      "Name the callee's error type itself, `error: ReserveError`, not a value of it.",
+    );
+  return {
+    within,
+    once,
+    to,
+    method,
+    send,
+    reply,
+    error,
+    methodName: text(method.value.bytes),
+    replyT: T(reply.value.name),
+    errorT: T(error.value.name),
+  };
 }
 
 // ---- the key of a command (once): text, or a record that names the command; the host scopes it by this object
@@ -135,26 +161,31 @@ function asJson(held: Stored, at: At): Expr {
   return call('freeze', [arg('buf', out)]);
 }
 
-// the reply block: u32 status (0 ok, 1 timeout, 2 unreachable, 3 rejected, 4 skew), u32 length, bytes
-function readReply(c: Ctx, e: CallOut, replyT: Type): Type {
+// the reply block: u32 status (0 ok, 1 timeout, 2 unreachable, 3 rejected, 4 skew), u32 length, bytes. A status
+// less one is CallError's constructor (Timeout 0 … Skew 3). Ok's bytes are the reply as JSON; a reply that does not
+// decode is Skew, with why: the two sides disagree despite the fingerprint. Rejected's are the callee's error as
+// JSON (a capability's, text), and one that does not decode is a Skew too, never a Rejected the caller cannot read.
+function readReply(c: Ctx, e: CallOut, replyT: Type, errorT: Type): Type {
   const [r, tag, pt, n] = [fresh(c, I32), fresh(c, I32), fresh(c, I32), fresh(c, I32)];
   const out = c.B.slotsOf(replyT).map(vt => fresh(c, vt));
   const why: [number, number] = [fresh(c, I32), fresh(c, I32)];
-  const errT = T('CallError');
+  const errT = T('CallError', errorT);
   const err = c.B.adtOf(errT, e);
   const res = T('Result', replyT, errT);
   const adt = c.B.adtOf(res, e);
-  if (
-    !err.tagged ||
-    err.slots.length !== 3 ||
-    err.variants.map(x => x.name).join(',') !== 'Timeout,Unreachable,Rejected,Skew'
-  )
+  const [REJECTED, SKEW] = [2, 3];
+  if (err.boxed || !err.tagged || err.variants.map(x => x.name).join(',') !== 'Timeout,Unreachable,Rejected,Skew')
     fail(
       e,
       'C99',
-      'std/core.tape: CallError must be Timeout, Unreachable, Rejected(reason: View), Skew(reason: View)',
+      'std/core.tape: CallError[E] must be Timeout, Unreachable, Rejected(reason: E), Skew(reason: View)',
       'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
     );
+  // Err(error: the CallError that `build` leaves on the stack)
+  const failed = (build: () => void): void => {
+    build();
+    buildVariant(c, adt, variantOf(adt, 'Err'), store(c, errT));
+  };
   const status = [0x22, ...uleb(r), 0x28, 2, 0, 0x41, 1, 0x6b, ...set(tag)];
   const body = [...get(r), 0x28, 2, 4, ...set(n), ...get(r), 0x41, 8, 0x6a, ...set(pt)];
   c.code.push(0x10, ...uleb(c.B.CALL_IMPORT), 0xfc, 0x03, ...status, ...body, ...get(tag), 0x41, ...sleb(-1), 0x46);
@@ -162,30 +193,64 @@ function readReply(c: Ctx, e: CallOut, replyT: Type): Type {
   decodeTo(c, replyT, [pt, n], out, e, why);
   open(c, 0x04, adt.slots);
   buildVariant(c, adt, variantOf(adt, 'Ok'), out);
-  // a reply that is not the promised record: the two sides disagree despite the fingerprint
-  c.code.push(0x05, 0x41, 3, ...set(tag));
-  buildVariant(c, adt, variantOf(adt, 'Err'), [tag, ...why]);
-  close(c);
   c.code.push(0x05);
-  buildVariant(c, adt, variantOf(adt, 'Err'), [tag, pt, n]);
+  failed(() => buildVariant(c, err, SKEW, why));
+  close(c);
+  c.code.push(0x05, ...get(tag), 0x41, REJECTED, 0x46);
+  open(c, 0x04, adt.slots);
+  if (errorT.name === 'View') failed(() => buildVariant(c, err, REJECTED, [pt, n]));
+  else {
+    const reason = c.B.slotsOf(errorT).map(vt => fresh(c, vt));
+    const whyNot: [number, number] = [fresh(c, I32), fresh(c, I32)];
+    decodeTo(c, errorT, [pt, n], reason, e, whyNot);
+    open(c, 0x04, adt.slots);
+    failed(() => buildVariant(c, err, REJECTED, reason));
+    c.code.push(0x05);
+    failed(() => buildVariant(c, err, SKEW, whyNot));
+    close(c);
+  }
+  c.code.push(0x05);
+  // Timeout, Unreachable or Skew, by the status: only Skew has fields, its reason the bytes
+  const skew = err.variants[SKEW];
+  const skewAt = skew && 'flat' in skew ? skew.flat : [];
+  const zero = (vt: number): number[] => (vt === I32 ? [0x41, 0] : vt === F64 ? f64(0) : [0x42, 0]);
+  failed(() => {
+    err.slots.forEach((vt, slot) => {
+      const j = skewAt.indexOf(slot);
+      if (slot === 0) c.code.push(...get(tag));
+      else c.code.push(...(j === 0 ? get(pt) : j === 1 ? get(n) : zero(vt)));
+    });
+  });
+  close(c);
   close(c);
   return res;
 }
 
 export function emitCallOut(c: Ctx, e: CallOut): Type {
   const { B } = c;
-  const { within, once, to, send, methodName, replyT } = named(e);
+  const { within, once, to, send, methodName, replyT, errorT, error } = named(e);
   const at = { line: e.line, file: e.file };
   const toType = c.emit(to.value, REMOTE, false);
-  if (!B.prog.interfaces.has(toType.name)) need(c, toType, REMOTE, to, 'argument to');
+  const capability = B.prog.interfaces.has(toType.name);
+  if (!capability) need(c, toType, REMOTE, to, 'argument to');
+  // a program's method refuses with a type of the program's own; only a capability the host binds refuses with text
+  if (!(capability && errorT.name === 'View') && !isErrorType(B.prog, errorT))
+    refuseErrorType(
+      { file: e.file, line: error.line || e.line },
+      errorT.name,
+      `the error of ${methodName}`,
+      methodName,
+    );
   // the message, written as JSON
   const sent = inLocals(c, send.value, e.sendType ?? null);
   if (e.sendType) need(c, sent.type, e.sendType, send, 'argument send');
   const keyHeld = once ? inLocals(c, once.value, null) : null;
   if (once && keyHeld) checkKey(c, once, B.strip(keyHeld.type));
   // for the simulator: what a reply to this method looks like, so a Remote nobody supplied can be stood in for
-  B.SIMJSON.replies[`${'name' in to.value ? to.value.name : ''}.${methodName}`] = [replyT, e];
-  const fingerprint = B.fingerprint(methodName, sent.type, replyT, e);
+  const site = `${'name' in to.value ? to.value.name : ''}.${methodName}`;
+  B.SIMJSON.replies[site] = [replyT, e];
+  if (errorT.name !== 'View') B.SIMJSON.refusals[site] = [errorT, e];
+  const fingerprint = B.fingerprint(methodName, sent.type, replyT, errorT, e);
   const id = B.calls.push({ method: methodName, keyed: e.name === 'call', fingerprint }) - 1;
   c.code.push(0x41, ...sleb(id));
   need(c, c.emit(asJson(sent, at), VIEW, false), VIEW, send, 'argument send');
@@ -201,5 +266,5 @@ export function emitCallOut(c: Ctx, e: CallOut): Type {
       'argument once',
     );
   } else c.code.push(0x41, 0, 0x41, 0);
-  return readReply(c, e, replyT);
+  return readReply(c, e, replyT, errorT);
 }

@@ -2,12 +2,12 @@
   "now": "2026-11-24T12:00:00.000Z",
   "step_version": 2,
   "md": {
-    "bytes": 55079,
+    "bytes": 55093,
     "functions": 176
   },
   "blog": {
-    "bytes": 99380,
-    "functions": 281
+    "bytes": 101098,
+    "functions": 283
   },
   "render": {
     "steps": 63515,

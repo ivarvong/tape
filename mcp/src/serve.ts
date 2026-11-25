@@ -10,6 +10,7 @@
 // service from its visitors' browsers: a request with an Origin header is refused, and a JSON POST from another
 // origin needs a preflight, which gets no CORS headers, so the browser never sends it.
 import { STEP_VERSION } from '../../compiler/step-version.ts';
+import { PROBLEM_TYPE, problemOf } from '../../host/problem.ts';
 import { fieldsOf, serveMcp } from '../../service/src/mcp.ts';
 import type { Fields, McpServer } from '../../service/src/mcp.ts';
 import {
@@ -56,16 +57,24 @@ const HEADERS = {
   'cache-control': 'no-store',
   'referrer-policy': 'no-referrer',
 };
-/** Any answer, with the headers every answer has. */
+/** Any answer, with the headers every answer has: JSON, or a problem, which keeps its type. */
 const secured = (res: Response): Response => {
   const headers = new Headers(res.headers);
+  const problem = headers.get('content-type') === PROBLEM_TYPE;
   for (const [k, v] of Object.entries(HEADERS)) headers.set(k, v);
+  if (problem) headers.set('content-type', PROBLEM_TYPE);
   return new Response(res.body, { status: res.status, headers });
 };
 const bigints = (_k: string, v: unknown): unknown => (typeof v === 'bigint' ? String(v) : v);
 export const json = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body, bigints), { status, headers: HEADERS });
-const refusal = (r: Refusal): Response => json({ ok: false, error: r.error, reason: r.reason }, r.status);
+// A refused call over HTTP is application/problem+json (RFC 9457), the service's one error shape: the reason is its
+// detail and the refusal's name (rate_limited, bad_arguments…) its `code`. An MCP call's refusal stays a tool result.
+const refusal = (r: Refusal): Response =>
+  new Response(JSON.stringify(problemOf(r.status, r.reason, { code: r.error })), {
+    status: r.status,
+    headers: { ...HEADERS, 'content-type': PROBLEM_TYPE },
+  });
 
 const enc = new TextEncoder();
 const hexOf = (buf: ArrayBuffer): string => [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
@@ -159,7 +168,7 @@ export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a
 - Respond: handle gives a Response, body first, status last: \`buf() |> append(view: "text") |> respond(status: 200)\` (text/plain); \`|> respond_as(status: 200, content: Json)\` names a type (Json, Html, Text, Css, Svg, Csv, Atom, Rss, Xml); \`json(status: 200, value: Item(id, name))\`; \`empty(status: 404)\`; \`|> header(name: "location", value: url)\`. \`write_rows(rows: sql_all(…))\` writes rows as an array; write_json writes what decode reads: records, Lists, Option fields (None: no key), constructors as \`{"Sets": {…}}\`.
 - JSON in (an arm of a block is a line of its own):
     let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
-      Err(error) -> buf() |> append(view: error) |> respond(status: 400)
+      Err(error) -> problem(status: 400, detail: error)
     }
   Its error names the field. Refined types validate: \`type Qty = Int where self >= 1 and self <= 100\`. An Option field may be absent.
 - SQL: \`sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)\` gives Option[Item]; \`sql_all\` gives Rows[Item]; \`sql_exec(query: "UPDATE items SET qty = :qty WHERE id = :id", qty, id)\` the rows changed. Each :name takes the argument of that name. Tables: \`migration 1 "items" { CREATE TABLE … }\` (a TEXT PRIMARY KEY needs NOT NULL). A POST that makes a row takes the client's key: UNIQUE, \`ON CONFLICT(key) DO NOTHING RETURNING *\`.

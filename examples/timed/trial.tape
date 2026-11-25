@@ -41,6 +41,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the mailer refuses a reminder with
+type SendError { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, mail: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
     Request(method: Post, path: "/trials", body) -> started(body) |> rendered
@@ -109,6 +112,7 @@ fn due(found: Option[Signup]) -> Outcome {
         method: "send",
         send: Email(to: email, template: "trial-ends-soon"),
         reply: Sent,
+        error: SendError,
         within: 5000,
         once: Reminder(trial: id)
       )
@@ -131,7 +135,7 @@ fn due(found: Option[Signup]) -> Outcome {
   }
 }
 
-fn reminded(id: Int, reply: Result[Sent, CallError]) -> Outcome {
+fn reminded(id: Int, reply: Result[Sent, CallError[SendError]]) -> Outcome {
   match reply {
     Ok(value) -> ending(
       id,
@@ -146,7 +150,7 @@ fn reminded(id: Int, reply: Result[Sent, CallError]) -> Outcome {
       )
     )
     // a reminder the mail service refuses will be refused again: the trial goes on to its end without one
-    Err(error: Rejected(reason)) -> ending(
+    Err(error: Rejected(reason: Refused(reason))) -> ending(
       id,
       found: latest(
         id,
@@ -202,11 +206,7 @@ fn shown(found: Option[Signup]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, trial) -> write_json(out: buf(), value: trial) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

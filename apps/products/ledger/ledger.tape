@@ -84,7 +84,6 @@ type Transfer { Transfer(
 type Entry { Entry(transfer: Int, amount: Dec[2], memo: View, at: Int) }
 type Shown { Shown(id: View, external: Bool, balance: Dec[2], entries: List[Entry]) }
 type Sent { Sent(id: Int, key: View, from: View, to: View, amount: Dec[2], memo: View, at: View) }
-type Problem { Problem(error: View) }
 
 fn name_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45 or b == 95
@@ -102,13 +101,13 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
     Request(method: Get, path: "/accounts/" ++ Name(id)) -> account(id)
     Request(method: Post, path: "/transfers", body) -> sent(body)
     Request(method: Get, path: "/transfers.csv") -> transfers_csv()
-    _ -> problem(status: 404, error: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn opened(body: View) -> Response {
   let Ok(value: NewAccount(id, external)) = decode(json: body, as: NewAccount) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let outside = match external {
     Some(value: True) -> True
@@ -124,8 +123,8 @@ fn opened(body: View) -> Response {
     Some(value) -> json(status: 201, value)
     None -> match sql_first(row: Account, query: "SELECT * FROM accounts WHERE id = :id", id) {
       Some(value: a) if a.external == outside -> json(status: 200, value: a)
-      Some(value) -> problem(status: 409, error: "account \(id) exists, and is not that kind")
-      None -> problem(status: 500, error: "the account is gone")
+      Some(value) -> problem(status: 409, detail: "account \(id) exists, and is not that kind")
+      None -> problem(status: 500, detail: "the account is gone")
     }
   }
 }
@@ -135,7 +134,7 @@ fn account(id: View) -> Response {
     row: Account,
     query: "SELECT * FROM accounts WHERE id = :id",
     id
-  ) else -> problem(status: 404, error: "no account \(id)")
+  ) else -> problem(status: 404, detail: "no account \(id)")
   json(
     status: 200,
     value: Shown(
@@ -165,13 +164,13 @@ fn sent(body: View) -> Response {
   let Ok(
     value: NewTransfer(key, from, to, amount, memo)
   ) = decode(json: body, as: NewTransfer) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let note = match memo {
     Some(value) -> value
     None -> ""
   }
-  let True = from != to else -> problem(status: 400, error: "to: another account than from")
+  let True = from != to else -> problem(status: 400, detail: "to: another account than from")
   let Some(value: t) = sql_first(
     row: Transfer,
     query: "INSERT INTO transfers(client, src, dst, amount, memo, at) \
@@ -186,7 +185,7 @@ fn sent(body: View) -> Response {
     at: now()
   ) else -> again(key, from, to, amount, note)
   let 1 = take(from, amount) else -> rollback(
-    out: problem(status: 409, error: "\(from) has less than \(amount)")
+    out: problem(status: 409, detail: "\(from) has less than \(amount)")
   )
   // the transfer's row was made only if both accounts were there; the credit still reads its count, so a credit that
   // finds no account undoes the debit rather than lose the amount
@@ -195,7 +194,7 @@ fn sent(body: View) -> Response {
     to,
     amount
   ) else -> rollback(
-    out: problem(status: 404, error: "no account \(to) to credit")
+    out: problem(status: 404, detail: "no account \(to) to credit")
   )
   let _ = sql_exec(
     query: "INSERT INTO entries(transfer, account, amount) \
@@ -233,8 +232,8 @@ fn again(key: View, from: View, to: View, amount: Dec[2], note: View) -> Respons
       and t.dst == to
       and t.amount == amount
       and t.memo == note -> shown_transfer(status: 200, t)
-    Some(value) -> problem(status: 409, error: "key \(key) was used for another transfer")
-    None -> problem(status: 404, error: "no such account: both \(from) and \(to) must exist")
+    Some(value) -> problem(status: 409, detail: "key \(key) was used for another transfer")
+    None -> problem(status: 404, detail: "no such account: both \(from) and \(to) must exist")
   }
 }
 
@@ -370,10 +369,6 @@ fn two(n: Int) -> View {
     n < 10 -> "0\(n)"
     else -> "\(n)"
   }
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 
 fn home() -> Response {

@@ -183,7 +183,6 @@ type Wait { Wait(id: Int, tier: Int, buyer: View, qty: Int, state: WaitlistState
 type Price { Price(price: Int) }
 type Count { Count(n: Int) }
 type Id { Id(id: Int) }
-type Failed { Failed(error: View) }
 type Finished { Finished(done: View) }
 
 // the pay program's methods
@@ -191,6 +190,12 @@ type Charge { Charge(card: View, amount: Int, ref: View) }
 type Charged { Charged(payment: Int) }
 type Refund { Refund(card: View, amount: Int, ref: View) }
 type RefundMade { RefundMade(payment: Int) }
+// what pay refuses with: the type pay.tape declares, so the fingerprints agree
+type PayError {
+  Declined
+  NoSuchCard
+  Unrecorded
+}
 // A charge's once key is the hold and the attempt: a declined card is a finished command, so paying again with
 // another card is a new one (the same key with another message would be answered skew, an unknown outcome).
 type PayFor { PayFor(hold: Int, attempt: Int) }
@@ -505,13 +510,14 @@ fn charge(hold: Hold) -> Outcome {
       method: "charge",
       send: Charge(card, amount, ref: "hold-\(id)"),
       reply: Charged,
+      error: PayError,
       within: 2000,
       once: PayFor(hold: id, attempt)
     )
   )
 }
 
-fn charged(id: Int, tries: Int, reply: Result[Charged, CallError]) -> Outcome {
+fn charged(id: Int, tries: Int, reply: Result[Charged, CallError[PayError]]) -> Outcome {
   match reply {
     Ok(value) -> confirmed(moved: sql_move(
       row: Hold,
@@ -519,13 +525,13 @@ fn charged(id: Int, tries: Int, reply: Result[Charged, CallError]) -> Outcome {
           AND state = 'paying' RETURNING *",
       id
     ))
-    Err(error: Rejected(reason)) -> declined(
-      reason,
+    Err(error: Rejected(reason: refused)) -> declined(
+      reason: refusal(refused),
       moved: sql_move(
         row: Hold,
         query: "UPDATE holds SET state = 'held', note = :reason WHERE id = :id \
             AND state = 'paying' RETURNING *",
-        reason,
+        reason: refusal(refused),
         id
       )
     )
@@ -873,6 +879,7 @@ fn refund_hold(hold: Hold) -> Outcome {
       method: "refund",
       send: Refund(card, amount, ref: "hold-\(id)"),
       reply: RefundMade,
+      error: PayError,
       within: 2000,
       once: RefundFor(hold: id)
     )
@@ -887,6 +894,15 @@ fn tries_of(id: Int) -> Int {
   }
 }
 
+// What pay's refusal says, in the hold's note.
+fn refusal(reason: PayError) -> View {
+  match reason {
+    Declined -> "card declined"
+    NoSuchCard -> "no such card"
+    Unrecorded -> "ledger write failed"
+  }
+}
+
 fn refund_refused(moved: Move[Hold]) -> Outcome {
   match moved {
     Moved(value) -> ShowHold(status: 200, hold: value)
@@ -895,7 +911,7 @@ fn refund_refused(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn refunded(id: Int, tries: Int, reply: Result[RefundMade, CallError]) -> Outcome {
+fn refunded(id: Int, tries: Int, reply: Result[RefundMade, CallError[PayError]]) -> Outcome {
   match reply {
     Ok(value) -> settled(moved: sql_move(
       row: Hold,
@@ -906,11 +922,11 @@ fn refunded(id: Int, tries: Int, reply: Result[RefundMade, CallError]) -> Outcom
     // A refund the payment service refuses will be refused again (the key gets the reply it got): the hold rests in
     // refund_failed with the reason, its tickets still valid and its seats still taken, for a person to settle.
     // Found by `tape sim` standing in for pay: before this arm the timer asked again for ever.
-    Err(error: Rejected(reason)) -> refund_refused(moved: sql_move(
+    Err(error: Rejected(reason: refused)) -> refund_refused(moved: sql_move(
       row: Hold,
       query: "UPDATE holds SET state = 'refund_failed', note = :reason WHERE id = :id \
           AND state = 'refunding' RETURNING *",
-      reason,
+      reason: refusal(refused),
       id
     ))
     Err(error) -> refund_unknown(id, n: tries)
@@ -1188,9 +1204,9 @@ fn rendered(outcome: Outcome) -> Response {
     ShowTicket(status, ticket) -> json(status, value: ticket)
     ShowWait(status, wait) -> json(status, value: wait)
     ShowTier(status, tier) -> json(status, value: tier)
-    Problem(status, reason) -> json(status, value: Failed(error: reason))
+    Problem(status, reason) -> problem(status, detail: reason)
     Reported(status, what) -> json(status, value: Finished(done: what))
-    Undo(status, reason) -> rollback(out: json(status, value: Failed(error: reason)))
+    Undo(status, reason) -> rollback(out: problem(status, detail: reason))
   }
 }
 

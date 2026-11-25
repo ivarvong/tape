@@ -59,6 +59,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the model and the tools refuse with: a reason they give
+type Refusal { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, model: Remote, tools: Remote) -> Response {
   routed(raw) |> rendered
 }
@@ -128,13 +131,13 @@ fn advance(run: Run) -> Outcome {
         method: "think",
         send: Think(prompt, step, last),
         reply: Proposal,
+        error: Refusal,
         within: 50,
         once: AtStep(run: id, step)
       ) else {
-        Err(error: Rejected(reason)) -> Problem(
-          status: 502,
-          reason: "the model refused: " ++ reason
-        )
+        Err(
+          error: Rejected(reason: Refused(reason))
+        ) -> Problem(status: 502, reason: "the model refused: " ++ reason)
         Err(error: Skew(reason)) -> Problem(status: 502, reason)
         Err(error) -> show(status: 202, found: load(id))
       }
@@ -173,10 +176,13 @@ fn advance(run: Run) -> Outcome {
         method: "tool",
         send: Use(tool, input),
         reply: Used,
+        error: Refusal,
         within: 50,
         once: AtStep(run: id, step)
       ) else {
-        Err(error: Rejected(reason)) -> next(found: told(id, last: "error: " ++ reason))
+        Err(error: Rejected(reason: Refused(reason))) -> next(
+          found: told(id, last: "error: " ++ reason)
+        )
         Err(error: Skew(reason)) -> Problem(status: 502, reason)
         Err(error) -> show(status: 202, found: load(id))
       }
@@ -225,11 +231,7 @@ fn missing() -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, run) -> write_json(out: buf(), value: run) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

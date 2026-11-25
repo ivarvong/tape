@@ -3,7 +3,7 @@
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { std } from '../std.ts';
-import { CONTENT_TYPES, instantiate, responseOf } from '../host.ts';
+import { CONTENT_TYPES, instantiate, problemOf, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { effectLine, queryNames } from '../apps/playground/src/lines.ts';
 import { nodeSql } from '../nodesql.ts';
@@ -232,7 +232,7 @@ fn handle(raw: View) -> Response {
   same('a feed is application/atom+xml', ask('/feed.xml'), [200, 'application/atom+xml; charset=utf-8', ATOM]);
   same('an RSS document is application/rss+xml', ask('/rss.xml'), [200, 'application/rss+xml; charset=utf-8', RSS]);
   same('an XML document is application/xml', ask('/doc.xml'), [200, 'application/xml; charset=utf-8', XML]);
-  const plain = 'text/plain; charset=utf-8';
+  const problem = 'application/problem+json';
   const head = (s: string): [number, string | undefined, string] => {
     const out = responseOf(new TextEncoder().encode(s));
     return [out.status, out.type, new TextDecoder().decode(out.body)];
@@ -240,7 +240,12 @@ fn handle(raw: View) -> Response {
   // a type is Content's constructor, written by the host: text that named one (a page type, an obsolete XML type,
   // a parameter on the token) is no frame, and is a 500 that says so, never served as that type or as a body
   const unframed = (n: number): string =>
-    `the program's answer is not a response frame (a bug in the host or the compiler): ${n} bytes that do not start "\\0tap"`;
+    JSON.stringify(
+      problemOf(
+        500,
+        `the program's answer is not a response frame (a bug in the host or the compiler): ${n} bytes that do not start "\\0tap"`,
+      ),
+    );
   same(
     'text that names a page type, an obsolete XML type, or a parameter on the token is no frame: 500',
     [
@@ -250,10 +255,10 @@ fn handle(raw: View) -> Response {
       head('200 text/javascript\nalert(1)'),
     ],
     [
-      [500, plain, unframed(33)],
-      [500, plain, unframed(17)],
-      [500, plain, unframed(47)],
-      [500, plain, unframed(28)],
+      [500, problem, unframed(33)],
+      [500, problem, unframed(17)],
+      [500, problem, unframed(47)],
+      [500, problem, unframed(28)],
     ],
   );
 }

@@ -27,6 +27,11 @@ type Order { Order(id: Int, item: View, state: OrderState) }
 type Key = View where len(self) >= 1 and len(self) <= 64
 type ForOrder { ForOrder(order: Int) }
 type NewOrder { NewOrder(key: Key, item: View) }
+// what stock refuses with: the same type stock.tape declares, so the two fingerprints agree
+type StockError {
+  NoneLeft
+  NoSuchItem
+}
 
 // the stock object's `reserve` method: what is sent and what comes back
 type Reserve { Reserve(item: View) }
@@ -39,14 +44,14 @@ fn handle(raw: View, db: Sql, stock: Remote) -> Response {
     Request(method: Get, path: "/orders") -> buf()
       |> write_rows(rows: sql_all(row: Order, query: "SELECT * FROM orders ORDER BY id"))
       |> respond(status: 200)
-    _ -> problem(status: 404, reason: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 // The order this request makes, or the one an earlier request with the same key made.
 fn place(body: View) -> Response {
   let Ok(value: NewOrder(key, item)) = decode(json: body, as: NewOrder) else {
-    Err(error) -> problem(status: 400, reason: error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let Some(value: order) = sql_first(
     row: Order,
@@ -70,8 +75,8 @@ fn again(found: Option[Order]) -> Response {
   match found {
     Some(value: order = Order(state: Pending)) -> reserve(order)
     Some(value: order = Order(state: Confirmed)) -> shown(status: 200, order)
-    Some(value: Order(state: Refused)) -> problem(status: 409, reason: "this order was refused")
-    None -> problem(status: 422, reason: "the key was already used for another order")
+    Some(value: Order(state: Refused)) -> problem(status: 409, detail: "this order was refused")
+    None -> problem(status: 422, detail: "the key was already used for another order")
   }
 }
 
@@ -80,7 +85,7 @@ fn retry(id: Int) -> Response {
     row: Order,
     query: "SELECT * FROM orders WHERE id = :id AND state = 'pending'",
     id
-  ) else -> problem(status: 404, reason: "no such pending order")
+  ) else -> problem(status: 404, detail: "no such pending order")
   reserve(order)
 }
 
@@ -92,6 +97,7 @@ fn reserve(order: Order) -> Response {
     method: "reserve",
     send: Reserve(item),
     reply: Reserved,
+    error: StockError,
     within: flags.stock_budget_ms,
     once: ForOrder(order: id)
   ) else {
@@ -106,12 +112,12 @@ fn reserve(order: Order) -> Response {
     )
     Err(error: Timeout) -> problem(
       status: 504,
-      reason: "stock did not answer in time; the order stays pending"
+      detail: "stock did not answer in time; the order stays pending"
     )
-    Err(error: Skew(reason)) -> problem(status: 502, reason)
+    Err(error: Skew(reason)) -> problem(status: 502, detail: reason)
     Err(error: Unreachable) -> problem(
       status: 503,
-      reason: "stock is unreachable; the order stays pending"
+      detail: "stock is unreachable; the order stays pending"
     )
   }
   // confirmed by this request or, when a retry racing it moved the order first (both heard the same stored reply),
@@ -123,28 +129,28 @@ fn reserve(order: Order) -> Response {
   ) {
     Moved(value) -> shown(status: 201, order: value)
     Raced(now) -> shown(status: 201, order: now)
-    NoRow -> problem(status: 500, reason: "the order vanished")
+    NoRow -> problem(status: 500, detail: "the order vanished")
   }
 }
 
 // Refused, whether this request moved the order or a retry racing it did.
-fn refused(reason: View, moved: Move[Order]) -> Response {
+fn refused(reason: StockError, moved: Move[Order]) -> Response {
   match moved {
-    NoRow -> problem(status: 404, reason: "no such pending order")
-    _ -> problem(status: 409, reason)
+    NoRow -> problem(status: 404, detail: "no such pending order")
+    _ -> problem(status: 409, detail: refusal(reason))
+  }
+}
+
+// What stock's refusal tells the client.
+fn refusal(reason: StockError) -> View {
+  match reason {
+    NoneLeft -> "none left"
+    NoSuchItem -> "no such item"
   }
 }
 
 fn shown(status: Int, order: Order) -> Response {
   buf() |> write_json(value: order) |> respond(status)
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  buf()
-    |> append(view: "{\"error\":")
-    |> write_json_string(text: reason)
-    |> append(view: "}")
-    |> respond(status)
 }
 
 // Across two programs: what stock gave out, against the orders. Each order's reserve carries the order's key, so an

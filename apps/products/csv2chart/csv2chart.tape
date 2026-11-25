@@ -6,8 +6,6 @@
 // The SVG is built from numbers and escaped labels only: every coordinate is computed, and every text from the
 // CSV (a column's name, an x label, the title) goes through write_html, so nothing in a CSV can become markup.
 
-type Problem { Problem(error: View) }
-
 // One row as read: its x as text, as a number when it is one, and each series' value.
 type Row { Row(label: View, x: Option[Float], values: List[Option[Float]]) }
 type Table { Table(names: List[View], rows: List[Row]) }
@@ -24,7 +22,7 @@ fn handle(raw: View) -> Response {
     )
     Request(method: Post, path: "/", query, body) -> drawn(text: body, title: title_of(query))
     Request(method: Post, path: "/chart", query, body) -> drawn(text: body, title: title_of(query))
-    _ -> problem(status: 404, error: "no such route: POST a CSV to / or GET /demo")
+    _ -> problem(status: 404, detail: "no such route: POST a CSV to / or GET /demo")
   }
 }
 
@@ -36,10 +34,6 @@ fn title_of(query: Option[View]) -> Option[View] {
   }
 }
 
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
-}
-
 fn sample() -> View {
   "month,docs,playground,api\nJan,120,40,12\nFeb,180,52,20\nMar,260,75,31\nApr,240,96,45\nMay,330,130,60\nJun,410,170,88\nJul,390,160,97\nAug,450,205,120\nSep,520,240,150\nOct,610,300,170\nNov,700,350,\n"
 }
@@ -49,7 +43,7 @@ fn sample() -> View {
 fn drawn(text: View, title: Option[View]) -> Response {
   match table(text) {
     Ok(value: t) -> chart(t, title)
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
 }
 

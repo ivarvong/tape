@@ -28,11 +28,11 @@ type Order { Order(id: Int, order_key: View, amount: Int) }
 type Charge { Charge(order_id: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
-type ForAmount { ForAmount(amount: Int) }
+type ForAmount { ForAmount(amount: Int) } type Refusal { Refused(reason: View) }
 
 fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   let Some(value: order) = sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") else -> empty(status: 404)
-  let Ok(value: _) = call(to: payments, method: "charge", send: Charge(order_id: order.id, amount: order.amount), reply: Charged, within: 100, once: @KEY) else {
+  let Ok(value: _) = call(to: payments, method: "charge", send: Charge(order_id: order.id, amount: order.amount), reply: Charged, error: Refusal, within: 100, once: @KEY) else {
     Err(error) -> empty(status: 502)
   }
   empty(status: 200)
@@ -52,16 +52,16 @@ type Order { Order(id: Int, amount: Int) }
 type Charge { Charge(order_id: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
-type ForAmount { ForAmount(amount: Int) }
+type ForAmount { ForAmount(amount: Int) } type Refusal { Refused(reason: View) }
 
 fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   match sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") {
-    Some(value: Order(id, amount)) -> charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, within: 100, once: @KEY))
+    Some(value: Order(id, amount)) -> charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, error: Refusal, within: 100, once: @KEY))
     None -> empty(status: 404)
   }
 }
 
-fn charged(reply: Result[Charged, CallError]) -> Response {
+fn charged(reply: Result[Charged, CallError[Refusal]]) -> Response {
   match reply {
     Ok(value) -> empty(status: 201)
     Err(error) -> empty(status: 502)
@@ -438,7 +438,7 @@ type Order { Order(id: Int, amount: Int) }
 type Charge { Charge(order_id: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
-type ForAmount { ForAmount(amount: Int) }
+type ForAmount { ForAmount(amount: Int) } type Refusal { Refused(reason: View) }
 
 fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   match sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") {
@@ -451,7 +451,7 @@ fn charge(order: Order) -> Response {
   @BODY
 }
 
-fn charged(reply: Result[Charged, CallError]) -> Response {
+fn charged(reply: Result[Charged, CallError[Refusal]]) -> Response {
   match reply {
     Ok(value) -> empty(status: 201)
     Err(error) -> empty(status: 502)
@@ -461,12 +461,12 @@ fn charged(reply: Result[Charged, CallError]) -> Response {
   const field = (key: string): string =>
     PARAM.replace(
       '@BODY',
-      `charged(reply: call(to: payments, method: "charge", send: Charge(order_id: order.id, amount: order.amount), reply: Charged, within: 100, once: ${key}))`,
+      `charged(reply: call(to: payments, method: "charge", send: Charge(order_id: order.id, amount: order.amount), reply: Charged, error: Refusal, within: 100, once: ${key}))`,
     );
   const bound = (key: string): string =>
     PARAM.replace(
       '@BODY',
-      `let Order(id, amount) = order\n  charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, within: 100, once: ${key}))`,
+      `let Order(id, amount) = order\n  charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, error: Refusal, within: 100, once: ${key}))`,
     );
   same(
     'a parameter row: its primary key as a field compiles, and bound by its pattern',

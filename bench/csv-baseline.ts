@@ -8,7 +8,10 @@ type Sum = { count: number; total: number; max: number };
 export function handle(bytes: Uint8Array): Uint8Array {
   const lines = dec.decode(bytes).split('\n');
   const strip = (l = ''): string => (l.endsWith('\r') ? l.slice(0, -1) : l);
-  if (strip(lines[0]) !== 'ts,user,amount,country') return enc.encode('{"error":"header"}');
+  if (strip(lines[0]) !== 'ts,user,amount,country')
+    return enc.encode(
+      '{"type":"about:blank","title":"Bad Request","status":400,"detail":"the first line is not the header ts,user,amount,country"}',
+    );
   const by = new Map<string, Sum>();
   let rows = 0,
     rejected = 0;

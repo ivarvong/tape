@@ -31,7 +31,6 @@ type Url = View where len(self) >= 12
 type NewLink { NewLink(slug: Slug, url: Url) }
 type Link { Link(slug: View, url: View, created: Int, clicks: Int) }
 type Made { Made(link: Link, new: Bool, short: View) }
-type Problem { Problem(error: View) }
 
 // a-z, 0-9 and -
 fn slug_byte(b: Int) -> Bool {
@@ -64,7 +63,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
       rows: sql_all(row: Link, query: "SELECT * FROM links ORDER BY clicks DESC, slug LIMIT 50")
     )
     Request(method: Get, path: "/s/" ++ _) -> visit(found: None)
-    _ -> problem(status: 404, error: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -75,7 +74,7 @@ fn load(slug: View) -> Option[Link] {
 // POST /links: the slug is claimed by the INSERT; a second run (a retry) finds it and answers what is there.
 fn create(body: View) -> Response {
   let Ok(value: NewLink(slug, url)) = decode(json: body, as: NewLink) else {
-    Err(error) -> problem(status: 400, error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let Some(value: link) = sql_first(
     row: Link,
@@ -91,8 +90,8 @@ fn create(body: View) -> Response {
 fn again(url: View, found: Option[Link]) -> Response {
   match found {
     Some(value: link = Link(url: had)) if had == url -> made(status: 200, link, new: False)
-    Some(value) -> problem(status: 409, error: "slug \(value.slug) is taken by another URL")
-    None -> problem(status: 500, error: "the link vanished")
+    Some(value) -> problem(status: 409, detail: "slug \(value.slug) is taken by another URL")
+    None -> problem(status: 500, detail: "the link vanished")
   }
 }
 
@@ -103,12 +102,8 @@ fn made(status: Int, link: Link, new: Bool) -> Response {
 fn as_json(found: Option[Link]) -> Response {
   match found {
     Some(value) -> json(status: 200, value)
-    None -> problem(status: 404, error: "no such link")
+    None -> problem(status: 404, detail: "no such link")
   }
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 
 // ---------- pages ----------

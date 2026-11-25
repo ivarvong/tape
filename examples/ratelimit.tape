@@ -19,7 +19,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
       who,
       slot: now(clock) / 10000
     ))
-    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -31,7 +31,7 @@ fn verdict(seen: Option[Hits]) -> Response {
     Some(value: Hits(n)) -> buf()
       |> append(view: "{\"allowed\":false,\"used\":\(n)}")
       |> respond(status: 429)
-    None -> buf() |> append(view: "{\"error\":\"no row\"}") |> respond(status: 500)
+    None -> problem(status: 500, detail: "no row")
   }
 }
 

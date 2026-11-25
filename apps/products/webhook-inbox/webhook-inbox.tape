@@ -35,7 +35,6 @@ type Id = View where len(self) >= 1 and len(self) <= 200
 
 type Delivery { Delivery(seq: Int, key: Option[View], at: Int, size: Int, body: View) }
 type Stored { Stored(box: View, seq: Int, key: Option[View], duplicate: Bool) }
-type Problem { Problem(error: View) }
 
 fn box_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45
@@ -59,9 +58,9 @@ fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
       seq
     ))
     Request(method: Get, path: "/api/" ++ Box(box)) -> listed(box, rows: recent(box))
-    Request(path: "/in/" ++ _) -> problem(status: 400, error: "box: 2 to 32 of a-z, 0-9 and -")
-    Request(path: "/box/" ++ _) -> problem(status: 400, error: "box: 2 to 32 of a-z, 0-9 and -")
-    _ -> problem(status: 404, error: "no such route")
+    Request(path: "/in/" ++ _) -> problem(status: 400, detail: "box: 2 to 32 of a-z, 0-9 and -")
+    Request(path: "/box/" ++ _) -> problem(status: 400, detail: "box: 2 to 32 of a-z, 0-9 and -")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -143,9 +142,9 @@ fn body_id(raw: Option[View]) -> Option[View] {
 }
 
 fn deliver(box: View, body: View, r: Request) -> Response {
-  let True = len(body) > 0 else -> problem(status: 400, error: "empty: send a JSON body")
-  let True = len(body) <= 65536 else -> problem(status: 413, error: "the body is over 64 KB")
-  let True = is_json(text: body) else -> problem(status: 400, error: "not JSON")
+  let True = len(body) > 0 else -> problem(status: 400, detail: "empty: send a JSON body")
+  let True = len(body) <= 65536 else -> problem(status: 413, detail: "the body is over 64 KB")
+  let True = is_json(text: body) else -> problem(status: 400, detail: "not JSON")
   match delivery_key(r, body) {
     Some(value: k) -> keyed(box, body, k)
     None -> {
@@ -158,7 +157,7 @@ fn deliver(box: View, body: View, r: Request) -> Response {
         at: now(),
         size: len(body),
         body
-      ) else -> problem(status: 500, error: "the delivery was not stored")
+      ) else -> problem(status: 500, detail: "the delivery was not stored")
       stored(status: 202, box, d, duplicate: False)
     }
   }
@@ -192,7 +191,7 @@ fn repeated(box: View, found: Option[Delivery]) -> Response {
       status: 200,
       value: Stored(box, seq: value.seq, key: value.key, duplicate: True)
     )
-    None -> problem(status: 500, error: "the delivery it repeats is gone")
+    None -> problem(status: 500, detail: "the delivery it repeats is gone")
   }
 }
 
@@ -206,16 +205,12 @@ fn stored(status: Int, box: View, d: Delivery, duplicate: Bool) -> Response {
   json(status, value: Stored(box, seq: d.seq, key: d.key, duplicate))
 }
 
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
-}
-
 // ---------- the JSON API ----------
 
 fn one(found: Option[Delivery]) -> Response {
   match found {
     Some(value) -> buf() |> append(view: value.body) |> respond_as(status: 200, content: Json)
-    None -> problem(status: 404, error: "no such delivery")
+    None -> problem(status: 404, detail: "no such delivery")
   }
 }
 

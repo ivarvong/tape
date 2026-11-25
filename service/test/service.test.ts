@@ -115,13 +115,18 @@ describe('tape service', () => {
       method: 'POST',
       body: '{"key":"b1","section":"floor","qty":2,"card":"ann-4242"}',
     });
-    // no program named payments in this account yet: the charge is rejected, the sale voided, the seats freed
-    expect([sold.status, await sold.text()]).toEqual([402, '{"error":"there is no program named payments"}']);
+    // no program named payments in this account yet: nothing answers to that name, so the charge is Unreachable
+    // and the seats stay held (until 25 November 2026 it was a Rejected with that text, and the sale was voided)
+    expect([sold.status, await sold.text()]).toEqual([
+      503,
+      '{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"payments is unreachable; the seats stay held"}',
+    ]);
     const id = sold.headers.get('tape-request-id');
     const log = await got(`/ivar/tickets/log/1/${id}`);
     expect(at(log, 'effects', 0, 'build')).toBeTruthy();
     const trace = await (await call(`/ivar/tickets/trace/1/${id}`)).text();
-    expect(trace).toContain('declined'); // a function of examples/tickets.tape, by name
+    expect(trace).toContain('charge'); // a function of examples/tickets.tape, by name
+    expect(trace).toContain('Err(error: Unreachable)');
   });
 
   it('traces a run that loops over a long body up to TRACE_SITES arms, and says where it stopped', async () => {
@@ -179,7 +184,7 @@ fn count(v: View, at: Int, k: Int) -> Int {
     expect(await json(paid)).toMatchObject({ section: 'balcony', qty: 2, amount: 90 });
     expect((await buy('{"key":"b3","section":"floor","qty":4,"card":"ann-4242"}')).status).toBe(409);
     const declined = await buy('{"key":"b4","section":"balcony","qty":2,"card":"bob-0001"}');
-    expect([declined.status, at(await json(declined), 'error')]).toEqual([402, 'card declined: not enough funds']);
+    expect([declined.status, at(await json(declined), 'detail')]).toEqual([402, 'card declined: not enough funds']);
     const trace = await (await opened(declined.headers.get('tape-trace-url'))).text();
     expect(trace).toContain('call payments.charge within 2000 ms → rejected');
   });
@@ -191,7 +196,7 @@ fn count(v: View, at: Int, k: Int) -> Int {
       method: 'POST',
       body: '{"key":"b5","section":"balcony","qty":2,"card":"bob-0001"}',
     });
-    expect([first.status, at(await json(first), 'error')]).toEqual([
+    expect([first.status, at(await json(first), 'detail')]).toEqual([
       504,
       'payments did not answer in time; the seats stay held',
     ]);
@@ -361,7 +366,7 @@ fn count(found: Option[Count]) -> Response {
       v1.replace('INSERT INTO tags VALUES', 'INSERT INTO tags(note, tag) VALUES') +
       'migration 2 "tag bodies" {\n  ALTER TABLE tags ADD COLUMN body TEXT\n}\n';
     const adds = await upload('gaps', v2);
-    expect([at(adds, 'status'), at(adds, 'error')]).toEqual([409, 'it would break v1, which is still live']);
+    expect([at(adds, 'status'), at(adds, 'detail')]).toEqual([409, 'it would break v1, which is still live']);
     expect(at(adds, 'problems', 0, 'reason')).toContain('2 values');
     expect(at(adds, 'problems', 0)).toMatchObject({ version: 1, query: ins });
     // the refusal is recorded like a request: a signed page and OTLP spans for the check that ran and was rolled back
@@ -411,7 +416,7 @@ fn count(found: Option[Count]) -> Response {
       v1.replace('repeat: True, ', '') +
         'migration 2 "one per email" {\n  CREATE UNIQUE INDEX people_email ON people(email)\n}\n',
     );
-    expect([at(unique, 'status'), at(unique, 'error')]).toEqual([409, 'it does not fit the data as it stands']);
+    expect([at(unique, 'status'), at(unique, 'detail')]).toEqual([409, 'it does not fit the data as it stands']);
     expect(at(unique, 'problems', 0)).toMatchObject({
       version: 2,
       migration: 2,
@@ -586,7 +591,7 @@ fn count(found: Option[Count]) -> Response {
       body: routes(M, [make, payMove]).replace('fn done', '// v4\nfn done'),
     });
     const v4body = await json(v4);
-    expect([v4.status, at(v4body, 'error'), list(at(v4body, 'problems')).map(p => at(p, 'reason'))]).toEqual([
+    expect([v4.status, at(v4body, 'detail'), list(at(v4body, 'problems')).map(p => at(p, 'reason'))]).toEqual([
       409,
       'it does not fit the data as it stands',
       [
@@ -778,7 +783,7 @@ fn count(found: Option[Count]) -> Response {
   it("woken is run by the program's own timers; another program cannot call it", async () => {
     await call('/timer2/fulfill', { method: 'POST', body: fulfillment });
     const caller =
-      'type Got { Got(id: Int) }\nfn handle(raw: View, fulfill: Remote) -> Response {\n  match call(to: fulfill, method: "woken", send: Wake(key: 1), reply: Got, within: 2000, once: raw) {\n    Ok(value) -> empty(status: 200)\n    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 403)\n    Err(error) -> empty(status: 500)\n  }\n}\n';
+      'type Got { Got(id: Int) }\ntype Refusal { Refused(reason: View) }\nfn handle(raw: View, fulfill: Remote) -> Response {\n  match call(to: fulfill, method: "woken", send: Wake(key: 1), reply: Got, error: Refusal, within: 2000, once: raw) {\n    Ok(value) -> empty(status: 200)\n    Err(error: Skew(reason)) -> buf() |> append(view: reason) |> respond(status: 403)\n    Err(error) -> empty(status: 500)\n  }\n}\n';
     expect(at(await got('/timer2/caller', { method: 'POST', body: caller }), 'version')).toBe(1);
     const res = await call('/timer2/caller/v/1/');
     expect([res.status, await res.text()]).toEqual([

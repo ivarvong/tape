@@ -26,7 +26,8 @@ describe('content types', () => {
     expect(head(200, 8, '<doc/>')).toEqual([200, 'application/xml; charset=utf-8', '<doc/>']);
     // a type Content does not have is a 500; the text that named a type before 25 November 2026 is no frame at all,
     // and a 500 too: there is no "all body" and no first line to read
-    expect(head(200, 9)[0]).toBe(500);
+    expect(head(404, 9, '{}')).toEqual([404, 'application/problem+json', '{}']);
+    expect(head(200, 10)[0]).toBe(500);
     for (const t of ['200 text/html; x: y\nx', '200 application/xhtml+xml\n<html/>', 'hello', '99\nx'])
       expect(responseOf(enc.encode(t)).status).toBe(500);
   });
@@ -98,7 +99,12 @@ describe('headers (0.3)', () => {
     expect(all([{ name: 'x-bad', value: 'a\r\nb' }])).toEqual([
       500,
       [],
-      'the program set a response header the host refuses: invalid header value for x-bad',
+      JSON.stringify({
+        type: 'about:blank',
+        title: 'Internal Server Error',
+        status: 500,
+        detail: 'the program set a response header the host refuses: invalid header value for x-bad',
+      }),
     ]);
   });
 

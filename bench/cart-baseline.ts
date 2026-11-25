@@ -2,7 +2,7 @@
 const dec = new TextDecoder(),
   enc = new TextEncoder();
 type Line = { sku: string; qty: number; cents: number };
-const REFUSED = enc.encode('{"error":"not a cart"}');
+const REFUSED = enc.encode('{"type":"about:blank","title":"Bad Request","status":400,"detail":"not a cart"}');
 /** An object; a key the type does not name is left unread, as decode leaves it. */
 const record = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const whole = (v: unknown, least: number, most: number): v is number =>

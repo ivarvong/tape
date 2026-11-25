@@ -10,7 +10,7 @@ fn handle(raw: View) -> Response {
       tally: lines(rest: after(v: raw, byte: 10), tally: Tally(rows: 0, rejected: 0, by: Empty))
     )
       |> respond_as(status: 200, content: Json)
-    _ -> buf() |> append(view: "{\"error\":\"header\"}") |> respond_as(status: 200, content: Json)
+    _ -> problem(status: 400, detail: "the first line is not the header ts,user,amount,country")
   }
 }
 

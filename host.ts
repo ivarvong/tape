@@ -17,6 +17,7 @@
 //
 // The parts are in host/: the effect log (log), what is read from and written into the module's memory (memory),
 // a call out (call), a linked module and its runs (run), migrations and machine triggers (schema).
+import { PROBLEM_TYPE, problemBytes } from './host/problem.ts';
 import { link, listed } from './host/run.ts';
 import type { App, Heap, LinkOptions } from './host/run.ts';
 import type { Effect, Sql, TraceEvent } from './host/log.ts';
@@ -25,6 +26,8 @@ import { dropMachines, installMachines, migrate } from './host/schema.ts';
 import type { Link, MachineSpec, Migrated } from './host/schema.ts';
 
 export { storageKind, transientAtEdge, transientBetween } from './host/failure.ts';
+export { PROBLEM_TYPE, TITLES, isProblem, problemBytes, problemOf, titleOf } from './host/problem.ts';
+export type { Problem } from './host/problem.ts';
 export { HTTP_LIMITS, NO_TIMERS, TimedOut, refusalOf, replyWire, stubHttp } from './host/call.ts';
 export type {
   HttpAnswer,
@@ -88,7 +91,7 @@ export type { MachineSpec, Migrated, Transaction } from './host/schema.ts';
 //   0  4 bytes  0x00 't' 'a' 'p'
 //   4  1 byte   the version, 1
 //   5  8 bytes  the status, signed
-//   13 1 byte   the content: Content's constructor by its place in the type (Html 0, Json 1, Text 2 … Xml 8)
+//   13 1 byte   the content: Content's constructor by its place in the type (Html 0, Json 1, Text 2 … Xml 8, Problem 9)
 //   14 4 bytes  the number of headers, then for each, in the order it was set: the name's length (4 bytes), the
 //               name, the value's length (4 bytes), the value
 //   …           the body, to the end
@@ -125,6 +128,7 @@ export const CONTENT_TYPES = new Map([
   ['application/atom+xml', 'application/atom+xml; charset=utf-8'],
   ['application/rss+xml', 'application/rss+xml; charset=utf-8'],
   ['application/xml', 'application/xml; charset=utf-8'],
+  ['application/problem+json', 'application/problem+json'],
 ]);
 /** Content's constructors in their order in std/http.tape, as the frame's content byte names them: the media type. */
 export const CONTENTS = [
@@ -137,6 +141,7 @@ export const CONTENTS = [
   'application/atom+xml',
   'application/rss+xml',
   'application/xml',
+  'application/problem+json',
 ] as const;
 /** The most headers an answer may set, the longest name and value, and the most bytes of names and values. */
 export const HEADER_LIMITS = { count: 32, name: 64, value: 4096, head: 16384 } as const;
@@ -163,11 +168,13 @@ export type Answer = {
   body: Uint8Array;
   session: SessionChange;
 };
+// An answer refused is a 500 the host gives in the program's place, as application/problem+json (host/problem.ts),
+// the shape of every error the host and the service answer for themselves; `detail` says why.
 const refusedAs = (text: string): Answer => ({
   status: 500,
-  type: CONTENT_TYPES.get('text/plain'),
+  type: PROBLEM_TYPE,
   headers: [],
-  body: new TextEncoder().encode(text),
+  body: problemBytes(500, text),
   session: null,
 });
 const refused = (why: string): Answer => refusedAs(`the program set a response header the host refuses: ${why}`);

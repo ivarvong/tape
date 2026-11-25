@@ -59,7 +59,6 @@ type Story {
 type Render { Render(hash: View, html: View) }
 type Op { Op(key: View, method: View, slug: View, status: Int, req_hash: View) }
 type Stamp { Stamp(n: Int, updated_ms: Int) }
-type Issue { Issue(error: View) }
 
 type Check {
   Fine(slug: Slug, title: Title, published: Day, key: ClientKey)
@@ -608,7 +607,7 @@ fn render(o: Outcome, r: Request, db: Sql) -> Response {
       tag: "missing",
       store: False
     )
-    Problem(status, reason) -> json_error(status, reason)
+    Problem(status, reason) -> problem(status, detail: reason)
       |> header(name: "cache-control", value: "no-store")
   }
 }
@@ -641,10 +640,6 @@ fn json_ok(status: Int, post: Story) -> Response {
       created_ms: post.created_ms
     )
   )
-}
-
-fn json_error(status: Int, reason: View) -> Response {
-  json(status, value: Issue(error: reason))
 }
 
 fn page_shell(title: View) -> Buf {

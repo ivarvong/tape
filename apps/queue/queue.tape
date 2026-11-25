@@ -336,10 +336,6 @@ fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, job) -> buf() |> write_json(value: job) |> respond(status)
     Nothing -> empty(status: 204)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }

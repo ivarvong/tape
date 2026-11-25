@@ -35,7 +35,7 @@ const given = (g: FnDecl, message: Value | null): Value[] =>
 const frozen = (r: Value): Value =>
   typeof r === 'object' && !(r instanceof Uint8Array) && r.k === 'buf' ? Uint8Array.from(r.buf) : r;
 // Content's constructors in their order in std/http.tape: the frame's content byte
-const CONTENT = ['Html', 'Json', 'Text', 'Css', 'Svg', 'Csv', 'Atom', 'Rss', 'Xml'];
+const CONTENT = ['Html', 'Json', 'Text', 'Css', 'Svg', 'Csv', 'Atom', 'Rss', 'Xml', 'Problem'];
 /** a program's own constructor of std's name moves std's aside as `std.Name` */
 const stdCtor = (c: string): string => (c.startsWith('std.') ? c.slice(4) : c);
 const u32 = (n: number): number[] => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
@@ -63,8 +63,8 @@ function framedOf(r: Value): Uint8Array {
   }
   return Uint8Array.from([0, 0x74, 0x61, 0x70, 1, ...st, tag, ...u32(heads.length), ...heads.flat(), ...asBytes(body)]);
 }
-// "1" and the reason: a method's refusal
-const refusal = (why: Value | undefined): Uint8Array => Uint8Array.from([49, ...asBytes(why)]);
+// "2" and why: a message the method could not decode (the host answers skew)
+const undecoded = (why: Value | undefined): Uint8Array => Uint8Array.from([50, ...asBytes(why)]);
 
 /**
  * `levels`: the depth budget's weights of the build to agree with (Built.levels): with them a run stops where the
@@ -97,7 +97,8 @@ export function interpret(
       const g = entry('handle');
       return framedOf(run(it, callable(g), given(g, bytes)));
     },
-    /** one message to an exported method: the reply is "0" and the record as JSON, or "1" and the reason */
+    /** one message to an exported method: "0" and the reply as JSON, "1" and the error as JSON (woken's text as it
+     * is), or "2" and why the message did not decode */
     serve(method: string, bytes: Uint8Array): Uint8Array {
       it.undone = false;
       it.depth = 0;
@@ -105,9 +106,14 @@ export function interpret(
         g = [...prog.fns.values()].find(named) ?? stop(`no exported function ${method}`),
         takes = g.params.find(p => ![...CAPABILITIES, 'Remote', 'Remotes'].includes(p.typeAst.name)),
         got = decoded(it, bytes, (takes ?? stop(`${method} takes no message`)).typeAst, g.file);
-      if (got.c === 'Err') return refusal(got.f['error']);
+      if (got.c === 'Err') return undecoded(got.f['error']);
       const r = asAdt(run(it, callable(g), given(g, got.f['value'] ?? null)));
-      if (r.c !== 'Ok') return refusal(r.f['error']);
+      if (r.c !== 'Ok') {
+        const error = r.f['error'] ?? stop('Err without an error');
+        return g.retAst.args[1]?.name === 'View'
+          ? Uint8Array.from([49, ...asBytes(error)])
+          : Uint8Array.from(jsonInto(it, { k: 'buf', buf: [49] }, error, g.file).buf);
+      }
       const out = jsonInto(it, { k: 'buf', buf: [48] }, r.f['value'] ?? stop('Ok without a value'), g.file);
       return Uint8Array.from(out.buf);
     },

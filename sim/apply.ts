@@ -4,6 +4,7 @@ import { stubHttp } from '../host.ts';
 import { HTTP, drain, fetchOf, hash, isCut, messageOf, programOf, rng } from './world.ts';
 import type { Client, Model, Op, Reply, Request, Waiting, World } from './world.ts';
 import { valueOf } from './values.ts';
+import type { Schema } from './values.ts';
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -134,23 +135,24 @@ async function fireTimer(world: World, action: string, a: string, b: string): Pr
 }
 
 // A Remote that no program here serves is stood in for: 3 times in 4 it answers ok with a value of the reply's
-// type, otherwise it refuses. Which, and what value, follow from the seed and the call's key, and a key seen before
-// gets the reply it got before, as a real callee's stored reply would.
+// type, otherwise it refuses with a value of the error type the call names (a Skew, when the call names none the
+// stand-in can make). Which, and what value, follow from the seed and the call's key, and a key seen before gets the
+// reply it got before, as a real callee's stored reply would.
 function standIn(world: World, model: Model, p: Waiting): Reply {
   const id = p.meta.key ?? p.id;
   const had = world.stubbed.get(`${p.to}/${id}`);
   if (had) return had;
   const rand = rng(hash(`${world.seed}/${p.to}/${p.meta.method}/${id}`));
   const schema = model.stubs?.[p.to]?.[p.meta.method];
+  const refusal = model.refusals?.[p.to]?.[p.meta.method];
+  const made = (s: Schema): Uint8Array =>
+    enc.encode(JSON.stringify(valueOf(s, rand, { ids: [1, 2, 3], dict: {}, keys: [], said: {}, blank: 0.25 })));
   const reply =
     rand() < 0.75 && schema
-      ? {
-          status: 'ok',
-          body: enc.encode(
-            JSON.stringify(valueOf(schema, rand, { ids: [1, 2, 3], dict: {}, keys: [], said: {}, blank: 0.25 })),
-          ),
-        }
-      : { status: 'rejected', body: enc.encode('the stand-in refuses') };
+      ? { status: 'ok', body: made(schema) }
+      : refusal
+        ? { status: 'rejected', body: made(refusal) }
+        : { status: 'skew', body: enc.encode('the stand-in refuses') };
   if (p.meta.key) world.stubbed.set(`${p.to}/${id}`, reply);
   return reply;
 }

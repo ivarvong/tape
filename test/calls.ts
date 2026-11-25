@@ -260,28 +260,28 @@ fn handle(raw: View) -> Response {
 T(
   'call without a time budget is rejected',
   err(
-    'type M { M(n: Int) }\nfn f(r: Remote) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: 1), reply: M, once: 1))\n}\nfn ignore(reply: Result[M, CallError]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}',
+    'type M { M(n: Int) } type Refusal { Refused(reason: View) }\nfn f(r: Remote) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: 1), reply: M, error: Refusal, once: 1))\n}\nfn ignore(reply: Result[M, CallError[Refusal]]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}',
   ),
   'C39',
 );
 T(
   'a command without a key is rejected',
   err(
-    'type M { M(n: Int) }\nfn f(r: Remote) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: 1), reply: M, within: 5))\n}\nfn ignore(reply: Result[M, CallError]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}',
+    'type M { M(n: Int) } type Refusal { Refused(reason: View) }\nfn f(r: Remote) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: 1), reply: M, error: Refusal, within: 5))\n}\nfn ignore(reply: Result[M, CallError[Refusal]]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}',
   ),
   'C41',
 );
 T(
   'a read takes no key',
   err(
-    'type M { M(n: Int) }\nfn f(r: Remote) -> Int {\n  ignore(reply: ask(to: r, method: "m", send: M(n: 1), reply: M, within: 5, once: 1))\n}\nfn ignore(reply: Result[M, CallError]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}',
+    'type M { M(n: Int) } type Refusal { Refused(reason: View) }\nfn f(r: Remote) -> Int {\n  ignore(reply: ask(to: r, method: "m", send: M(n: 1), reply: M, error: Refusal, within: 5, once: 1))\n}\nfn ignore(reply: Result[M, CallError[Refusal]]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}',
   ),
   'C11',
 );
 T(
-  'an exported function has one message and returns Result[_, View]',
+  'an exported function has one message and returns Result[_, Error]',
   err(
-    'type M { M(n: Int) }\nexport fn m(a: M, b: M) -> Result[M, View] {\n  Ok(value: a)\n}\nfn f(n: Int) -> Int {\n  n\n}',
+    'type M { M(n: Int) } type Refusal { Refused(reason: View) }\nexport fn m(a: M, b: M) -> Result[M, Refusal] {\n  Ok(value: a)\n}\nfn f(n: Int) -> Int {\n  n\n}',
   ),
   'C42',
 );
@@ -365,7 +365,11 @@ const post = (item: string, key: string) =>
     traceOf(traced, post('lamp', 'a'), ok.effects).events.flatMap(e => ('call' in e ? [e.status] : [])),
     ['ok'],
   );
-  T("call rejected with the callee's reason", text(await app.run(post('unicorn', 'b'))), '409\n{"error":"none left"}');
+  T(
+    "call rejected with the callee's reason",
+    text(await app.run(post('unicorn', 'b'))),
+    '409 application/problem+json\n{"type":"about:blank","title":"Conflict","status":409,"detail":"none left"}',
+  );
 
   // a timeout on a command: the outcome is unknown, and sending it again with the same key is safe. The reply is held
   // and the budget's timer fired by hand, so the run must answer at the budget, with the reply still on its way.
@@ -381,7 +385,11 @@ const post = (item: string, key: string) =>
   // never answer here)
   await until(answered, 'the answer at the budget');
   const slow = await slowRun;
-  T('call timeout', text(slow.out), '504\n{"error":"stock did not answer in time; the order stays pending"}');
+  T(
+    'call timeout',
+    text(slow.out),
+    '504 application/problem+json\n{"type":"about:blank","title":"Gateway Timeout","status":504,"detail":"stock did not answer in time; the order stays pending"}',
+  );
   T('timeout returned at the budget, not at the reply', [reply.done(), clock.armed()], [false, []]);
   T(
     'replay timeout takes no time: it answers at once, with no timer to wait on',
@@ -443,11 +451,11 @@ const post = (item: string, key: string) =>
     ['{"remaining":4}', 4],
   );
   T(
-    'a bad message is rejected with the reason',
+    'a bad message is skew, with the reason: the two sides disagree on it, and nothing ran (a refusal is a value of the error type)',
     await stockApp
       .serve({ method: 'reserve', fingerprint: stockBuild.methods[0]?.fingerprint ?? '' }, bytes('{"item":7}'))
       .then(r => [r.status, text(r.body)]),
-    ['rejected', 'item: expected text'],
+    ['skew', 'item: expected text'],
   );
 
   // version skew: the callee was built from another definition of the method, so nothing runs
@@ -500,12 +508,12 @@ const post = (item: string, key: string) =>
   T(
     'unreachable',
     text(await instantiate(module, { sql: nodeSql(), name: 'x' }).run(post('lamp', 'h'))),
-    '503\n{"error":"stock is unreachable; the order stays pending"}',
+    '503 application/problem+json\n{"type":"about:blank","title":"Service Unavailable","status":503,"detail":"stock is unreachable; the order stays pending"}',
   );
   T(
     'bad body gives the reason',
     text(await app.run(bytes('POST /orders\n{"key":"z","item":7}'))),
-    '400\n{"error":"item: expected text"}',
+    '400 application/problem+json\n{"type":"about:blank","title":"Bad Request","status":400,"detail":"item: expected text"}',
   );
   T(
     'sync handle refuses a handler that calls',
@@ -669,7 +677,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
   T('now without the capability is rejected', err('fn f(n: Int) -> Int {\n  now(n)\n}'), 'C14');
   // ---- command keys (C64, C65) and the callee's check that a key names one message
   const prog = (key: string) =>
-    `type M { M(n: Int, text: View) }\ntype ForRow { ForRow(row: Int) }\nfn f(r: Remote, id: Int, raw: View) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: id, text: raw), reply: M, within: 5, once: ${key}))\n}\nfn ignore(reply: Result[M, CallError]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}`;
+    `type M { M(n: Int, text: View) } type Refusal { Refused(reason: View) }\ntype ForRow { ForRow(row: Int) }\nfn f(r: Remote, id: Int, raw: View) -> Int {\n  ignore(reply: call(to: r, method: "m", send: M(n: id, text: raw), reply: M, error: Refusal, within: 5, once: ${key}))\n}\nfn ignore(reply: Result[M, CallError[Refusal]]) -> Int {\n  match reply {\n    Ok(value) -> 1\n    Err(error) -> 0\n  }\n}`;
   T(
     'C64: a key that is an Int, a Bool or an Option is refused; text and records are taken',
     ['id', 'id == 1', 'Some(value: id)', 'raw', 'ForRow(row: id)', '"row-" ++ raw'].map(k => err(prog(k))),
@@ -743,7 +751,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
   // ---- a family of Remotes: remote(of, index) names member <family>-<index>, chosen at run time
   {
     const fam =
-      'type P { P(n: Int) }\ntype Q { Q(n: Int) }\nfn handle(raw: View, shards: Remotes) -> Response {\n  answer(reply: call(to: remote(of: shards, index: len(raw) % 3), method: "p", send: P(n: len(raw)), reply: Q, within: 500, once: raw))\n}\nfn answer(reply: Result[Q, CallError]) -> Response {\n  match reply {\n    Ok(value: Q(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)\n    _ -> empty(status: 502)\n  }\n}\n';
+      'type P { P(n: Int) } type Refusal { Refused(reason: View) }\ntype Q { Q(n: Int) }\nfn handle(raw: View, shards: Remotes) -> Response {\n  answer(reply: call(to: remote(of: shards, index: len(raw) % 3), method: "p", send: P(n: len(raw)), reply: Q, error: Refusal, within: 500, once: raw))\n}\nfn answer(reply: Result[Q, CallError[Refusal]]) -> Response {\n  match reply {\n    Ok(value: Q(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)\n    _ -> empty(status: 502)\n  }\n}\n';
     const r = build(fam),
       hits: [number, string | null][] = [];
     const shard =
@@ -767,7 +775,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
     T(
       'remote needs a family; a Remote is not one',
       err(
-        'type P { P(n: Int) }\nfn f(s: Remote) -> Int {\n  ignore(reply: call(to: remote(of: s, index: 1), method: "p", send: P(n: 1), reply: P, within: 5, once: "k"))\n}\nfn ignore(reply: Result[P, CallError]) -> Int {\n  1\n}',
+        'type P { P(n: Int) } type Refusal { Refused(reason: View) }\nfn f(s: Remote) -> Int {\n  ignore(reply: call(to: remote(of: s, index: 1), method: "p", send: P(n: 1), reply: P, error: Refusal, within: 5, once: "k"))\n}\nfn ignore(reply: Result[P, CallError[Refusal]]) -> Int {\n  1\n}',
       ),
       'C14',
     );
@@ -786,11 +794,11 @@ fn stamp(out: Buf, roll: Int) -> Buf {
     const pay = build(`schema "CREATE TABLE IF NOT EXISTS charges(id INTEGER PRIMARY KEY, who TEXT NOT NULL)"
 type Pay { Pay(who: View) }
 type Done { Done(n: Int) }
-type Ack { Ack(ok: Int) }
-export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, View] {
+type Ack { Ack(ok: Int) } type Refusal { Refused(reason: View) }
+export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, Refusal] {
   let _ = sql_exec(query: "INSERT INTO charges(who) VALUES (:who)", who: message.who)
-  let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, within: 1000, once: message.who) else -> Err(
-    error: "bank"
+  let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, error: Refusal, within: 1000, once: message.who) else -> Err(
+    error: Refused(reason: "bank")
   )
   Ok(value: Done(n: ok))
 }`);

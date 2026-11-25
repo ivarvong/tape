@@ -43,6 +43,8 @@ export type Model = {
   secrets?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** Remotes no program here serves: the reply type of each method */
   stubs?: Readonly<Record<string, Readonly<Record<string, Schema | null>>>>;
+  /** and the error type each call to one names, which the stand-in refuses with */
+  refusals?: Readonly<Record<string, Readonly<Record<string, Schema | null>>>>;
   clients: (rand: () => number) => Op[][];
   start?: number;
   observe?: (program: string, run: Observed) => void;

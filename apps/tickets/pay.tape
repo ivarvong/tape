@@ -25,8 +25,15 @@ type Balance { Balance(balance: Int) }
 type Card { Card(card: View, balance: Int) }
 type Entry { Entry(id: Int, card: View, amount: Int, what: View, ref: View) }
 type Made { Made(id: Int) }
+// why pay refuses: a charge the card cannot cover (or a card it does not know), a refund to a card it does not know,
+// and a movement it made and could not write in its ledger
+type PayError {
+  Declined
+  NoSuchCard
+  Unrecorded
+}
 
-export fn charge(db: Sql, message: Charge) -> Result[Charged, View] {
+export fn charge(db: Sql, message: Charge) -> Result[Charged, PayError] {
   let Charge(card, amount, ref) = message
   let Some(value: Balance) = sql_first(
     row: Balance,
@@ -35,7 +42,7 @@ export fn charge(db: Sql, message: Charge) -> Result[Charged, View] {
     amount,
     card
   ) else {
-    None -> Err(error: "card declined")
+    None -> Err(error: Declined)
   }
   let Some(value: Made(id)) = sql_first(
     row: Made,
@@ -45,12 +52,12 @@ export fn charge(db: Sql, message: Charge) -> Result[Charged, View] {
     amount,
     ref
   ) else {
-    None -> Err(error: "ledger write failed")
+    None -> Err(error: Unrecorded)
   }
   Ok(value: Charged(payment: id))
 }
 
-export fn refund(db: Sql, message: Refund) -> Result[Refunded, View] {
+export fn refund(db: Sql, message: Refund) -> Result[Refunded, PayError] {
   let Refund(card, amount, ref) = message
   let Some(value: Balance) = sql_first(
     row: Balance,
@@ -58,7 +65,7 @@ export fn refund(db: Sql, message: Refund) -> Result[Refunded, View] {
     amount,
     card
   ) else {
-    None -> Err(error: "no such card")
+    None -> Err(error: NoSuchCard)
   }
   let Some(value: Made(id)) = sql_first(
     row: Made,
@@ -68,7 +75,7 @@ export fn refund(db: Sql, message: Refund) -> Result[Refunded, View] {
     amount: 0 - amount,
     ref
   ) else {
-    None -> Err(error: "ledger write failed")
+    None -> Err(error: Unrecorded)
   }
   Ok(value: Refunded(payment: id))
 }
@@ -85,8 +92,7 @@ fn handle(raw: View, db: Sql) -> Response {
       rows: sql_all(row: Entry, query: "SELECT * FROM ledger ORDER BY id")
     )
       |> respond_as(status: 200, content: Json)
-    _ -> append(buf: buf(), view: "{\"error\":\"no such route\"}")
-      |> respond_as(status: 404, content: Json)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 

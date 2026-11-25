@@ -3,6 +3,8 @@
 // request answers 202 and the timer's run gets the payment.
 type Charge { Charge(order: Int) }
 type Charged { Charged(payment: Int) }
+// what payments refuses with: a reason it gives
+type ChargeError { Declined(why: View) }
 
 fn handle(raw: View, payments: Remote, timer: Timer) -> Response {
   match request(raw) {
@@ -20,18 +22,19 @@ export fn woken(payments: Remote, timer: Timer, message: Wake) -> Result[Charged
   }
 }
 
-fn charged(order: Int) -> Result[Charged, CallError] {
+fn charged(order: Int) -> Result[Charged, CallError[ChargeError]] {
   call(
     to: payments,
     method: "charge",
     send: Charge(order),
     reply: Charged,
+    error: ChargeError,
     within: 1000,
     once: Charge(order)
   )
 }
 
-fn paid(order: Int, reply: Result[Charged, CallError]) -> Response {
+fn paid(order: Int, reply: Result[Charged, CallError[ChargeError]]) -> Response {
   match reply {
     Ok(value: Charged(payment)) -> buf() |> write_int(value: payment) |> respond(status: 201)
     Err(error: Timeout) -> {

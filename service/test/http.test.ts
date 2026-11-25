@@ -132,8 +132,8 @@ describe('outbound HTTP', () => {
 
   it('a tool may not fetch: no policy grants Http', async () => {
     await call('/_policy/webt', { method: 'PUT', body: '{"sql": true, "clock": true, "entropy": true}' });
-    const tool = `export fn peek(http: Http, message: Ask) -> Result[Ask, View] {\n  match fetch(to: http, method: Get, url: "https://api.stripe.com/", headers: Nil, body: "", within: 100, key: None) {\n    Ok -> Ok(value: message)\n    Err -> Err(error: "no")\n  }\n}\n\ntype Ask {\n  Ask(n: Int)\n}\n`;
+    const tool = `export fn peek(http: Http, message: Ask) -> Result[Ask, Refusal] {\n  match fetch(to: http, method: Get, url: "https://api.stripe.com/", headers: Nil, body: "", within: 100, key: None) {\n    Ok -> Ok(value: message)\n    Err -> Err(error: Refused(reason: "no"))\n  }\n}\n\ntype Ask {\n  Ask(n: Int)\n}\n\ntype Refusal {\n  Refused(reason: View)\n}\n`;
     const r = await call('/tools/webt/peek', { method: 'POST', body: tool });
-    expect([r.status, at(await json(r), 'error')]).toEqual([403, 'capability not granted']);
+    expect([r.status, at(await json(r), 'detail')]).toEqual([403, 'capability not granted']);
   });
 });

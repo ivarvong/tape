@@ -55,7 +55,7 @@ deployed compiler is not the one that made a version's builds (each build record
 again from its source the first time it is loaded, once, and the new builds are stored. The rules are not asked
 again, so a version accepted once is not refused later for a rule that came after it. The listing shows
 `rebuilt_from` (the old compiler's hash, or `unknown`) and `rebuilt_at`, and the log has a `tape.rebuilt` line. If
-the current compiler cannot build the source, the version answers 503 `{"error": "rebuild_failed", "errors": […]}`
+the current compiler cannot build the source, the version answers a 503 problem with `"code": "rebuild_failed"` and `"errors": […]`
 with the compiler's diagnostics (logged as `tape.rebuild_failed`, tried again only under another compiler) and its
 old build is never run; the other versions are unaffected. When that version is the latest, its timers are kept and not run: the alarm is set again an hour later, with a `tape.timers_deferred` warning. Neither is logged as an error. So that no request pays for a rebuild (1.2-4 s), a deploy that changes the compiler is followed, once the new version has all traffic, by `POST /_rebuild` (operator; service/scripts/ship.sh calls it and records how many names were rebuilt and how long it took): every live version of every program of the listed accounts, a few names at a time. The accounts are those that uploaded a program since the list was kept, those with a published name, and any given as `{"accounts": [...]}`; a name it misses still rebuilds on its first request, as before. Its answer lists the published names (`published`), and ship.sh then sends each one request (service/scripts/warm.ts), so the first visitor after a deploy does not start the name's object. Every version of a name shares the name's tables. Migrations
 (`migration n "…" { … }`) are applied before the first request after an upload; one that removes something must be
@@ -83,9 +83,32 @@ run. The `build` id is a hash of the source, so after the accounting changes the
 build can count the same request differently, and `step_version` is what tells the two counts apart. A storage failure at commit answers 503
 `not_applied` with `retry-after: 1`. A trap answers 500 `not_applied` with no `retry-after`.
 
+### An error is a problem
+
+Every error the service answers for itself, on every route, is `application/problem+json` (RFC 9457), and so is
+every error a program answers with std/http's `problem`. A client parses one shape:
+
+```json
+{"type": "about:blank", "title": "Service Unavailable", "status": 503,
+ "detail": "the program stopped before it answered; what it committed before that is kept, so the outcome is unknown",
+ "outcome": "unknown", "retry": "…", "reason": "…"}
+```
+
+`type` is `about:blank`: the status says what kind of failure it is, and `title` is its reason phrase. `detail` says
+what went wrong with this request. The other members are RFC 9457's extension members, what a client acts on:
+`outcome`, `retry` and `transient` on an answer from a program route that failed (below); `code` where one status
+has several causes a client tells apart (`rebuild_failed`, and the hosted runner's `rate_limited`, `bad_json`…);
+`errors` with the diagnostics of a refused upload (`"detail": "does not compile"`) or of a version that cannot be
+rebuilt; `problems` of an upload whose SQL does not fit its schema; the shard, key and version of a KV refusal. Those
+the service answers itself: a refused upload (400, 409, 413), a 401 without the token, a 403 a policy refuses, a 404
+of a route, a version or a name that is not published, a 405, a 410 of a retired version, a 413 over a body cap, a
+500 of an answer the host refuses (the reason is the detail), a 503 of a run that stopped, a storage failure, an
+upgrade in progress or a version that cannot be rebuilt. (Before 25 November 2026 each was `{"error": …}` as
+`application/json`.) A program's own answers are its own; one written with `problem` has the same shape.
+
 ### What a client should do
 
-`tape-outcome` is one of four states. The body of a failure carries the same `outcome` and a `retry` line. `outcome`
+`tape-outcome` is one of four states. The body of a failure is a problem that carries the same `outcome` and a `retry` line. `outcome`
 and `retry` say whether sending the request again is safe. `transient` and `retry-after` say whether waiting and
 sending it again may succeed. A `not_applied` with no `retry-after` (a trap, a retired version, a version the
 compiler cannot build, a version whose contract migration is held) will not succeed by being sent again; sending
@@ -110,12 +133,13 @@ The service does not retry a request itself. A storage reset fails the requests 
 
 A program answers a `Response` (std/http.tape), a value, never bytes: `buf() |> … |> respond(status: 200)` is served
 as `text/plain`, `respond_as(status: …, content: Html)` as its type (`Json`, `Text`, `Css`, `Svg`, `Csv`, `Atom`,
-`Rss` and `Xml` too), `json(status:, value:)` as JSON, `empty(status:)` with no body and `redirect(to:)` as a 303
-with a `location`. The type is from a closed list, and headers are added with `header(name:, value:)` (`location`,
+`Rss`, `Xml` and `Problem` too), `json(status:, value:)` as JSON, `empty(status:)` with no body, `redirect(to:)` as
+a 303 with a `location`, and `problem(status:, detail:)` as `application/problem+json`, the shape of the service's
+own errors. The type is from a closed list, and headers are added with `header(name:, value:)` (`location`,
 `cache-control`). A program sees only that type: the function the compiler generates around `handle` gives the host
 the head (the status, the type and the headers, each its own field) and where the body lies, and the host reads
-them, so no byte of a body, however it came in, can become a status or a header. The host refuses, with a 500 that
-says why and after nothing more is run: a status outside 200 to 599; a body on 204, 205 or 304; a header it sets
+them, so no byte of a body, however it came in, can become a status or a header. The host refuses, with a 500 problem whose
+detail says why, and after nothing more is run: a status outside 200 to 599; a body on 204, 205 or 304; a header it sets
 itself (content-type, content-length, set-cookie, the security headers, `tape-…`), a name that is not a token, a
 value that is not printable ASCII, more than 32 headers or 16 KB of them. (Before 25 November 2026 the host read the
 head out of the answer's first line, so a program that answered what it was sent let the sender choose it.)
@@ -226,7 +250,7 @@ GET /_http/:account/:name   {hosts}
 ```
 
 A program that declares `http: Http` makes a request with std/http's `fetch(to: http, method:, url:, headers:, body:,
-within:, key:)`, and gets `Ok(HttpReply(status, headers, body))` whatever the status, or a `CallError`, as a call
+within:, key:)`, and gets `Ok(HttpReply(status, headers, body))` whatever the status, or a `CallError[View]` (its refusals are text), as a call
 does: the request is logged, it is a commit point (what the run wrote before it is committed when it goes out), it
 has `within` ms, and a replay answers it from the log without sending it again. The Worker sends it, not the
 program's sandbox (which has no network), and only when all of these hold; otherwise the program gets
@@ -267,7 +291,7 @@ uploads, lists and calls tools with the account's agent token.
 PUT  /_policy/:account          {sql, clock, entropy, remote: [names]}            operator
 POST /tools/:account/:name      body: Tape source -> 201 the manifest entries; 403 when a capability is not granted
 GET  /tools/:account            every tool function, with JSON Schemas and capabilities
-POST /tools/:account/:name/:fn  body: the JSON message -> {ok, output | error, trace_url, otlp_url}
+POST /tools/:account/:name/:fn  body: the JSON message -> 200 {ok, output, trace_url, otlp_url}; a refusal is a problem {…, detail, ok, trace_url, otlp_url}
 POST /mcp/:account              MCP over streamable HTTP: initialize, tools/list, tools/call
 ```
 

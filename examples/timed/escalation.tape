@@ -44,6 +44,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the pager refuses with: why it would not page
+type PageError { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, pager: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
     Request(method: Post, path: "/requests", body) -> opened(body) |> rendered
@@ -171,6 +174,7 @@ fn page(request: Req) -> Outcome {
     method: "page",
     send: Page(to: manager, text: "an approval waits for you"),
     reply: Paged,
+    error: PageError,
     within: 2000,
     once: PageFor(request: id)
   ) {
@@ -179,7 +183,7 @@ fn page(request: Req) -> Outcome {
       noted(id)
     }
     // a page the pager refuses will be refused again: the SLA still runs
-    Err(error: Rejected(reason)) -> {
+    Err(error: Rejected(reason: Refused(reason))) -> {
       do wake(after: left(until: due), key: id)
       noted(id)
     }
@@ -228,11 +232,7 @@ fn shown(found: Option[Req]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, request) -> write_json(out: buf(), value: request) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

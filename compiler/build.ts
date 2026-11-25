@@ -77,13 +77,18 @@ export type Built = {
   entry: HostParam[];
   calls: CallDecl[];
   methods: { name: string; fingerprint: string; params: HostParam[] }[];
-  schemas: { name: string; input: JsonSchema; output: JsonSchema }[];
+  schemas: { name: string; input: JsonSchema; output: JsonSchema; error: JsonSchema }[];
   build: string;
   schema: string[];
   migrations: ReturnType<typeof chainOf>;
   machines: { table: string; column: string; start: string | null; states: string[]; moves: string[][] }[];
   invariants: ReturnType<typeof checkInvariants>;
-  json: { replies: Record<string, JsonSchema | null>; decodes: Record<string, JsonSchema | null> };
+  json: {
+    replies: Record<string, JsonSchema | null>;
+    /** each call's refusal: the JSON Schema of the error type it names */
+    refusals: Record<string, JsonSchema | null>;
+    decodes: Record<string, JsonSchema | null>;
+  };
   functions: string[];
   options: Options;
 };
@@ -141,8 +146,9 @@ function filling() {
   const sites: Site[] = [];
   const table: string[] = [];
   const replies: SimJson = {};
+  const refusals: SimJson = {};
   const decodes: SimJson = {};
-  return { calls, sites, table, flagRead: new Set<string>(), SIMJSON: { replies, decodes } };
+  return { calls, sites, table, flagRead: new Set<string>(), SIMJSON: { replies, refusals, decodes } };
 }
 
 /** Each function with its types resolved; a generic one is resolved per set of type arguments, when it is called. */
@@ -163,11 +169,19 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
   const { fns, ctors, types } = prog;
   const find = (n: string, file: string, at?: Place): FnDecl | null => mod.find(prog, n, file, at);
   const ownedParams = ownedParameters(fns, find, opts.reuse, opts.ownershipRounds);
-  const fingerprint = (method: string, send: Type, reply: Type, at: Place): string =>
-    sha256(UTF8.encode(JSON.stringify([method, layout.describe(L, send, at), layout.describe(L, reply, at)]))).slice(
-      0,
-      16,
-    );
+  // what both sides must agree on: the method, its message, its reply and its error (a capability's is text), so a
+  // caller built against another error type is told Skew before anything runs, never handed a refusal it cannot read
+  const fingerprint = (method: string, send: Type, reply: Type, error: Type, at: Place): string =>
+    sha256(
+      UTF8.encode(
+        JSON.stringify([
+          method,
+          layout.describe(L, send, at),
+          layout.describe(L, reply, at),
+          error.name === 'View' ? 'View' : layout.describe(L, error, at),
+        ]),
+      ),
+    ).slice(0, 16);
   for (const n of Object.keys(opts.pin))
     if (!prog.flags.some(x => x.name === n))
       fail(
@@ -328,17 +342,22 @@ function describeModule(
     (f?.params ?? []).map(pm => ({ name: pm.name, type: hostType(pm.type) }));
   const methods = served.map((f: Served) => ({
     name: f.method,
-    fingerprint: fingerprint(f.method, resolve(f.message), resolve(f.reply), f),
+    fingerprint: fingerprint(f.method, resolve(f.message), resolve(f.reply), resolve(f.error), f),
     params: hostParams(prog.fns.get(`serve_${f.method}`)),
   }));
   const schemas = served.map((f: Served) => ({
     name: f.method,
     input: jsonSchema(L, resolve(f.message), f),
     output: jsonSchema(L, resolve(f.reply), f),
+    error: key(f.error) === 'View' ? { type: 'string' } : jsonSchema(L, resolve(f.error), f),
   }));
   const settled = (part: SimJson): Record<string, JsonSchema | null> =>
     Object.fromEntries(Object.entries(part).map(([k, v]) => [k, Array.isArray(v) ? schemaOr(L, v) : v]));
-  const json = { replies: settled(SIMJSON.replies), decodes: settled(SIMJSON.decodes) };
+  const json = {
+    replies: settled(SIMJSON.replies),
+    refusals: settled(SIMJSON.refusals),
+    decodes: settled(SIMJSON.decodes),
+  };
   return {
     json,
     entry: hostParams(prog.fns.get('handle')),

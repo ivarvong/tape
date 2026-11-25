@@ -175,8 +175,8 @@ const origin = await post(
   { origin: 'https://example.com' },
 );
 check(
-  origin.r.status === 403 && origin.j['error'] === 'origin_refused',
-  `Origin: ${origin.r.status} ${String(origin.j['error'])}`,
+  origin.r.status === 403 && origin.j['code'] === 'origin_refused',
+  `Origin: ${origin.r.status} ${String(origin.j['code'])}`,
 );
 console.log(`  feedback: ${fbId} (smoke/)`);
 console.log(`  run: ${ran}; compile: ${str(d[0]?.['code'])} line ${str(d[0]?.['line'])}; Origin: ${origin.r.status}`);

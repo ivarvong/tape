@@ -19,11 +19,9 @@ type Priced { Priced(
   total: Int
 ) }
 
-type Refused { Refused(error: View) }
-
 fn handle(raw: View) -> Response {
   let Ok(value: Cart(customer, lines, coupon)) = decode(json: raw, as: Cart) else {
-    Err(error) -> json(status: 200, value: Refused(error: "not a cart"))
+    Err(error) -> problem(status: 400, detail: "not a cart")
   }
   let subtotal = fold(
     list: lines,

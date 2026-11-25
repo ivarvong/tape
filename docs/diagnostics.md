@@ -4,7 +4,7 @@
 
 A code starts with the part of the compiler that gives it: L for the lexer (the characters of a file), P for the parser (its shape), C for the checker and the rules (what it means). A refusal is a code, a file and line, what is wrong there, and what to write instead; the line and the fix name what the program wrote. This page says what each code refuses whatever the program, and where [LANGUAGE.md](../LANGUAGE.md) or [the guide](guide.md) explains it.
 
-107 codes.
+108 codes.
 
 | Code | Refuses | Explained in |
 |---|---|---|
@@ -62,7 +62,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C38 | A flag declared and never read: a rollout that already finished. Delete its declaration. |  |
 | C39 | A call to another program without `within`. Every call has a time budget in milliseconds. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job) |
 | C41 | A `call` (a command) without `once`. The key lets the other side run it at most once, so it can be sent again after a timeout. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Timers: Timer, wake and woken](guide.md#timers-timer-wake-and-woken) |
-| C42 | An exported function that does not take capabilities and exactly one message, or does not return `Result[Reply, View]`, which is how another program calls it. |  |
+| C42 | An exported function that does not take capabilities and exactly one message, or does not return `Result[Reply, Error]`, which is how another program calls it. |  |
 | C43 | A call of a generic function where nothing says what one of its type parameters is. |  |
 | C44 | A function value with no parameter or more than two, or one that captures a Buf or a capability, which cannot be kept inside it. |  |
 | C45 | A name two files other than the first define, used unqualified. Say which: `file.name`. | [the guide: Names: a program's own wins over std's](guide.md#names-a-programs-own-wins-over-stds) |
@@ -111,8 +111,9 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C93 | The set of `scan` that is not a text literal. The bytes are fixed when the program is compiled, so the scan reads 16 at a time. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C94 | A `private fn` called, passed as a function value or matched as a pattern outside the file that defines it. std's helpers are private: what it reads and writes for decode is reached through decode, is_json and json_member. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C95 | An UPDATE a request reaches that takes a row chosen by what it changes (the next job that is ready, by a query or a subquery), with nothing that keys it to the request: sent again, the request takes a second row. Write the client's key into the row and read it back first, or claim an op id. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
-| C96 | A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none). A status that is a value is checked when the host answers, which says why in a 500. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
+| C96 | A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none); or a `problem` whose status is not an error (200 to 399). A status that is a value is checked when the host answers, which says why in a 500. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 | C97 | A match on a machine's states with an arm that takes the states the arms beside it do not name (`_`, a name, a row pattern that leaves the state out). A state added to the machine would be taken there without a word; each state gets an arm of its own. | [LANGUAGE.md: 5. Patterns](../LANGUAGE.md#5-patterns); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
+| C98 | The error of an exported method, or the `error:` a `call` or an `ask` names, that is not a type of the program's own with constructors (a View, an Int, a std type): the callee's refusals are the constructors a caller matches `Rejected(reason: …)` on, each of them, and text gives a match nothing to hold to. `woken`'s error may be text, as the host only logs it; a capability's (an `interface`) is text. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 | C99 | A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program. |  |
 | C100 | A fetch whose method is not written `Get` or `Head` without `key: Some(…)`. A request that timed out may have been received, so it is sent again, which is safe only when the other side can tell it for a repeat: std/http.tape's fetch sends the key as Idempotency-Key. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 

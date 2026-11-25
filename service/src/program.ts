@@ -38,7 +38,7 @@ import versions from './versions.ts';
 import type { VersionBuild } from './versions.ts';
 import { storageKind, transientAtEdge, transientBetween } from './host.ts';
 import { APPLY, encodeOutcome, isCheckHead, isEntry, isMigrationsHead, isRunHead } from './records.ts';
-import { randomHex } from './web.ts';
+import { problem as problemAnswer, randomHex } from './web.ts';
 import type {
   Apply,
   CallMeta,
@@ -123,7 +123,6 @@ const V = new Map<number, Version>(
 type Stretch = { out?: unknown; pending?: unknown };
 const NO_STRETCH: Stretch = {};
 const stretchOf = (r: unknown): Stretch => (typeof r === 'object' && r !== null ? r : NO_STRETCH);
-const json = (body: unknown, status = 200): Response => Response.json(body, { status });
 const ROLLBACK = Symbol('rollback');
 /** Run f in a transaction that is always rolled back. */
 const rolledBack = (storage: DurableObjectStorage, f: () => void): void => {
@@ -450,10 +449,7 @@ const failedResponse = (
   // retry-after only when nothing was kept. An unknown or a finished request must not ask to be sent again.
   const encoded = encodeOutcome(apply, transient);
   const status = apply.outcome === 'applied' ? 500 : apply.outcome === 'unknown' || transient ? 503 : 500;
-  return new Response(JSON.stringify({ error, reason, ...encoded.body }), {
-    status,
-    headers: { ...headers, 'content-type': 'application/json', ...encoded.headers },
-  });
+  return problemAnswer(status, error, { reason, ...encoded.body }, { ...headers, ...encoded.headers });
 };
 
 /** Every string in a view with each secret value written `[secret <name>]`: what a run read never reaches a page,
@@ -734,7 +730,7 @@ export class Program extends DurableObject<Env> {
       // header is set here: a missing tape-outcome is unknown at the router, and unknown is a weaker claim than
       // this one, which the service can make.
       const encoded = encodeOutcome(APPLY.not_applied);
-      const res = json({ error: messageOf(e), ...encoded.body }, 409);
+      const res = problemAnswer(409, messageOf(e), encoded.body);
       res.headers.set('tape-request-id', crypto.randomUUID());
       for (const [header, value] of Object.entries(encoded.headers)) res.headers.set(header, value);
       return res;
@@ -900,13 +896,15 @@ export class Program extends DurableObject<Env> {
     } catch (e) {
       // recorded when the run had begun its log, so the callee's trace shows the failed run instead of nothing
       const effects = effectsOf(e);
-      // A refusal is final: the caller compensates for it. That holds for what the program itself did (a trap, a
-      // trigger's refusal): it does the same again on the same key. A storage failure is not the program's: nothing
-      // was applied, nothing was kept under the call's key, and the same call may succeed when it is sent again, so it
-      // answers unreachable (sent again later, with the same key), never rejected (S2: a charge refused this way was
+      // What the program itself did (a trap, a trigger's refusal) is final: it does the same again on the same key,
+      // and nothing it did was kept. It is skew, not rejected: a refusal is a value of the method's error type, which
+      // the program gives, and the caller compensates for one; a trap is not one it gave (before 25 November 2026 it
+      // was rejected, with this text as the reason). A storage failure is not the program's: nothing was applied,
+      // nothing was kept under the call's key, and the same call may succeed when it is sent again, so it answers
+      // unreachable (sent again later, with the same key), never rejected (S2: a charge refused this way was
       // compensated, then made by a racing retry of the same key, so money left a failed order).
       const transient = transientBetween(e);
-      const status = transient ? 'unreachable' : 'rejected';
+      const status = transient ? 'unreachable' : 'skew';
       const failed: Failed = { status, error: messageOf(e), rolled_back: true };
       return {
         status,
@@ -1051,8 +1049,7 @@ export class Program extends DurableObject<Env> {
     const version = this.env.PLAN.latest,
       b = V.get(version),
       m = b ? methodsOf(b.plain).find(x => x.name === method) : undefined;
-    if (!m)
-      return Promise.resolve({ status: 'rejected', body: enc.encode(`no function ${method}`), version, id: null });
+    if (!m) return Promise.resolve({ status: 'skew', body: enc.encode(`no function ${method}`), version, id: null });
     return this.serve({ method, fingerprint: m.fingerprint, key: null, withinMs: 10000, trace: null }, bytes);
   }
   // One request as data: what came in, what went out (replayed), the log, and the trace made from it now. A run that
@@ -1178,5 +1175,7 @@ const answered = (
   called: boolean,
 ): { status: number | string; body: Uint8Array; headers: Header[] } => {
   if (!out) return { status: 500, body: new Uint8Array(0), headers: [] };
-  return called ? { status: out[0] === 48 ? 'ok' : 'rejected', body: out.subarray(1), headers: [] } : split(out);
+  return called
+    ? { status: out[0] === 48 ? 'ok' : out[0] === 49 ? 'rejected' : 'skew', body: out.subarray(1), headers: [] }
+    : split(out);
 };

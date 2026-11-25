@@ -1,4 +1,5 @@
 // web.ts: what the routes and the objects share: replies, hashes, signed trace links, the operator's token.
+import { PROBLEM_TYPE, problemOf } from './host.ts';
 import { APPLY, encodeOutcome } from './records.ts';
 
 const enc = new TextEncoder();
@@ -9,7 +10,27 @@ export const SEGMENT = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 export const PUBLISHED = '~/published';
 /** The object that lists every account that has uploaded a program (POST /_rebuild walks them). */
 export const ACCOUNTS = '~/accounts';
-export const reply = (body: unknown, status = 200): Response => Response.json(body, { status });
+/** An error the service answers for itself, as application/problem+json (RFC 9457, host/problem.ts): `{"type":
+ * "about:blank", "title", "status", "detail", …members}`. The members are its extension members, what a client acts
+ * on: `outcome` and `retry` on an answer that ran nothing or may have, `errors` on a refused upload, `request_id`…
+ * Every error the service gives is one, as std/http's `problem` is a program's, so a client reads one shape. */
+export const problem = (
+  status: number,
+  detail: string,
+  members: Readonly<Record<string, unknown>> = {},
+  headers: Readonly<Record<string, string>> = {},
+): Response =>
+  new Response(JSON.stringify(problemOf(status, detail, members)), {
+    status,
+    headers: { ...headers, 'content-type': PROBLEM_TYPE },
+  });
+/** The service's own answer: the body as JSON, or, with a status of 400 and up, an error: a problem whose detail is
+ * the body's `error` and whose members are its other fields. */
+export const reply = (body: unknown, status = 200, headers: Readonly<Record<string, string>> = {}): Response => {
+  if (status < 400) return Response.json(body, { status, headers });
+  const { error, ...members }: Record<string, unknown> = typeof body === 'object' && body !== null ? { ...body } : {};
+  return problem(status, typeof error === 'string' ? error : JSON.stringify(error ?? null), members, headers);
+};
 export const hexOf = (buf: ArrayBuffer | Uint8Array): string =>
   [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
 export const hex = async (bytes: BufferSource): Promise<string> => hexOf(await crypto.subtle.digest('SHA-256', bytes));
@@ -25,7 +46,7 @@ export const STOPPED =
   'the program stopped before it answered; what it committed before that is kept, so the outcome is unknown';
 export const unknownStop = (reason: string, traceparent?: string): Response => {
   const encoded = encodeOutcome(APPLY.unknown, false);
-  const res = Response.json({ error: STOPPED, ...encoded.body, reason }, { status: 503, headers: encoded.headers });
+  const res = problem(503, STOPPED, { ...encoded.body, reason }, encoded.headers);
   res.headers.set('tape-request-id', crypto.randomUUID());
   res.headers.set('traceparent', traceparent ?? `00-${randomHex(16)}-${randomHex(8)}-01`);
   return res;

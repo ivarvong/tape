@@ -267,12 +267,12 @@ ok(
 );
 
 // between programs: a nested message and a nested reply, and a disagreement three levels down
-const msg = `type Item { Item(sku: View, qty: Int) }\n\ntype Buyer { Buyer(name: View, tags: List[View]) }\n\ntype Basket { Basket(buyer: Buyer, items: List[Item]) }\n\ntype Line { Line(sku: View, cents: Int) }\n\ntype Quote { Quote(lines: List[Line], total: Int, to: Buyer) }\n`;
+const msg = `type Item { Item(sku: View, qty: Int) }\n\ntype Buyer { Buyer(name: View, tags: List[View]) }\n\ntype Basket { Basket(buyer: Buyer, items: List[Item]) }\n\ntype Line { Line(sku: View, cents: Int) }\n\ntype Quote { Quote(lines: List[Line], total: Int, to: Buyer) }\n\ntype Refusal { Refused(reason: View) }\n`;
 const shop = (cents: string) => `${msg.replace('Item(sku: View, qty: Int)', cents)}
-export fn price(message: Basket) -> Result[Quote, View] {
+export fn price(message: Basket) -> Result[Quote, Refusal] {
   let Basket(buyer, items) = message
   match items {
-    Nil -> Err(error: "an empty basket")
+    Nil -> Err(error: Refused(reason: "an empty basket"))
     _ -> Ok(value: Quote(lines: priced(items, acc: Nil), total: total(items, sum: 0), to: buyer))
   }
 }
@@ -301,15 +301,15 @@ fn handle(raw: View, shop: Remote) -> Response {
 
 fn asked(basket: Result[Basket, View]) -> Response {
   match basket {
-    Ok(value) -> quoted(reply: ask(to: shop, method: "price", send: value, reply: Quote, within: 1000))
+    Ok(value) -> quoted(reply: ask(to: shop, method: "price", send: value, reply: Quote, error: Refusal, within: 1000))
     Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 
-fn quoted(reply: Result[Quote, CallError]) -> Response {
+fn quoted(reply: Result[Quote, CallError[Refusal]]) -> Response {
   match reply {
     Ok(value) -> buf() |> write_json(value) |> respond_as(status: 200, content: Json)
-    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 422)
+    Err(error: Rejected(reason: Refused(reason))) -> buf() |> append(view: reason) |> respond(status: 422)
     Err(error: Skew(reason)) -> buf() |> append(view: reason) |> respond(status: 502)
     Err(error) -> empty(status: 504)
   }
@@ -454,7 +454,8 @@ if (fb.wasm !== null && sb.wasm !== null && other.wasm !== null) {
     ok(
       'a wrong tier refuses the whole request, and says where',
       s3 === 400 &&
-        t3 === '{"error":"tiers[1].price: expected Money, 0 to 10000000"}' &&
+        t3 ===
+          '{"type":"about:blank","title":"Bad Request","status":400,"detail":"tiers[1].price: expected Money, 0 to 10000000"}' &&
         sql.exec("SELECT count(*) AS n FROM events WHERE client = 'e4'").toArray()[0]?.n === 0,
       t3,
     );

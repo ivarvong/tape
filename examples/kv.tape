@@ -8,7 +8,7 @@
 // A shard with no placement serves nothing (503), and one that is given a key it does not own refuses it (421),
 // so a routing bug is an error, never a key split across two shards.
 //
-//   GET    /k/<key>                         200 {"key","value","version"}; 404 {"error","key","version"} (version 0: never written)
+//   GET    /k/<key>                         200 {"key","value","version"}; 404 problem {…,"key","version"} (version 0: never written)
 //   PUT    /k/<key>?op=<id>[&if=<v>]        the body is the value; 201 on the key's first write, else 200 {"key","version"}
 //   PUT    /k/<key>?if=<v>                  the same, compare-and-set without an op id
 //   PUT    /k/<key>                         428: a write that is not a compare-and-set needs ?op=<id>
@@ -18,7 +18,7 @@
 //
 // Every write gives the key a new version, one more than the last, deletes included: a deleted key keeps its row
 // (a tombstone, `live` 0), so its versions never repeat and `?if=` is one rule: the write happens only when the
-// key's version is <v> now (0 for a key never written). Otherwise 409 {"error","key","version","expected"}.
+// key's version is <v> now (0 for a key never written). Otherwise a 409 problem {…,"key","version","expected"}.
 // Keys are 1-256 bytes of A-Z a-z 0-9 - . _ ~ : and %, as they appear in the URL (percent-encoded stays encoded);
 // values are UTF-8 text of at most 65536 bytes.
 //
@@ -87,7 +87,7 @@ migration 4 "op window" {
 type Placement { Placement(shard: Int, shards: Int) }
 type Placed { Placed(shard: Int, shards: Int, window_ms: Int, skew_ms: Int) }
 type Window { Window(window_ms: Int, skew_ms: Int) }
-type Expired { Expired(error: View, op_expired: Bool, window_ms: Int) }
+type Expired { Expired(op_expired: Bool, window_ms: Int) }
 
 // a row as stored, and what it means
 type Row { Row(key: View, value: View, version: Int, live: Int) }
@@ -111,11 +111,10 @@ type Expect {
 // the replies
 type Value { Value(key: View, value: View, version: Int) }
 type Stored { Stored(key: View, version: Int) }
-type Absent { Absent(error: View, key: View, version: Int) }
-type Mismatch { Mismatch(error: View, key: View, version: Int, expected: Int) }
+type Absent { Absent(key: View, version: Int) }
+type Mismatch { Mismatch(key: View, version: Int, expected: Int) }
 type Stats { Stats(shard: Int, shards: Int, keys: Int, live: Int) }
 type Counts { Counts(keys: Int, live: Int) }
-type Problem { Problem(error: View) }
 // a write applied under an op id: what it answered
 type Done { Done(key: View, status: Int, version: Int) }
 type Once { Once(op: View) }
@@ -146,7 +145,7 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
     Request(method, path: "/k/" ++ key, query, body) -> checked(
       parsed: parsed(method, key, query, body)
     )
-    _ -> problem(status: 404, reason: "no such route; see GET/PUT/DELETE /k/<key>")
+    _ -> problem(status: 404, detail: "no such route; see GET/PUT/DELETE /k/<key>")
   }
 }
 
@@ -285,7 +284,7 @@ fn place_with(shard: Int, shards: Int, tail: View) -> Response {
     )
     _ -> problem(
       status: 400,
-      reason: "a placement is ?shards=<n>, or ?shards=<n>&window=<ms>&skew=<ms>"
+      detail: "a placement is ?shards=<n>, or ?shards=<n>&window=<ms>&skew=<ms>"
     )
   }
 }
@@ -323,14 +322,14 @@ fn place(shard: Int, shards: Int, window: Int, skew: Int) -> Response {
       or shard < 0
       or shard >= shards -> problem(
         status: 400,
-        reason: "a placement is shard i of n, 0 <= i < n <= 64"
+        detail: "a placement is shard i of n, 0 <= i < n <= 64"
       )
     window < 1000
       or window > 86400000
       or skew < 1000
       or skew > 600000 -> problem(
         status: 400,
-        reason: "the op window is 1000 to 86400000 ms and the clock allowance 1000 to 600000 ms"
+        detail: "the op window is 1000 to 86400000 ms and the clock allowance 1000 to 600000 ms"
       )
     else -> placed(
       asked: Placed(shard, shards, window_ms: window, skew_ms: skew),
@@ -355,7 +354,7 @@ fn placed(asked: Placed, now: Option[Placed]) -> Response {
       same: s == shard and n == shards and w == window_ms and k == skew_ms,
       stored: Placed(shard: s, shards: n, window_ms: w, skew_ms: k)
     )
-    None -> problem(status: 500, reason: "the placement upsert returned no row")
+    None -> problem(status: 500, detail: "the placement upsert returned no row")
   }
 }
 
@@ -369,7 +368,7 @@ fn placement_reply(same: Bool, stored: Placed) -> Response {
 fn checked(parsed: Parsed) -> Response {
   match parsed {
     Valid(op, once) -> owned(op, once, place: placement())
-    Invalid(status, reason) -> problem(status, reason)
+    Invalid(status, reason) -> problem(status, detail: reason)
   }
 }
 
@@ -384,7 +383,7 @@ fn owned(op: Op, once: View, place: Option[Placement]) -> Response {
     )
     None -> problem(
       status: 503,
-      reason: "this shard has no placement yet: its cluster is still being created"
+      detail: "this shard has no placement yet: its cluster is still being created"
     )
   }
 }
@@ -395,7 +394,7 @@ fn mine(op: Op, once: View, shard: Int, at: Int) -> Response {
       and len(once) == 0
       and unconditional(op) -> problem(
         status: 428,
-        reason: "an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"
+        detail: "an unconditional write needs ?op=<id>, so that a retry cannot apply it twice"
       )
     at == shard and len(once) == 0 -> run(op, once, t: 0, cutoff: 0)
     at == shard -> timed(
@@ -405,7 +404,7 @@ fn mine(op: Op, once: View, shard: Int, at: Int) -> Response {
       now: now(clock),
       window: sql_first(row: Window, query: "SELECT * FROM placement")
     )
-    else -> problem(status: 421, reason: "this key belongs to shard \(at), not \(shard)")
+    else -> problem(status: 421, detail: "this key belongs to shard \(at), not \(shard)")
   }
 }
 
@@ -415,7 +414,7 @@ fn timed(op: Op, once: View, t: Int, now: Int, window: Option[Window]) -> Respon
     Some(value: Window(window_ms, skew_ms)) -> windowed(op, once, t, now, window_ms, skew_ms)
     None -> problem(
       status: 503,
-      reason: "this shard has no placement yet: its cluster is still being created"
+      detail: "this shard has no placement yet: its cluster is still being created"
     )
   }
 }
@@ -424,22 +423,18 @@ fn windowed(op: Op, once: View, t: Int, now: Int, window_ms: Int, skew_ms: Int) 
   match {
     t < 0 -> problem(
       status: 400,
-      reason: "an op id is <t>_<id>: t, 13 digits, is your clock in ms when the op was first \
+      detail: "an op id is <t>_<id>: t, 13 digits, is your clock in ms when the op was first \
           sent, and every resend carries the same op id"
     )
-    t < now - window_ms -> write_json(
-      out: buf(),
-      value: Expired(
-        error: "this op id is older than the shard's op window, so its earlier reply may be gone; \
-            nothing was run. Read the key to learn its state, and send a new op with a new op id",
-        op_expired: True,
-        window_ms
-      )
+    t < now - window_ms -> problem_with(
+      status: 410,
+      detail: "this op id is older than the shard's op window, so its earlier reply may be gone; \
+          nothing was run. Read the key to learn its state, and send a new op with a new op id",
+      members: Expired(op_expired: True, window_ms)
     )
-      |> respond(status: 410)
     t > now + skew_ms -> problem(
       status: 400,
-      reason: "this op id's time is ahead of the shard's clock by more than its allowance"
+      detail: "this op id's time is ahead of the shard's clock by more than its allowance"
     )
     else -> replayed(
       op,
@@ -605,7 +600,7 @@ fn read(found: Found) -> Response {
 }
 
 fn absent(key: View, version: Int) -> Response {
-  write_json(out: buf(), value: Absent(error: "no such key", key, version)) |> respond(status: 404)
+  problem_with(status: 404, detail: "no such key", members: Absent(key, version))
 }
 
 // A write that happened, or (when its condition failed) the version the key has now.
@@ -654,19 +649,19 @@ fn applied(key: View, once: View, t: Int, cutoff: Int, status: Int, version: Int
 fn remembered(key: View, status: Int, version: Int, kept: Option[Once]) -> Response {
   match kept {
     Some(value: Once(op)) -> write_json(out: buf(), value: Stored(key, version)) |> respond(status)
-    None -> problem(status: 500, reason: "the op id was not stored")
+    None -> problem(status: 500, detail: "the op id was not stored")
   }
 }
 
 // 409 for a condition that failed; an unconditional write always returns its row, so None there is a bug (500)
 fn mismatch(key: View, expect: Expect, now: Int) -> Response {
   match expect {
-    At(version) -> write_json(
-      out: buf(),
-      value: Mismatch(error: "version mismatch", key, version: now, expected: version)
+    At(version) -> problem_with(
+      status: 409,
+      detail: "version mismatch",
+      members: Mismatch(key, version: now, expected: version)
     )
-      |> respond(status: 409)
-    Any -> problem(status: 500, reason: "an unconditional write returned no row")
+    Any -> problem(status: 500, detail: "an unconditional write returned no row")
   }
 }
 
@@ -696,7 +691,7 @@ fn not_removed(key: View, expect: Expect, found: Found) -> Response {
 fn stats(place: Option[Placement], counts: Option[Counts]) -> Response {
   match place {
     Some(value: Placement(shard, shards)) -> counted(shard, shards, counts)
-    None -> problem(status: 503, reason: "this shard has no placement yet")
+    None -> problem(status: 503, detail: "this shard has no placement yet")
   }
 }
 
@@ -707,12 +702,8 @@ fn counted(shard: Int, shards: Int, counts: Option[Counts]) -> Response {
       value: Stats(shard, shards, keys, live)
     )
       |> respond(status: 200)
-    None -> problem(status: 500, reason: "count(*) returned no row")
+    None -> problem(status: 500, detail: "count(*) returned no row")
   }
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  write_json(out: buf(), value: Problem(error: reason)) |> respond(status)
 }
 
 // FNV-1a, 32 bits, over the key's bytes. The router computes the same (service/src/kv.js) to pick the shard.

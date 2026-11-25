@@ -50,6 +50,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the endpoint refuses a post with
+type PostError { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, hook: Remote, timer: Timer) -> Response {
   match request(raw) {
     Request(method: Post, path: "/deliveries", body) -> made(body) |> rendered
@@ -124,6 +127,7 @@ fn send(found: Option[Delivery]) -> Outcome {
         method: "post",
         send: Publish(topic, body),
         reply: Posted,
+        error: PostError,
         within: 2000,
         once: Once(delivery: id, round)
       )
@@ -133,10 +137,10 @@ fn send(found: Option[Delivery]) -> Outcome {
   }
 }
 
-fn sent(id: Int, tries: Int, reply: Result[Posted, CallError]) -> Outcome {
+fn sent(id: Int, tries: Int, reply: Result[Posted, CallError[PostError]]) -> Outcome {
   match reply {
     Ok(value) -> shown(found: moved(id, to: Delivered, note: ""))
-    Err(error: Rejected(reason)) -> shown(found: moved(id, to: Dead, note: reason))
+    Err(error: Rejected(reason: Refused(reason))) -> shown(found: moved(id, to: Dead, note: reason))
     Err(error: Skew(reason)) -> shown(found: moved(id, to: Dead, note: reason))
     Err(error) -> failed(
       id,
@@ -217,11 +221,7 @@ fn shown(found: Option[Delivery]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, delivery) -> write_json(out: buf(), value: delivery) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

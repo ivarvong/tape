@@ -148,8 +148,14 @@ function remoteCall(s: Site): Value {
       return refused('Timeout');
     case 'unreachable':
       return refused('Unreachable');
-    case 'rejected':
-      return refused('Rejected', reply);
+    case 'rejected': {
+      // the callee's error, a value of the type the call names; one that does not decode is Skew, as compiled
+      const why = decoded(s.it, reply, typeArg(s, 'error'), s.file);
+      const reason = why.f['value'];
+      return why.c === 'Ok' && reason !== undefined
+        ? adt('Err', { error: adt('Rejected', { reason }) })
+        : refused('Skew', asBytes(why.f['error']));
+    }
     case 'skew':
       return refused('Skew', reply);
     default:

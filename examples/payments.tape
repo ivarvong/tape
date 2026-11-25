@@ -10,25 +10,31 @@ type Balance { Balance(balance: Int) }
 type Refund { Refund(card: View, amount: Int) }
 type Refunded { Refunded(balance: Int) }
 type Card { Card(card: View, balance: Int) }
+// why payments refuses: a charge the card cannot cover, or for a card it does not know (Insufficient); a refund to a
+// card it does not know (NoSuchCard)
+type PaymentError {
+  Insufficient
+  NoSuchCard
+}
 
-export fn charge(db: Sql, message: Charge) -> Result[Charged, View] {
+export fn charge(db: Sql, message: Charge) -> Result[Charged, PaymentError] {
   let Some(value: card) = sql_first(
     row: Balance,
     query: "UPDATE cards SET balance = balance - :amount WHERE card = :card \
         AND balance >= :amount RETURNING *",
     amount: message.amount,
     card: message.card
-  ) else -> Err(error: "card declined: not enough funds")
+  ) else -> Err(error: Insufficient)
   Ok(value: Charged(balance: card.balance))
 }
 
-export fn refund(db: Sql, message: Refund) -> Result[Refunded, View] {
+export fn refund(db: Sql, message: Refund) -> Result[Refunded, PaymentError] {
   let Some(value: card) = sql_first(
     row: Balance,
     query: "UPDATE cards SET balance = balance + :amount WHERE card = :card RETURNING *",
     amount: message.amount,
     card: message.card
-  ) else -> Err(error: "no such card")
+  ) else -> Err(error: NoSuchCard)
   Ok(value: Refunded(balance: card.balance))
 }
 
@@ -37,7 +43,7 @@ fn handle(raw: View, db: Sql) -> Response {
     Request(method: Get, path: "/cards") -> buf()
       |> write_rows(rows: sql_all(row: Card, query: "SELECT * FROM cards ORDER BY card"))
       |> respond(status: 200)
-    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 

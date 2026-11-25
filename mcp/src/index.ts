@@ -21,6 +21,7 @@ import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
 import hostFailure from '../../host/failure.ts?erased';
+import hostProblem from '../../host/problem.ts?erased';
 import hostSecrets from '../../host/secrets.ts?erased';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { serve } from './serve.ts';
@@ -49,6 +50,7 @@ const MODULES = {
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
   'host/failure.js': hostFailure,
+  'host/problem.js': hostProblem,
   'host/secrets.js': hostSecrets,
 };
 // sql.js's Wasm, for the Dynamic Worker's modules: decoded once per isolate, when a run first needs it. Decoded at

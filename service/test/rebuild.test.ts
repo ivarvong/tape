@@ -63,7 +63,7 @@ describe('a stored build is a cache of the source', () => {
     const body = await json(r);
     expect([
       r.status,
-      at(body, 'error'),
+      at(body, 'code'),
       at(body, 'outcome'),
       at(body, 'transient'),
       r.headers.get('retry-after'),
@@ -105,7 +105,7 @@ describe('a stored build is a cache of the source', () => {
     expect(Date.parse(String(at(wakes, 'alarm')))).toBeGreaterThanOrEqual(before + 3_500_000);
     expect(at(wakes, 'runs')).toEqual([]);
     const r = await call('/ivar/alarm/v/1/');
-    expect([r.status, at(await json(r), 'error')]).toEqual([503, 'rebuild_failed']);
+    expect([r.status, at(await json(r), 'code')]).toEqual([503, 'rebuild_failed']);
   });
 });
 

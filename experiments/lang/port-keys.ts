@@ -82,3 +82,24 @@ export const portWith = (text: string): string =>
         '',
       ].join('\n'),
   );
+
+// A call names its callee's error type now, and an exported method's is a type of the program's own (issue #17,
+// C98): every `reply: R` of a call gains `error: Refusal` on its line, `CallError` is `CallError[Refusal]`, a bound
+// `Rejected(reason)` binds the text of `Refused(reason)`, an exported method's `Result[R, View]` (not woken's) is
+// `Result[R, Refusal]` with each `Err(error: "…")` a `Refused(reason: "…")`, and the type is declared at the end, so
+// no line moves.
+export function portErrors(text: string): string {
+  // a capability's method (an interface) refuses with text still: CallError[View], and nothing else changes
+  if (!/reply: (?!Result\b)[A-Z]\w*[,)]/.test(text)) return text.replaceAll(/\bCallError\b(?!\[)/g, 'CallError[View]');
+  let out = text
+    .replaceAll(/(reply: [A-Z]\w*)(,|\))/g, '$1, error: Refusal$2')
+    .replaceAll(/\bCallError\b(?!\[)/g, 'CallError[Refusal]')
+    .replaceAll('Rejected(reason)', 'Rejected(reason: Refused(reason))');
+  if (/export fn (?!woken\b)\w+\([^)]*\) -> Result\[\w+, View\]/.test(out))
+    out = out
+      .replaceAll(/(fn (?!woken\b)\w+\([^)]*\) -> Result\[\w+, )View\]/g, '$1Refusal]')
+      .replaceAll(/Err\(error: ("(?:[^"\\]|\\.)*")\)/g, 'Err(error: Refused(reason: $1))');
+  return out === text
+    ? text
+    : `${out.replace(/\n?$/, '\n')}// added by experiments/lang/port-keys.ts: a call's error was text before issue 17\ntype Refusal { Refused(reason: View) }\n`;
+}

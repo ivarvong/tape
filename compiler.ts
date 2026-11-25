@@ -28,12 +28,14 @@
 //              flag's value into the module's memory before a request, so a read is one memory load, the value
 //              cannot change during a request, and the request's log records it. A flag that is never read is
 //              an error. Compiling with { pin: { name: value } } turns a flag into a constant.
-//   calls      call(to: remote, method: "name", send: record, reply: Type, within: milliseconds, once: key)
-//              -> Result[Type, CallError] sends a command: the other side runs it at most once per key and
+//   calls      call(to: remote, method: "name", send: record, reply: Type, error: E, within: milliseconds,
+//              once: key) -> Result[Type, CallError[E]] sends a command: the other side runs it at most once per key and
 //              answers a repeat with the stored reply, so a call that timed out can be sent again safely.
-//              ask(to, method, send, reply, within) is the same for a read, with no key. `within` is required:
-//              every call has a time budget. Each call carries a fingerprint of the method name and the two
-//              record shapes; a callee whose fingerprint differs answers Err(Skew(reason)) and runs nothing.
+//              ask(to, method, send, reply, error, within) is the same for a read, with no key. `within` is
+//              required: every call has a time budget. E is the callee's error type, a type of the program's own
+//              (C98 for a View); a refusal is Err(Rejected(reason: E)). Each call carries a fingerprint of the
+//              method name and the shapes of the message, the reply and E; a callee whose fingerprint differs
+//              answers Err(Skew(reason)) and runs nothing.
 //              The handler is run again from its effect log once the reply (or the timeout) is known, so a
 //              call is also a commit point for the SQL before it.
 //   undoing    rollback(out) returns `out` as the response and tells the host to undo this request's writes
@@ -50,9 +52,11 @@
 //   interfaces `interface Git { read head(Ref) -> Head  write edit_file(Edit) -> Edited }` names what a capability
 //              can do. A parameter `repo: Git` is such a capability, and `repo.head(send: Ref(ref), within: 2000)`
 //              is the call. A read is sent as `ask`; a write as `call`, so it must carry `once:`. The message
-//              must be the record the interface names, and the result is Result[Reply, CallError].
-//   serving    `export fn name(db: Sql, message: Record) -> Result[Reply, View]` is a method other objects can
-//              call. Its parameters are capabilities and one record; Err's text reaches the caller as Rejected.
+//              must be the record the interface names, and the result is Result[Reply, CallError[View]]: a
+//              capability the host binds refuses with text.
+//   serving    `export fn name(db: Sql, message: Record) -> Result[Reply, E]` is a method other objects can
+//              call. Its parameters are capabilities and one record; E is a type of the program's own, and the
+//              value Err carries reaches the caller as Rejected(reason), written as JSON (woken's E may be View).
 //   timers     wake(timer, after: ms, key: n) -> Done asks the host to call this program's `export fn woken(…,
 //              message: Wake)` with Wake(key: n) after `ms`. It is in the effect log; setting a key again moves
 //              its time; it is kept only if the request's writes are (a rollback or a trap drops it).

@@ -86,12 +86,16 @@ export function ledger(db: NodeSql): (req: Uint8Array) => Uint8Array {
   return req => {
     const text = dec.decode(req);
     const nl = text.indexOf('\n');
-    if ((nl < 0 ? text : text.slice(0, nl)) !== 'POST /transfers') return enc.encode('404\n{"error":"no such route"}');
+    if ((nl < 0 ? text : text.slice(0, nl)) !== 'POST /transfers')
+      return enc.encode('404\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such route"}');
     let transfers: Transfer[];
     try {
       transfers = decode(nl < 0 ? '' : text.slice(nl + 1));
     } catch (e) {
-      if (e instanceof Refused) return enc.encode(`400\n${JSON.stringify({ error: e.message })}`);
+      if (e instanceof Refused)
+        return enc.encode(
+          `400\n${JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400, detail: e.message })}`,
+        );
       throw e;
     }
     const results = transfers.map(t => [t.key, one(t)]);

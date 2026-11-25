@@ -53,8 +53,8 @@ export const plants: Plant[] = [
   ),
   P(
     'charge without a once key',
-    'reply: Charged, within: 2000, once: PayFor(hold: id, attempt))',
-    'reply: Charged, within: 2000)',
+    'reply: Charged, error: PayError, within: 2000, once: PayFor(hold: id, attempt))',
+    'reply: Charged, error: PayError, within: 2000)',
   ),
   P(
     'release twice: no state guard',
@@ -114,8 +114,8 @@ export const plants: Plant[] = [
   ),
   P(
     'a decline leaves the hold paying',
-    "    Err(error: Rejected(reason)) -> declined(reason, moved: sql_move(row: Hold, query: \"UPDATE holds SET state = 'held', note = :reason WHERE id = :id AND state = 'paying' RETURNING *\", reason, id))",
-    '    Err(error: Rejected(reason)) -> Problem(status: 402, reason)',
+    "    Err(error: Rejected(reason: refused)) -> declined(reason: refusal(refused), moved: sql_move(row: Hold, query: \"UPDATE holds SET state = 'held', note = :reason WHERE id = :id AND state = 'paying' RETURNING *\", reason: refusal(refused), id))",
+    '    Err(error: Rejected(reason: refused)) -> Problem(status: 402, reason: refusal(refused))',
   ),
   P(
     'the page writes the buyer unescaped',

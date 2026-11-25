@@ -70,6 +70,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the payment provider refuses with: why it turned a charge or a refund down
+type PaymentError { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
     Request(method: Post, path: "/orders", body) -> placed(body) |> rendered
@@ -164,6 +167,7 @@ fn charge(order: Order) -> Outcome {
       method: "charge",
       send: Charge(card, amount),
       reply: Charged,
+      error: PaymentError,
       within: 2000,
       once: ChargeFor(order: id)
     )
@@ -172,7 +176,7 @@ fn charge(order: Order) -> Outcome {
 
 // Charged: placed, and the restaurant's deadline is a timer. Declined: done. No answer: the timer set before the
 // call asks again.
-fn charged(id: Int, reply: Result[Charged, CallError]) -> Outcome {
+fn charged(id: Int, reply: Result[Charged, CallError[PaymentError]]) -> Outcome {
   match reply {
     Ok(value) -> {
       do wake(after: flags.accept_ms, key: id)
@@ -187,7 +191,7 @@ fn charged(id: Int, reply: Result[Charged, CallError]) -> Outcome {
         )
       ))
     }
-    Err(error: Rejected(reason)) -> shown(found: latest(
+    Err(error: Rejected(reason: Refused(reason))) -> shown(found: latest(
       id,
       m: sql_move(
         row: Order,
@@ -240,13 +244,14 @@ fn refund(order: Order) -> Outcome {
       method: "refund",
       send: Refund(card, amount),
       reply: Refunded,
+      error: PaymentError,
       within: 2000,
       once: RefundFor(order: id)
     )
   )
 }
 
-fn refunded(id: Int, reply: Result[Refunded, CallError]) -> Outcome {
+fn refunded(id: Int, reply: Result[Refunded, CallError[PaymentError]]) -> Outcome {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -258,7 +263,7 @@ fn refunded(id: Int, reply: Result[Refunded, CallError]) -> Outcome {
       )
     ))
     // a refund the payment service refuses will be refused again: the order rests in refund_failed, for a person
-    Err(error: Rejected(reason)) -> shown(found: latest(
+    Err(error: Rejected(reason: Refused(reason))) -> shown(found: latest(
       id,
       m: sql_move(
         row: Order,
@@ -320,11 +325,7 @@ fn shown(found: Option[Order]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, order) -> write_json(out: buf(), value: order) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

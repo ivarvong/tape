@@ -49,7 +49,7 @@ fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Response {
     Request(method: Get, path: "/version") -> version()
     Request(method: Post, path: "/bump", body) -> start(body)
     Request(method: Post, path: "/retry/" ++ decimal(id)) -> retry(id)
-    _ -> problem(status: 404, reason: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -58,8 +58,8 @@ fn version() -> Response {
     send: ReadFile(ref: "main", path: "VERSION"),
     within: 2000
   ) else {
-    Err(error: Rejected(reason)) -> problem(status: 502, reason)
-    _ -> problem(status: 504, reason: "the repository did not answer")
+    Err(error: Rejected(reason)) -> problem(status: 502, detail: reason)
+    _ -> problem(status: 504, detail: "the repository did not answer")
   }
   buf()
     |> append(view: "{\"version\":")
@@ -70,12 +70,12 @@ fn version() -> Response {
 
 fn start(body: View) -> Response {
   let Ok(value: Bump(key, from, to)) = decode(json: body, as: Bump) else {
-    Err(error) -> problem(status: 400, reason: error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let Ok(value: Head(commit)) = repo.head(
     send: Ref(ref: "main"),
     within: 2000
-  ) else -> problem(status: 502, reason: "could not read the branch")
+  ) else -> problem(status: 502, detail: "could not read the branch")
   // Write the intent down first: what to change, from which head, stamped with which time. The same key again
   // finds the intent written before, if it is still pending.
   let Some(value: intent) = sql_first(
@@ -102,7 +102,7 @@ fn start(body: View) -> Response {
 fn again(found: Option[Intent]) -> Response {
   match found {
     Some(value) -> edit(intent: value)
-    None -> problem(status: 404, reason: "no such pending bump")
+    None -> problem(status: 404, detail: "no such pending bump")
   }
 }
 
@@ -111,7 +111,7 @@ fn retry(id: Int) -> Response {
     row: Intent,
     query: "SELECT * FROM bumps WHERE id = :id AND state = 'pending'",
     id
-  ) else -> problem(status: 404, reason: "no such pending bump")
+  ) else -> problem(status: 404, detail: "no such pending bump")
   edit(intent)
 }
 
@@ -142,9 +142,9 @@ fn edit(intent: Intent) -> Response {
     )
     Err(error: Timeout) -> problem(
       status: 504,
-      reason: "the push did not finish in time; the bump stays pending"
+      detail: "the push did not finish in time; the bump stays pending"
     )
-    _ -> problem(status: 502, reason: "the repository is unavailable; the bump stays pending")
+    _ -> problem(status: 502, detail: "the repository is unavailable; the bump stays pending")
   }
   pushed(
     commit,
@@ -159,7 +159,7 @@ fn edit(intent: Intent) -> Response {
 // Pushed, whether this request moved the bump or a retry racing it did (both heard the same stored reply).
 fn pushed(commit: View, moved: Move[Bumped]) -> Response {
   match moved {
-    NoRow -> problem(status: 404, reason: "no such pending bump")
+    NoRow -> problem(status: 404, detail: "no such pending bump")
     _ -> buf()
       |> append(view: "{\"commit\":")
       |> write_json_string(text: commit)
@@ -170,15 +170,7 @@ fn pushed(commit: View, moved: Move[Bumped]) -> Response {
 
 fn refused(reason: View, moved: Move[Bumped]) -> Response {
   match moved {
-    NoRow -> problem(status: 404, reason: "no such pending bump")
-    _ -> problem(status: 409, reason)
+    NoRow -> problem(status: 404, detail: "no such pending bump")
+    _ -> problem(status: 409, detail: reason)
   }
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  buf()
-    |> append(view: "{\"error\":")
-    |> write_json_string(text: reason)
-    |> append(view: "}")
-    |> respond(status)
 }

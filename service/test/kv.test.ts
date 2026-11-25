@@ -95,7 +95,10 @@ describe('kv: keys', () => {
     await create('basic', 2);
     const k = '/kv/kvt/basic/k/user:1';
     let r = await call(k);
-    expect([r.status, await json(r)]).toEqual([404, { error: 'no such key', key: 'user:1', version: 0 }]);
+    expect([r.status, await json(r)]).toEqual([
+      404,
+      { type: 'about:blank', title: 'Not Found', status: 404, detail: 'no such key', key: 'user:1', version: 0 },
+    ]);
     r = await put(k, 'ann');
     expect([r.status, await json(r)]).toEqual([201, { key: 'user:1', version: 1 }]);
     expect(r.headers.get('kv-shard')).toBe(`${shardOf('user:1', 2)}/2`);
@@ -121,7 +124,15 @@ describe('kv: keys', () => {
     let r = await put(k, '1', '?if=0');
     expect([r.status, await json(r)]).toEqual([
       409,
-      { error: 'version mismatch', key: 'counter', version: 1, expected: 0 },
+      {
+        type: 'about:blank',
+        title: 'Conflict',
+        status: 409,
+        detail: 'version mismatch',
+        key: 'counter',
+        version: 1,
+        expected: 0,
+      },
     ]);
     expect((await put(k, '2', '?if=1')).status).toBe(200);
     r = await put(k, '3', '?if=1');
@@ -187,7 +198,7 @@ describe('kv: keys', () => {
     for (const [r, status] of cases) {
       const res = await r;
       expect(res.status).toBe(status);
-      expect(typeof at(await json(res), 'error')).toBe('string');
+      expect(typeof at(await json(res), 'detail')).toBe('string');
     }
     const max = await put(`${b}max`, 'é'.repeat(32768));
     expect(max.status).toBe(201);
@@ -305,7 +316,7 @@ describe('kv: correctness regressions', () => {
     const key = must(Array.from({ length: 200 }, (_, i) => `k${i}`).find(k => shardOf(k, 2) !== shardOf(k, 4)));
     remember('kvt', 'cache4', 2);
     const r = await put(`/kv/kvt/cache4/k/${key}`, 'v');
-    expect([r.status, at(await json(r), 'error')]).toEqual([
+    expect([r.status, at(await json(r), 'detail')]).toEqual([
       421,
       expect.stringContaining(`belongs to shard ${shardOf(key, 4)}`),
     ]);

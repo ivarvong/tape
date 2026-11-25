@@ -54,6 +54,11 @@ type Section { Section(name: View, price: Int, seats: Int) }
 // the payments object's `charge` method: what is sent and what comes back
 type Charge { Charge(card: View, amount: Int) }
 type Charged { Charged(balance: Int) }
+// what payments refuses with: the same type payments.tape declares, so the fingerprints agree
+type PaymentError {
+  Insufficient
+  NoSuchCard
+}
 
 fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, dice: Entropy) -> Response {
   match request(raw) {
@@ -67,19 +72,19 @@ fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, dice: Entropy) -> 
       rows: sql_all(row: Line, query: "SELECT * FROM sales WHERE state = 'paid' ORDER BY id"),
       totals: Empty
     ))
-    _ -> problem(status: 404, reason: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn buy(body: View) -> Response {
   let Ok(value: Buy(key, section, qty, card)) = decode(json: body, as: Buy) else {
-    Err(error) -> problem(status: 400, reason: error)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let Some(value: Price(price)) = sql_first(
     row: Price,
     query: "SELECT * FROM sections WHERE name = :section",
     section
-  ) else -> problem(status: 404, reason: "no such section")
+  ) else -> problem(status: 404, detail: "no such section")
   // Take the seats, unless a sale with this key exists (then this is that sale again).
   let 1 = sql_exec(
     query: "UPDATE sections SET seats = seats - :qty WHERE name = :section AND seats >= :qty \
@@ -113,7 +118,7 @@ fn buy(body: View) -> Response {
     at: now(clock),
     card
   ) else -> rollback(
-    out: problem(status: 422, reason: "the key was already used for another purchase")
+    out: problem(status: 422, detail: "the key was already used for another purchase")
   )
   charge(id, section, qty, card, amount, within: 50)
 }
@@ -130,15 +135,15 @@ fn earlier(found: Option[Earlier], used: Option[Price]) -> Response {
       |> respond(status: 201)
     Some(
       value: Earlier(state: Declined)
-    ) -> problem(status: 402, reason: "this purchase was declined")
+    ) -> problem(status: 402, detail: "this purchase was declined")
     None -> unused(used)
   }
 }
 
 fn unused(used: Option[Price]) -> Response {
   match used {
-    Some(value) -> problem(status: 422, reason: "the key was already used for another purchase")
-    None -> problem(status: 409, reason: "not enough seats left in that section")
+    Some(value) -> problem(status: 422, detail: "the key was already used for another purchase")
+    None -> problem(status: 409, detail: "not enough seats left in that section")
   }
 }
 
@@ -150,7 +155,7 @@ fn retry(sale: Int) -> Response {
     row: Unpaid,
     query: "SELECT * FROM sales WHERE id = :sale AND state = 'pending'",
     sale
-  ) else -> problem(status: 404, reason: "no such pending sale")
+  ) else -> problem(status: 404, detail: "no such pending sale")
   charge(id, section, qty, card, amount, within: 2000)
 }
 
@@ -161,13 +166,14 @@ fn charge(id: Int, section: View, qty: Int, card: View, amount: Int, within: Int
     method: "charge",
     send: Charge(card, amount),
     reply: Charged,
+    error: PaymentError,
     within,
     once: ForSale(sale: id)
   ) else {
     Err(error: Rejected(reason)) -> declined(
       section,
       qty,
-      reason,
+      reason: refusal(reason),
       moved: sql_move(
         row: Held,
         query: "UPDATE sales SET state = 'declined' WHERE id = :id AND state = 'pending' \
@@ -177,13 +183,13 @@ fn charge(id: Int, section: View, qty: Int, card: View, amount: Int, within: Int
     )
     Err(error: Timeout) -> problem(
       status: 504,
-      reason: "payments did not answer in time; the seats stay held"
+      detail: "payments did not answer in time; the seats stay held"
     )
     Err(error: Unreachable) -> problem(
       status: 503,
-      reason: "payments is unreachable; the seats stay held"
+      detail: "payments is unreachable; the seats stay held"
     )
-    Err(error: Skew(reason)) -> problem(status: 502, reason)
+    Err(error: Skew(reason)) -> problem(status: 502, detail: reason)
   }
   ticket(moved: sql_move(
     row: Earlier,
@@ -198,12 +204,20 @@ fn sale(id: Int) -> Response {
     row: Sale,
     query: "SELECT * FROM sales WHERE id = :id",
     id
-  ) else -> problem(status: 404, reason: "no such sale")
+  ) else -> problem(status: 404, detail: "no such sale")
   buf() |> write_json(value) |> respond(status: 200)
 }
 
 // The seats go back with the sale this request voided (Moved), and only then: two retries of one sale that both
 // hear the refusal (it is stored, so both do) void it once, and the second finds it voided already (Raced).
+// What payments' refusal tells the buyer.
+fn refusal(reason: PaymentError) -> View {
+  match reason {
+    Insufficient -> "card declined: not enough funds"
+    NoSuchCard -> "no such card"
+  }
+}
+
 fn declined(section: View, qty: Int, reason: View, moved: Move[Held]) -> Response {
   match moved {
     Moved(value) -> {
@@ -212,12 +226,12 @@ fn declined(section: View, qty: Int, reason: View, moved: Move[Held]) -> Respons
         qty,
         section
       ) else -> rollback(
-        out: problem(status: 500, reason: "the sale's section \(section) is gone")
+        out: problem(status: 500, detail: "the sale's section \(section) is gone")
       )
-      problem(status: 402, reason)
+      problem(status: 402, detail: reason)
     }
-    Raced(now) -> problem(status: 402, reason)
-    NoRow -> problem(status: 404, reason: "no such pending sale")
+    Raced(now) -> problem(status: 402, detail: reason)
+    NoRow -> problem(status: 404, detail: "no such pending sale")
   }
 }
 
@@ -231,9 +245,9 @@ fn ticket(moved: Move[Earlier]) -> Response {
     Raced(now: Earlier(id, section, qty, amount, state: Paid, code)) -> buf()
       |> write_json(value: Ticket(id, section, qty, amount, code))
       |> respond(status: 201)
-    Raced(now: Earlier(state: Pending)) -> problem(status: 409, reason: "this sale was pending")
-    Raced(now: Earlier(state: Declined)) -> problem(status: 409, reason: "this sale was declined")
-    NoRow -> problem(status: 404, reason: "no such pending sale")
+    Raced(now: Earlier(state: Pending)) -> problem(status: 409, detail: "this sale was pending")
+    Raced(now: Earlier(state: Declined)) -> problem(status: 409, detail: "this sale was declined")
+    NoRow -> problem(status: 404, detail: "no such pending sale")
   }
 }
 
@@ -289,14 +303,6 @@ fn entry(out: Buf, key: View, value: Tally, first: Bool) -> Buf {
       value
     )
   }
-}
-
-fn problem(status: Int, reason: View) -> Response {
-  buf()
-    |> append(view: "{\"error\":")
-    |> write_json_string(text: reason)
-    |> append(view: "}")
-    |> respond(status)
 }
 
 // What must hold after every commit (checked by `tape sim` and by app.invariants() in the host).

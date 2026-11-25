@@ -11,25 +11,30 @@ type Reserved { Reserved(price: Int, remaining: Int) }
 type Release { Release(sku: View, qty: Int) }
 type Released { Released(remaining: Int) }
 type Item { Item(sku: View, price: Int, remaining: Int) }
+// why inventory refuses: a reservation of more than is left, a release of a sku it does not keep
+type StockError {
+  NotEnough
+  NoSuchSku
+}
 
-export fn reserve(db: Sql, message: Reserve) -> Result[Reserved, View] {
+export fn reserve(db: Sql, message: Reserve) -> Result[Reserved, StockError] {
   let Some(value) = sql_first(
     row: Reserved,
     query: "UPDATE stock SET remaining = remaining - :qty WHERE sku = :sku AND remaining >= :qty \
         RETURNING *",
     qty: message.qty,
     sku: message.sku
-  ) else -> Err(error: "not enough stock")
+  ) else -> Err(error: NotEnough)
   Ok(value)
 }
 
-export fn release(db: Sql, message: Release) -> Result[Released, View] {
+export fn release(db: Sql, message: Release) -> Result[Released, StockError] {
   let Some(value) = sql_first(
     row: Released,
     query: "UPDATE stock SET remaining = remaining + :qty WHERE sku = :sku RETURNING *",
     qty: message.qty,
     sku: message.sku
-  ) else -> Err(error: "no such sku")
+  ) else -> Err(error: NoSuchSku)
   Ok(value)
 }
 
@@ -38,7 +43,7 @@ fn handle(raw: View, db: Sql) -> Response {
     Request(method: Get, path: "/stock") -> buf()
       |> write_rows(rows: sql_all(row: Item, query: "SELECT * FROM stock ORDER BY sku"))
       |> respond(status: 200)
-    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 

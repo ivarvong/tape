@@ -45,7 +45,7 @@ describe('retention: the op window (R-RET-1..4)', () => {
       expect(h.map(x => x.status)).toEqual([201, 200, 201, 200, 410, 400, 400]);
       expect([h[2]?.version, h[4]?.body]).toEqual([
         h[0]?.version,
-        { error: anyString, op_expired: true, window_ms: W },
+        { type: 'about:blank', title: 'Gone', status: 410, detail: anyString, op_expired: true, window_ms: W },
       ]);
       expect(check(h, { window: W, skew: S, tolerance: 200 }).anomalies).toEqual([]);
       // the 410 ran nothing: the key is at the version of z

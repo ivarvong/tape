@@ -13,7 +13,7 @@ const codes = (text: string): string[] =>
     .filter(e => e.code === 'C87')
     .map(e => `${e.code}:${e.line}`);
 const c87 = (text: string): string => problems(text).find(e => e.code === 'C87')?.message ?? '';
-const REFUSED = `        Err(error: Rejected(reason)) -> moved(m: sql_move(row: Order, query: "UPDATE orders SET state = 'failed', note = :reason WHERE id = :id AND state = 'paying' RETURNING *", reason, id))
+const REFUSED = `        Err(error: Rejected(reason: Declined(reason))) -> moved(m: sql_move(row: Order, query: "UPDATE orders SET state = 'failed', note = :reason WHERE id = :id AND state = 'paying' RETURNING *", reason, id))
 `;
 const UNKNOWN = `        Err(error) -> {
           do wake(after: 5000, key: id)
@@ -37,6 +37,7 @@ fn refunded(id: Int, amount: Int) -> Outcome {
     method: "refund",
     send: Refund(order: id, amount),
     reply: Refunded,
+    error: ChargeError,
     within: 2000,
     once: ForOrder(order: id)
   ) else -> shown(status: 502, found: load(id))
@@ -124,7 +125,7 @@ T(
 );
 T(
   'an arm with a guard takes nothing for certain: a Rejected arm with a guard leaves the refusal to the catch-all',
-  codes(arms(REFUSED.replace('Rejected(reason))', 'Rejected(reason)) if reason == "card"') + FAILED)).length,
+  codes(arms(REFUSED.replace('Declined(reason)))', 'Declined(reason))) if reason == "card"') + FAILED)).length,
   1,
 );
 

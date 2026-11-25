@@ -3,6 +3,8 @@
 // skew's, 504, 503).
 type Charge { Charge(order: Int) }
 type Charged { Charged(payment: Int) }
+// what payments refuses with: a reason it gives
+type ChargeError { Declined(why: View) }
 
 fn handle(raw: View, payments: Remote) -> Response {
   match request(raw) {
@@ -11,6 +13,7 @@ fn handle(raw: View, payments: Remote) -> Response {
       method: "charge",
       send: Charge(order),
       reply: Charged,
+      error: ChargeError,
       within: 1000,
       once: Charge(order)
     ))
@@ -18,10 +21,12 @@ fn handle(raw: View, payments: Remote) -> Response {
   }
 }
 
-fn paid(reply: Result[Charged, CallError]) -> Response {
+fn paid(reply: Result[Charged, CallError[ChargeError]]) -> Response {
   match reply {
     Ok(value: Charged(payment)) -> buf() |> write_int(value: payment) |> respond(status: 201)
-    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 402)
+    Err(error: Rejected(reason: Declined(why: reason))) -> buf()
+      |> append(view: reason)
+      |> respond(status: 402)
     Err(error: Skew(reason)) -> buf() |> append(view: reason) |> respond(status: 409)
     Err(error: Timeout) -> empty(status: 504)
     Err(error) -> empty(status: 503)

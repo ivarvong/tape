@@ -31,7 +31,7 @@
 //   GET  /_agent/:account           { token }: the account's agent token                  operator
 //   POST /tools/:account/:name      body: Tape source -> 201 the manifest entries, or 403 capability not granted
 //   GET  /tools/:account            the manifest: every tool function with JSON Schemas and capabilities
-//   POST /tools/:account/:name/:fn  body: the JSON message -> { ok, output | error, trace_url, otlp_url }
+//   POST /tools/:account/:name/:fn  body: the JSON message -> { ok, output, trace_url, otlp_url }, or a problem (detail)
 //   POST /mcp/:account              MCP (streamable HTTP, JSON responses): initialize, tools/list, tools/call
 //
 // The hosted compiler and runner, with no token (mcp/src, docs/mcp.md), served in this Worker.
@@ -99,7 +99,18 @@ const jsonOf = async (request: Request): Promise<unknown> => {
     return null;
   }
 };
-const rejected = (why: string): ServiceReply => ({ status: 'rejected', body: enc.encode(why) });
+// the service refuses a call it will not make: the two sides cannot agree, so nothing runs (skew; a refusal,
+// rejected, is a value of the method's own error type, which only the program gives)
+/** Text as JSON when it parses, as itself when it does not. */
+const parsedOr = (text: string): unknown => {
+  try {
+    const v: unknown = JSON.parse(text);
+    return v;
+  } catch {
+    return text;
+  }
+};
+const rejected = (why: string): ServiceReply => ({ status: 'skew', body: enc.encode(why) });
 // Calls between programs: env.CALLS in each loaded program, bound to its account.
 export class Calls extends WorkerEntrypoint<Env, { account: string; from: string }> {
   async call(to: string, meta: CallMeta, bytes: Uint8Array): Promise<ServiceReply> {
@@ -176,6 +187,9 @@ async function invokeTool(
     );
   const text = new TextDecoder().decode(r.body),
     links = await traceLinks(token, origin, account, name, r.version, r.id);
+  // a refusal is the value of the tool's error type, as JSON; any other status (a message it could not read) says why
+  if (r.status === 'rejected')
+    return { ok: false, status: 422, error: `the tool refused: ${text}`, refusal: parsedOr(text), ...links };
   if (r.status !== 'ok') return { ok: false, status: 422, error: text, ...links };
   const output: unknown = JSON.parse(text);
   return { ok: true, status: 200, output, ...links };

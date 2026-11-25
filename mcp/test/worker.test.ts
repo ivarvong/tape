@@ -193,7 +193,7 @@ describe('tape-mcp in workerd', () => {
     const { out } = await call('run', {
       files: [{ name: 'remote.tape', text: remote }],
       requests: ['POST /pay/1', 'POST /pay/2', 'POST /pay/3'],
-      remotes: { payments: { charge: [{ payment: 7 }, { error: 'Rejected', reason: 'card declined' }] } },
+      remotes: { payments: { charge: [{ payment: 7 }, { error: 'Rejected', reason: { why: 'card declined' } }] } },
     });
     const rs = results(out);
     expect(rs.map(r => [r['status'], r['body']])).toEqual([
@@ -308,7 +308,7 @@ describe('tape-mcp in workerd', () => {
       for (let i = 0; i < 3; i++) {
         // oxlint-disable-next-line no-await-in-loop -- in order: the third is the one past the limit
         const res = await worker.fetch(req(ip), tight, createExecutionContext());
-        got.push(res.status === 200 ? 200 : F(await res.json())['error']);
+        got.push(res.status === 200 ? 200 : F(await res.json())['code']);
       }
       return got;
     }, 100);
@@ -333,9 +333,14 @@ describe('tape-mcp in workerd', () => {
     expect((await post('/v1/run', '{}', { 'content-type': 'text/plain' })).status).toBe(415);
     const bad = await post('/mcp', '{"jsonrpc":');
     expect([bad.status, F(bad.json['error'])['code']]).toEqual([400, -32700]);
-    expect((await post('/v1/run', { requests: Array.from({ length: 51 }, () => 'GET /') })).json).toMatchObject({
-      ok: false,
-      error: 'too_many_requests',
+    // a refusal over HTTP is a problem (RFC 9457): its code a member beside the status and the detail
+    const many = await post('/v1/run', { requests: Array.from({ length: 51 }, () => 'GET /') });
+    expect(many.res.headers.get('content-type')).toBe('application/problem+json');
+    expect(many.json).toMatchObject({
+      type: 'about:blank',
+      title: 'Content Too Large',
+      status: 413,
+      code: 'too_many_requests',
     });
   });
 
@@ -347,10 +352,10 @@ describe('tape-mcp in workerd', () => {
         body: '{}',
       });
     const off = await worker.fetch(req(), { ...env, KILL_SWITCH: 'on' }, createExecutionContext());
-    expect([off.status, F(await off.json())['error']]).toEqual([503, 'disabled']);
+    expect([off.status, F(await off.json())['code']]).toEqual([503, 'disabled']);
     const { IP_SALT: _salt, ...unsalted } = env;
     const bare = await worker.fetch(req(), unsalted, createExecutionContext());
-    expect([bare.status, F(await bare.json())['error']]).toEqual([503, 'misconfigured']);
+    expect([bare.status, F(await bare.json())['code']]).toEqual([503, 'misconfigured']);
     const tight = env.TIGHT;
     if (!tight) throw new Error('vitest.config.ts gives no TIGHT limiter');
     const statuses = await inOneWindow(async ip => {

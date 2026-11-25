@@ -52,6 +52,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what the bank refuses a payout with
+type PayoutError { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
     Request(method: Post, path: "/expenses", body) -> filed(body) |> rendered
@@ -153,13 +156,14 @@ fn pay(expense: Expense) -> Outcome {
       method: "pay",
       send: Pay(amount, ref: "expense-\(id)"),
       reply: Payout,
+      error: PayoutError,
       within: 2000,
       once: PayFor(expense: id)
     )
   )
 }
 
-fn paid(id: Int, reply: Result[Payout, CallError]) -> Outcome {
+fn paid(id: Int, reply: Result[Payout, CallError[PayoutError]]) -> Outcome {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -170,7 +174,7 @@ fn paid(id: Int, reply: Result[Payout, CallError]) -> Outcome {
         id
       )
     ))
-    Err(error: Rejected(reason)) -> shown(found: latest(
+    Err(error: Rejected(reason: Refused(reason))) -> shown(found: latest(
       id,
       m: sql_move(
         row: Expense,
@@ -241,11 +245,7 @@ fn shown(found: Option[Expense]) -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, expense) -> write_json(out: buf(), value: expense) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

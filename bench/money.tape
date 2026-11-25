@@ -13,13 +13,9 @@ type Priced {
   Priced(subtotal: Dec[2], tax: Dec[2], total: Dec[2])
 }
 
-type Refused {
-  Refused(error: View)
-}
-
 fn handle(raw: View) -> Response {
   let Ok(value: Cart(lines, rate)) = decode(json: raw, as: Cart) else {
-    Err(error) -> json(status: 200, value: Refused(error))
+    Err(error) -> problem(status: 400, detail: error)
   }
   let subtotal = fold(
     list: lines,

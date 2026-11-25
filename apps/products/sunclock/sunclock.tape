@@ -5,8 +5,6 @@
 // (UTC by default). Each event is computed at its own moment: a first guess at noon, then once more at the
 // event, which keeps it within a minute of the ephemeris.
 
-type Problem { Problem(error: View) }
-
 // What the sun does on a day: the times are minutes after 00:00 UTC of that day, and may run below 0 or past
 // 1440 where the local day does.
 type Sky {
@@ -55,10 +53,10 @@ fn handle(raw: View, clock: Clock) -> Response {
     }
     Request(method: Get, path: "/api", query: Some(value: q)) -> match place(q) {
       Ok(value: p) -> json(status: 200, value: answer(p))
-      Err(error) -> json(status: 400, value: Problem(error))
+      Err(error) -> problem(status: 400, detail: error)
     }
-    Request(method: Get, path: "/api") -> json(status: 400, value: Problem(error: "lat: missing"))
-    _ -> json(status: 404, value: Problem(error: "no such route"))
+    Request(method: Get, path: "/api") -> problem(status: 400, detail: "lat: missing")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 

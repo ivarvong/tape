@@ -10,7 +10,7 @@ import { tablesOf } from '../rules.ts';
 import { TimedOut, instantiate } from '../host.ts';
 import type { Service } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
-import { portKeys, portJson, portWith } from '../experiments/lang/port-keys.ts';
+import { portErrors, portKeys, portJson, portWith } from '../experiments/lang/port-keys.ts';
 import { std } from '../std.ts';
 import { answered, built, finish, moduleOf, same as T } from './harness.ts';
 const NOW = Date.now(); // R-RET-1: a kv op id is <t>_<id>, t the client's clock in ms when it was first sent
@@ -141,7 +141,7 @@ T(
   ),
   ['C55:10'],
 );
-const exported = `schema "${c}"\ntype Bump { Bump(name: View) }\ntype Done { Done(n: Int) }\nexport fn bump(db: Sql, message: Bump) -> Result[Done, View] {\n  Ok(value: Done(n: sql_exec(db, query: "UPDATE c SET n = n + 1 WHERE name = :name", name: message.name)))\n}\n`;
+const exported = `schema "${c}"\ntype Bump { Bump(name: View) } type Refusal { Refused(reason: View) }\ntype Done { Done(n: Int) }\nexport fn bump(db: Sql, message: Bump) -> Result[Done, Refusal] {\n  Ok(value: Done(n: sql_exec(db, query: "UPDATE c SET n = n + 1 WHERE name = :name", name: message.name)))\n}\n`;
 T(
   'C54: a write reached only from an exported method is not checked (a repeated once key is answered from the stored reply)',
   codes(exported),
@@ -254,9 +254,9 @@ for (const [f, want] of Object.entries(before)) {
     .replace(/^service_verify_/, 'service/verify/');
   T(
     `before the rules ${now}: ${want.join(' ') || 'compiles (its hazard is in its meaning: see section 3)'}`,
-    codes(portWith(portJson(portKeys(read(`experiments/lang/before/${f}`))))),
+    codes(portErrors(portWith(portJson(portKeys(read(`experiments/lang/before/${f}`)))))),
     want,
-  ); // keys were Ints then (port-keys.ts)
+  ); // keys were Ints then, and a call's error text (port-keys.ts)
   T(`now ${now}: compiles`, codes(read(now)), now.endsWith('notes-v3-rename.tape') ? ['C51:8'] : []); // a fixture of a removal that must be a contract
 }
 
@@ -272,7 +272,7 @@ const app = (file: string, services: Record<string, Service> = {}, name = file) 
   return { run, sql, a, r, first };
 };
 type Running = ReturnType<typeof app>;
-const status = (s: string): string | undefined => s.split('\n')[0];
+const status = (s: string): string | undefined => s.split('\n')[0]?.split(' ')[0];
 const json = (s: string): Record<string, unknown> => {
   const parsed: unknown = JSON.parse(s.split('\n').slice(1).join('\n'));
   return typeof parsed === 'object' && parsed !== null ? Object.fromEntries(Object.entries(parsed)) : {};
@@ -483,7 +483,7 @@ for (const file of ['examples/todo.tape', 'examples/todo-decode.tape', 'examples
   const t = await pay({ key: 1, card: 'c', amount: 5 });
   T(
     'tools/ledger: a charge that timed out is an unknown outcome, never "not charged"',
-    [t[0], t[1].startsWith('unknown: '), t[1].includes('not charged')],
+    [t[0], t[1].startsWith('{"Unknown":'), t[1].includes('NotCharged')],
     ['rejected', true, false],
   );
   timeout = false;

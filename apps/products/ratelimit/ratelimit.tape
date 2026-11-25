@@ -36,7 +36,6 @@ type Op = View where len(self) >= 1 and len(self) <= 128
 type Count { Count(n: Int) }
 type Window { Window(key: View, span: Int, slot: Int, lim: Int, n: Int) }
 type Claim { Claim(allowed: Bool, remaining: Int) }
-type Problem { Problem(error: View) }
 
 // The rule asked for: `limit` hits a window of `span` ms; the window now, and when it ends (ms since 1970).
 type Rule { Rule(limit: Int, span: Int, slot: Int, resets: Int, at: Int) }
@@ -59,21 +58,21 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Response {
     Request(method: Get, path: "/") -> dashboard(at: now())
     Request(method: Post, path: "/hit/" ++ Key(key), query) -> match rule(query) {
       Ok(value: rule) -> hit(key, rule, op: header_of(request: r, name: "idempotency-key"))
-      Err(error) -> problem(status: 400, error)
+      Err(error) -> problem(status: 400, detail: error)
     }
     Request(method: Get, path: "/peek/" ++ Key(key), query) -> match rule(query) {
       Ok(value: rule) -> peeked(key, rule, n: used(key, rule))
-      Err(error) -> problem(status: 400, error)
+      Err(error) -> problem(status: 400, detail: error)
     }
     Request(path: "/hit/" ++ _) -> problem(
       status: 400,
-      error: "key: 1 to 64 of a-z, A-Z, 0-9 and - _ . :"
+      detail: "key: 1 to 64 of a-z, A-Z, 0-9 and - _ . :"
     )
     Request(path: "/peek/" ++ _) -> problem(
       status: 400,
-      error: "key: 1 to 64 of a-z, A-Z, 0-9 and - _ . :"
+      detail: "key: 1 to 64 of a-z, A-Z, 0-9 and - _ . :"
     )
-    _ -> problem(status: 404, error: "no such route")
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
@@ -137,7 +136,7 @@ fn hit(key: View, rule: Rule, op: Option[View]) -> Response {
   )
   match op {
     Some(value: Op(o)) -> once(key, rule, o)
-    Some -> problem(status: 400, error: "idempotency-key: 1 to 128 bytes")
+    Some -> problem(status: 400, detail: "idempotency-key: 1 to 128 bytes")
     None -> {
       let taken = sql_exec(
         repeat: True,
@@ -195,7 +194,7 @@ fn once(key: View, rule: Rule, o: View) -> Response {
     remaining: max(a: 0, b: rule.limit - n),
     key,
     o
-  ) else -> rollback(out: problem(status: 500, error: "the claim of idempotency-key \(o) is gone"))
+  ) else -> rollback(out: problem(status: 500, detail: "the claim of idempotency-key \(o) is gone"))
   answered(key, rule, allowed: taken == 1, used: n, peek: False)
 }
 
@@ -208,7 +207,7 @@ fn replayed(key: View, rule: Rule, found: Option[Claim]) -> Response {
       used: rule.limit - remaining,
       peek: False
     )
-    None -> problem(status: 500, error: "the claim is gone")
+    None -> problem(status: 500, detail: "the claim is gone")
   }
 }
 
@@ -230,10 +229,6 @@ fn answered(key: View, rule: Rule, allowed: Bool, used: Int, peek: Bool) -> Resp
     429 -> out |> header(name: "retry-after", value: "\(reset)")
     _ -> out
   }
-}
-
-fn problem(status: Int, error: View) -> Response {
-  json(status, value: Problem(error))
 }
 
 // ---------- the dashboard ----------

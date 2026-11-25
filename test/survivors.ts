@@ -9,7 +9,7 @@ const LOAD = '"SELECT * FROM orders WHERE id = :id"';
 T('the program these are edits of compiles', codes(whole), []);
 
 // rules/driver.ts: only an arm for Rejected is an arm for the refusal. An arm for Timeout is not one.
-const REFUSED = whole.split('\n').find(l => l.includes('Err(error: Rejected(reason)) ->')) ?? '';
+const REFUSED = whole.split('\n').find(l => l.includes('Err(error: Rejected(reason: Declined(reason))) ->')) ?? '';
 T(
   'C87: an arm for Timeout does not stand for the arm a refusal needs',
   codes(swap(REFUSED, '        Err(error: Timeout) -> shown(status: 202, found: load(id))')).includes('C87'),

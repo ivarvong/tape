@@ -70,6 +70,9 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
+// what payments and the tools refuse with: a reason they give
+type Refusal { Refused(reason: View) }
+
 fn handle(raw: View, db: Sql, payments: Remote, tools: Remote) -> Response {
   routed(raw) |> rendered
 }
@@ -170,6 +173,7 @@ fn renew(sub: Sub, period: Int) -> Outcome {
         method: "charge",
         send: Charge(card, amount: price),
         reply: Charged,
+        error: Refusal,
         within: 50,
         once: Period(sub: id, period: charging)
       )
@@ -205,6 +209,7 @@ fn bill(id: Int, period: Int, state: SubState) -> Outcome {
       method: "charge",
       send: Charge(card, amount: price),
       reply: Charged,
+      error: Refusal,
       within: 50,
       once: Period(sub: id, period)
     )
@@ -219,7 +224,7 @@ fn charged(
   period: Int,
   price: Int,
   state: SubState,
-  reply: Result[Charged, CallError]
+  reply: Result[Charged, CallError[Refusal]]
 ) -> Outcome {
   match reply {
     Ok(value) -> {
@@ -235,6 +240,7 @@ fn charged(
         method: "tool",
         send: Email(tool: "email", input: "\(id)/\(period)"),
         reply: Sent,
+        error: Refusal,
         within: 50,
         once: Receipt(sub: id, period)
       ) else -> show(status: 202, found: load(id))
@@ -258,7 +264,7 @@ fn charged(
         PastDue -> activated(id, period, state)
       }
     }
-    Err(error: Rejected(reason)) -> show(
+    Err(error: Rejected(reason: Refused(reason))) -> show(
       status: 402,
       found: latest(
         id,
@@ -316,11 +322,7 @@ fn missing() -> Outcome {
 fn rendered(outcome: Outcome) -> Response {
   match outcome {
     Shown(status, sub) -> write_json(out: buf(), value: sub) |> respond(status)
-    Problem(status, reason) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: reason)
-      |> append(view: "}")
-      |> respond(status)
+    Problem(status, reason) -> problem(status, detail: reason)
   }
 }
 

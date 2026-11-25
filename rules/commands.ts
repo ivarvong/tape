@@ -88,16 +88,36 @@ function isReply(f: FnDecl, subject: Expr | null): boolean {
 const NO_ANSWER = ['Timeout', 'Unreachable'];
 /** What a catch-all takes: every CallError the arms above it left (no constructor is named `*`). */
 const ALL = '*';
-/** What an arm's pattern takes of a reply's errors: one CallError by name, every one left (ALL), or none. */
-function takes(pat: Pattern): string | null {
+/** A pattern that takes every value of its type: a name, `_`, or the one constructor of its type with such fields. */
+function irrefutable(prog: Program, p: Pattern | undefined): boolean {
+  const q = p && bare(p);
+  if (catchAll(q)) return true;
+  const only = q?.k === 'ctor' ? prog.ctors.get(q.name)?.decl.variants.length === 1 : false;
+  return q?.k === 'ctor' && only && q.subs.every(s => irrefutable(prog, s.pat));
+}
+/** What an arm's pattern takes of a reply's errors: one CallError by name, every one left (ALL), none, or one of
+ * the callee's reasons, `Rejected(Busy)` (`Rejected(…)` for a reason pattern that may not match). */
+function takes(prog: Program, pat: Pattern): string | null {
   const p = bare(pat);
   if (p.k !== 'ctor' || p.name !== 'Err') return catchAll(p) ? ALL : null;
   const named = p.subs.find(s => s.field === 'error')?.pat;
   const e = named && bare(named);
-  if (e?.k === 'ctor') return e.name;
-  return catchAll(e) ? ALL : null;
+  // `Rejected(reason: OutOfStock(left))` takes one of the callee's reasons, not every refusal: what is left of
+  // them is still to be taken by an arm below
+  const reason = e?.k === 'ctor' ? e.subs.find(s => s.field === 'reason')?.pat : undefined;
+  if (e?.k !== 'ctor') return catchAll(e) ? ALL : null;
+  if (reason === undefined || irrefutable(prog, reason)) return e.name;
+  const r = bare(reason);
+  return r.k === 'ctor' && r.subs.every(s => irrefutable(prog, s.pat)) ? `${e.name}(${r.name})` : `${e.name}(…)`;
 }
 
+/** Whether the reasons taken one by one (`Rejected(Busy)`, …) are every constructor of the callee's error type. */
+function everyReason(prog: Program, taken: ReadonlySet<string>): boolean {
+  const named = [...taken].flatMap(t => /^Rejected\((\w+)\)$/.exec(t)?.slice(1) ?? []);
+  const [first] = named;
+  const decl = first === undefined ? undefined : prog.ctors.get(first)?.decl;
+  return !!decl && decl.variants.every(v => named.includes(v.name));
+}
 function refusalsAsked(r: Reading): void {
   const acts = actsOf(r);
   const check = (m: Match): void => {
@@ -105,8 +125,9 @@ function refusalsAsked(r: Reading): void {
     // the errors taken by an arm above (one with a guard takes nothing for certain)
     const taken = new Set<string>();
     for (const arm of m.arms) {
-      const took = takes(arm.pat);
+      const took = takes(r.prog, arm.pat);
       if (took !== null && took !== ALL && !arm.guard) taken.add(took);
+      if (everyReason(r.prog, taken)) taken.add('Rejected');
       const both = took === ALL && !taken.has('Rejected') && NO_ANSWER.some(n => !taken.has(n));
       const act = both && !arm.guard ? acts.find(a => a.in(arm.body)) : undefined;
       if (!act) continue;

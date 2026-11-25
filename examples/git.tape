@@ -1,34 +1,32 @@
 // git.tape: parse one git object (already inflated): "<kind> <size>\0<payload>". Answers with JSON. Byte layouts
-// need no special syntax: a prefix pattern, `until`, `after` and `slice` cover blobs, trees and commits.
+// need no special syntax: a prefix pattern, `until`, `after` and `slice` cover blobs, trees and commits. An object
+// that does not parse is a 400 problem that says why.
 
 fn handle(raw: View) -> Response {
-  parsed(raw) |> respond_as(status: 200, content: Json)
+  parsed(raw)
 }
 
-fn parsed(raw: View) -> Buf {
+fn parsed(raw: View) -> Response {
   match until(v: raw, byte: 0) {
     "blob " ++ decimal(size) -> sized(kind: 1, size, payload: after(v: raw, byte: 0))
     "tree " ++ decimal(size) -> sized(kind: 2, size, payload: after(v: raw, byte: 0))
     "commit " ++ decimal(size) -> sized(kind: 3, size, payload: after(v: raw, byte: 0))
-    _ -> problem(reason: "not a git object header")
+    _ -> problem(status: 400, detail: "not a git object header")
   }
 }
 
-fn sized(kind: Int, size: Int, payload: View) -> Buf {
+fn sized(kind: Int, size: Int, payload: View) -> Response {
   match {
-    size != len(payload) -> problem(reason: "the size in the header is not the payload's length")
+    size != len(payload) -> problem(
+      status: 400,
+      detail: "the size in the header is not the payload's length"
+    )
     kind == 1 -> push(
       buf: write_int(out: append(buf: buf(), view: "{\"kind\":\"blob\",\"size\":"), value: size),
       byte: 125
     )
-    kind == 2 -> append(
-      buf: entries(
-        out: append(buf: buf(), view: "{\"kind\":\"tree\",\"entries\":["),
-        rest: payload,
-        first: True
-      ),
-      view: "]}"
-    )
+      |> respond_as(status: 200, content: Json)
+    kind == 2 -> tree(payload)
     else -> push(
       buf: headers(
         out: append(buf: buf(), view: "{\"kind\":\"commit\""),
@@ -37,10 +35,36 @@ fn sized(kind: Int, size: Int, payload: View) -> Buf {
       ),
       byte: 125
     )
+      |> respond_as(status: 200, content: Json)
   }
 }
 
 // ---------- tree: "<mode> <name>\0<20 bytes of id>" repeated ----------
+
+fn tree(payload: View) -> Response {
+  match truncated(rest: payload) {
+    True -> problem(status: 400, detail: "truncated entry")
+    False -> append(
+      buf: entries(
+        out: append(buf: buf(), view: "{\"kind\":\"tree\",\"entries\":["),
+        rest: payload,
+        first: True
+      ),
+      view: "]}"
+    )
+      |> respond_as(status: 200, content: Json)
+  }
+}
+
+// Whether an entry runs past the end, read before any is written.
+fn truncated(rest: View) -> Bool {
+  let id = after(v: after(v: rest, byte: 32), byte: 0)
+  match {
+    len(rest) == 0 -> False
+    len(id) < 20 -> True
+    else -> truncated(rest: slice(v: id, from: 20, to: len(id)))
+  }
+}
 
 fn entries(out: Buf, rest: View, first: Bool) -> Buf {
   let mode = until(v: rest, byte: 32)
@@ -48,8 +72,7 @@ fn entries(out: Buf, rest: View, first: Bool) -> Buf {
   let name = until(v: named, byte: 0)
   let id = after(v: named, byte: 0)
   match {
-    len(rest) == 0 -> out
-    len(id) < 20 -> append(buf: out, view: "{\"error\":\"truncated entry\"}")
+    len(rest) == 0 or len(id) < 20 -> out
     first -> entries(
       out: entry(out, mode, name, id: slice(v: id, from: 0, to: 20)),
       rest: slice(v: id, from: 20, to: len(id)),
@@ -126,11 +149,4 @@ fn headers(out: Buf, rest: View, parents: Int) -> Buf {
     )
     _ -> headers(out, rest: after(v: rest, byte: 10), parents)
   }
-}
-
-fn problem(reason: View) -> Buf {
-  append(
-    buf: write_json_string(out: append(buf: buf(), view: "{\"error\":"), text: reason),
-    view: "}"
-  )
 }

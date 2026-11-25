@@ -1073,7 +1073,7 @@ const tests: Test[] = [
         payments: {
           charge: [
             { payment: 7 },
-            { error: 'Rejected', reason: 'card declined' },
+            { error: 'Rejected', reason: { why: 'card declined' } },
             'timeout',
             'unreachable',
             { error: 'Skew', reason: 'another message' },
@@ -1107,7 +1107,10 @@ const tests: Test[] = [
         JSON.stringify(['ok', 'rejected', 'timeout', 'unreachable', 'ok', 'skew', 'unreachable'])
       )
         out.push(`the effect log's calls: ${JSON.stringify(statuses)}`);
-      if (JSON.stringify(calls[0]?.['reply']) !== '{"payment":7}' || calls[1]?.['reply'] !== 'card declined')
+      if (
+        JSON.stringify(calls[0]?.['reply']) !== '{"payment":7}' ||
+        JSON.stringify(calls[1]?.['reply']) !== '{"why":"card declined"}'
+      )
         out.push(`replies: ${JSON.stringify(calls[0]?.['reply'])} ${JSON.stringify(calls[1]?.['reply'])}`);
       if (!rs.every(x => x['replayed'] === true))
         out.push(`replayed: ${JSON.stringify(rs.map(x => x['replay_error'] ?? x['replayed']))}`);
@@ -1364,7 +1367,14 @@ const tests: Test[] = [
         const { $tool, ...rest } = args;
         const http = await post(m, `/v1/${toolOf({ $tool })}`, JSON.stringify(rest));
         const b = F(http.body);
-        if (http.status !== status || b['error'] !== error || b['ok'] !== false || typeof b['reason'] !== 'string')
+        // over HTTP a refusal is a problem: the code a member, the reason its detail
+        if (
+          http.status !== status ||
+          http.headers.get('content-type') !== 'application/problem+json' ||
+          b['code'] !== error ||
+          b['status'] !== status ||
+          typeof b['detail'] !== 'string'
+        )
           out.push(`${what}: ${http.status} ${http.text.slice(0, 200)}`);
       };
       const ok = ['GET /hello/ada'];
@@ -1453,17 +1463,17 @@ const tests: Test[] = [
         out.push(`the limits themselves are refused: ${JSON.stringify(edge).slice(0, 200)}`);
       // the HTTP gate: method, content type, origin, size, kill switch, rate limit, and the run's own guards
       const get = await post(m, '/mcp', '', { method: 'GET' });
-      if (get.status !== 405 || F(get.body)['error'] !== 'method_not_allowed')
+      if (get.status !== 405 || F(get.body)['code'] !== 'method_not_allowed')
         out.push(`GET /mcp: ${get.status} ${get.text}`);
       const form = await post(m, '/v1/run', '{}', { headers: { 'content-type': 'text/plain' } });
-      if (form.status !== 415 || F(form.body)['error'] !== 'unsupported_media_type')
+      if (form.status !== 415 || F(form.body)['code'] !== 'unsupported_media_type')
         out.push(`text/plain: ${form.status}`);
       const page = await post(m, '/mcp', '{}', { headers: { origin: 'https://evil.example' } });
-      if (page.status !== 403 || F(page.body)['error'] !== 'origin_refused') out.push(`an Origin: ${page.status}`);
+      if (page.status !== 403 || F(page.body)['code'] !== 'origin_refused') out.push(`an Origin: ${page.status}`);
       const big = await post(m, '/v1/run', JSON.stringify({ requests: ['GET /'], pad: 'x'.repeat(2_000_000) }));
-      if (big.status !== 413 || F(big.body)['error'] !== 'body_too_large') out.push(`a 2 MB body: ${big.status}`);
+      if (big.status !== 413 || F(big.body)['code'] !== 'body_too_large') out.push(`a 2 MB body: ${big.status}`);
       const unsalted = await rpc(m, 'tools/list', {}, 1, { gate: { salt: undefined } });
-      if (unsalted.status !== 503 || F(unsalted.body)['error'] !== 'misconfigured')
+      if (unsalted.status !== 503 || F(unsalted.body)['code'] !== 'misconfigured')
         out.push(`no IP_SALT: ${unsalted.status}`);
       if (unsalted.logs[0]?.['ip_hash'] !== 'unsalted') out.push('without a salt the address is still hashed');
       // the hash: the same for one address, salt and day; another for another day or salt; the address not in it
@@ -1480,7 +1490,7 @@ const tests: Test[] = [
       )
         out.push('dayOf is not the UTC day');
       const off = await rpc(m, 'tools/list', {}, 1, { gate: { killSwitch: 'on' } });
-      if (off.status !== 503 || F(off.body)['error'] !== 'disabled') out.push(`the kill switch: ${off.status}`);
+      if (off.status !== 503 || F(off.body)['code'] !== 'disabled') out.push(`the kill switch: ${off.status}`);
       const keys: string[] = [];
       const limited = await rpc(m, 'tools/list', {}, 1, {
         gate: {
@@ -1492,7 +1502,7 @@ const tests: Test[] = [
           },
         },
       });
-      if (limited.status !== 429 || F(limited.body)['error'] !== 'rate_limited')
+      if (limited.status !== 429 || F(limited.body)['code'] !== 'rate_limited')
         out.push(`the rate limit: ${limited.status}`);
       if (
         keys[0] !== (await m.serve.ipHash('203.0.113.7', 'test-salt', m.serve.dayOf(Date.now()))) ||
@@ -1503,19 +1513,19 @@ const tests: Test[] = [
       const slow = await tool(m, 'run', { requests: ok }).then(() =>
         post(m, '/v1/run', JSON.stringify({ requests: ok }), { deps: { wallMs: 5, run: () => new Promise(() => {}) } }),
       );
-      if (slow.status !== 504 || F(slow.body)['error'] !== 'run_timeout')
+      if (slow.status !== 504 || F(slow.body)['code'] !== 'run_timeout')
         out.push(`a run past the wall guard: ${slow.status}`);
       const dead = await post(m, '/v1/run', JSON.stringify({ requests: ok }), {
         deps: { run: () => Promise.reject(new Error('Worker exceeded CPU time limit.')) },
       });
       if (
         dead.status !== 503 ||
-        F(dead.body)['error'] !== 'run_failed' ||
-        !String(F(dead.body)['reason']).includes('CPU')
+        F(dead.body)['code'] !== 'run_failed' ||
+        !String(F(dead.body)['detail']).includes('CPU')
       )
         out.push(`a runner that died: ${dead.status} ${dead.text}`);
       const nowhere = await post(m, '/v2/run', '{}');
-      if (nowhere.status !== 404 || F(nowhere.body)['error'] !== 'not_found')
+      if (nowhere.status !== 404 || F(nowhere.body)['code'] !== 'not_found')
         out.push(`an unknown route: ${nowhere.status}`);
       return out;
     },
@@ -1529,10 +1539,10 @@ const tests: Test[] = [
       if (mcp.status !== 400 || e['code'] !== -32700 || F(mcp.body)['id'] !== null)
         out.push(`/mcp: ${mcp.status} ${mcp.text}`);
       const http = await post(m, '/v1/compile', 'files: hello');
-      if (http.status !== 400 || F(http.body)['error'] !== 'bad_json')
+      if (http.status !== 400 || F(http.body)['code'] !== 'bad_json')
         out.push(`/v1/compile: ${http.status} ${http.text}`);
       const notObject = await post(m, '/v1/run', '["GET /"]');
-      if (notObject.status !== 400 || F(notObject.body)['error'] !== 'bad_arguments')
+      if (notObject.status !== 400 || F(notObject.body)['code'] !== 'bad_arguments')
         out.push(`an array: ${notObject.status} ${notObject.text}`);
       const args = await tool(m, 'compile', 'hello');
       if (!args.isError || args.out['error'] !== 'bad_arguments')
@@ -1575,7 +1585,9 @@ const tests: Test[] = [
         await rpc(m, 'notifications/initialized', {}, null),
       ];
       for (const [i, a] of answers.entries()) {
-        if (a.headers.get('content-type') !== 'application/json; charset=utf-8')
+        // a refusal (answer 2, an Origin) is a problem; every other answer JSON
+        const type = i === 2 ? 'application/problem+json' : 'application/json; charset=utf-8';
+        if (a.headers.get('content-type') !== type)
           out.push(`answer ${i}: content-type ${a.headers.get('content-type')}`);
         if (a.headers.get('x-content-type-options') !== 'nosniff') out.push(`answer ${i}: no nosniff`);
         if (a.headers.get('content-security-policy') !== "default-src 'none'; sandbox")

@@ -19,17 +19,13 @@ type Named { Named(name: View) }
 fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(method: Post, path: "/transfers", body) -> batch(body)
-    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
+    _ -> problem(status: 404, detail: "no such route")
   }
 }
 
 fn batch(body: View) -> Response {
   let Ok(value: Batch(transfers)) = decode(json: body, as: Batch) else {
-    Err(error) -> buf()
-      |> append(view: "{\"error\":")
-      |> write_json_string(text: error)
-      |> append(view: "}")
-      |> respond(status: 400)
+    Err(error) -> problem(status: 400, detail: error)
   }
   let out = buf() |> append(view: "{\"results\":[")
   each(transfers, out, first: True)

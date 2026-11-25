@@ -71,19 +71,23 @@ const signed = (message: string): { body: string; signature: string } => {
   T(
     'tickets: declined, and the hold undone',
     (await buy('balcony', 2, 'bob-0001')).out,
-    '402\n{"error":"card declined: not enough funds"}',
+    '402 application/problem+json\n{"type":"about:blank","title":"Payment Required","status":402,"detail":"card declined: not enough funds"}',
   );
   T(
     'tickets: sold out',
     (await buy('floor', 2, 'ann-4242')).out,
-    '409\n{"error":"not enough seats left in that section"}',
+    '409 application/problem+json\n{"type":"about:blank","title":"Conflict","status":409,"detail":"not enough seats left in that section"}',
   );
-  T('tickets: over the flag', (await buy('balcony', 9, 'ann-4242')).out, '400\n{"error":"qty: not a valid Qty"}');
+  T(
+    'tickets: over the flag',
+    (await buy('balcony', 9, 'ann-4242')).out,
+    '400 application/problem+json\n{"type":"about:blank","title":"Bad Request","status":400,"detail":"qty: not a valid Qty"}',
+  );
   app.setFlags({ max_per_order: 10 });
   T(
     'tickets: the flag raised, the card is the limit',
     (await buy('balcony', 9, 'ann-4242')).out,
-    '402\n{"error":"card declined: not enough funds"}',
+    '402 application/problem+json\n{"type":"about:blank","title":"Payment Required","status":402,"detail":"card declined: not enough funds"}',
   );
   T(
     'tickets: sales per section',
@@ -127,7 +131,7 @@ const signed = (message: string): { body: string; signature: string } => {
   T(
     'retry: the first attempt times out, the seats stay held',
     await run('POST /buy\n{"key":"r1","section":"balcony","qty":2,"card":"ann-4242"}'),
-    '504\n{"error":"payments did not answer in time; the seats stay held"}',
+    '504 application/problem+json\n{"type":"about:blank","title":"Gateway Timeout","status":504,"detail":"payments did not answer in time; the seats stay held"}',
   );
   T('retry: payments did charge, once', balance(), 300 - 90);
   slow = false;
@@ -140,7 +144,7 @@ const signed = (message: string): { body: string; signature: string } => {
   T(
     'retry: a settled sale is not pending any more',
     await run('POST /retry/1\n'),
-    '404\n{"error":"no such pending sale"}',
+    '404 application/problem+json\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such pending sale"}',
   );
 }
 
@@ -378,17 +382,20 @@ type Note`,
   T(
     'webhook: bad signature stops before the api',
     [(await hook(body, '00'.repeat(32))).out, sent.length],
-    ['401\n{"error":"bad signature"}', 1],
+    [
+      '401 application/problem+json\n{"type":"about:blank","title":"Unauthorized","status":401,"detail":"bad signature"}',
+      1,
+    ],
   );
   T(
     'webhook: valid signature, wrong shape',
     (await hook('{"id":"x"}')).out,
-    '400\n{"error":"id: expected an integer"}',
+    '400 application/problem+json\n{"type":"about:blank","title":"Bad Request","status":400,"detail":"id: expected an integer"}',
   );
   T(
     'webhook: no signature',
     answered(await app.run(enc.encode('POST /hook\n{}'))),
-    '401\n{"error":"missing signature"}',
+    '401 application/problem+json\n{"type":"about:blank","title":"Unauthorized","status":401,"detail":"missing signature"}',
   );
 }
 
@@ -459,16 +466,20 @@ type Note`,
     [wrong, (kinds.blob ?? 0) >= 4, (kinds.tree ?? 0) >= 3, kinds.commit],
     [0, true, true, 2],
   );
-  T('git: bad header', answerBody(app.handle(enc.encode('blub 3\0abc'))), '{"error":"not a git object header"}');
+  T(
+    'git: bad header',
+    answerBody(app.handle(enc.encode('blub 3\0abc'))),
+    '{"type":"about:blank","title":"Bad Request","status":400,"detail":"not a git object header"}',
+  );
   T(
     'git: wrong size',
     answerBody(app.handle(enc.encode('blob 4\0abc'))),
-    '{"error":"the size in the header is not the payload\'s length"}',
+    '{"type":"about:blank","title":"Bad Request","status":400,"detail":"the size in the header is not the payload\'s length"}',
   );
   T(
-    'git: truncated tree entry is an error, not a trap',
+    'git: a truncated tree entry is a 400 problem, not a trap',
     answerBody(app.handle(enc.encode('tree 12\u0000100644 a\u0000abc'))),
-    '{"kind":"tree","entries":[{"error":"truncated entry"}]}',
+    '{"type":"about:blank","title":"Bad Request","status":400,"detail":"truncated entry"}',
   );
   console.log(`(webhook.tape and git.tape: ${build('webhook').wasm.length} and ${r.wasm.length} bytes)`);
 }
@@ -492,7 +503,10 @@ type Note`,
   T(
     'ledger: no payee: the debit is undone and the answer still sent',
     [lost, balances()],
-    ['404\n{"error":"no such payee"}', '200\n[{"name":"alice","balance":70},{"name":"bob","balance":50}]'],
+    [
+      '404 application/problem+json\n{"type":"about:blank","title":"Not Found","status":404,"detail":"no such payee"}',
+      '200\n[{"name":"alice","balance":70},{"name":"bob","balance":50}]',
+    ],
   );
   T(
     'ledger: the log shows what was tried, marked undone: no earlier transfer with this key, the debit, no credit',
@@ -539,7 +553,7 @@ type Note`,
   T(
     'imports: a program whose only JSON is a call reply validates',
     only(
-      `type Ping { Ping(n: Int) }\ntype Pong { Pong(n: Int) }\nfn handle(raw: View, db: Sql, pong: Remote) -> Response {\n  answer(reply: call(to: pong, method: "ping", send: Ping(n: 1), reply: Pong, within: 5000, once: raw))\n}\nfn answer(reply: Result[Pong, CallError]) -> Response {\n  match reply {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 504)\n  }\n}\n`,
+      `type Ping { Ping(n: Int) } type Refusal { Refused(reason: View) }\ntype Pong { Pong(n: Int) }\nfn handle(raw: View, db: Sql, pong: Remote) -> Response {\n  answer(reply: call(to: pong, method: "ping", send: Ping(n: 1), reply: Pong, error: Refusal, within: 5000, once: raw))\n}\nfn answer(reply: Result[Pong, CallError[Refusal]]) -> Response {\n  match reply {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 504)\n  }\n}\n`,
     ),
     'valid',
   );
@@ -550,7 +564,7 @@ type Note`,
     ...std,
     {
       name: 'program.tape',
-      text: 'type K = View where len(self) >= 1 and len(self) <= 8\ntype N = Int where self >= 0 and self <= 9\ntype In { In(key: K, n: Option[N], on: Bool) }\ntype Out { Out(key: View) }\nexport fn put(message: In) -> Result[Out, View] {\n  Ok(value: Out(key: message.key))\n}\n',
+      text: 'type K = View where len(self) >= 1 and len(self) <= 8\ntype N = Int where self >= 0 and self <= 9\ntype In { In(key: K, n: Option[N], on: Bool) } type Refusal { Refused(reason: View) }\ntype Out { Out(key: View) }\nexport fn put(message: In) -> Result[Out, Refusal] {\n  Ok(value: Out(key: message.key))\n}\n',
     },
   ]);
   // put is also std's map put: the export keeps its own name, and the module is valid

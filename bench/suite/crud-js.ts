@@ -70,12 +70,17 @@ export function crud(db: NodeSql): (req: Uint8Array) => Uint8Array {
     const text = dec.decode(req);
     const nl = text.indexOf('\n');
     const line = nl < 0 ? text : text.slice(0, nl);
-    if (line !== 'POST /items') return answer(404, '{"error":"no such route"}');
+    if (line !== 'POST /items')
+      return answer(404, '{"type":"about:blank","title":"Not Found","status":404,"detail":"no such route"}');
     let batch: string, items: NewItem[];
     try {
       ({ batch, items } = decode(nl < 0 ? '' : text.slice(nl + 1)));
     } catch (e) {
-      if (e instanceof Refused) return answer(400, JSON.stringify({ error: e.message }));
+      if (e instanceof Refused)
+        return answer(
+          400,
+          JSON.stringify({ type: 'about:blank', title: 'Bad Request', status: 400, detail: e.message }),
+        );
       throw e;
     }
     let created = 0;

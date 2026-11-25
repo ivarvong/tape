@@ -828,8 +828,10 @@ export type ServeRequest = {
   trace?: From;
 };
 export type Served = { status: string; body: Uint8Array; effects?: Effect[] };
+// A method's reply: "0" and the reply, "1" and its error (the value of the method's error type, as JSON), "2" and why
+// the message did not decode (the two sides disagree: skew, never a refusal the caller would compensate for).
 const answerOf = (out: Uint8Array): { status: Status; body: Uint8Array } => ({
-  status: out[0] === 48 ? 'ok' : 'rejected',
+  status: out[0] === 48 ? 'ok' : out[0] === 49 ? 'rejected' : 'skew',
   body: out.subarray(1),
 });
 

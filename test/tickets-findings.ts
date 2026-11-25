@@ -170,12 +170,17 @@ T(
   ],
 );
 T(
-  'responseOf: a content Content does not have is a 500, not a type',
-  [head(200, 9), head(200, 255)],
+  'responseOf: a content Content does not have is a 500, not a type (Problem, 9, is the last)',
+  [head(200, 10), head(200, 255)],
   [
-    [500, 'text/plain; charset=utf-8'],
-    [500, 'text/plain; charset=utf-8'],
+    [500, 'application/problem+json'],
+    [500, 'application/problem+json'],
   ],
+);
+T(
+  'responseOf: Problem is application/problem+json, with no charset (RFC 9457 is JSON)',
+  [head(404, 9)],
+  [[404, 'application/problem+json']],
 );
 T(
   'responseOf: Atom, RSS and XML are those types, with charset=utf-8',
@@ -193,9 +198,9 @@ T(
     return [r.status, r.type];
   }),
   [
-    [500, 'text/plain; charset=utf-8'],
-    [500, 'text/plain; charset=utf-8'],
-    [500, 'text/plain; charset=utf-8'],
+    [500, 'application/problem+json'],
+    [500, 'application/problem+json'],
+    [500, 'application/problem+json'],
   ],
 );
 // 0.3: a carriage return on the status line opened a header; a header is a field of the frame now, and one whose
@@ -210,8 +215,8 @@ T(
     return [r.status, r.type];
   }),
   [
-    [500, 'text/plain; charset=utf-8'],
-    [500, 'text/plain; charset=utf-8'],
+    [500, 'application/problem+json'],
+    [500, 'application/problem+json'],
   ],
 );
 

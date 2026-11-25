@@ -145,10 +145,12 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   of 50,000 characters and more, which clients do not show): ask for `"lines"` to see them. A full trace is most
   of an answer's size: ask for it when you need the spans themselves.
 - `remotes` answers calls to other programs, which otherwise answer Unreachable (one program runs at a time):
-  `{"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout",
-  "unreachable"]}}`, by the name of the program's `Remote` parameter and the method. Each call takes the next answer
-  for its method, across the run's requests and timers: the reply's value as JSON (`Ok`), a refusal (`Rejected`, its
-  `reason`), `{"error": "Skew", "reason": …}` (the callee found the key used for another message: `Skew`), `"timeout"` (no answer in time: `Timeout`), `"unreachable"`; once they run out, Unreachable. A repeated
+  `{"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "declined"}, "timeout",
+  "unreachable"]}}`, by the name of the program's `Remote` parameter and the method. Each
+  call takes the next answer for its method, across the run's requests and timers: the reply's value as JSON (`Ok`),
+  a refusal (`Rejected`, its `reason` a value of the error type the call names, as JSON: `"declined"` for a
+  constructor of a type whose constructors have no fields, `{"why": "card declined"}` for the one constructor of
+  `type ChargeError { Declined(why: View) }`; one that does not decode as that type is a `Skew`), `{"error": "Skew", "reason": …}` (the callee found the key used for another message: `Skew`), `"timeout"` (no answer in time: `Timeout`), `"unreachable"`; once they run out, Unreachable. A repeated
   `once` key gets the reply or refusal it got before, as a program that keeps its replies answers; after a
   `"timeout"` or `"unreachable"` nothing was kept (the callee did not answer), so the same key sent again, from a
   timer that retries, takes the next answer. Each call is in the
@@ -282,15 +284,18 @@ These are alpha limits and may change.
 | calls | 60 a minute per client address (its daily salted hash, below), per Cloudflare location |
 | a JSON integer a program decodes | within ±(2^53 - 1) = ±9007199254740991; past that `decode` refuses it, `<field>: expected an integer`, rather than round it (a number is read exactly from its text). Exact large integers are planned; send them as text until then |
 
-Every refusal is JSON, `{"ok": false, "error": "<code>", "reason": "<what to change>"}`, with an HTTP status: over
-MCP it is a tool result with `isError: true` and the same JSON. The codes: `bad_arguments`, `unknown_argument`,
+Every refusal over HTTP (`POST /v1/…`) is `application/problem+json` (RFC 9457), the service's one error shape,
+with its HTTP status: `{"type": "about:blank", "title": "Too Many Requests", "status": 429, "detail": "<what to
+change>", "code": "<code>"}`. Over MCP it is a tool result with `isError: true` and the JSON `{"ok": false, "error":
+"<code>", "reason": "<what to change>"}`. A `/v1/run` that ran answers 200 with its result schema (below), whatever
+the program answered: that is a result, not an error. The codes: `bad_arguments`, `unknown_argument`,
 `bad_files`, `bad_file_name`, `too_many_files` (413), `source_too_large` (413), `bad_requests`, `bad_at_ms`,
 `bad_request_line`, `too_many_requests` (413), `request_too_large` (413), `body_too_large` (413), `bad_json`,
 `unsupported_media_type` (415), `method_not_allowed` (405), `origin_refused` (403), `not_found` (404),
 `rate_limited` (429), `run_timeout` (504), `run_failed` (503), `disabled` (503: switched off for now),
 `misconfigured` (503: the deployment has no `IP_SALT`).
 
-Every answer is `application/json` with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
+Every answer is `application/json` (a refusal `application/problem+json`) with `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src
 'none'; sandbox` and `Cache-Control: no-store`; what a program answers is a JSON string, never a page. There are no
 CORS headers, and a request with an `Origin` header is refused: the clients are MCP clients and HTTP tools, not
 browsers, so a web page cannot use its visitors as clients.

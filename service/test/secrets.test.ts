@@ -115,10 +115,10 @@ describe('secrets', () => {
 
   it('a tool may not read one: no policy grants Secrets', async () => {
     await call('/_policy/sect', { method: 'PUT', body: '{"sql": true, "clock": true, "entropy": true}' });
-    const tool = `export fn peek(secrets: Secrets, message: Ask) -> Result[Seen, View] {\n  Ok(value: Seen(n: len(value_or(given: secret(name: "stripe"), otherwise: ""))))\n}\n\ntype Ask {\n  Ask(n: Int)\n}\n\ntype Seen {\n  Seen(n: Int)\n}\n`;
+    const tool = `export fn peek(secrets: Secrets, message: Ask) -> Result[Seen, Refusal] {\n  Ok(value: Seen(n: len(value_or(given: secret(name: "stripe"), otherwise: ""))))\n}\n\ntype Ask {\n  Ask(n: Int)\n}\n\ntype Seen {\n  Seen(n: Int)\n}\n\ntype Refusal {\n  Refused(reason: View)\n}\n`;
     const r = await call('/tools/sect/peek', { method: 'POST', body: tool });
     const body = await json(r);
-    expect([r.status, at(body, 'error')]).toEqual([403, 'capability not granted']);
+    expect([r.status, at(body, 'detail')]).toEqual([403, 'capability not granted']);
     expect(text(at(body, 'hint'))).toContain('no policy grants Secrets or Http');
   });
 });
