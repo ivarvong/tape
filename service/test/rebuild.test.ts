@@ -76,11 +76,17 @@ describe('a stored build is a cache of the source', () => {
 
   it('keeps a timer of a version that cannot be rebuilt, logs no error, and tries again later', async () => {
     expect(at(await got('/ivar/alarm', { method: 'POST', body: alarm }), 'version')).toBe(1);
+    // the timer is set 3 s out, so it is still there when it is read and when the source goes stale; it was 30 ms,
+    // and under load the runtime's own alarm ran it first with the good build (seen: `set` was [] at the next line)
+    const setAt = Date.now();
     const set = await call('/ivar/alarm/v/1/set', { method: 'POST' });
     expect([set.status, await set.text()]).toEqual([202, 'set']);
     expect(list(at(await got('/ivar/alarm/wakes'), 'set')).map(w => at(w, 'key'))).toEqual([1]);
     // the version as an older compiler left it: its build stale, its source one this compiler refuses
     await stale('ivar/alarm', 1, alarm.replace('respond(status: 202)', 'respond_with(status: 202)'));
+    // due now: the alarm below finds it due, as the runtime's would (if the runtime's ran first, it took the same
+    // path: the version cannot be rebuilt, so the timer is kept and the alarm is set an hour on)
+    await new Promise(done => setTimeout(done, Math.max(0, setAt + 3100 - Date.now())));
     const errors = vi.spyOn(console, 'error');
     const before = Date.now();
     // the alarm, run as the runtime runs it (runDurableObjectAlarm would delete the alarm it sets again)
