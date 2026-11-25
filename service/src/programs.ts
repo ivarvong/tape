@@ -24,6 +24,24 @@ type Restarted = {
   held: string | null;
 };
 const iso = (t: unknown): string | null => (typeof t === 'number' ? new Date(t).toISOString() : null);
+/**
+ * The host's Server-Timing entry: whole milliseconds the router waited on the Durable Object (the invoke span,
+ * Date.now at begin to Date.now at done). A negative reading is a clock step and is 0, which is also a wait
+ * under 1 ms. `desc` is the label a client shows; `dur` is milliseconds by the header's own rules.
+ */
+export const programTiming = (ms: number): string =>
+  `tape-invoke;desc="wall time waiting on the program (not CPU)";dur=${Math.max(0, ms)}`;
+/**
+ * Operator answers only. The host's entry goes first; a `server-timing` the program set is appended, because the
+ * header is a list and the program is allowed to write its own (it is not in HOST_OWNED). A public answer is not
+ * given the host entry: `dur` is a 1 ms sample of the object's whole call, with no network jitter, and an
+ * anonymous client can read it.
+ */
+const withProgramTiming = (res: Response, ms: number): void => {
+  const own = res.headers.get('server-timing');
+  res.headers.set('server-timing', programTiming(ms));
+  if (own !== null && own !== '') res.headers.append('server-timing', own);
+};
 const otlpOf = (link: string, origin: string): string => link.replace(`${origin}/t/`, `${origin}/otlp/`);
 
 // What an upload or a retirement did to the data: the live versions, the migration run (with a signed trace link),
@@ -211,12 +229,7 @@ export async function run(
     out = reply({ error: STOPPED, outcome: 'unknown', reason: messageOf(e) }, 503);
   }
   rt.finish(out.status);
-  // The caller's wait on this invocation, the same header kv.ts writes for a shard: the span's own
-  // milliseconds, unclamped. A 404 the list of published names answers itself never reaches here.
-  out.headers.set(
-    'server-timing',
-    `tape-invoke;desc="caller-wall-ms-not-cpu";dur=${(call.end ?? call.start) - call.start}`,
-  );
+  const waited = (call.end ?? call.start) - call.start;
   const storeIt = (): Promise<string | null> =>
     store(() => ctx.exports.Name.getByName(`${account}/${name}`), call.span, rt);
   // a trace link opens the run's whole log (its SQL, its calls): it is the operator's, so a public answer has none.
@@ -235,6 +248,7 @@ export async function run(
     for (const h of ['tape-request-id', 'tape-next-wake', 'tape-supervisor-span']) out.headers.delete(h);
     return out;
   }
+  withProgramTiming(out, waited);
   const link = await signed(token, url.origin, `/${account}/${name}/r/${call.span}`);
   out.headers.set('tape-trace-url', link);
   out.headers.set('tape-otlp-url', otlpOf(link, url.origin));

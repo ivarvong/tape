@@ -40,8 +40,10 @@ describe('security headers', () => {
   it('are on a trace page, which may use only its own inline style', async () => {
     await call('/ivar/hello', { method: 'POST', body: hello });
     const r = await call('/ivar/hello/v/1/hello/ada');
-    // the router's wait on the program's object, whole milliseconds, labeled as a wait and not as CPU
-    expect(r.headers.get('server-timing')).toMatch(/^tape-invoke;desc="caller-wall-ms-not-cpu";dur=\d+$/);
+    // the router's wait on the program's object, whole milliseconds. desc is the label; dur is milliseconds.
+    expect(r.headers.get('server-timing')).toMatch(
+      /^tape-invoke;desc="wall time waiting on the program \(not CPU\)";dur=\d+$/,
+    );
     const link = r.headers.get('tape-trace-url') ?? '';
     expect(link).toMatch(/^http:\/\/tape\/t\//);
     const t = await anyone(link.replace('http://tape', ''));
@@ -57,9 +59,15 @@ describe('security headers', () => {
   it("sandbox a program's own HTML, on its operator route and its public route", async () => {
     await call('/ivar/hpage', { method: 'POST', body: page });
     await call('/_public/ivar/hpage', { method: 'PUT', body: '{"published":true}' });
-    for (const r of [await call('/ivar/hpage/v/1/'), await anyone('/p/ivar/hpage/')]) {
+    const [op, pub] = [await call('/ivar/hpage/v/1/'), await anyone('/p/ivar/hpage/')];
+    // the wait is on the operator's route only: a public answer would hand an anonymous client a 1 ms sample
+    // of the object's whole call
+    expect(op.headers.get('server-timing')).toMatch(
+      /^tape-invoke;desc="wall time waiting on the program \(not CPU\)";dur=\d+$/,
+    );
+    expect(pub.headers.get('server-timing')).toBeNull();
+    for (const r of [op, pub]) {
       expect([r.status, r.headers.get('content-type')]).toEqual([200, 'text/html; charset=utf-8']);
-      expect(r.headers.get('server-timing')).toMatch(/^tape-invoke;desc="caller-wall-ms-not-cpu";dur=\d+$/);
       expect(headersOf(r)).toEqual(BASE);
       const csp = r.headers.get('content-security-policy') ?? '';
       expect(csp.split('; ')).toEqual(expect.arrayContaining(["default-src 'none'", "frame-ancestors 'none'"]));
@@ -69,6 +77,24 @@ describe('security headers', () => {
       // other: nothing is fetched from another origin
       expect(csp.split('; ').filter(d => d.startsWith('img-src'))).toEqual(["img-src 'self' data:"]);
     }
+  });
+
+  it("keeps a program's own server-timing, and adds the host's entry only on the operator route", async () => {
+    const src = `fn handle(raw: View) -> Buf {
+  respond(status: 200) |> header(name: "server-timing", value: "db;dur=5") |> append(view: raw)
+}
+`;
+    expect((await call('/ivar/timed', { method: 'POST', body: src })).status).toBe(201);
+    expect((await call('/_public/ivar/timed', { method: 'PUT', body: '{"published":true}' })).status).toBe(200);
+    const op = await call('/ivar/timed/v/1/');
+    // the host's entry first, then the program's: Server-Timing is a list
+    expect(op.status).toBe(200);
+    expect(op.headers.get('server-timing')).toMatch(
+      /^tape-invoke;desc="wall time waiting on the program \(not CPU\)";dur=\d+, db;dur=5$/,
+    );
+    const pub = await anyone('/p/ivar/timed/');
+    expect(pub.status).toBe(200);
+    expect(pub.headers.get('server-timing')).toBe('db;dur=5');
   });
 
   it("serves a program's Atom, RSS and XML under the API policy, not as a page", async () => {

@@ -64,10 +64,14 @@ parameters reach the latest version of the program with that name in the same ac
 
 Every response names its request (`tape-request-id`) and carries signed links to its trace as a page
 (`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`), and names the step accounting the deployed compiler builds
-(`tape-step-version`). It also carries `server-timing`
-(`tape-invoke;desc="caller-wall-ms-not-cpu";dur=<ms>`): `<ms>` is the whole milliseconds this Worker waited on
-the program's object, the same reading `kv.ts` puts on a shard call. The same header is on a published name's
-response. What the number measures, and the precision it has on Workers, is in
+(`tape-step-version`). The operator's run of a version also carries `server-timing`, the host's entry first:
+`tape-invoke;desc="wall time waiting on the program (not CPU)";dur=<ms>`. `<ms>` is the whole milliseconds this
+Worker waited on the program's object, from the invoke span's begin to its done, which is after the body is
+buffered. A negative reading is reported as 0. A `server-timing` the program set is kept after that entry: the
+header is a list, and only `tape-invoke` is the host's. A request that never calls the object (a body over the
+limit, answered before the call) has no `tape-invoke`. A published name's public route does not add it either:
+the number is a 1 ms sample of the object's whole call, with no network jitter, and anyone can request that
+route. What the number measures, and the precision it has on Workers, is in
 [telemetry](telemetry_and_profiling.md#what-a-client-can-read-of-a-requests-cost). The run's span in the OTLP says
 what the run used of the limits below, `tape.memory_bytes`, `tape.steps` and `tape.step_version` (the first entry
 of its log holds the same, as `bytes`, `steps` and `step_version`, and the trace page shows them; a module built
@@ -101,10 +105,11 @@ and the path, wherever it is mounted. A client cannot set it, and a request that
 ### Public routes
 
 After `PUT /_public/:account/:name {"published": true}` (operator), `/p/:account/:name/<path>` answers GET, HEAD and
-POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links. It keeps
-`server-timing` (`tape-invoke`), the same wait the operator's route reports. A name that is not published is
-answered by the list of published names and never calls the program's object, so that 404 has no `tape-invoke`.
-A HEAD is run as the GET it stands for (the program sees `GET`, and the body is not sent), on this route and every
+POST (a body of at most 64 KB) from anyone, through the latest live version, without trace links and without
+the operator route's `tape-invoke` entry. A `server-timing` the program itself set is still sent. A name that
+is not published is answered by the list of published names and never calls the program's object, and a request
+the route refuses before that call (405, 413) has no `server-timing` from the host. A HEAD is run as the GET it
+stands for (the program sees `GET`, and the body is not sent), on this route and every
 other. The program sees who called: the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)`
 says so.
 For HTML forms, std/http has `form_field(body: …, name: …)` and `write_html(out: …, text: …)` (escaped). `apps/tickets/` is a
