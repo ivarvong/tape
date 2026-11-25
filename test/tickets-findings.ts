@@ -100,7 +100,7 @@ T(
 }
 
 // ---- 4. C62 is one row's compare-and-set: a set update is not
-const S = (q: string) => prog(H, `  do sql_exec(query: "${q}", n: 1)\n  respond(status: 200)`, M);
+const S = (q: string) => prog(H, `  let _ = sql_exec(query: "${q}", n: 1)\n  respond(status: 200)`, M);
 T(
   'C62: a set update by state (no key) is not a compare-and-set to type',
   codes(
@@ -127,7 +127,7 @@ T(
 );
 
 // ---- 5. C60: INSERT … SELECT that leaves the machine column out starts in its DEFAULT
-const I = (q: string) => prog(H, `  do sql_exec(query: "${q}", n: 1)\n  respond(status: 200)`, M);
+const I = (q: string) => prog(H, `  let _ = sql_exec(query: "${q}", n: 1)\n  respond(status: 200)`, M);
 // (the fragment enters 'held' and nothing leaves it: C77, judged in test/timers-way-out.ts)
 T(
   'C60: INSERT … SELECT without the machine column: its DEFAULT, the start state',
@@ -143,7 +143,7 @@ T(
   codes(
     prog(
       H.replace("DEFAULT 'held')", "DEFAULT 'released')"),
-      `  do sql_exec(query: "INSERT INTO holds(client, tier) SELECT 'k' || id, id FROM tiers WHERE event = :event ON CONFLICT(client) DO NOTHING", event: 1)\n  respond(status: 200)`,
+      `  let _ = sql_exec(query: "INSERT INTO holds(client, tier) SELECT 'k' || id, id FROM tiers WHERE event = :event ON CONFLICT(client) DO NOTHING", event: 1)\n  respond(status: 200)`,
       M,
     ),
   ),

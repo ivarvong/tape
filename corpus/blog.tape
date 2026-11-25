@@ -319,7 +319,13 @@ fn saved(
     None -> match load(slug, db) {
       Some(value: was) -> render(o: update(was, title, published, markdown, db), r, db)
       None -> {
-        do sql_exec(db, query: "UPDATE ops SET status = 201 WHERE key = :key", key)
+        let 1 = sql_exec(
+          db,
+          query: "UPDATE ops SET status = 201 WHERE key = :key",
+          key
+        ) else -> rollback(
+          out: render(o: Problem(status: 500, reason: "the claimed key is gone"), r, db)
+        )
         render(o: insert(slug, title, published, markdown, db), r, db)
       }
     }
@@ -346,11 +352,19 @@ fn removed(slug: View, key: View, r: Request, db: Sql) -> Buf {
     Some(value: op) -> replayed(op, req_hash, r, db)
     None -> match load(slug, db) {
       None -> {
-        do sql_exec(db, query: "UPDATE ops SET status = 404 WHERE key = :key", key)
+        let 1 = sql_exec(
+          db,
+          query: "UPDATE ops SET status = 404 WHERE key = :key",
+          key
+        ) else -> rollback(
+          out: render(o: Problem(status: 500, reason: "the claimed key is gone"), r, db)
+        )
         render(o: Problem(status: 404, reason: "no such post"), r, db)
       }
       Some(value: _) -> {
-        do sql_exec(db, query: "DELETE FROM posts WHERE slug = :slug", slug)
+        let 1 = sql_exec(db, query: "DELETE FROM posts WHERE slug = :slug", slug) else -> rollback(
+          out: render(o: Problem(status: 500, reason: "the post was there and is gone"), r, db)
+        )
         render(o: Removed(slug), r, db)
       }
     }
@@ -406,7 +420,8 @@ fn replayed(op: Op, req_hash: View, r: Request, db: Sql) -> Buf {
 
 fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> Outcome {
   let h = digest(markdown)
-  do ensure_cached(hash: h, markdown, db)
+  // the render is cached for the page that shows the post
+  let _ = cached(hash: h, markdown, db)
   let t = now()
   match sql_first(
     db,
@@ -428,7 +443,8 @@ fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> 
 
 fn update(was: Post, title: View, published: View, markdown: View, db: Sql) -> Outcome {
   let h = digest(markdown)
-  do ensure_cached(hash: h, markdown, db)
+  // the render is cached for the page that shows the post
+  let _ = cached(hash: h, markdown, db)
   let t = now()
   match sql_first(
     db,
@@ -452,14 +468,15 @@ fn cached(hash: View, markdown: View, db: Sql) -> View {
     Some(value: Render(hash: stored, html)) -> html
     None -> {
       let html = freeze(buf: write_doc(out: buf(), text: markdown))
-      do sql_exec(db, query: "INSERT INTO renders(hash, html) VALUES (:hash, :html)", hash, html)
+      let _ = sql_exec(
+        db,
+        query: "INSERT INTO renders(hash, html) VALUES (:hash, :html)",
+        hash,
+        html
+      )
       html
     }
   }
-}
-
-fn ensure_cached(hash: View, markdown: View, db: Sql) -> Int {
-  len(cached(hash, markdown, db))
 }
 
 fn html_of(hash: View, markdown: View, db: Sql) -> View {

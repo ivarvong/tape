@@ -136,7 +136,7 @@ type Pay { Pay(who: View) }
 type Done { Done(n: Int) }
 type Ack { Ack(ok: Int) }
 export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, View] {
-  do sql_exec(
+  let _ = sql_exec(
     query: "INSERT INTO charges(who, n) VALUES (:who, 1) ON CONFLICT(who) DO UPDATE SET n = n + 1",
     who: message.who
   )

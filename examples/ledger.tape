@@ -58,13 +58,15 @@ fn transfer(body: View) -> Buf {
   ) else -> rollback(
     out: problem(status: 404, reason: "no such payee")
   )
-  do sql_exec(
+  let 1 = sql_exec(
     query: "INSERT INTO transfers(key, payer, payee, amount) VALUES (:key, :from, :to, :amount) \
         ON CONFLICT(key) DO NOTHING",
     key,
     from,
     to,
     amount
+  ) else -> rollback(
+    out: problem(status: 422, reason: "the key was already used for another transfer")
   )
   moved()
 }

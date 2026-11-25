@@ -519,7 +519,8 @@ function match(c: Cursor, word: Token): Match {
 
 // ---- blocks: steps, then the expression the block is worth
 type Steps = { lets: Let[]; result: Expr };
-// `do call(…)`: run it for what it does; its value is dropped. A step like a `let`, with no name to invent.
+// `do call(…)`: run it for what it does; its value is Done (checked where it is compiled, C82). A step like a
+// `let`, with no name to invent.
 function doStep(c: Cursor, n: number): Let {
   const d = c.next(),
     value = expr(c);

@@ -784,7 +784,7 @@ type Pay { Pay(who: View) }
 type Done { Done(n: Int) }
 type Ack { Ack(ok: Int) }
 export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, View] {
-  do sql_exec(query: "INSERT INTO charges(who) VALUES (:who)", who: message.who)
+  let _ = sql_exec(query: "INSERT INTO charges(who) VALUES (:who)", who: message.who)
   let Ok(value: Ack(ok)) = call(to: bank, method: "ack", send: Ack(ok: 1), reply: Ack, within: 1000, once: message.who) else -> Err(
     error: "bank"
   )

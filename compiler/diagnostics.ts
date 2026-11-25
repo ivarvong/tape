@@ -322,15 +322,20 @@ export const DIAGNOSTICS = {
   },
   C82: {
     meaning:
-      '`do` before something that is not a call, or a call whose value is not an Int. `do` drops only a number; an Option, a Result or a Move has outcomes to read.',
+      "`do` before something that is not a call, or a call whose value is not Done. `do` runs a call for what it does: wake, or a function that returns Done. Any other value says something (sql_exec's count of rows changed, an Option, a Result, a Move): read it, as `let 1 = sql_exec(…) else -> …`, or drop it on purpose with `let _ = …`.",
   },
   C83: {
-    meaning: 'A call bound with `let` to a name never read, so what it does is hidden. Write `do call(…)`.',
+    meaning:
+      'A call bound with `let` to a name never read, so what it does is hidden. Write it as a step: `do call(…)` for a Done, `let 1 = …` or `let _ = …` for an Int, a match for the rest.',
   },
   C84: {
-    meaning: 'A call passed to a parameter its function never reads, so what it does is hidden. Write `do call(…)`.',
+    meaning:
+      'A call passed to a parameter its function never reads, so what it does is hidden. Write it as a step on the line before: `do call(…)` for a Done, `let 1 = …` or `let _ = …` for an Int.',
   },
-  C85: { meaning: 'A call multiplied by 0, so what it does is hidden and its value thrown away. Write `do call(…)`.' },
+  C85: {
+    meaning:
+      'A call multiplied by 0, so what it does is hidden and its value thrown away. Write it as a step: `do call(…)` for a Done, `let 1 = …` or `let _ = …` for an Int.',
+  },
   C86: {
     meaning:
       "An invariant that is not one SELECT, without placeholders, over the schema's tables and columns, or one whose name is used twice.",

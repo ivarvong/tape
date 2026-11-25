@@ -36,6 +36,13 @@ private type CallError {
   Skew(reason: View) final
 }
 
+// The value of a call run for what it does: wake gives it, and so does a function that only does something. `do
+// f(…)` runs a call whose value is Done; a call with any other value is read (`let 1 = sql_exec(…) else -> …`), or
+// dropped on purpose with `let _ = …`.
+type Done {
+  Done
+}
+
 // What the host sends to `export fn woken` when a timer set with wake(timer, after, key) is due: that key.
 type Wake {
   Wake(key: Int)

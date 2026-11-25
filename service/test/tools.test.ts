@@ -213,7 +213,7 @@ describe('tools', () => {
       body: JSON.stringify({ sql: true, clock: true, entropy: true }),
     });
     const later =
-      'export fn woken(timer: Timer, message: Wake) -> Result[Wake, View] {\n  Ok(value: Wake(key: wake(timer, after: 10, key: message.key)))\n}\n';
+      'export fn woken(timer: Timer, message: Wake) -> Result[Wake, View] {\n  do wake(timer, after: 10, key: message.key)\n  Ok(value: message)\n}\n';
     expect(await json(await operator('/tools/agents3/later', { method: 'POST', body: later }))).toEqual({
       status: 403,
       body: {

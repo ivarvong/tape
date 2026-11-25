@@ -131,7 +131,7 @@ describe('tape service', () => {
 
 fn handle(raw: View, db: Sql) -> Buf {
   let n = count(v: request(raw).body, at: 0, k: 0)
-  do sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
+  let _ = sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
   respond(status: 200) |> append(view: "\\(n)")
 }
 
@@ -843,7 +843,7 @@ fn count(found: Option[Count]) -> Buf {
 type Hit { Hit(n: Int) }
 export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Hit, View] {
   let Wake(key) = message
-  do sql_exec(
+  let _ = sql_exec(
     query: "INSERT INTO hits(id, n) VALUES (:key, 1) ON CONFLICT(id) DO UPDATE SET n = n + 1",
     key,
     repeat: True

@@ -34,7 +34,7 @@ const program = (call: string): string =>
   `${SCHEMA}type Todo { Todo(id: Int, title: View, n: Int) }
 fn handle(raw: View, db: Sql) -> Buf {
   let id = len(raw)
-  do sql_exec(db, query: "INSERT INTO todos(id, title, n) VALUES (:id, :title, :id * 10) ON CONFLICT(id) DO NOTHING", title: raw, id)
+  let _ = sql_exec(db, query: "INSERT INTO todos(id, title, n) VALUES (:id, :title, :id * 10) ON CONFLICT(id) DO NOTHING", title: raw, id)
   match ${call} {
     Some(value: Todo(title, n)) -> respond(status: 200) |> append(view: "\\(title) \\(n)")
     None -> respond(status: 404)

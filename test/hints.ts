@@ -289,8 +289,8 @@ fn moved(id: View) -> Buf {
 }
 
 fn counted(key: View, used: Int) -> Buf {
-  do sql_exec(query: "UPDATE k SET used = :used WHERE key = :key", key, used@SET)
-  do sql_exec(query: "INSERT INTO k(key, used) VALUES (:key, 0) ON CONFLICT(key) DO NOTHING", key@INSERT)
+  let _ = sql_exec(query: "UPDATE k SET used = :used WHERE key = :key", key, used@SET)
+  let _ = sql_exec(query: "INSERT INTO k(key, used) VALUES (:key, 0) ON CONFLICT(key) DO NOTHING", key@INSERT)
   respond(status: 200)
 }
 `;
@@ -386,7 +386,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 fn handle(raw: View, db: Sql) -> Buf {
   let id = request(raw).path
   @CLAIM
-  do sql_exec(query: "UPDATE a SET balance = balance + 5 WHERE id = :id", id@R)
+  let _ = sql_exec(query: "UPDATE a SET balance = balance + 5 WHERE id = :id", id@R)
   respond(status: 200)
 }
 `;

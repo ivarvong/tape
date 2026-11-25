@@ -97,13 +97,13 @@ fn transfer(t: Transfer) -> Int {
     to,
     key
   ) else -> 500
-  do sql_exec(
+  let 1 = sql_exec(
     query: "INSERT INTO transfers(key, payer, payee, amount) VALUES (:key, :from, :to, :amount) \
         ON CONFLICT(key) DO NOTHING",
     key,
     from,
     to,
     amount
-  )
+  ) else -> 422
   200
 }

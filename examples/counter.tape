@@ -20,7 +20,8 @@ type Op = View where len(self) >= 1 and len(self) <= 64
 fn handle(raw: View, db: Sql) -> Buf {
   match request(raw) {
     Request(method: "POST", path: "/" ++ name, query: Some(value: "op=" ++ Op(op))) -> {
-      do sql_exec(
+      // a repeat of the op changes no row, and answers the count as it stands
+      let _ = sql_exec(
         query: "INSERT INTO counters(name, n) VALUES (:name, :step) ON CONFLICT(name) \
             DO UPDATE SET n = n + :step WHERE NOT EXISTS (SELECT 1 FROM counted WHERE op = :op \
             AND name = :name)",
@@ -41,7 +42,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 
 // The op id is recorded with the name; a repeat added nothing, and answers the count as it stands.
 fn add(name: View, op: View) -> Buf {
-  do sql_exec(
+  let _ = sql_exec(
     query: "INSERT INTO counted(op, name) VALUES (:op, :name) ON CONFLICT(op, name) DO NOTHING",
     op,
     name

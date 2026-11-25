@@ -4,6 +4,7 @@ import type { Arg, Expr, Pattern, TypeAst, Variant } from '../ast.ts';
 import { I32, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
+import { stdName } from '../shadow.ts';
 import {
   buildVariant,
   close,
@@ -156,17 +157,23 @@ function emitIndex(c: Ctx, e: Of<'index'>): Type {
 /** One `let name = value` or `do value` of a block: the name it declares. */
 function emitLet(c: Ctx, l: Extract<Of<'block'>['lets'][number], { name: string }>): Binding {
   const type = c.emit(l.value, null, false);
-  // `do` drops a number (rows written, a timer's delay, an id). A Result, a Move or an Option has outcomes
-  // that would go unseen: those are matched.
-  if (l.do && type.name !== 'Int')
+  // `do` runs a call whose value is Done (wake, a function that only does something): it drops nothing. Any other
+  // value says something: the rows a write changed, a Result, a Move. Those are read, or dropped by name.
+  if (l.do && type.name !== stdName(c.B.prog, 'types', 'Done')) {
+    const name = 'name' in l.value ? l.value.name : '…';
     fail(
       l,
       'C82',
-      `\`do\` would drop ${key(type)}: ${'name' in l.value ? l.value.name : undefined} has outcomes that must be read`,
-      type.name === 'Option'
-        ? 'Use sql_exec for a statement whose rows are not read, or match the Option.'
-        : 'Match on it (or `let … else`), so each outcome is handled; `do` drops only an Int.',
+      `\`do\` runs a call whose value is Done, and ${name} gives ${key(type)}`,
+      name === 'sql_exec'
+        ? 'Read the count: `let 1 = sql_exec(…) else -> …` when the row must be there, or the guard must hold; `let _ = sql_exec(…)` when the count does not matter (an insert that always adds its row).'
+        : type.name === 'Option'
+          ? 'Match on the Option, or use `let _ = sql_exec(…)` for a statement whose rows are not read.'
+          : type.name === 'Int'
+            ? `Read the number (\`let 1 = ${name}(…) else -> …\`), or drop it on purpose with \`let _ = ${name}(…)\`; a function that only does something returns Done.`
+            : 'Match on it (or `let … else`), so each outcome is handled.',
     );
+  }
   if (CAPABILITIES.includes(type.name))
     fail(l, 'C08', 'a capability cannot be bound with let', 'Pass the parameter directly.');
   return declare(c, l.name, type, store(c, type), l);

@@ -19,7 +19,7 @@ const SWEEP = "h.state = 'confirmed' ORDER BY h.id LIMIT 1";
 const REFUNDING = "UPDATE holds SET state = 'refunding'";
 // a policy of one's own: three tries, then nothing (F4), or a type whose giving up is (F5b) or is not (F5a) declared final
 const OWN = (stop: string, give: string): Pair[] => [['waiting(decided: retry_later(timer, key: id, policy: resume(), failed: retries))', `planned(decided: again(id, failed: retries))`],
-  ['fn waiting(decided: Retry) -> View {', `type Plan {\n  Again(after: Int)\n  ${stop}\n}\n\nfn again(id: Int, failed: Int) -> Plan {\n  match {\n    failed >= 3 -> ${give}\n    else -> Again(after: wake(timer, after: 1000, key: id))\n  }\n}\n\nfn planned(decided: Plan) -> View {\n  match decided {\n    Again(after) -> "; again in " ++ decimal_text(value: after) ++ " ms"\n    Stop -> "; stopped"\n  }\n}\n\nfn waiting(decided: Retry) -> View {`]];
+  ['fn waiting(decided: Retry) -> View {', `type Plan {\n  Again(after: Int)\n  ${stop}\n}\n\nfn again(id: Int, failed: Int) -> Plan {\n  match {\n    failed >= 3 -> ${give}\n    else -> {\n      do wake(timer, after: 1000, key: id)\n      Again(after: 1000)\n    }\n  }\n}\n\nfn planned(decided: Plan) -> View {\n  match decided {\n    Again(after) -> "; again in " ++ decimal_text(value: after) ++ " ms"\n    Stop -> "; stopped"\n  }\n}\n\nfn waiting(decided: Retry) -> View {`]];
 export const round2: Mutant[] = [
   // (1) the key must be the row's key, not one computed from it
   ['4a refund timer keyed id + 1', 'apps/tickets/tickets.tape', [['do wake(after: 5000, key: id)\n      refund_hold(hold: value)', 'do wake(after: 5000, key: id + 1)\n      refund_hold(hold: value)']], ['C78', REFUNDING]],
@@ -32,7 +32,7 @@ export const round2: Mutant[] = [
   ['5d control: no refund timer; sweep OR admits refunding', 'apps/tickets/tickets.tape', [NOREFUNDWAKE, [SWEEP, "(h.state = 'confirmed' OR h.state = 'refunding') ORDER BY h.id LIMIT 1"]], []],
   // (3) a retry policy that gives up: the giving up must be declared (a final constructor), or set a timer
   ['F4 own policy gives up with a plain value', 'examples/fulfillment.tape', [['waiting(decided: retry_later(timer, key: id, policy: resume(), failed: retries))', '"; next in " ++ decimal_text(value: again(id, failed: retries))'],
-    ['fn waiting(decided: Retry) -> View {', 'fn again(id: Int, failed: Int) -> Int {\n  match {\n    failed >= 3 -> 0\n    else -> wake(timer, after: 1000, key: id)\n  }\n}\n\nfn waiting(decided: Retry) -> View {']], ['C79', 'failed >= 3 -> 0']],
+    ['fn waiting(decided: Retry) -> View {', 'fn again(id: Int, failed: Int) -> Int {\n  match {\n    failed >= 3 -> 0\n    else -> {\n      do wake(timer, after: 1000, key: id)\n      1000\n    }\n  }\n}\n\nfn waiting(decided: Retry) -> View {']], ['C79', 'failed >= 3 -> 0']],
   ['F5a own policy gives up with a constructor not declared final', 'examples/fulfillment.tape', OWN('Stop', 'Stop'), ['C79', 'failed >= 3 -> Stop']],
   ['F5b control: the same, its Stop declared final', 'examples/fulfillment.tape', OWN('Stop final', 'Stop'), []],
   // (4) woken's guards send the key to the function that reads it back

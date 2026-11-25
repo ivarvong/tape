@@ -14,7 +14,7 @@ const text = `schema "CREATE TABLE IF NOT EXISTS hits(id INTEGER PRIMARY KEY, n 
 type Hit { Hit(n: Int) }
 export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Hit, View] {
   let Wake(key) = message
-  do sql_exec(query: "INSERT INTO hits(id, n) VALUES (:key, 1) ON CONFLICT(id) DO UPDATE SET n = n + 1", key)
+  let _ = sql_exec(query: "INSERT INTO hits(id, n) VALUES (:key, 1) ON CONFLICT(id) DO UPDATE SET n = n + 1", key)
   // key 13 traps: division by zero
   Ok(value: Hit(n: 1 / (key - 13)))
 }

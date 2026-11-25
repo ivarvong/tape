@@ -623,7 +623,7 @@ Needs `Sql`. Every row, to fold with `fold_rows`, write as JSON with `write_rows
 sql_exec(query: "…", …) -> Int
 ```
 
-Needs `Sql`. Runs a write; the number of rows it changed. On a write it also takes `repeat: True`, for a write meant to apply again on each run: a count in SQL (`n = n + 1`) or an INSERT with no unique key (C54, C55; C88 refuses it where the write is safe without it); and `no_floor: True`, for a column it takes from that has no floor (C73).
+Needs `Sql`. Runs a write; the number of rows it changed, which is read: `let 1 = sql_exec(…) else -> …` when the row must be there or the guard must hold, `let _ = sql_exec(…)` when the count does not matter. On a write it also takes `repeat: True`, for a write meant to apply again on each run: a count in SQL (`n = n + 1`) or an INSERT with no unique key (C54, C55; C88 refuses it where the write is safe without it); and `no_floor: True`, for a column it takes from that has no floor (C73).
 
 ### builtin sql_move
 
@@ -676,7 +676,7 @@ Needs `Entropy`. 53 random bits, in the log.
 ### builtin wake
 
 ```tape
-wake(after: Int, key: Int) -> Int
+wake(after: Int, key: Int) -> Done
 ```
 
 Needs `Timer`. Asks the host to run the program's `export fn woken(…, message: Wake)` with `Wake(key)` after `after` ms. Setting a key again moves its time. Run it with `do wake(…)`.
@@ -739,6 +739,16 @@ private type CallError {
 ```
 
 Why a call to another object or Worker gave no reply. Timeout: the time budget ran out, and for a call that changes something the outcome is unknown until it is sent again with the same key. Unreachable: nothing answers to that name. Rejected: it refused, and says why. Skew: the two sides disagree, so nothing ran this time: they were built from different definitions of the method, or the key was used before for another message (which may have run; do not compensate for a Skew as for a refusal). Rejected and Skew are final: the callee runs a key at most once and repeats its stored reply, so the same call sent again gets the same answer; a timer that asks again does not change it (rules.ts C79 lets such an outcome leave a row for a request to move on).
+
+### type Done
+
+```tape
+type Done {
+  Done
+}
+```
+
+The value of a call run for what it does: wake gives it, and so does a function that only does something. `do f(…)` runs a call whose value is Done; a call with any other value is read (`let 1 = sql_exec(…) else -> …`), or dropped on purpose with `let _ = …`.
 
 ### type Wake
 

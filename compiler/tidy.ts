@@ -1,38 +1,48 @@
-// compiler/tidy.ts: a call run for what it does is written `do` (C83-C85).
+// compiler/tidy.ts: a call run for what it does is written as a step of its own (C83-C85).
 //
-// Three ways of running a call for what it does that `do` replaces. Each hides the order of effects: in a name
+// Three ways of running a call for what it does that a step replaces. Each hides the order of effects: in a name
 // nobody reads, in an argument list, or in arithmetic. Refused like the other rules (built anyway under rules: false).
-//   C83  `let name = call(…)` and the name is never read        -> `do call(…)`
-//   C84  a call passed to a parameter its function never reads   -> `do call(…)` on the line before, and drop the parameter
-//   C85  a call multiplied by the literal 0                      -> `do call(…)`
-// "A call" here is one that does something: sql_*, wake, call, ask, now, random, rollback, or a function that
+//   C83  `let name = call(…)` and the name is never read        -> a step: `do call(…)`, or what its value needs
+//   C84  a call passed to a parameter its function never reads   -> that step on the line before, and drop the parameter
+//   C85  a call multiplied by the literal 0                      -> that step
+// The step is `do call(…)` for a call whose value is Done (wake, a function that only does something); `let 1 =
+// sql_exec(…) else -> …` or `let _ = sql_exec(…)` for a count of rows; `let _ = …` for another Int; a match for the
+// rest. "A call" here is one that does something: sql_*, wake, call, ask, now, random, rollback, or a function that
 // reaches one. A parameter or a name that is never read and holds no such call is dead, not hidden work.
 import { type At, type Call, type Expr, type FnDecl, type Program, type TypeAst, eachExpr, partsOf } from './ast.ts';
 import type { Problem } from './common.ts';
+import { stdName } from './shadow.ts';
 import { CAPABILITIES } from './types.ts';
 
 const EFFECTS = ['sql_exec', 'sql_first', 'sql_all', 'sql_move', 'wake', 'call', 'ask', 'random', 'now', 'rollback'];
-// the effects whose value is not an Int, so `do` refuses them (C82), and what each gives
+// what each effect gives but wake, whose value is Done, the one `do` runs (C82)
 const GIVES: Readonly<Record<string, string>> = {
+  sql_exec: 'Int',
   sql_first: 'an Option',
   sql_all: 'Rows',
   sql_move: 'a Move',
   call: 'a Result',
   ask: 'a Result',
+  random: 'Int',
+  now: 'Int',
   rollback: 'a Buf',
 };
 const typeText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(typeText).join(', ')}]` : t.name);
-/** How to run `name` for what it does: `do`, or, for a value `do` cannot drop, what to do with it instead. */
+/** How to run `name` as a step of its own: `do` for a Done, or, for a value `do` does not run, what to do with it. */
 function runIt(r: Reading, name: string): string {
   const gives = r.gives.get(name);
   if (gives === undefined) return `\`do ${name}(…)\``;
-  if (name === 'sql_first' || name === 'sql_all') return `\`do sql_exec(…)\`, for a statement whose rows are not read`;
-  return `a match on what ${name} gives (${gives}, which \`do\` does not drop: C82), with an arm for each outcome`;
+  if (name === 'sql_exec')
+    return '`let 1 = sql_exec(…) else -> …` when the row must be there or the guard must hold, or `let _ = sql_exec(…)` when the count does not matter';
+  if (name === 'sql_first' || name === 'sql_all')
+    return `\`let _ = sql_exec(…)\`, for a statement whose rows are not read`;
+  if (gives === 'Int') return `\`let _ = ${name}(…)\`, which drops its Int on purpose`;
+  return `a match on what ${name} gives (${gives}, which \`do\` does not run: C82), with an arm for each outcome`;
 }
 /** What tidy reads a program through: the functions that do something, and what each function reads. */
 type Reading = {
   doing: Set<string>;
-  /** a function that does something and gives a value `do` cannot drop: what it gives (`do` drops only an Int, C82) */
+  /** a function that does something and gives a value other than Done, which `do` does not run (C82): what it gives */
   gives: Map<string, string>;
   reads: Map<FnDecl, Set<string>>;
   /** function -> the parameters it never reads (capabilities aside) */
@@ -72,7 +82,8 @@ function reading(prog: Program): Reading {
     if (dead.length > 0 && !f.exported && f.name !== 'handle') unread.set(f.name, new Set(dead));
   }
   const gives = new Map(Object.entries(GIVES));
-  for (const f of prog.fns.values()) if (f.retAst.name !== 'Int') gives.set(f.name, typeText(f.retAst));
+  const done = stdName(prog, 'types', 'Done');
+  for (const f of prog.fns.values()) if (f.retAst.name !== done) gives.set(f.name, typeText(f.retAst));
   return { doing: doingOf(prog), gives, reads, unread };
 }
 // the problems at one expression of f

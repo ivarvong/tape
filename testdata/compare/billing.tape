@@ -216,7 +216,7 @@ fn charged(
 ) -> Outcome {
   match reply {
     Ok(value) -> {
-      do sql_exec(
+      let _ = sql_exec(
         query: "INSERT INTO invoices(sub, period, amount) VALUES (:id, :period, :price) \
             ON CONFLICT(sub, period) DO NOTHING",
         id,

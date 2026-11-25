@@ -8,6 +8,7 @@ import { I32, fail, loadOp, sleb, stemOf, storeOp, uleb, utf8 } from '../common.
 import { ROW_CALLS } from '../rows.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, RETIRED, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
+import { stdName } from '../shadow.ts';
 import { fresh, get, mark, need, refines, releaseLevel, set } from './fn.ts';
 import type { Binding, Build, CExpr, Ctx, Stored } from './fn.ts';
 import type { Compiled } from './assemble.ts';
@@ -75,7 +76,7 @@ const ROW_RESULT: Readonly<Record<string, string>> = { sql_all: 'Rows', sql_firs
 
 /** The built-ins whose result is one type whatever they are given. */
 const MONO: ReadonlyMap<string, Type> = new Map([
-  ...['len', 'size', 'wrapping_add', 'wrapping_sub', 'wrapping_mul', 'trunc', 'to_int', 'now', 'random', 'wake'].map(
+  ...['len', 'size', 'wrapping_add', 'wrapping_sub', 'wrapping_mul', 'trunc', 'to_int', 'now', 'random'].map(
     (n): [string, Type] => [n, INT],
   ),
   ...['slice', 'freeze'].map((n): [string, Type] => [n, VIEW]),
@@ -90,6 +91,7 @@ function peekCall(c: Ctx, e: Call): Type | null {
     const r = e.args.find(x => x.label === 'row')?.value;
     return r?.k === 'ctor' && c.B.types.has(r.name) ? T(ROW_RESULT[e.name] ?? '', T(r.name)) : null;
   }
+  if (e.name === 'wake') return T(stdName(c.B.prog, 'types', 'Done'));
   if (INTRINSICS.has(e.name)) return MONO.get(e.name) ?? null;
   const g = c.B.find(e.name, c.f.file, e);
   if (!g) return null;

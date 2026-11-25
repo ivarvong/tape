@@ -637,7 +637,7 @@ fn applied(key: View, once: View, t: Int, cutoff: Int, status: Int, version: Int
         version,
         t
       )
-      do sql_exec(
+      let _ = sql_exec(
         query: "DELETE FROM key_ops WHERE (op, key) IN (SELECT op, key FROM key_ops \
             WHERE at < :cutoff LIMIT 32)",
         cutoff

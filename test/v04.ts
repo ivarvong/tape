@@ -64,7 +64,7 @@ fn received(id: View) -> Buf {
 }
 
 fn credit(k: View, by: Int) -> Buf {
-  do sql_exec(query: "INSERT INTO a(k, b) VALUES (:k, :by) ON CONFLICT(k) DO UPDATE SET b = b + :by", k, by)
+  let _ = sql_exec(query: "INSERT INTO a(k, b) VALUES (:k, :by) ON CONFLICT(k) DO UPDATE SET b = b + :by", k, by)
   respond(status: 200) |> append(view: "ok")
 }
 `;

@@ -26,7 +26,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 
 fn added(body: View) -> Buf {
   let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else -> respond(status: 400)
-  do sql_exec(query: "INSERT INTO items(name, qty) VALUES (:name, :qty)", name, qty, repeat: True)
+  let _ = sql_exec(query: "INSERT INTO items(name, qty) VALUES (:name, :qty)", name, qty, repeat: True)
   respond(status: 201)
 }
 

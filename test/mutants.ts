@@ -24,17 +24,17 @@ ok(
 ok(
   'avg() may be NULL: it cannot be written to a NOT NULL column (C69)',
   codes(
-    h('  do sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  respond(status: 200)'),
+    h('  let _ = sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  respond(status: 200)'),
   ) === 'C69' &&
     said(
-      h('  do sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  respond(status: 200)'),
+      h('  let _ = sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  respond(status: 200)'),
     ).includes('may be NULL'),
 );
 ok(
   'and with coalesce it can',
   codes(
     h(
-      '  do sql_exec(query: "UPDATE t SET mean = coalesce((SELECT avg(n) FROM t), 0.0) WHERE id = 1")\n  respond(status: 200)',
+      '  let _ = sql_exec(query: "UPDATE t SET mean = coalesce((SELECT avg(n) FROM t), 0.0) WHERE id = 1")\n  respond(status: 200)',
     ),
   ) === 'builds',
 );
@@ -43,7 +43,7 @@ ok(
   'an aggregate in a VALUES row is refused (C68)',
   codes(
     h(
-      '  do sql_exec(query: "INSERT INTO t(id, n) VALUES (7, count(*)) ON CONFLICT(id) DO NOTHING")\n  respond(status: 200)',
+      '  let _ = sql_exec(query: "INSERT INTO t(id, n) VALUES (7, count(*)) ON CONFLICT(id) DO NOTHING")\n  respond(status: 200)',
     ),
   ) === 'C68',
 );

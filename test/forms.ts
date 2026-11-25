@@ -647,11 +647,11 @@ type Count { Count(n: Int) }
 type Done { Done(key: Int, n: Int) }
 fn handle(req: View, db: Sql, timer: Timer) -> Buf {
   match req {
-    "POST /later/" ++ decimal(ms) -> respond(status: 202) |> write_int(value: wake(timer, after: ms, key: 7))
+    "POST /later/" ++ decimal(ms) -> later(timer, ms, key: 7, status: 202)
     "POST /backoff/" ++ decimal(n) -> respond(status: 202) |> append(view: said(decided: retry_later(timer, key: 8, policy: Backoff(first: 100, factor: 10, most: 5000, tries: 3), failed: n)))
-    "POST /sooner" -> respond(status: 202) |> write_int(value: wake(timer, after: 0 - 40, key: 7))
-    "POST /undo" ++ _ -> rollback(out: respond(status: 500) |> write_int(value: wake(timer, after: 10, key: 9)))
-    "POST /trap" ++ _ -> respond(status: 202) |> write_int(value: wake(timer, after: 0, key: 0))
+    "POST /sooner" -> later(timer, ms: 0 - 40, key: 7, status: 202)
+    "POST /undo" ++ _ -> rollback(out: later(timer, ms: 10, key: 9, status: 500))
+    "POST /trap" ++ _ -> later(timer, ms: 0, key: 0, status: 202)
     _ -> respond(status: 404)
   }
 }
@@ -660,6 +660,10 @@ fn said(decided: Retry) -> View {
     RetryIn(after, attempt) -> "again in " ++ decimal_text(value: after) ++ " ms, attempt " ++ decimal_text(value: attempt)
     GaveUp(tries) -> "gave up after " ++ decimal_text(value: tries)
   }
+}
+fn later(timer: Timer, ms: Int, key: Int, status: Int) -> Buf {
+  do wake(timer, after: ms, key)
+  respond(status)
 }
 export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   let Wake(key) = message
@@ -685,10 +689,17 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     [true, false],
   );
   const set = await run('POST /later/250\n');
+  // wake gives Done, run with `do`; the delay the host set is in the log (in a program whose own Done shadows std's)
+  const afterOf = (effects: readonly Effect[]): number => effects.find(isWake)?.after ?? Number.NaN;
   T(
-    'timer: wake answers the delay it set, and the log records { wake, after, due }',
-    [set.text, Object.keys(set.effects[1] ?? {}), dueOf(set.effects) - (headOf(set.effects)?.at ?? 0) >= 250],
-    ['202\n250', ['wake', 'after', 'due'], true],
+    'timer: wake gives Done, and the log records { wake, after, due } with the delay it set',
+    [
+      set.text,
+      afterOf(set.effects),
+      Object.keys(set.effects[1] ?? {}),
+      dueOf(set.effects) - (headOf(set.effects)?.at ?? 0) >= 250,
+    ],
+    ['202\n', 250, ['wake', 'after', 'due'], true],
   );
   T(
     'timer: it is kept in _wakes, and is not due yet',
@@ -698,7 +709,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   T(
     'timer: a replay answers wake from the log, setting nothing',
     [dec.decode(replay(mod, enc.encode('POST /later/250'), set.effects)), pending().length],
-    ['202\n250', 1],
+    ['202\n', 1],
   );
   await run('POST /sooner');
   T(
@@ -706,7 +717,11 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     [pending().length, Number(pending()[0]?.due) <= Date.now()],
     [1, true],
   );
-  T('timer: a delay longer than 30 days is 30 days', (await run('POST /later/99999999999\n')).text, '202\n2592000000');
+  T(
+    'timer: a delay longer than 30 days is 30 days',
+    afterOf((await run('POST /later/99999999999\n')).effects),
+    2592000000,
+  );
   await run('POST /later/0\n');
   const woke = await app.wake(7, { transaction: tx });
   T(
@@ -722,7 +737,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     ['ok', '{"key":7,"n":1}', 'woken', 7, true, 0],
   );
   T('timer: a key that is not due (or not set) is not run', await app.wake(7, { transaction: tx }), null);
-  T('timer: a run rolled back keeps no timer', [(await run('POST /undo\n')).text, pending().length], ['500\n10', 0]);
+  T('timer: a run rolled back keeps no timer', [(await run('POST /undo\n')).text, pending().length], ['500\n', 0]);
   await run('POST /trap\n');
   T(
     'timer: a woken run that traps is not retried by the timer: its row goes, the trap reaches the host',
@@ -755,7 +770,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   T(
     'timer: setting a timer without exporting woken is a guiding error',
     errorOf(timers.replace(/export fn woken[^]*$/, '')),
-    'C50 4: this program sets a timer (wake), but nothing exports `woken`',
+    'C50 20: this program sets a timer (wake), but nothing exports `woken`',
   );
   T(
     'timer: woken must take a Wake',
@@ -765,12 +780,12 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
         'message: Done) -> Result[Done, View] {\n  let Done(key) = message',
       ),
     ),
-    'C50 20: woken takes Done, but the host sends a Wake',
+    'C50 24: woken takes Done, but the host sends a Wake',
   );
   T(
     'timer: wake is missing an argument',
-    errorOf(timers.replace('wake(timer, after: ms, key: 7)', 'wake(timer, after: ms)')),
-    'C13 6: wake is missing argument key',
+    errorOf(timers.replace('wake(timer, after: ms, key)', 'wake(timer, after: ms)')),
+    'C13 21: wake is missing argument key',
   );
 
   // fulfillment: a step that does not answer is sent again by its timer; no POST /advance

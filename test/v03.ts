@@ -804,7 +804,7 @@ fn moved(id: View, from: View, amount: Int) -> Buf {
     codes(
       claimed.replace(
         'fn moved(id: View, from: View, amount: Int) -> Buf {\n',
-        'fn moved(id: View, from: View, amount: Int) -> Buf {\n  do sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
+        'fn moved(id: View, from: View, amount: Int) -> Buf {\n  let _ = sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
       ),
       ['handle'],
     ).map(x => x.split(':')[0]),

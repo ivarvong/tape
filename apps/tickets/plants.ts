@@ -73,20 +73,20 @@ export const plants: Plant[] = [
   ),
   P(
     'seats back with a set update outside the move',
-    '      do sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty, tier)\n      do promote(tier)\n      ShowHold(status: 200, hold)\n    }\n    Raced(now) -> ShowHold(status: 409, hold: now)',
-    '      do promote(tier)\n      ShowHold(status: 200, hold)\n    }\n    Raced(now) -> {\n      do sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty: now.qty, tier: now.tier)\n      ShowHold(status: 409, hold: now)\n    }',
+    '      let 1 = sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty, tier) else -> Problem(status: 500, reason: "the hold ended, and its tier \\(tier) is gone")\n      do promote(tier)\n      ShowHold(status: 200, hold)\n    }\n    Raced(now) -> ShowHold(status: 409, hold: now)',
+    '      do promote(tier)\n      ShowHold(status: 200, hold)\n    }\n    Raced(now) -> {\n      let _ = sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty: now.qty, tier: now.tier)\n      ShowHold(status: 409, hold: now)\n    }',
   ),
   P(
     'a refund that does not give the seats back',
-    '      do sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty, tier)\n      do promote(tier)\n      ShowHold(status: 200, hold)\n    }\n    Raced(now) -> ShowHold(status: 200, hold: now)',
-    '      do promote(tier)\n      ShowHold(status: 200, hold)\n    }\n    Raced(now) -> ShowHold(status: 200, hold: now)',
+    '      let 1 = sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty, tier) else -> Problem(status: 500, reason: "hold \\(id) is refunded, and its tier \\(tier) is gone")\n      do promote(tier)\n      refunded_all(hold, tickets)',
+    '      do promote(tier)\n      refunded_all(hold, tickets)',
   ),
   P(
     'tickets issued without ON CONFLICT',
     'VALUES (:hold, :seat, :buyer) ON CONFLICT(hold, seat) DO NOTHING"',
     'VALUES (:hold, :seat, :buyer)"',
   ),
-  P('one ticket too few', '    seat > qty -> qty', '    seat >= qty -> qty'),
+  P('one ticket too few', '    seat > qty -> Done', '    seat >= qty -> Done'),
   P(
     'a hold without its expiry timer',
     '  do wake(after: ms, key: hold.id)\n  ShowHold(status: 201, hold)',
@@ -109,7 +109,7 @@ export const plants: Plant[] = [
   ),
   P(
     'cancel sweep does not drop the waitlist',
-    "  do sql_exec(query: \"UPDATE waitlist SET state = 'dropped' WHERE state = 'waiting' AND tier IN (SELECT id FROM tiers WHERE event = :event)\", event)\n",
+    "  let _ = sql_exec(query: \"UPDATE waitlist SET state = 'dropped' WHERE state = 'waiting' AND tier IN (SELECT id FROM tiers WHERE event = :event)\", event)\n",
     '',
   ),
   P(

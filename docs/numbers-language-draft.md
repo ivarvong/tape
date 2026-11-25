@@ -156,7 +156,7 @@ Programs refused whole:
 +}
 +
 +fn handle(raw: View, db: Sql) -> Buf {
-+  do sql_exec(query: "UPDATE m SET reading = :r WHERE id = 1", r: 21.5f, repeat: True)
++  let _ = sql_exec(query: "UPDATE m SET reading = :r WHERE id = 1", r: 21.5f, repeat: True)
 +  respond(status: 200)
 +}
 +```

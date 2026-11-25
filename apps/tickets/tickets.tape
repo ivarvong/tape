@@ -179,7 +179,7 @@ type Outcome {
   ShowWait(status: Int, wait: Wait)
   ShowTier(status: Int, tier: Tier)
   Problem(status: Int, reason: View)
-  Done(status: Int, what: View)
+  Reported(status: Int, what: View)
   // the request's writes are undone, and it answers this
   Undo(status: Int, reason: View)
 }
@@ -287,8 +287,7 @@ fn new_event(body: View) -> Outcome {
       found: sql_first(row: Event, query: "SELECT * FROM events WHERE client = :key", key)
     )
   }
-  do add_tiers(event: event.id, tiers: listed(tiers))
-  ShowEvent(status: 201, event)
+  added(event, tiers: listed(tiers))
 }
 
 fn listed(tiers: Option[List[NewTier]]) -> List[NewTier] {
@@ -299,11 +298,12 @@ fn listed(tiers: Option[List[NewTier]]) -> List[NewTier] {
 }
 
 // The tiers sent with a new event, in the event's own transaction: all of them, or (the event's key seen before)
-// none again.
-fn add_tiers(event: Int, tiers: List[NewTier]) -> Int {
+// none again. A tier whose key is taken (by another event's tier, or twice in one list) is no tier of this event:
+// the event is undone and the answer says which key.
+fn added(event: Event, tiers: List[NewTier]) -> Outcome {
   match tiers {
     Cons(head: NewTier(key, name, price, capacity), tail) -> {
-      do sql_exec(
+      let 1 = sql_exec(
         query: "INSERT INTO tiers(client, event, name, price, capacity, left) \
             SELECT :key, id, :name, :price, :capacity, :capacity FROM events WHERE id = :event \
             AND state = 'onsale' ON CONFLICT(client) DO NOTHING",
@@ -311,11 +311,11 @@ fn add_tiers(event: Int, tiers: List[NewTier]) -> Int {
         name,
         price,
         capacity,
-        event
-      )
-      add_tiers(event, tiers: tail)
+        event: event.id
+      ) else -> Undo(status: 409, reason: "the tier key \(key) is taken by another tier")
+      added(event, tiers: tail)
     }
-    Nil -> 0
+    Nil -> ShowEvent(status: 201, event)
   }
 }
 
@@ -565,11 +565,11 @@ fn confirmed(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn issue(hold: Int, buyer: View, seat: Int, qty: Int) -> Int {
+fn issue(hold: Int, buyer: View, seat: Int, qty: Int) -> Done {
   match {
-    seat > qty -> qty
+    seat > qty -> Done
     else -> {
-      do sql_exec(
+      let _ = sql_exec(
         query: "INSERT INTO tickets(hold, seat, owner) VALUES (:hold, :seat, :buyer) \
             ON CONFLICT(hold, seat) DO NOTHING",
         hold,
@@ -616,7 +616,14 @@ fn release(id: Int) -> Outcome {
 fn ended(moved: Move[Hold]) -> Outcome {
   match moved {
     Moved(value: hold = Hold(tier, qty)) -> {
-      do sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty, tier)
+      let 1 = sql_exec(
+        query: "UPDATE tiers SET left = left + :qty WHERE id = :tier",
+        qty,
+        tier
+      ) else -> Problem(
+        status: 500,
+        reason: "the hold ended, and its tier \(tier) is gone"
+      )
       do promote(tier)
       ShowHold(status: 200, hold)
     }
@@ -627,7 +634,7 @@ fn ended(moved: Move[Hold]) -> Outcome {
 
 // The oldest waiting entry whose seats fit gets a hold of its own, with its own timer. One per seats returned is
 // enough to keep the line moving: every ended hold promotes again.
-fn promote(tier: Int) -> Int {
+fn promote(tier: Int) -> Done {
   let Some(
     value: Wait(id, buyer, qty)
   ) = sql_first(
@@ -637,7 +644,7 @@ fn promote(tier: Int) -> Int {
         WHERE events.id = t.event) = 'onsale' ORDER BY w.id LIMIT 1",
     tier
   ) else {
-    None -> 0
+    None -> Done
   }
   let key = "waitlist-\(id)"
   let Some(value: Price(price)) = sql_first(
@@ -648,7 +655,7 @@ fn promote(tier: Int) -> Int {
     tier,
     key
   ) else {
-    None -> 0
+    None -> Done
   }
   let ms = 1000 * flags.hold_seconds
   let Some(value: hold) = sql_first(
@@ -663,7 +670,7 @@ fn promote(tier: Int) -> Int {
     amount: price * qty,
     expires: now() + ms
   ) else {
-    None -> 0
+    None -> Done
   }
   // read and moved in one transaction, so it is Moved; the other outcomes are typed all the same
   match sql_move(
@@ -675,10 +682,10 @@ fn promote(tier: Int) -> Int {
   ) {
     Moved -> {
       do wake(after: ms, key: hold.id)
-      hold.id
+      Done
     }
-    Raced(now) -> 0
-    NoRow -> 0
+    Raced(now) -> Done
+    NoRow -> Done
   }
 }
 
@@ -731,7 +738,7 @@ fn summary(outcome: Outcome) -> Woke {
   match outcome {
     ShowHold(status, hold: Hold(id, state)) -> Woke(status, what: "hold \(id) \(state)")
     Problem(status, reason) -> Woke(status, what: reason)
-    Done(status, what) -> Woke(status, what)
+    Reported(status, what) -> Woke(status, what)
     ShowEvent(status) -> Woke(status, what: "event")
     _ -> Woke(status: 200, what: "")
   }
@@ -896,16 +903,36 @@ fn refund_ask_again(id: Int, decided: Retry) -> Outcome {
 fn settled(moved: Move[Hold]) -> Outcome {
   match moved {
     Moved(value: hold = Hold(id, tier, qty)) -> {
-      do sql_exec(
+      let tickets = sql_exec(
         query: "UPDATE tickets SET state = 'refunded' WHERE hold = :id AND state = 'valid'",
         id
       )
-      do sql_exec(query: "UPDATE tiers SET left = left + :qty WHERE id = :tier", qty, tier)
+      let 1 = sql_exec(
+        query: "UPDATE tiers SET left = left + :qty WHERE id = :tier",
+        qty,
+        tier
+      ) else -> Problem(
+        status: 500,
+        reason: "hold \(id) is refunded, and its tier \(tier) is gone"
+      )
       do promote(tier)
-      ShowHold(status: 200, hold)
+      refunded_all(hold, tickets)
     }
     Raced(now) -> ShowHold(status: 200, hold: now)
     NoRow -> Problem(status: 404, reason: "no such hold")
+  }
+}
+
+// A refunded hold had one valid ticket for each seat: fewer means a ticket was refunded or lost before the hold was,
+// and the answer says so rather than that all is well.
+fn refunded_all(hold: Hold, tickets: Int) -> Outcome {
+  let Hold(id, qty) = hold
+  match {
+    tickets == qty -> ShowHold(status: 200, hold)
+    else -> Problem(
+      status: 500,
+      reason: "hold \(id) is refunded, but only \(tickets) of its \(qty) tickets were valid"
+    )
   }
 }
 
@@ -962,19 +989,19 @@ fn restarted(event: Event, moved: Move[Count]) -> Outcome {
 // and come back for the next. A charge still out (paying) is waited for: its own timer settles it, and it is
 // refunded on a later sweep.
 fn sweep(event: Int) -> Outcome {
-  do sql_exec(
+  let _ = sql_exec(
     query: "UPDATE holds SET state = 'released' WHERE state = 'held' AND tier IN (SELECT id \
         FROM tiers WHERE event = :event)",
     event
   )
   // the released seats are counted back from the holds that still take some (a set, so a second sweep is the same)
-  do sql_exec(
+  let _ = sql_exec(
     query: "UPDATE tiers SET left = capacity - (SELECT coalesce(sum(qty), 0) FROM holds \
         WHERE holds.tier = tiers.id AND holds.state IN ('held', 'paying', 'confirmed', \
         'refunding', 'refund_failed', 'unresolved', 'refund_unresolved')) WHERE event = :event",
     event
   )
-  do sql_exec(
+  let _ = sql_exec(
     query: "UPDATE waitlist SET state = 'dropped' WHERE state = 'waiting' AND tier IN (SELECT id \
         FROM tiers WHERE event = :event)",
     event
@@ -1014,10 +1041,10 @@ fn sweep(event: Int) -> Outcome {
 }
 
 // Whether the reset was this run's or another's, the count is none or was just counted again: nothing more to do.
-fn moved_on(moved: Move[Count]) -> Int {
+fn moved_on(moved: Move[Count]) -> Done {
   match moved {
-    Moved -> 1
-    _ -> 0
+    Moved -> Done
+    _ -> Done
   }
 }
 
@@ -1045,7 +1072,7 @@ fn swept(event: Int, waits: Int, open: Option[Count]) -> Outcome {
         event
       )
     )
-    _ -> Done(status: 200, what: "every order of this event is refunded")
+    _ -> Reported(status: 200, what: "every order of this event is refunded")
   }
 }
 
@@ -1061,9 +1088,9 @@ fn wait_more(event: Int, decided: Retry) -> Outcome {
   match decided {
     RetryIn(after) -> {
       do wake(after, key: 0 - event)
-      Done(status: 202, what: "waiting for charges still out")
+      Reported(status: 202, what: "waiting for charges still out")
     }
-    GaveUp(tries) -> Done(
+    GaveUp(tries) -> Reported(
       status: 202,
       what: "gave up waiting for charges still out after \(tries) waits; cancel the event again \
           to resume"
@@ -1101,7 +1128,7 @@ fn rendered(outcome: Outcome) -> Buf {
     ShowWait(status, wait) -> write_json(out: json_head(status), value: wait)
     ShowTier(status, tier) -> write_json(out: json_head(status), value: tier)
     Problem(status, reason) -> write_json(out: json_head(status), value: Failed(error: reason))
-    Done(status, what) -> write_json(out: json_head(status), value: Finished(done: what))
+    Reported(status, what) -> write_json(out: json_head(status), value: Finished(done: what))
     Undo(status, reason) -> rollback(
       out: write_json(out: json_head(status), value: Failed(error: reason))
     )

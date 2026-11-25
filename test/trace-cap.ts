@@ -13,7 +13,7 @@ const program = `schema "CREATE TABLE IF NOT EXISTS seen(n INTEGER NOT NULL)"
 
 fn handle(raw: View, db: Sql) -> Buf {
   let n = count(v: request(raw).body, at: 0, k: 0)
-  do sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
+  let _ = sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
   respond(status: 200) |> append(view: "\\(n)")
 }
 

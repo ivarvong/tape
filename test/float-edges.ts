@@ -38,7 +38,7 @@ fn put(body: View, db: Sql) -> Buf {
   let Ok(value: In(id, r, rs)) = decode(json: body, as: In) else {
     Err(error) -> respond(status: 400) |> append(view: error)
   }
-  do sql_exec(query: "INSERT INTO readings(id, r) VALUES (:id, :r) ON CONFLICT(id) DO UPDATE SET r = excluded.r", id, r)
+  let _ = sql_exec(query: "INSERT INTO readings(id, r) VALUES (:id, :r) ON CONFLICT(id) DO UPDATE SET r = excluded.r", id, r)
   let Some(value: Reading(r: back)) = sql_first(row: Reading, query: "SELECT id, r FROM readings WHERE id = :id", id) else -> respond(status: 404)
   respond_as(status: 200, content: Json) |> write_json(value: Out(r, twice: r * 2f, rs, read: back))
 }

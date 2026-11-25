@@ -113,7 +113,7 @@ type Status { Status(overall: View, components: List[Component], incidents: List
 type Item { Item(id: View, title: View, content_text: View, date_published: View) }
 type Feed { Feed(version: View, title: View, home_page_url: View, items: List[Item]) }
 type Line { Line(id: Int, at: Int, title: View, state: View, body: View) }
-type Done { Done(component: Int, state: View) }
+type Ended { Ended(component: Int, state: View) }
 type Problem { Problem(error: View) }
 
 fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
@@ -139,7 +139,7 @@ fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
 }
 
 // a maintenance window ends: the component is operational again, unless someone moved it first
-export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Done, View] {
+export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Ended, View] {
   let Wake(key) = message
   match sql_move(
     row: Component,
@@ -148,8 +148,8 @@ export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Done, View] {
     key,
     at: now()
   ) {
-    Moved(value) -> Ok(value: Done(component: key, state: value.state))
-    Raced(now) -> Ok(value: Done(component: key, state: now.state))
+    Moved(value) -> Ok(value: Ended(component: key, state: value.state))
+    Raced(now) -> Ok(value: Ended(component: key, state: now.state))
     NoRow -> Err(error: "no component \(key)")
   }
 }
@@ -260,7 +260,7 @@ fn opened(body: View) -> Buf {
     status: 200,
     found: sql_first(row: Incident, query: "SELECT * FROM incidents WHERE client = :key", key)
   )
-  do sql_exec(
+  let _ = sql_exec(
     query: "INSERT INTO updates(client, incident, state, body, at) \
         VALUES (:key, :incident, 'investigating', :first, :at)",
     key,
@@ -346,11 +346,11 @@ fn updated(id: Int, body: View) -> Buf {
   }
 }
 
-// a component moved along with an incident: 1 if it moved; one already there, or past it, stays as it is
-fn moved_or_not(m: Move[Component]) -> Int {
+// a component moved along with an incident; one already there, or past it, stays as it is
+fn moved_or_not(m: Move[Component]) -> Done {
   match m {
-    Moved -> 1
-    _ -> 0
+    Moved -> Done
+    _ -> Done
   }
 }
 

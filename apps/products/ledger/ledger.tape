@@ -186,8 +186,16 @@ fn sent(body: View) -> Buf {
   let 1 = take(from, amount) else -> rollback(
     out: problem(status: 409, error: "\(from) has less than \(amount)")
   )
-  do sql_exec(query: "UPDATE accounts SET balance = balance + :amount WHERE id = :to", to, amount)
-  do sql_exec(
+  // the transfer's row was made only if both accounts were there; the credit still reads its count, so a credit that
+  // finds no account undoes the debit rather than lose the amount
+  let 1 = sql_exec(
+    query: "UPDATE accounts SET balance = balance + :amount WHERE id = :to",
+    to,
+    amount
+  ) else -> rollback(
+    out: problem(status: 404, error: "no account \(to) to credit")
+  )
+  let _ = sql_exec(
     query: "INSERT INTO entries(transfer, account, amount) \
         VALUES (:id, :from, -:amount), (:id, :to, :amount)",
     id: t.id,

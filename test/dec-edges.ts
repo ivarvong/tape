@@ -43,7 +43,7 @@ fn put(body: View, db: Sql) -> Buf {
   let Ok(value: In(id, amount, fee, parts)) = decode(json: body, as: In) else {
     Err(error) -> respond(status: 400) |> append(view: error)
   }
-  do sql_exec(query: "INSERT INTO pay(id, amount, fee) VALUES (:id, :amount, :fee) ON CONFLICT(id) DO UPDATE SET amount = excluded.amount, fee = excluded.fee", id, amount, fee: ofFee(fee))
+  let _ = sql_exec(query: "INSERT INTO pay(id, amount, fee) VALUES (:id, :amount, :fee) ON CONFLICT(id) DO UPDATE SET amount = excluded.amount, fee = excluded.fee", id, amount, fee: ofFee(fee))
   let Some(value: Paid(amount: back, fee: kept)) = sql_first(row: Paid, query: "SELECT id, amount, fee FROM pay WHERE id = :id", id) else -> respond(status: 404)
   let Some(value: units) = sql_first(row: Units, query: "SELECT amount AS units FROM pay WHERE id = :id", id) else -> respond(status: 404)
   respond_as(status: 200, content: Json)

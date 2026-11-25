@@ -201,10 +201,12 @@ fn sale(id: Int) -> Buf {
 fn declined(section: View, qty: Int, reason: View, moved: Move[Held]) -> Buf {
   match moved {
     Moved(value) -> {
-      do sql_exec(
+      let 1 = sql_exec(
         query: "UPDATE sections SET seats = seats + :qty WHERE name = :section",
         qty,
         section
+      ) else -> rollback(
+        out: problem(status: 500, reason: "the sale's section \(section) is gone")
       )
       problem(status: 402, reason)
     }

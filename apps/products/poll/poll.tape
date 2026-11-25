@@ -140,19 +140,18 @@ fn again(found: Option[Poll]) -> Outcome {
 }
 
 // each option, numbered from 0; the claim of the poll's key above makes these run once
-fn add_options(poll: Int, options: List[Label], idx: Int) -> Int {
+fn add_options(poll: Int, options: List[Label], idx: Int) -> Done {
   match options {
-    Cons(head, tail) -> sql_exec(
-      query: "INSERT INTO options(poll, idx, label) VALUES (:poll, :idx, :head)",
-      poll,
-      idx,
-      head
-    ) + add_options(
-      poll,
-      options: tail,
-      idx: idx + 1
-    )
-    Nil -> 0
+    Cons(head, tail) -> {
+      let _ = sql_exec(
+        query: "INSERT INTO options(poll, idx, label) VALUES (:poll, :idx, :head)",
+        poll,
+        idx,
+        head
+      )
+      add_options(poll, options: tail, idx: idx + 1)
+    }
+    Nil -> Done
   }
 }
 

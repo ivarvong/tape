@@ -57,7 +57,7 @@ fn added(body: View) -> Buf {
   let Ok(value: NewItem(name, region, qty)) = decode(json: body, as: NewItem) else {
     Err(error) -> respond(status: 400) |> append(view: error)
   }
-  do sql_exec(
+  let _ = sql_exec(
     query: "INSERT INTO items(name, region, qty, state) VALUES (:name, :region, :qty, 'open')",
     name,
     region,
@@ -175,7 +175,7 @@ const said = (body: string): string => {
 const into = said(`
 fn handle(raw: View, db: Sql) -> Buf {
   let Ok(value: NewItem(region)) = decode(json: raw, as: NewItem) else -> respond(status: 400)
-  do sql_exec(query: "INSERT INTO items(name, state) VALUES (:region, 'open')", region, repeat: True)
+  let _ = sql_exec(query: "INSERT INTO items(name, state) VALUES (:region, 'open')", region, repeat: True)
   respond(status: 200)
 }
 `);

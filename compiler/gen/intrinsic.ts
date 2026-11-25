@@ -281,7 +281,7 @@ function next(u: Use): Type {
 
 // ---- capabilities
 
-// wake(timer, after: ms, key: n) -> the delay the host set (after, kept within 0 ms to 30 days)
+// wake(timer, after: ms, key: n) -> Done: a timer, set for `after` kept within 0 ms to 30 days
 function wake(c: Ctx, e: Call): Type {
   const arg = (l: string): Arg =>
     e.args.find(a => a.label === l) ??
@@ -305,8 +305,11 @@ function wake(c: Ctx, e: Call): Type {
   need(c, c.emit(arg('key').value, INT, false), INT, arg('key'), 'argument key');
   c.code.push(0xb9);
   need(c, c.emit(arg('after').value, INT, false), INT, arg('after'), 'argument after');
-  c.code.push(0xb9, 0x10, ...uleb(c.B.WAKE_IMPORT), 0xfc, 0x06);
-  return INT;
+  // the host answers the delay it set; the program is given Done, the value of a call run for what it does
+  c.code.push(0xb9, 0x10, ...uleb(c.B.WAKE_IMPORT), 0x1a);
+  const done = T(stdName(c.B.prog, 'types', 'Done'));
+  buildVariant(c, c.B.adtOf(done, e), 0, []);
+  return done;
 }
 
 // remote(of: shards, index: i): one Remote of a family; which one is decided at run time, so the number of

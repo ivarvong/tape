@@ -196,7 +196,7 @@ fn repeated(box: View, found: Option[Delivery]) -> Buf {
 
 // A new delivery is kept, and the box is cut back to its newest 50.
 fn stored(status: Int, box: View, d: Delivery, duplicate: Bool) -> Buf {
-  do sql_exec(
+  let _ = sql_exec(
     query: "DELETE FROM deliveries WHERE box = :box AND seq NOT IN (SELECT seq FROM deliveries \
         WHERE box = :box ORDER BY seq DESC LIMIT 50)",
     box

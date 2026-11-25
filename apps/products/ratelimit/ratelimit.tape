@@ -130,7 +130,7 @@ fn used(key: View, rule: Rule) -> Int {
 // ---------- a hit ----------
 
 fn hit(key: View, rule: Rule, op: Option[View]) -> Buf {
-  do sql_exec(
+  let _ = sql_exec(
     query: "DELETE FROM windows WHERE key = :key AND slot < :slot - 1",
     key,
     slot: rule.slot
@@ -157,7 +157,11 @@ fn hit(key: View, rule: Rule, op: Option[View]) -> Buf {
 // A hit with an idempotency key: the key is claimed first, so a second run of the same request finds the claim
 // and answers the verdict the first one stored.
 fn once(key: View, rule: Rule, o: View) -> Buf {
-  do sql_exec(query: "DELETE FROM ops WHERE key = :key AND slot < :slot - 1", key, slot: rule.slot)
+  let _ = sql_exec(
+    query: "DELETE FROM ops WHERE key = :key AND slot < :slot - 1",
+    key,
+    slot: rule.slot
+  )
   let 1 = sql_exec(
     query: "INSERT INTO ops(key, op, slot) VALUES (:key, :o, :slot) ON CONFLICT(key, op) \
         DO NOTHING",
@@ -184,13 +188,14 @@ fn once(key: View, rule: Rule, o: View) -> Buf {
     limit: rule.limit
   )
   let n = used(key, rule)
-  do sql_exec(
+  // the claim is this run's own, made above in the same transaction
+  let 1 = sql_exec(
     query: "UPDATE ops SET allowed = :allowed, remaining = :remaining WHERE key = :key AND op = :o",
     allowed: taken == 1,
     remaining: max(a: 0, b: rule.limit - n),
     key,
     o
-  )
+  ) else -> rollback(out: problem(status: 500, error: "the claim of idempotency-key \(o) is gone"))
   answered(key, rule, allowed: taken == 1, used: n, peek: False)
 }
 

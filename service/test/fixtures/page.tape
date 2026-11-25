@@ -15,7 +15,7 @@ fn handle(raw: View, db: Sql) -> Buf {
       n: sql_first(row: Count, query: "SELECT count(*) AS n FROM visits")
     )
     Request(method: "POST", path: "/visit", body) -> {
-      do sql_exec(repeat: True, query: "INSERT INTO visits(who) VALUES (:body)", body)
+      let _ = sql_exec(repeat: True, query: "INSERT INTO visits(who) VALUES (:body)", body)
       visited()
     }
     Request(method: "POST", path: "/reset", caller: Operator) -> append(

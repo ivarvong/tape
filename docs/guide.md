@@ -365,7 +365,7 @@ wrong somewhere inside are refused. It costs a second parse per level; nothing h
 ## Steps that only do something: `do`
 
 A block is steps followed by one expression. A step is `let name = e`, or, when the call is made for what it does
-and its value is not wanted, `do call(…)`:
+and gives `Done`, `do call(…)`:
 
 ```
 Moved(value) -> {
@@ -374,8 +374,12 @@ Moved(value) -> {
 }
 ```
 
-`do` takes a call, and drops only an `Int` (rows written, a timer's delay, an id): a `Result`, a `Move` or an
-`Option` has outcomes that must be read, so `do call(to: …)` and `do sql_move(…)` are refused (C82).
+`do` takes a call whose value is `Done`, the value of a call run for what it does: `wake` gives it, and so does a
+function of the program's that only does something (`fn promote(tier: Int) -> Done`). Any other value says
+something and is read: `do sql_exec(…)`, `do call(to: …)` and `do sql_move(…)` are refused (C82). A write's count
+of rows changed is read where the row must be there or a guard must hold, `let 1 = sql_exec(…) else -> …`, and
+dropped by name where it does not matter, `let _ = sql_exec(…)` (an insert that always adds its row, a delete that
+prunes).
 
 It is the one way to run something for what it does, so the order of effects is the order of the lines. The three
 older ways are refused. "A call" below is one that does something: `sql_*`, `wake`, `call`, `ask`, `now`,
@@ -383,9 +387,9 @@ older ways are refused. "A call" below is one that does something: `sql_*`, `wak
 
 | | Refused | Instead |
 |---|---|---|
-| C83 | `let set = wake(…)` where `set` is never read | `do wake(…)` |
+| C83 | `let set = wake(…)` where `set` is never read | `do wake(…)`; for `let n = sql_exec(…)`, `let 1 = sql_exec(…) else -> …` or `let _ = sql_exec(…)` |
 | C84 | `later(hold, set: wake(…))` where `later` never reads `set` | `do wake(…)` on the line before; drop the parameter |
-| C85 | `seat + 1 + 0 * sql_exec(…)` | `do sql_exec(…)` on the line before |
+| C85 | `seat + 1 + 0 * sql_exec(…)` | `let 1 = sql_exec(…) else -> …` or `let _ = sql_exec(…)` on the line before |
 
 A name or a parameter that is never read and holds no such call is dead, not hidden work, and is left alone.
 Every program in this repository is written this way. A version uploaded before these rules keeps running in the
@@ -475,8 +479,8 @@ Every build runs the rules in `rules.ts` after type-checking. Each rejects a kin
 | C78 | a timer that C77 counts, or that a timer's run sets again, whose key is not the row's key: a literal, another row's or table's key, a key computed from the row's (`id + 1`), or the row's key negated when woken reads it as `key` (or the reverse); a table that no timer's run reads by the timer's key; or a key that woken's guards (`key < 0 -> …`, in woken or in a function it passes the key to) send down an arm that does not read it back; and, for a timer set with any write of the table (a move to a final state too: a cancel that leaves refunds to a timer), a key computed from the row's, or one that woken uses only as another table's key ([design](design.md#timers-c77-to-c80)) |
 | C79 | in a timer's run, an outcome of a remote call that leaves the row in a timed state while another outcome moves it out, or an arm that picks the row by a timed state, when some path through it neither moves the row out nor sets the timer again (a call counts only through its own outcomes); a path may end at a `final` constructor (Rejected, Skew, GaveUp) when a request can still move the row and, if it is matched, the value is a `call`'s reply (not an `ask`'s); or at the None of a read that lets a row in that state through ([design](design.md#timers-c77-to-c80)) |
 | C81 | a state named in a pattern on a row (`Hold(state: "x")`) that its machine does not declare: the arm can never be taken. |
-| C82 | `do` followed by something that is not a call, or a call whose value is not an Int. |
-| C83-C85 | a call run for what it does and hidden: bound to a name never read, passed to a parameter never read, or multiplied by 0. Write `do call(…)`. |
+| C82 | `do` followed by something that is not a call, or a call whose value is not `Done` (`do sql_exec(…)`: read the count with `let 1 = … else -> …`, or drop it with `let _ = …`). |
+| C83-C85 | a call run for what it does and hidden: bound to a name never read, passed to a parameter never read, or multiplied by 0. Write it as a step: `do call(…)` for a call whose value is Done, `let 1 = sql_exec(…) else -> …` or `let _ = sql_exec(…)` for a count. |
 | C86 | an invariant that is not one SELECT without placeholders over the schema's tables, or a name used twice. |
 | C87 | a match on a call's reply where one arm takes a refusal (`Rejected`) together with no answer and sets a timer: the same key gets the same refusal, so it asks for ever. Give the refusal its own arm. |
 | C88 | `repeat: True` or `no_floor: True` on a call whose statement the rule it answers (C54 and C55, or C73) would accept anyway. The argument is a claim about the write, so it is refused where it is not true. |

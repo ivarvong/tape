@@ -207,7 +207,7 @@ A body is steps, then one expression that is its value. There are three steps:
 |---|---|
 | `let x = e` | name a value. `let Order(id, amount) = e` takes apart a value whose pattern cannot fail |
 | `let P = e else { arms }` | go on with the case `P`; every other case leaves the function through an arm. `else -> e` takes all of them. `P` is any pattern a match arm takes: `let 1 = sql_exec(…) else -> …` goes on when one row changed, `let key ++ "=" ++ value = pair else -> …` splits a text. An `=` outside brackets ends the pattern; `name = P` binds a whole value inside them |
-| `do f(…)` | run a call for what it does. The call must return an `Int`, which is dropped |
+| `do f(…)` | run a call for what it does. The call's value must be `Done` (std's `type Done { Done }`): `wake` gives it, and so does a function that only does something (`fn recount() -> Done`). A call with any other value says something and is read: `let 1 = sql_exec(…) else -> …` goes on when one row changed, `let _ = sql_exec(…)` drops the count on purpose (C82) |
 
 ```tape gives
 fn version(n: Int) -> Int {
@@ -333,7 +333,7 @@ state needs no `_` arm.
 | `sql_move(row: T, query: "UPDATE … WHERE … RETURNING *")` | `Sql` | a compare-and-set: `Moved(value)`, `Raced(now)` when another run moved the row first, `NoRow` |
 | `call(to:, method:, send:, reply:, within:, once:)` | `Remote` | a command to another program: `Result[Reply, CallError]`. A repeat of a `once` key gets the first run's reply and runs nothing: its stored reply, or, sent while the first run waits on a call, that run's reply when it comes (`Unreachable` if it does not come within the budget: send it again) |
 | `ask(to:, method:, send:, reply:, within:)` | `Remote` | a read: the same, with no key |
-| `wake(after: ms, key: n)` | `Timer` | asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again, and so does a run that fails on a storage error, after a wait that doubles each time (1 s up to 15 min); a run that traps is not retried |
+| `wake(after: ms, key: n)` | `Timer` | `Done`, run with `do`: asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again, and so does a run that fails on a storage error, after a wait that doubles each time (1 s up to 15 min); a run that traps is not retried |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
 | `rollback(out)` | | answers `out` and undoes this request's writes since its last call; the effect log marks each write and each timer it undid `undone` (as it does for a trap), and so does the trace |
@@ -571,7 +571,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Divide a Dec, or apply a rate | `div(a: …, by: …, scale: 2, rounding: HalfEven)`, `mul(a: …, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
 | Money in currencies of different places (USD 2, JPY 0) | one scale for all, `Dec[2]`; for a 0-place currency compute at scale 0 and rescale up, `rescale(x: mul(a: sub, by: rate, scale: 0, rounding: HalfUp), to: 2)`, rather than round a 2-place result (that rounds twice) | C14 |
 | Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back. sin, cos, tan, asin, acos, atan2, exp, log, pow and `%` are Float's, and `pi()` is std's: a Dec has none (`sin(x)` of a Dec is C14), so an exact kernel stays Int, with Dec at its edges | C14 |
-| Run something for what it does | `do f(…)` | C83-C85 |
+| Run something for what it does | `do f(…)` for a call whose value is `Done` (`wake`, a function that returns `Done`); a write's count is read, `let 1 = sql_exec(…) else -> …` when the row must be there or the guard must hold, or dropped by name, `let _ = sql_exec(…)`, when it does not matter (an insert that always adds its row, a delete that prunes) | C82, C83-C85 |
 | Count, or do something n times | `fold` over `range(from:, to:)` | |
 | Write each item of a list | `fold(list, from: out, by: fn(out: Buf, item: T) -> Buf { … })` | |
 | List the rows of a query | `sql_all(row: T, query: …) \|> fold_rows(from: out, by: fn(out: Buf, row: T) -> Buf { … })`, or a total in `from`; `write_rows(rows: …)` for JSON. A list of the rows is a fold into `Cons`, then `reverse` | |

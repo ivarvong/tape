@@ -65,7 +65,10 @@ fn retry_later(timer: Timer, key: Int, policy: Backoff, failed: Int) -> Retry {
 // retry_later, once backoff has decided.
 private fn retry_at(timer: Timer, key: Int, decided: Retry) -> Retry {
   match decided {
-    RetryIn(after, attempt) -> RetryIn(after: wake(timer, after, key), attempt)
+    RetryIn(after, attempt) -> {
+      do wake(timer, after, key)
+      RetryIn(after, attempt)
+    }
     GaveUp(tries) -> GaveUp(tries)
   }
 }

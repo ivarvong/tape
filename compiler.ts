@@ -53,7 +53,7 @@
 //              must be the record the interface names, and the result is Result[Reply, CallError].
 //   serving    `export fn name(db: Sql, message: Record) -> Result[Reply, View]` is a method other objects can
 //              call. Its parameters are capabilities and one record; Err's text reaches the caller as Rejected.
-//   timers     wake(timer, after: ms, key: n) -> Int asks the host to call this program's `export fn woken(…,
+//   timers     wake(timer, after: ms, key: n) -> Done asks the host to call this program's `export fn woken(…,
 //              message: Wake)` with Wake(key: n) after `ms`. It is in the effect log; setting a key again moves
 //              its time; it is kept only if the request's writes are (a rollback or a trap drops it).
 //   time       now(clock) -> Int: milliseconds since 1970. random(from: entropy) -> Int: 53 random bits. Both

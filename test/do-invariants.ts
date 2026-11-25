@@ -51,13 +51,18 @@ fn handle(raw: View, db: Sql) -> Buf {
 }
 
 fn set(coins: Int, key: View) -> Buf {
-  do sql_exec(query: "INSERT INTO notes(key, coins) VALUES (:key, :coins) ON CONFLICT(key) DO NOTHING", key, coins)
-  do sql_exec(query: "UPDATE purse SET coins = (SELECT coalesce(max(coins), 0) FROM notes) WHERE id = 1")
+  let _ = sql_exec(query: "INSERT INTO notes(key, coins) VALUES (:key, :coins) ON CONFLICT(key) DO NOTHING", key, coins)
+  do recounted()
   respond(status: 200) |> append(view: "set")
 }
 
+fn recounted() -> Done {
+  let _ = sql_exec(query: "UPDATE purse SET coins = (SELECT coalesce(max(coins), 0) FROM notes) WHERE id = 1")
+  Done
+}
+
 fn broken() -> Buf {
-  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")
+  let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> respond(status: 404)
   respond(status: 200) |> append(view: "broken")
 }
 
@@ -141,20 +146,44 @@ const swap = (a: string, c: string) => {
   if (!jars.includes(a)) throw new Error('not in the program: ' + a);
   return jars.replace(a, c);
 };
+const BREAK = `  let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> respond(status: 404)`;
 ok(
-  'C82: do drops only an Int: a Move must be matched',
-  codes(
-    build(
-      swap(
-        `  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`,
-        `  do sql_first(row: Purse, query: "SELECT * FROM purse WHERE id = 1")`,
-      ),
-    ),
-  ) === 'C82',
+  'C82: do runs only a Done: an Option must be matched',
+  codes(build(swap(BREAK, `  do sql_first(row: Purse, query: "SELECT * FROM purse WHERE id = 1")`))) === 'C82',
 );
+ok('C82: do takes a call', codes(build(swap(BREAK, `  do 1 + 1`))) === 'C82');
+{
+  // the count of rows a write changed is read, or dropped by name: `do` does not drop it
+  const [e] = build(swap(BREAK, `  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`)).errors;
+  ok(
+    'C82: do sql_exec is refused, and the fix reads the count or drops it by name',
+    e?.code === 'C82' &&
+      e.message === '`do` runs a call whose value is Done, and sql_exec gives Int' &&
+      e.hint.includes('`let 1 = sql_exec(…) else -> …`') &&
+      e.hint.includes('`let _ = sql_exec(…)`'),
+    `${e?.code} ${e?.message} ${e?.hint}`,
+  );
+  // a function of the program's that gives an Int is not run with `do` either
+  const [f] = build(
+    swap(BREAK, `  do rows()`) +
+      '\nfn rows() -> Int {\n  sql_exec(query: "UPDATE purse SET coins = 0 WHERE id = 1")\n}\n',
+  ).errors;
+  ok(
+    "C82: do on the program's own Int function offers let 1 and let _, and a function that gives Done",
+    f?.code === 'C82' && f.hint.includes('`let _ = rows(…)`') && f.hint.includes('returns Done'),
+    `${f?.code} ${f?.hint}`,
+  );
+}
 ok(
-  'C82: do takes a call',
-  codes(build(swap(`  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`, `  do 1 + 1`))) === 'C82',
+  'a function that gives Done runs under do, and its writes are seen by the next step',
+  (() => {
+    const x = build(jars);
+    if (x.wasm === null) return false;
+    const sql = nodeSql(),
+      app = instantiate(new WebAssembly.Module(x.wasm), { sql });
+    app.handleIn(f => sql.transaction(f), enc.encode('POST /set/9/z\n'));
+    return sql.exec('SELECT coins FROM purse WHERE id = 1').toArray()[0]?.coins === 9;
+  })(),
 );
 ok(
   'C81: a state in a pattern that the machine does not have',
@@ -228,7 +257,7 @@ ok(
 // tidy
 const untidy = swap(
   `fn broken() -> Buf {
-  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")
+${BREAK}
   respond(status: 200) |> append(view: "broken")
 }`,
   `fn broken() -> Buf {
@@ -263,10 +292,10 @@ ok(
 const unreadMove = build(
   swap(
     `fn broken() -> Buf {
-  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`,
+${BREAK}`,
     `fn broken() -> Buf {
   let sealed = sql_move(row: Jar, query: "UPDATE jars SET state = 'sealed' WHERE id = 1 AND state = 'open' RETURNING *")
-  do sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")`,
+${BREAK}`,
   ),
 );
 const [moveHint] = unreadMove.errors;
@@ -277,6 +306,23 @@ ok(
     /match on what sql_move gives/.test(moveHint.hint ?? ''),
   `${moveHint?.code} ${moveHint?.hint}`,
 );
+// each of C83-C85 says the step for what the call gives: `do` for a Done, the count read or dropped for sql_exec
+{
+  const hint = (code: string): string => t.errors.find(e => e.code === code)?.hint ?? '';
+  ok(
+    'C83-C85 on sql_exec ask for `let 1 = sql_exec(…) else -> …` or `let _ = sql_exec(…)`, never `do sql_exec`',
+    ['C83', 'C84', 'C85'].every(
+      c => hint(c).includes('`let 1 = sql_exec(…) else -> …`') && !hint(c).includes('`do sql_exec'),
+    ),
+    ['C83', 'C84', 'C85'].map(hint).join(' | '),
+  );
+  const unreadDone = build(swap('  do recounted()', '  let n = recounted()')).errors[0];
+  ok(
+    'C83 on an unread call of a function that gives Done asks for `do`',
+    unreadDone?.code === 'C83' && unreadDone.hint === 'Write `do recounted(…)`.',
+    `${unreadDone?.code} ${unreadDone?.hint}`,
+  );
+}
 ok(
   'handle may leave its capabilities unread, and std has none of the three',
   !build(jars).errors?.length,

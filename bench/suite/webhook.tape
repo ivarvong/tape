@@ -105,13 +105,13 @@ fn paid(n: Int, what: View) -> View {
 }
 // A payment recorded under the event's id, and the account's total moved by it; 1.
 fn pay(id: Id, account: Account, amount: Int) -> Int {
-  do sql_exec(
+  let 1 = sql_exec(
     query: "INSERT INTO payments(id, account, amount) VALUES (:id, :account, :amount) \
         ON CONFLICT(id) DO NOTHING",
     id,
     account,
     amount
-  )
+  ) else -> 0
   sql_exec(
     query: "INSERT INTO customers(account, total, note) VALUES (:account, :amount, '') \
         ON CONFLICT(account) DO UPDATE SET total = total + excluded.total",

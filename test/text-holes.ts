@@ -62,7 +62,7 @@ same('a Buf in a hole', codes(program('buf() |> append(view: "a \\(buf())")')), 
 ok(
   'a query is still a literal: a hole in one is refused',
   codes(
-    'schema "CREATE TABLE IF NOT EXISTS t(k TEXT PRIMARY KEY)"\nfn handle(raw: View, db: Sql) -> Buf {\n  do sql_exec(db, query: "DELETE FROM t WHERE k = \'\\(raw)\'")\n  respond(status: 200)\n}\n',
+    'schema "CREATE TABLE IF NOT EXISTS t(k TEXT PRIMARY KEY)"\nfn handle(raw: View, db: Sql) -> Buf {\n  let _ = sql_exec(db, query: "DELETE FROM t WHERE k = \'\\(raw)\'")\n  respond(status: 200)\n}\n',
   ).includes('C32:3'),
 );
 

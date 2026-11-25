@@ -150,7 +150,8 @@ function remoteCall(s: Site): Value {
 function wake(s: Site): Value {
   const key = exact(asInt(value(s, 'key')), 'wake'),
     after = Math.min(Math.max(0, Number(asInt(value(s, 'after')))), MAX_WAKE_MS);
-  return BigInt(host(s.it, 'wake')(key, after));
+  host(s.it, 'wake')(key, after);
+  return adt('Done');
 }
 function remote(s: Site): Value {
   const of = asFamily(value(s, 'of')),

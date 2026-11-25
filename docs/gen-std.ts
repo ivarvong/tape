@@ -286,7 +286,7 @@ const BUILT_INS: BuiltIn[] = [
     name: 'sql_exec',
     sig: 'sql_exec(query: "…", …) -> Int',
     needs: 'Sql',
-    doc: `Runs a write; the number of rows it changed. ${WRITES}`,
+    doc: `Runs a write; the number of rows it changed, which is read: \`let 1 = sql_exec(…) else -> …\` when the row must be there or the guard must hold, \`let _ = sql_exec(…)\` when the count does not matter. ${WRITES}`,
   },
   {
     name: 'sql_move',
@@ -316,7 +316,7 @@ const BUILT_INS: BuiltIn[] = [
   { name: 'random', sig: 'random() -> Int', needs: 'Entropy', doc: '53 random bits, in the log.' },
   {
     name: 'wake',
-    sig: 'wake(after: Int, key: Int) -> Int',
+    sig: 'wake(after: Int, key: Int) -> Done',
     needs: 'Timer',
     doc: "Asks the host to run the program's `export fn woken(…, message: Wake)` with `Wake(key)` after `after` ms. Setting a key again moves its time. Run it with `do wake(…)`.",
   },
