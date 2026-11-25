@@ -1263,6 +1263,44 @@ The value of a hex digit (is_hex(b) must hold).
 15
 ```
 
+### fn is_json
+
+```tape
+fn is_json(text: View) -> Bool
+```
+
+Is text one JSON value (RFC 8259), with whitespace around it allowed? It accepts what decode accepts: strings are UTF-8, and a \u escape of a lone surrogate is allowed, as JSON.parse allows it. One pass over the bytes, with no tree built and no stack grown by nesting: on 64 KB of nested JSON, 99,358 steps and 8 bytes of memory (test/json-any.ts measures it on each build).
+
+```
+> is_json(text: " {\"a\": [1, -2.5e3, \"\\u00e9\"], \"b\": {\"c\": null}} ")
+True
+> is_json(text: "{\"a\": 1,}")
+False
+> is_json(text: "[1] [2]")
+False
+> is_json(text: "")
+False
+```
+
+### fn json_member
+
+```tape
+fn json_member(json: View, key: View) -> Option[View]
+```
+
+The JSON text of the value of member `key` of the object that json holds, without the whitespace around it; None when json is not an object, has no member `key`, or is not JSON up to that member. Keys are compared once unescaped (`"\u0069d"` is `id`). Of two members with the same key the first is taken, and nothing after it is read; decode, like JSON.parse, takes the last. The value is read with decode: `decode(json: raw, as: View)` for a string, `as: Int` for a number, `as: T` for an object.
+
+```
+> json_member(json: "{\"id\": \"a1\", \"n\": [1, 2] }", key: "n")
+Some(value: "[1, 2]")
+> json_member(json: "{\"\\u0069d\": 7, \"id\": 8}", key: "id")
+Some(value: "7")
+> json_member(json: "{\"id\": \"a1\"}", key: "name")
+None
+> json_member(json: "[{\"id\": 1}]", key: "id")
+None
+```
+
 ### fn write_json_string
 
 ```tape

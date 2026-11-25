@@ -365,6 +365,219 @@ fn hex(b: Int) -> Int {
   }
 }
 
+// ---------- JSON of any shape ----------
+
+// Is text one JSON value (RFC 8259), with whitespace around it allowed? It accepts what decode accepts: strings
+// are UTF-8, and a \u escape of a lone surrogate is allowed, as JSON.parse allows it. One pass over the bytes,
+// with no tree built and no stack grown by nesting: on 64 KB of nested JSON, 99,358 steps and 8 bytes of memory
+// (test/json-any.ts measures it on each build).
+//
+//   > is_json(text: " {\"a\": [1, -2.5e3, \"\\u00e9\"], \"b\": {\"c\": null}} ")
+//   True
+//   > is_json(text: "{\"a\": 1,}")
+//   False
+//   > is_json(text: "[1] [2]")
+//   False
+//   > is_json(text: "")
+//   False
+fn is_json(text: View) -> Bool {
+  let end = value_end(v: text, at: json_ws(v: text, at: 0))
+  end >= 0 and json_ws(v: text, at: end) == len(text)
+}
+
+// The JSON text of the value of member `key` of the object that json holds, without the whitespace around it;
+// None when json is not an object, has no member `key`, or is not JSON up to that member. Keys are compared once
+// unescaped (`"\u0069d"` is `id`). Of two members with the same key the first is taken, and nothing after it is
+// read; decode, like JSON.parse, takes the last. The value is read with decode: `decode(json: raw, as: View)` for
+// a string, `as: Int` for a number, `as: T` for an object.
+//
+//   > json_member(json: "{\"id\": \"a1\", \"n\": [1, 2] }", key: "n")
+//   Some(value: "[1, 2]")
+//   > json_member(json: "{\"\\u0069d\": 7, \"id\": 8}", key: "id")
+//   Some(value: "7")
+//   > json_member(json: "{\"id\": \"a1\"}", key: "name")
+//   None
+//   > json_member(json: "[{\"id\": 1}]", key: "id")
+//   None
+fn json_member(json: View, key: View) -> Option[View] {
+  let s = json_ws(v: json, at: 0)
+  match {
+    s < len(json) and json[s] == 123 -> named_at(v: json, at: json_ws(v: json, at: s + 1), key)
+    else -> None
+  }
+}
+
+// Internal: a member json_member reads, whose key's opening quote is at `at`.
+fn named_at(v: View, at: Int, key: View) -> Option[View] {
+  match {
+    at < len(v) and v[at] == 34 -> named_colon(v, at, key, end: string_close(v, at: at + 1))
+    else -> None
+  }
+}
+
+// Internal: a member whose key's quote is at `at` and ends before `end` (-1: the key is not a string).
+fn named_colon(v: View, at: Int, key: View, end: Int) -> Option[View] {
+  match {
+    end < 0 -> None
+    else -> {
+      let colon = json_ws(v, at: end)
+      match {
+        colon < len(v) and v[colon] == 58 -> {
+          let from = json_ws(v, at: colon + 1)
+          named_value(v, key, hit: key_is(v, at: at + 1, key), from, to: value_end(v, at: from))
+        }
+        else -> None
+      }
+    }
+  }
+}
+
+// Internal: a member's value, from `from` to `to` (-1: not JSON); `hit` when its key is the one asked for.
+fn named_value(v: View, key: View, hit: Bool, from: Int, to: Int) -> Option[View] {
+  match {
+    to < 0 -> None
+    hit -> Some(value: slice(v, from, to))
+    else -> {
+      let s = json_ws(v, at: to)
+      match {
+        s < len(v) and v[s] == 44 -> named_at(v, at: json_ws(v, at: s + 1), key)
+        else -> None
+      }
+    }
+  }
+}
+
+// Internal: is the string whose body starts at `at` (a string string_close has read) `key`, once unescaped? One
+// without escapes is compared where it is; one with escapes is decoded first.
+fn key_is(v: View, at: Int, key: View) -> Bool {
+  let e = text_run(v, at)
+  match {
+    e < len(v) and v[e] == 34 -> slice(v, from: at, to: e) == key
+    else -> match tree_text(v, at) {
+      Json_Got(text) -> text == key
+      Json_NoText -> False
+    }
+  }
+}
+
+// Internal: the arrays and objects open around a value, innermost first: `bits` holds the innermost `n` (1 an
+// object, 0 an array; the innermost in the lowest bit), at most 60; `rest` the full words of 60 below them.
+type Json_Open { Json_Open(bits: Int, n: Int, rest: List[Int]) }
+
+// Internal: one more open, an object or an array.
+fn open_push(open: Json_Open, object: Int) -> Json_Open {
+  match open {
+    Json_Open(bits, n, rest) if n == 60 -> Json_Open(
+      bits: object,
+      n: 1,
+      rest: Cons(head: bits, tail: rest)
+    )
+    Json_Open(bits, n, rest) -> Json_Open(bits: (bits << 1) | object, n: n + 1, rest)
+  }
+}
+
+// Internal: the innermost one closed.
+fn open_pop(open: Json_Open) -> Json_Open {
+  match open {
+    Json_Open(n, rest: Cons(head, tail)) if n == 1 -> Json_Open(bits: head, n: 60, rest: tail)
+    Json_Open(bits, n, rest) -> Json_Open(bits: bits >> 1, n: n - 1, rest)
+  }
+}
+
+// Internal: where the JSON value that starts at `at` ends, or -1 when there is none there.
+fn value_end(v: View, at: Int) -> Int {
+  next_value(v, at, open: Json_Open(bits: 0, n: 0, rest: Nil))
+}
+
+// Internal: a value starts at `at` (whitespace skipped), inside what is open.
+fn next_value(v: View, at: Int, open: Json_Open) -> Int {
+  match {
+    at >= len(v) -> -1
+    v[at] == 123 -> opened(v, at: json_ws(v, at: at + 1), open, close: 125)
+    v[at] == 91 -> opened(v, at: json_ws(v, at: at + 1), open, close: 93)
+    v[at] == 34 -> after_value(v, at: string_close(v, at: at + 1), open)
+    has(v, at, word: "true") -> after_value(v, at: at + 4, open)
+    has(v, at, word: "false") -> after_value(v, at: at + 5, open)
+    has(v, at, word: "null") -> after_value(v, at: at + 4, open)
+    else -> after_value(v, at: found_end(end: number_end(v, at)), open)
+  }
+}
+
+// Internal: after `{` (close 125) or `[` (close 93) and whitespace.
+fn opened(v: View, at: Int, open: Json_Open, close: Int) -> Int {
+  match {
+    at < len(v) and v[at] == close -> after_value(v, at: at + 1, open)
+    close == 125 -> next_key(v, at, open: open_push(open, object: 1))
+    else -> next_value(v, at, open: open_push(open, object: 0))
+  }
+}
+
+// Internal: a member's key starts at `at`; then its colon and its value.
+fn next_key(v: View, at: Int, open: Json_Open) -> Int {
+  match {
+    at < len(v) and v[at] == 34 -> {
+      let e = string_close(v, at: at + 1)
+      let colon = match {
+        e < 0 -> len(v)
+        else -> json_ws(v, at: e)
+      }
+      match {
+        colon < len(v) and v[colon] == 58 -> next_value(v, at: json_ws(v, at: colon + 1), open)
+        else -> -1
+      }
+    }
+    else -> -1
+  }
+}
+
+// Internal: a value ended at `at` (-1: it was not JSON): the end of the whole, or what comes next in what is open.
+fn after_value(v: View, at: Int, open: Json_Open) -> Int {
+  match open {
+    _ if at < 0 -> -1
+    Json_Open(n: 0) -> at
+    Json_Open(bits) -> {
+      let s = json_ws(v, at)
+      match {
+        s >= len(v) -> -1
+        v[s] == 44 and (bits & 1) == 1 -> next_key(v, at: json_ws(v, at: s + 1), open)
+        v[s] == 44 -> next_value(v, at: json_ws(v, at: s + 1), open)
+        v[s] == 125 and (bits & 1) == 1 -> after_value(v, at: s + 1, open: open_pop(open))
+        v[s] == 93 and (bits & 1) == 0 -> after_value(v, at: s + 1, open: open_pop(open))
+        else -> -1
+      }
+    }
+  }
+}
+
+// Internal: a number's end, or -1.
+fn found_end(end: Option[Int]) -> Int {
+  match end {
+    Some(value) -> value
+    None -> -1
+  }
+}
+
+// Internal: past the closing quote of the string whose body starts at `at`, or -1 when it is not a string: plain
+// bytes and UTF-8 are passed 16 at a time (text_run), and an escape is checked, not decoded.
+fn string_close(v: View, at: Int) -> Int {
+  let e = text_run(v, at)
+  match {
+    e >= len(v) -> -1
+    v[e] == 34 -> e + 1
+    v[e] != 92 or e + 1 >= len(v) -> -1
+    v[e + 1] == 117 -> escape_close(v, at: e + 6, ok: hex4(v, at: e + 2))
+    else -> escape_close(v, at: e + 2, ok: unescape(v[e + 1]))
+  }
+}
+
+// Internal: after an escape, which is one when `ok` is Some.
+fn escape_close(v: View, at: Int, ok: Option[Int]) -> Int {
+  match ok {
+    Some -> string_close(v, at)
+    None -> -1
+  }
+}
+
 // ---------- writing ----------
 
 // Appends text as a JSON string, escaped exactly as JSON.stringify escapes it; bytes that are not UTF-8 are written
@@ -775,6 +988,15 @@ fn json_array(v: View) -> Result[Json_Tree, View] {
     Some(value: Json_Arr(items)) -> Ok(value: Json_Arr(items))
     None -> Err(error: json_bad(v))
     _ -> Err(error: "expected an array")
+  }
+}
+
+// Internal: the value v holds, or why decode refuses it: "empty" or "not JSON" (decode as Int, View, Bool, Float
+// or a refinement of one).
+fn json_whole(v: View) -> Result[Json_Tree, View] {
+  match json_tree(v) {
+    Some(value) -> Ok(value)
+    None -> Err(error: json_bad(v))
   }
 }
 

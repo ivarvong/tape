@@ -271,7 +271,8 @@ function fit(
   return { value: adt(variant.name, f) };
 }
 
-/** decode(json:, as: T): Ok with the value, or Err with why the bytes are not one. T is a record type or List[…]. */
+/** decode(json:, as: T): Ok with the value, or Err with why the bytes are not one. T is a record type, List[…], or a scalar
+ * (Int, View, Bool, Float, a refinement), read as an element of a list is. */
 export function decode(prog: Program, bytes: Uint8Array, t: TypeAst, meets: Meets): Adt {
   let parsed: unknown;
   let text: string;
@@ -295,7 +296,9 @@ export function decode(prog: Program, bytes: Uint8Array, t: TypeAst, meets: Meet
       ? Array.isArray(parsed)
         ? listAs(prog, meets, of, parsed)
         : { why: 'expected an array' }
-      : recordAs(prog, meets, t.name, parsed);
+      : shapeOf(prog, t).k === 'scalar'
+        ? valueAs(prog, meets, t, parsed)
+        : recordAs(prog, meets, t.name, parsed);
   return 'why' in got ? err(got.why) : adt('Ok', { value: got.value });
 }
 

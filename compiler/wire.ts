@@ -3,7 +3,8 @@
 //   json_as_T(obj)          the first constructor whose keys and kinds fit the object (or why not, from the one that
 //                           got furthest), its refined fields checked in order, then its records and lists decoded,
 //                           each reason with the path to it
-//   json_decode_top_L(json)  for each `decode(json:, as: List[…])`: the array, its elements decoded in turn
+//   json_decode_top_L(json)  for each `decode(json:, as: List[…])`: the array, its elements decoded in turn; for
+//                            each `decode(json:, as: Int)` (View, Bool, Float, a refinement): one value, as an element
 // and for each record type that is not one flat constructor (`written`):
 //   wire_write_T(out, value)  the object, field by field: an Option field that is None has no key, and a type with
 //                             several constructors is {"Constructor": {…}}, the form json_as_T reads first
@@ -44,14 +45,14 @@ const stop = (what: string): never => {
 const astText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(astText).join(', ')}]` : t.name);
 /** A type's text as part of a generated name: `List[Item]` is `List_Item`. */
 export const mangled = (text: string): string => text.replaceAll(/[^A-Za-z0-9]+/g, '_').replace(/_$/, '');
-/** Every List type the program decodes on its own, `decode(json:, as: List[T])`. */
-function topLists(prog: Program): TypeAst[] {
+/** Every type the program decodes on its own that is not a record: `decode(json:, as: List[T])`, `as: Int`. */
+function tops(prog: Program): TypeAst[] {
   const out = new Map<string, TypeAst>();
   const visit = (e: Expr): void => {
     if (e.k === 'call' && e.name === 'decode') {
       const as = e.args.find(a => a.label === 'as')?.value,
         t = as ? asType(as) : null;
-      if (t?.name === 'List') out.set(astText(t), t);
+      if (t) out.set(astText(t), t);
     }
     partsOf(e).forEach(visit);
   };
@@ -393,12 +394,18 @@ export function wireSource(prog: Program): Wire {
       );
     });
   }
-  for (const t of topLists(prog)) {
+  // a List is decoded from an array; a scalar (Int, View, Bool, Float, or a refinement of one) from any JSON value,
+  // read as an element of a list is, so its reasons are a list element's without the index: `expected an integer`
+  for (const t of tops(prog)) {
     const k = kind(t, false, new Set());
-    if (k?.k !== 'list') continue;
-    out.push(
-      `fn json_decode_top_${mangle(t)}(json: View) -> Result[${text(t)}, View] {\n  match json.json_array(v: json) {\n    Ok(value) -> ${each(k.of)}(arr: value)\n    Err(error) -> Err(error)\n  }\n}\n`,
-    );
+    if (k?.k === 'list')
+      out.push(
+        `fn json_decode_top_${mangle(t)}(json: View) -> Result[${text(t)}, View] {\n  match json.json_array(v: json) {\n    Ok(value) -> ${each(k.of)}(arr: value)\n    Err(error) -> Err(error)\n  }\n}\n`,
+      );
+    else if (k?.k === 's')
+      out.push(
+        `fn json_decode_top_${mangle(t)}(json: View) -> Result[${text(t)}, View] {\n  match json.json_whole(v: json) {\n    Ok(value) -> ${item(k)}(item: value)\n    Err(error) -> Err(error)\n  }\n}\n`,
+      );
   }
   // the kind of a constructor's i-th field: every field of a type that can be JSON has one
   const kinds = (v: Variant): ((i: number) => WireKind) => {

@@ -30,6 +30,9 @@ type Box = View where len(self) >= 2
   and len(self) <= 32
   and every_byte(v: self, keep: box_byte) else "2 to 32 of a-z, 0-9 and -"
 
+// A body's own name for itself: its top-level "id", when that is text of 1 to 200 bytes.
+type Id = View where len(self) >= 1 and len(self) <= 200
+
 type Delivery { Delivery(seq: Int, key: Option[View], at: Int, size: Int, body: View) }
 type Stored { Stored(box: View, seq: Int, key: Option[View], duplicate: Bool) }
 type Problem { Problem(error: View) }
@@ -73,9 +76,11 @@ fn recent(box: View) -> Rows[Delivery] {
 // Ten random a-z and 0-9.
 fn fresh_box() -> View {
   let n = random()
-  range(from: 0, to: 10) |> fold(from: buf(), by: fn(out: Buf, i: Int) -> Buf {
-    out |> push(byte: alnum_byte(d: n / pow36(k: i) % 36))
-  }) |> freeze
+  range(from: 0, to: 10)
+    |> fold(from: buf(), by: fn(out: Buf, i: Int) -> Buf {
+      out |> push(byte: alnum_byte(d: n / pow36(k: i) % 36))
+    })
+    |> freeze
 }
 
 fn pow36(k: Int) -> Int {
@@ -92,7 +97,7 @@ fn alnum_byte(d: Int) -> Int {
 // ---------- taking a delivery ----------
 
 // The name a delivery gives itself: a header, else a top-level "id" that is text or a number.
-fn delivery_key(r: Request, tree: Json_Tree) -> Option[View] {
+fn delivery_key(r: Request, body: View) -> Option[View] {
   let named = first_of(
     a: header_of(request: r, name: "idempotency-key"),
     b: first_of(
@@ -105,7 +110,7 @@ fn delivery_key(r: Request, tree: Json_Tree) -> Option[View] {
   )
   match named {
     Some(value: k) if len(k) >= 1 and len(k) <= 200 -> named
-    _ -> body_id(tree: json_get(obj: tree, key: "id"))
+    _ -> body_id(raw: json_member(json: body, key: "id"))
   }
 }
 
@@ -116,10 +121,23 @@ fn first_of(a: Option[View], b: Option[View]) -> Option[View] {
   }
 }
 
-fn body_id(tree: Option[Json_Tree]) -> Option[View] {
-  match tree {
-    Some(value: Json_Str(text)) if len(text) >= 1 and len(text) <= 200 -> Some(value: "id:" ++ text)
-    Some(value: Json_Num(text)) -> Some(value: "id:" ++ text)
+// The JSON of a body's "id" as a key: text of 1 to 200 bytes, or a number as it is written.
+//
+//   > body_id(raw: Some(value: "\"evt\\u005f1\""))
+//   Some(value: "id:evt_1")
+//   > body_id(raw: Some(value: "-12.5"))
+//   Some(value: "id:-12.5")
+//   > body_id(raw: Some(value: "\"\""))
+//   None
+//   > body_id(raw: Some(value: "{\"n\": 1}"))
+//   None
+fn body_id(raw: Option[View]) -> Option[View] {
+  match raw {
+    Some(value: j) if j[0] == 34 -> match decode(json: j, as: Id) {
+      Ok(value: text) -> Some(value: "id:" ++ text)
+      Err -> None
+    }
+    Some(value: j) if j[0] == 45 or is_digit(j[0]) -> Some(value: "id:" ++ j)
     _ -> None
   }
 }
@@ -127,8 +145,8 @@ fn body_id(tree: Option[Json_Tree]) -> Option[View] {
 fn deliver(box: View, body: View, r: Request) -> Buf {
   let True = len(body) > 0 else -> problem(status: 400, error: "empty: send a JSON body")
   let True = len(body) <= 65536 else -> problem(status: 413, error: "the body is over 64 KB")
-  let Some(value: tree) = json_tree(body) else -> problem(status: 400, error: "not JSON")
-  match delivery_key(r, tree) {
+  let True = is_json(text: body) else -> problem(status: 400, error: "not JSON")
+  match delivery_key(r, body) {
     Some(value: k) -> keyed(box, body, k)
     None -> {
       let Some(value: d) = sql_first(
@@ -213,19 +231,17 @@ fn listed(box: View, rows: Rows[Delivery]) -> Buf {
 
 fn json_items(out: Buf, rows: Rows[Delivery], first: Bool) -> Buf {
   match next(rows) {
-    Next(value: Delivery(seq, key, at, size, body), rest) -> out |> append(view: match first {
-      True -> "{\"seq\":"
-      False -> ",{\"seq\":"
-    }) |> write_int(value: seq) |> json_key(key) |> append(
-      view: ",\"at\":\(at),\"size\":\(size),\"body\":"
-    ) |> append(
-      view: body
-    ) |> append(
-      view: "}"
-    ) |> json_items(
-      rows: rest,
-      first: False
-    )
+    Next(value: Delivery(seq, key, at, size, body), rest) -> out
+      |> append(view: match first {
+        True -> "{\"seq\":"
+        False -> ",{\"seq\":"
+      })
+      |> write_int(value: seq)
+      |> json_key(key)
+      |> append(view: ",\"at\":\(at),\"size\":\(size),\"body\":")
+      |> append(view: body)
+      |> append(view: "}")
+      |> json_items(rows: rest, first: False)
     End -> out
   }
 }
@@ -248,35 +264,35 @@ fn page(status: Int, title: View) -> Buf {
     |> write_html(text: title)
     |> append(view: " · webhook inbox</title><style>")
     |> append(
-    view: ":root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--card:#fff;"
-  )
+      view: ":root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--card:#fff;"
+    )
     |> append(
-    view: "--line:#e3e4e6;--acc:#2856c7;--key:#7a3e9d;--str:#1d7a46;--num:#b4561b;--lit:#2856c7}"
-  )
+      view: "--line:#e3e4e6;--acc:#2856c7;--key:#7a3e9d;--str:#1d7a46;--num:#b4561b;--lit:#2856c7}"
+    )
     |> append(
-    view: "@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;"
-  )
+      view: "@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;"
+    )
     |> append(view: "--card:#1d2024;--line:#30343a;--acc:#86a8ff;--key:#d6a5f0;--str:#8fd8a8;--num:#f2b27a;")
     |> append(view: "--lit:#9fb8ff}}body{margin:0;background:var(--bg);color:var(--fg);")
     |> append(view: "font:16px/1.5 system-ui,sans-serif}main{max-width:52rem;margin:0 \
         auto;padding:2rem 1rem}")
     |> append(
-    view: "h1{font-size:1.5rem;margin:0 0 .25rem;overflow-wrap:anywhere}a{color:var(--acc)}"
-  )
+      view: "h1{font-size:1.5rem;margin:0 0 .25rem;overflow-wrap:anywhere}a{color:var(--acc)}"
+    )
     |> append(view: ".mute{color:var(--mute)}code,pre{font:13px/1.45 ui-monospace,Menlo,monospace}")
     |> append(view: "pre{margin:0;overflow-x:auto;white-space:pre}article{background:var(--card);")
     |> append(
-    view: "border:1px solid var(--line);border-radius:10px;margin:1rem 0;overflow:hidden}"
-  )
+      view: "border:1px solid var(--line);border-radius:10px;margin:1rem 0;overflow:hidden}"
+    )
     |> append(
-    view: "article header{display:flex;flex-wrap:wrap;gap:.25rem 1rem;padding:.5rem 1rem;"
-  )
+      view: "article header{display:flex;flex-wrap:wrap;gap:.25rem 1rem;padding:.5rem 1rem;"
+    )
     |> append(view: "border-bottom:1px solid var(--line);font-size:.875rem;color:var(--mute)}")
     |> append(view: "article pre{padding:.75rem 1rem}.k{color:var(--key)}.s{color:var(--str)}")
     |> append(view: ".n{color:var(--num)}.l{color:var(--lit)}.cmd{background:var(--card);")
     |> append(
-    view: "border:1px solid var(--line);border-radius:8px;padding:.75rem;white-space:pre-wrap;"
-  )
+      view: "border:1px solid var(--line);border-radius:8px;padding:.75rem;white-space:pre-wrap;"
+    )
     |> append(view: "overflow-wrap:anywhere}</style><main><p class=mute>")
     |> append(view: "<a href=\"/p/demo/webhook-inbox/\">webhook inbox</a></p><h1>")
     |> write_html(text: title)
@@ -285,8 +301,8 @@ fn page(status: Int, title: View) -> Buf {
 
 fn end(out: Buf) -> Buf {
   out
-    |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/webhook-inbox/webhook-inbox.tape\">source</a>). Bodies are shown as text, never run; a box is \
-        public to anyone who knows its name.</p></main></html>")
+    |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/webhook-inbox/webhook-inbox.tape\">source</a>). Bodies are shown as text, never run; a box is public to anyone who knows its name.</p></main></html>")
 }
 
 fn home() -> Buf {
@@ -346,7 +362,7 @@ fn key_label(out: Buf, key: Option[View]) -> Buf {
 
 // ---------- pretty-printing ----------
 
-// JSON that json_tree has accepted, laid out two spaces a level, as HTML: each string, number and literal in a
+// JSON that is_json has accepted, laid out two spaces a level, as HTML: each string, number and literal in a
 // span by kind (k a key, s a string, n a number, l true, false or null), and every byte of text escaped. One
 // loop over the bytes, so any depth of nesting costs no stack.
 //
@@ -364,7 +380,7 @@ fn pretty(out: Buf, v: View, at: Int, depth: Int) -> Buf {
       match {
         b == 32 or b == 10 or b == 13 or b == 9 -> pretty(out, v, at: at + 1, depth)
         b == 123
-          or b == 91 -> opened(out, v, at, depth, close: b + 2, inner: json_ws(v, at: at + 1))
+          or b == 91 -> opened(out, v, at, depth, close: b + 2, inner: past_space(v, at: at + 1))
         b == 125 or b == 93 -> out
           |> indent(depth: depth - 1)
           |> push(byte: b)
@@ -401,7 +417,7 @@ fn indent(out: Buf, depth: Int) -> Buf {
 
 // A string from `at` (its opening quote) to `end` (past its closing one): a key when a colon follows.
 fn quoted(out: Buf, v: View, at: Int, depth: Int, end: Int) -> Buf {
-  let after = json_ws(v, at: end)
+  let after = past_space(v, at: end)
   let class = match {
     after < len(v) and v[after] == 58 -> "k"
     else -> "s"
@@ -441,6 +457,15 @@ fn word_end(v: View, at: Int) -> Int {
     at >= len(v) -> at
     v[at] == 44 or v[at] == 125 or v[at] == 93 or v[at] == 58 or is_space(v[at]) -> at
     else -> word_end(v, at: at + 1)
+  }
+}
+
+// The first position at or after `at` that is not JSON whitespace (space, tab, line feed, carriage return).
+fn past_space(v: View, at: Int) -> Int {
+  match {
+    at < len(v)
+      and (v[at] == 32 or v[at] == 9 or v[at] == 10 or v[at] == 13) -> past_space(v, at: at + 1)
+    else -> at
   }
 }
 

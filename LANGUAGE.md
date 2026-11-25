@@ -378,7 +378,10 @@ other condition (a call such as `every_byte`, a bound that is a flag) is `not a 
 program's source. An `else "…"` message is printed after the path, so it says what the value must be and does not
 name its field: `else "lowercase letters, digits and -"`, not `else "url: …"`, which would print `url: url: …`. Of
 the body as a whole the reasons are `empty`, `not JSON`, and `expected an object` (or
-`expected an array` for `as: List[T]`). The first problem is the reason: each field's kind is checked in order,
+`expected an array` for `as: List[T]`). `as:` may also name a scalar, `Int`, `View`, `Bool`, `Float` or a
+refinement of one: the body is then that one JSON value, read as an element of a list is, so its reasons are an
+element's without the index (`null`, `expected an integer`, `expected Key, 1 to 64 bytes`); this reads what
+`json_member` finds (`decode(json: raw, as: View)` for a string). The first problem is the reason: each field's kind is checked in order,
 then each refinement, then what is inside its records and lists. So `{"key": "", "items": [{"sku": "a", "price":
 "1.505"}]}` as an order is `key: expected Key, 1 to 64 bytes`, and with a right key, `items[0].price: expected a
 number with at most 2 decimals`.
@@ -555,6 +558,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 |---|---|---|
 | Ask whether an Option holds a value | `title != None` (`let True = title != None or done != None else -> …` for a body with something in it); to use the value, `let Some(value: t) = title else -> …` | C19 for two Options compared or `<` |
 | Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); an `Option` field that is absent or `null` is `None`. Its `Err` is `<path>: missing`, `null` or `expected <what>` (section 6), ready to send as a 400. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected an integer")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
+| Read JSON of any shape | `is_json(text: body)` says whether the bytes are JSON, building nothing; `json_member(json: body, key: "id")` is the JSON text of one top-level member's value (`Option[View]`, the first member of that key), to read with `decode(json: raw, as: View)`, `as: Int` or `as: T` | |
 | Write JSON | `write_json(value: …)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows: …)` for the rows of a query | C09 |
 | Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list: …, sep: …)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |

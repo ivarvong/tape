@@ -86,18 +86,17 @@ function decodeNested(
  */
 export function decodeTo(c: Ctx, t: Type, view: readonly number[], out: readonly number[], at: Place, why: Why): void {
   const { B } = c;
-  if (t.name === 'List') {
-    // decode(json:, as: List[T]): the array's generated decoder
-    const fn = `json_decode_top_${mangled(key(t))}`;
-    if (B.find(fn, 'wire') === null)
-      fail(
-        at,
-        'C09',
-        `${key(t)} cannot be decoded from JSON`,
-        'A list is decoded from an array of Int, Float, Bool, View, records that can be JSON, or lists of them.',
-      );
-    return decodeNested(c, t, fn, view, out, at, why);
-  }
+  // decode(json:, as: List[T]) and decode(json:, as: Int) (a scalar, or a refinement of one): their generated
+  // decoders, the array's or the one value's
+  const top = `json_decode_top_${mangled(key(t))}`;
+  if (B.find(top, 'wire') !== null) return decodeNested(c, t, top, view, out, at, why);
+  if (t.name === 'List')
+    fail(
+      at,
+      'C09',
+      `${key(t)} cannot be decoded from JSON`,
+      'A list is decoded from an array of Int, Float, Bool, View, records that can be JSON, or lists of them.',
+    );
   if (!Object.hasOwn(B.SIMJSON.decodes, t.name)) B.SIMJSON.decodes[t.name] = [t, at];
   if (!B.WIRE.decodable.has(t.name)) B.shapeOf(t, at, true);
   if (!B.WIRE.decodable.has(t.name))
