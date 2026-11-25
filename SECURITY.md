@@ -20,5 +20,8 @@ Please include what you found, how to reproduce it (a program, a request, a comm
 
 These are listed in [`STATUS.md`](STATUS.md#known-limitations); there is no need to report them again:
 
-- A published page is served from the API's origin as `text/html` or `image/svg+xml`, with no
-  `Content-Security-Policy` and no `X-Content-Type-Options: nosniff`.
+- A published page is served from the API's host as `text/html`, `image/svg+xml`, or XML (`application/atom+xml`,
+  `application/rss+xml`, `application/xml`). Each response has `X-Content-Type-Options: nosniff` and a
+  `Content-Security-Policy` with `sandbox` and no script. Chrome renders the XML types as pages; that policy is
+  what stops a script in the document, and nosniff does not. The API's credentials are bearer tokens, not cookies.
+  The sandbox gives the document an opaque origin. The isolation is that policy.

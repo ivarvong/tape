@@ -97,7 +97,7 @@ describe('security headers', () => {
     expect(pub.headers.get('server-timing')).toBe('db;dur=5');
   });
 
-  it("serves a program's Atom, RSS and XML under the API policy, not as a page", async () => {
+  it('serves Atom, RSS and XML under the API policy, which stops a script in the document', async () => {
     await call('/ivar/xml', { method: 'POST', body: feed });
     await call('/_public/ivar/xml', { method: 'PUT', body: '{"published":true}' });
     const pages = [
@@ -112,7 +112,11 @@ describe('security headers', () => {
       const r = path.startsWith('/p/') ? await anyone(path) : await call(path);
       expect([r.status, r.headers.get('content-type')]).toEqual([200, type]);
       expect(headersOf(r)).toEqual(BASE);
+      // The feed holds an XHTML script. Chrome runs it for these types even with nosniff; this policy is what
+      // stops it.
       expect(r.headers.get('content-security-policy')).toBe(API_CSP);
+      if (path.endsWith('/feed.xml'))
+        expect(await r.text()).toContain('<script xmlns="http://www.w3.org/1999/xhtml">ran=1</script>');
     }
   });
 });

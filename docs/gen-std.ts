@@ -342,7 +342,7 @@ fn handle(raw: View) -> Buf {
   {
     title: 'Respond with an Atom feed',
     uses: ['fn respond_as', 'type Content', 'fn respond'],
-    text: '`respond_as(status: 200, content: Atom)` answers `application/atom+xml`; the host adds `charset=utf-8`. `Rss` is `application/rss+xml` and `Xml` is `application/xml`. These are documents, not pages.',
+    text: "`respond_as(status: 200, content: Atom)` answers `application/atom+xml` (the host adds `charset=utf-8`, which overrides an encoding declaration in the document). `Rss` is `application/rss+xml` and `Xml` is `application/xml`. Chrome renders these as pages; the service's content-security-policy is what stops a script in the document, and a host that serves them must send that policy.",
     program: `fn handle(raw: View) -> Buf {
   match request(raw) {
     Request(method: "GET", path: "/feed.xml") -> respond_as(status: 200, content: Atom)

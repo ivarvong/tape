@@ -47,12 +47,16 @@ export type { MachineSpec, Migrated, Transaction } from './host/schema.ts';
 // respond_as), and either with headers on the same line, each after a carriage return: `STATUS CR name: value LF
 // BODY` (std/http's header). Output whose first line is not one of those is all body, with status 200 (as before
 // content types). The type is a closed list, so a program cannot send a header the service does not mean to send
-// (no `text/html; x-injected: …`, no types a browser runs as script beyond the page itself). Atom, RSS and XML are
-// on the list: a feed reader asks for application/atom+xml by name, and a browser does not run that,
-// application/rss+xml or application/xml as a page when the response is nosniff. application/xhtml+xml is not,
-// because a browser would run it as a page; text/xml is not, because it is obsolete and was sniffed. Text types
-// and these three XML documents are labeled charset=utf-8 (the host's bytes are UTF-8, and RFC 7303 asks an XML
-// type to say so). application/json and image/svg+xml carry no charset (RFC 8259; SVG is an image). The program
+// (no `text/html; x-injected: …`, no type a program can use to set a parameter on the header). Atom, RSS and XML
+// are on the list because a feed reader or an XML client asks for them by name. Chrome renders application/xml,
+// application/atom+xml and application/rss+xml as pages: a script in the XHTML or SVG namespace runs, and nosniff
+// does not stop it. What stops it is the content-security-policy on every response the service gives (`sandbox`
+// without `allow-scripts`, `default-src 'none'`; service/src/headers.ts). responseOf does not send that policy. A
+// host that serves these types to a browser must. application/xhtml+xml is not on the list: a page is text/html
+// (Html). text/xml is not, because it is obsolete and was sniffed. Text types and these three XML documents are
+// labeled charset=utf-8. The host's bytes are UTF-8, and the charset overrides an encoding declaration in the
+// document (`<?xml encoding="iso-8859-1"?>` is still read as UTF-8). RFC 7303 leaves the parameter optional.
+// application/json and image/svg+xml carry no charset (RFC 8259; SVG is an image). The program
 // names the token and the host writes the header, so a type cannot carry a parameter of its own. The headers are
 // checked here, for every host alike: a name of token characters, a value with no CR, LF or NUL, within the
 // limits below, and none of those the host sets itself. A head with a header that fails is answered 500, and says

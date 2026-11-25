@@ -59,6 +59,7 @@ export type Build = Imports & {
     args: readonly Arg[],
     at: Place,
     hidden?: ReadonlySet<string>,
+    aside?: string,
   ) => Arg[];
   prog: Program;
   queryId: (q: Omit<QueryEntry, 'run'>) => number;

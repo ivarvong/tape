@@ -3,12 +3,15 @@
 // indexed, and nothing runs script: the API's JSON and text are sandboxed with nothing allowed; a trace page may use
 // its own inline style; a program's own HTML or SVG (its operator route and its public route) may use inline style,
 // show images from this origin and data: URLs, and post its forms to itself, and runs sandboxed, so it has no
-// origin and runs no script. A program's Atom, RSS or XML is a document, not a page, so it takes the API's policy,
-// the same as JSON: an xml-stylesheet processing instruction cannot fetch anything. application/xhtml+xml is not a
-// type a program can name, because a browser would run it as a page. An image from this origin is what a page needs
-// to show a chart another of its routes draws (`<img src="chart">`, apps/products/FRICTION.md #16); it makes nothing
-// active: an image runs no script. An SVG's script is not run in an img (Chrome 131, 24 November 2026). Every
-// response here is nosniff, a route that needs
+// origin and runs no script.
+// Chrome renders application/atom+xml, application/rss+xml and application/xml as pages: a script in the XHTML or
+// SVG namespace runs, and nosniff does not stop it. Those types stay on the API policy (sandbox, default-src
+// 'none'), which is what stops the script and any fetch. The page policy's extra allowances are for HTML and SVG.
+// A host that serves these types must send that policy. application/xhtml+xml is not a type a program can name: a
+// page is Html.
+// An image from this origin is what a page needs to show a chart another of its routes draws (`<img src="chart">`,
+// apps/products/FRICTION.md #16); it makes nothing active: an image runs no script. An SVG's script is not run in
+// an img (Chrome 131, 24 November 2026). Every response here is nosniff, a route that needs
 // a token gets none from a page (there are no cookies), and a GET of a public route is what any page anywhere can
 // already cause. Nothing is fetched from another origin. Every response names the commit it was built from
 // (tape-version) and the Worker version (tape-worker-version). The step accounting is on the count it goes with
@@ -28,7 +31,8 @@ export const secured = (res: Response, path: string, version?: string): Response
   const out = new Response(res.body, res),
     h = out.headers,
     type = h.get('content-type') ?? '',
-    // HTML and SVG are rendered. XML documents (Atom, RSS, application/xml) are not: they stay on the API policy.
+    // HTML and SVG get the page policy. XML is rendered too, and stays on the API policy: that policy is what
+    // stops a script in the document.
     active = /^(text\/html|image\/svg\+xml)\b/.test(type);
   h.set('tape-version', SHA);
   // the hosted runner's answers (mcp/src) keep the compiler it names: the deploy's parity check compares the two

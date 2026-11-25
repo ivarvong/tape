@@ -410,11 +410,16 @@ function emitCtor(c: Ctx, e: Of<'ctor'>, expected: Type | null): Type {
       'This is a compiler bug, not a mistake in the program: please report it with the program that shows it.',
     );
   const given = decl.params.length === 0 ? T(decl.name) : expected?.name === decl.name ? expected : null;
+  const shadowed = B.prog.renamed?.ctors.has(e.name)
+    ? ` This program's ${e.name} shadows std's ${e.name}: rename the program's ${e.name} to use std's here.`
+    : '';
   const args = B.orderArgs(
     `constructor ${e.name}`,
     v.fields.map(x => x.name),
     e.args,
     e,
+    new Set(),
+    shadowed,
   );
   const { got, ls, bound } = emitFields(c, e, v, args, given);
   const type = given ?? inferred(c, e, bound);

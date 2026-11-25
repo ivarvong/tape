@@ -194,9 +194,10 @@ fn handle(raw: View) -> Buf {
 }
 
 // ---- Atom, RSS and XML are content types (a published /feed.xml was text/plain, and a reader may reject that).
-// The token list is std/http's content_type, and the header is host.ts. A type a browser would run as a page
-// (application/xhtml+xml), an obsolete one that was sniffed (text/xml), and a parameter smuggled onto a token are
-// not on the list: the line is all body.
+// The token list is std/http's content_type, and the header is host.ts. application/xhtml+xml is the HTML page
+// token (a page is Html), text/xml is obsolete and was sniffed, and a parameter on the token is the program
+// writing the header: each of those lines is all body. Chrome renders application/xml as a page; the service's
+// content-security-policy is what stops a script in it (service/test/headers.test.ts), not this host function.
 {
   const http = std.find(s => s.name === 'std/http.tape')?.text ?? '';
   const start = http.indexOf('fn content_type');
@@ -219,7 +220,8 @@ fn handle(raw: View) -> Buf {
     const out = responseOf(app.handle(new TextEncoder().encode(`GET ${path}\n`)));
     return [out.status, out.type, new TextDecoder().decode(out.body)];
   };
-  const ATOM = '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"/>';
+  const ATOM =
+    '<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/2005/Atom"><script xmlns="http://www.w3.org/1999/xhtml">ran=1</script></feed>';
   const RSS = '<?xml version="1.0" encoding="utf-8"?><rss version="2.0"/>';
   const XML = '<?xml version="1.0" encoding="utf-8"?><doc/>';
   same('a feed is application/atom+xml', ask('/feed.xml'), [200, 'application/atom+xml; charset=utf-8', ATOM]);

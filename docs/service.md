@@ -116,8 +116,11 @@ headers) with a 500 that says why. A first line that is neither form is all body
 A program's HTML or SVG is served sandboxed (`content-security-policy`): no script runs, style is inline, a form
 posts to the service's own origin, and an image is one of this origin's (another route of the program that answers
 `Svg`: `<img src="chart">`) or a `data:` URL; nothing is loaded from another origin. Atom, RSS and XML
-(`application/atom+xml`, `application/rss+xml`, `application/xml`, each with `charset=utf-8`) are documents, not
-pages: they take the same policy as JSON. `application/xhtml+xml` is not a type a program can name.
+(`application/atom+xml`, `application/rss+xml`, `application/xml`, each with `charset=utf-8`, which overrides an
+encoding declaration in the document) are rendered as pages by Chrome. They take the API's policy, the same as
+JSON: `sandbox` and `default-src 'none'`, which is what stops a script in the document. nosniff does not.
+`application/xhtml+xml` is not a type a program can name: a page is `Html`. Any host that serves these types must
+send that policy; the content type alone does not.
 
 A program reads the request headers the host passes with `header_of`. They are an allow-list: accept,
 accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, the Standard
