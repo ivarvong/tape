@@ -37,6 +37,15 @@ def exact(fn, x, y):
         return mpmath.sin(X)
     if fn == 'cos':
         return mpmath.cos(X)
+    if fn == 'tan':
+        return mpmath.tan(X)
+    if fn == 'asin':
+        return mpmath.asin(X) if abs(x) <= 1 else None
+    if fn == 'acos':
+        return mpmath.acos(X) if abs(x) <= 1 else None
+    if fn == 'fmod':
+        # exact: the remainder is a double, which C's fmod (Python's math.fmod) gives
+        return mpf(math.fmod(x, y)) if y != 0 else None
     if fn == 'exp':
         return mpmath.exp(X)
     if fn == 'log':

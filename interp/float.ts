@@ -1,6 +1,8 @@
 // interp/float.ts: Float in the reference interpreter, written from the language's definition and not from the
 // compiler's code. A Float is a JS number. JS + - * / are IEEE 754 roundTiesToEven (ECMA-262 §6.1.6.1), as
-// Wasm's are; a result that is NaN or infinite stops the run (float not finite), so no Float is ever either.
+// Wasm's are; a result that is NaN or infinite stops the run (float not finite), so no Float is ever either. JS `%`
+// is the exact remainder with the sign of the left side (ECMA-262 Number::remainder), which is C's fmod: the
+// compiled module's `%` is its own port of musl's fmod (compiler/math/fmod.ts), so this one is independent of it.
 import { unreachable } from '../compiler/ast.ts';
 import { TRAP } from '../compiler/common.ts';
 import { Trap } from './host.ts';
@@ -11,7 +13,7 @@ export const finite = (x: number): number => {
   if (!Number.isFinite(x)) throw new Trap(TRAP.FLOAT);
   return x;
 };
-type Op = '+' | '-' | '*' | '/';
+type Op = '+' | '-' | '*' | '/' | '%';
 export function floatArithmetic(op: Op, l: number, r: number): number {
   switch (op) {
     case '+':
@@ -22,6 +24,8 @@ export function floatArithmetic(op: Op, l: number, r: number): number {
       return finite(l * r);
     case '/':
       return finite(l / r);
+    case '%':
+      return finite(l % r);
     default:
       return unreachable(op, 'operator');
   }

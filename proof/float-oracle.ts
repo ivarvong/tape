@@ -1,9 +1,11 @@
 // proof/float-oracle.ts: inputs for the math library's oracle, and what the library gives for each, as JSON lines
 // for proof/float_oracle.py (mpmath), which says how far each result is from the true value. By hand, not in the
 // gate: the gate reads the golden file the oracle wrote (test/float-math.ts).
-//   node proof/float-oracle.ts [n] [musl.wasm]     n inputs per function (default 100000), edge cases first
+//   node proof/float-oracle.ts [n] [musl.wasm] [fns]   n inputs per function (default 100000), edge cases first;
+//                                                       fns, a list such as tan,asin: only those functions
 // With musl.wasm, each line also has musl's own result (m), which the golden file keeps, so the gate holds the port
-// to musl bit for bit. That module is musl's libm as zig 0.14.1 builds it, exporting m_sin, m_cos, … :
+// to musl bit for bit. That module is musl's libm as zig 0.14.1 builds it, exporting m_sin, m_cos, … (m_fmod for
+// Float's `%`); zig 0.14.1 is on PyPI as ziglang==0.14.1:
 //   double m_sin(double x) { return sin(x); }  …  zig cc -target wasm32-wasi -O2 -mexec-model=reactor m.c -o musl.wasm
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
@@ -11,7 +13,8 @@ import { math64 } from '../interp/float.ts';
 
 const n = Number(process.argv[2] ?? 100_000);
 const lib = math64();
-const muslFile = process.argv[3];
+const muslFile = process.argv[3] === '' ? undefined : process.argv[3];
+const only = process.argv[4]?.split(',') ?? null;
 const musl: Record<string, (...xs: number[]) => number> = {};
 if (muslFile)
   for (const [k, f] of Object.entries(new WebAssembly.Instance(new WebAssembly.Module(readFileSync(muslFile))).exports))
@@ -58,10 +61,32 @@ const INPUTS: Record<string, () => number[]> = {
   },
 };
 INPUTS['cos'] = INPUTS['sin'] ?? (() => [0]);
+INPUTS['tan'] = INPUTS['sin'] ?? (() => [0]);
+// asin and acos: all of -1 to 1, near 0, near 1 and -1 (where the reduction to sqrt(1 - |x|) matters), and a
+// little past them, where there is no value and the language traps
+INPUTS['asin'] = () => {
+  const k = Math.floor(unit() * 5);
+  if (k === 0) return [uniform(-1, 1)];
+  if (k === 1) return [spread(-60, -1) * sign()];
+  if (k === 2) return [(1 - spread(-53, -2)) * sign()];
+  if (k === 3) return [uniform(0.5, 1) * sign()];
+  return [(1 + spread(-52, 2)) * sign()];
+};
+INPUTS['acos'] = INPUTS['asin'];
+// fmod, Float's %: quotients from tiny to huge, subnormals, and a divisor near a multiple of the dividend
+INPUTS['fmod'] = () => {
+  const k = Math.floor(unit() * 4);
+  if (k === 0) return [spread(-60, 60) * sign(), spread(-60, 60) * sign()];
+  if (k === 1) return [spread(0, 1023) * sign(), spread(-1074, 0) * sign()];
+  if (k === 2) return [spread(-1074, -1000) * sign(), spread(-1074, -1010) * sign()];
+  const y = spread(-20, 20);
+  return [y * Math.round(uniform(1, 1e6)) * (1 + uniform(-1e-15, 1e-15)) * sign(), y * sign()];
+};
 for (const [fn, make] of Object.entries(INPUTS)) {
+  if (only && !only.includes(fn)) continue;
   const f = lib[fn];
   if (!f) throw new Error(`the library has no ${fn}`);
-  const two = fn === 'atan2' || fn === 'pow';
+  const two = fn === 'atan2' || fn === 'pow' || fn === 'fmod';
   const edges = two ? EDGE.flatMap(a => EDGE.map(b => [a, b])) : EDGE.map(a => [a]);
   for (let k = 0; k < n; k++) {
     const [x = 0, y = 0] = k < edges.length ? (edges[k] ?? []) : make();

@@ -90,6 +90,9 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     // the math library (compiler/math)
     sin: ['x'],
     cos: ['x'],
+    tan: ['x'],
+    asin: ['x'],
+    acos: ['x'],
     atan2: ['y', 'x'],
     exp: ['x'],
     log: ['x'],

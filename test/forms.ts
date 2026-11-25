@@ -578,6 +578,7 @@ T(
     'std/json.tape',
     'std/list.tape',
     'std/map.tape',
+    'std/math.tape',
     'std/retry.tape',
     'std/text.tape',
     'std/time.tape',

@@ -1,4 +1,5 @@
-// sin, cos, atan2, exp, log and pow: the math library (compiler/math) in three builds and the reference interpreter,
+// sin, cos, tan, asin, acos, atan2, exp, log, pow and Float's % (fmod): the math library (compiler/math) in three
+// builds and the reference interpreter,
 // against the true values mpmath computed (testdata/float/golden.jsonl, written by proof/float_oracle.py): every
 // result within 1 ulp of the true value (atan2: 1.5), a trap (float not finite) where there is no finite one, and the same bits
 // in every build and in the interpreter.
@@ -23,11 +24,15 @@ const fromHex = (h: string): number => {
   dv.setBigUint64(0, BigInt(`0x${h}`));
   return dv.getFloat64(0);
 };
-const TWO = new Set(['atan2', 'pow']);
-const FNS = ['sin', 'cos', 'atan2', 'exp', 'log', 'pow'];
+const TWO = new Set(['atan2', 'pow', 'fmod']);
+// fmod is Float's `%`: the compiled builds run their port of musl's (compiler/math/fmod.ts), the interpreter
+// JavaScript's `%`, which is specified exactly, so there it is an independent check
+const FNS = ['sin', 'cos', 'tan', 'asin', 'acos', 'atan2', 'exp', 'log', 'pow', 'fmod'];
+const bodyOf = (f: string): string =>
+  f === 'fmod' ? 'a % b' : f === 'atan2' ? 'atan2(y: a, x: b)' : `${f}(x: a, y: b)`;
 const text = FNS.map(f =>
   TWO.has(f)
-    ? `fn m_${f}(a: Float, b: Float) -> Float {\n  ${f}(${f === 'atan2' ? 'y: a, x: b' : 'x: a, y: b'})\n}\n`
+    ? `fn m_${f}(a: Float, b: Float) -> Float {\n  ${bodyOf(f)}\n}\n`
     : `fn m_${f}(x: Float) -> Float {\n  ${f}(x)\n}\n`,
 ).join('\n');
 

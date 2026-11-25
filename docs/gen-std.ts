@@ -190,6 +190,9 @@ const BUILT_INS: BuiltIn[] = [
     [
       ['sin', 'x', 'The sine, x in radians.'],
       ['cos', 'x', 'The cosine, x in radians.'],
+      ['tan', 'x', 'The tangent, x in radians; never infinite (no Float is that near an odd multiple of pi/2).'],
+      ['asin', 'x', 'The arcsine, from -pi/2 to pi/2; outside -1 to 1 it traps (trap 8, float not finite).'],
+      ['acos', 'x', 'The arccosine, from 0 to pi; outside -1 to 1 it traps (trap 8). `acos(x: -1f)` is `pi()`.'],
       ['exp', 'x', 'e to the x; beyond about 709.78 it traps (trap 8, float not finite).'],
       ['log', 'x', 'The natural logarithm; of 0 or less it traps (trap 8).'],
     ] as const

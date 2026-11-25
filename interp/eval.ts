@@ -271,6 +271,7 @@ function floatBinary(op: Bin['op'], l: number, r: number): Value {
     case '-':
     case '*':
     case '/':
+    case '%':
       return floatArithmetic(op, l, r);
     default:
       return stop(`Float has no ${op}`);
@@ -297,6 +298,9 @@ const INTRINSIC = {
   max: ['a', 'b'],
   sin: ['x'],
   cos: ['x'],
+  tan: ['x'],
+  asin: ['x'],
+  acos: ['x'],
   atan2: ['y', 'x'],
   exp: ['x'],
   log: ['x'],
@@ -392,6 +396,9 @@ function intrinsic(name: Intrinsic, a: Value[]): Value {
     // so test/float-math.ts holds them to musl and to an oracle
     case 'sin':
     case 'cos':
+    case 'tan':
+    case 'asin':
+    case 'acos':
     case 'exp':
     case 'log':
       return finite(mathFn(name)(asFloat(a[0])));

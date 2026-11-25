@@ -15,17 +15,24 @@ import { INVERSE } from './inverse.ts';
 import { EXPLOG } from './explog.ts';
 import { DEC } from './dec.ts';
 import { DECIMAL } from './decimal.ts';
+import { FMOD } from './fmod.ts';
 
-export const LIBRARY: Readonly<Record<string, Def>> = { ...TRIG, ...INVERSE, ...EXPLOG, ...DEC, ...DECIMAL };
+export const LIBRARY: Readonly<Record<string, Def>> = { ...TRIG, ...INVERSE, ...EXPLOG, ...DEC, ...DECIMAL, ...FMOD };
 /** The functions a program calls by name, with their parameters' names; the rest are their helpers. */
 export const PUBLIC: Readonly<Record<string, readonly string[]>> = {
   sin: ['x'],
   cos: ['x'],
+  tan: ['x'],
+  asin: ['x'],
+  acos: ['x'],
   atan2: ['y', 'x'],
   exp: ['x'],
   log: ['x'],
   pow: ['x', 'y'],
 };
+/** The functions behind an operator, which a program does not call by name: fmod is Float's `%`. */
+export const OPERATORS: Readonly<Record<string, readonly string[]>> = { fmod: ['x', 'y'] };
+const EXPORTED = { ...PUBLIC, ...OPERATORS };
 export const defOf = (n: string): Def => {
   const d = Object.hasOwn(LIBRARY, n) ? LIBRARY[n] : undefined;
   if (!d) throw new Error(`no math function ${n}`);
@@ -33,7 +40,7 @@ export const defOf = (n: string): Def => {
 };
 
 /**
- * The library as a module of its own: every public function exported by its name, the helpers they call, the
+ * The library as a module of its own: every public function and fmod exported by its name, the helpers they call, the
  * constant tables and the scratch room in one memory. For the interpreter, and for tests (a Worker cannot compile
  * it at run time, so the reference interpreter's math is Node's and the browser's only).
  */
@@ -66,7 +73,7 @@ export function standalone(): Uint8Array<ArrayBuffer> {
       return at;
     },
   };
-  for (const n of Object.keys(PUBLIC).filter(x => Object.hasOwn(LIBRARY, x))) index(n);
+  for (const n of Object.keys(EXPORTED).filter(x => Object.hasOwn(LIBRARY, x))) index(n);
   const bodies: number[][] = [];
   for (let k = 0; k < order.length; k++) bodies.push(assembleBody(defOf(order[k] ?? ''), link));
   const sigs: string[] = [];
@@ -82,7 +89,7 @@ export function standalone(): Uint8Array<ArrayBuffer> {
     return [0x60, ...vec(vts(p).map(x => [x])), ...vec(vts(r).map(x => [x]))];
   });
   const pages = Math.ceil((BASE + data.length) / 65536);
-  const exported = order.flatMap((n, k) => (Object.hasOwn(PUBLIC, n) ? [[...name(n), 0, ...uleb(k)]] : []));
+  const exported = order.flatMap((n, k) => (Object.hasOwn(EXPORTED, n) ? [[...name(n), 0, ...uleb(k)]] : []));
   return new Uint8Array([
     0,
     0x61,

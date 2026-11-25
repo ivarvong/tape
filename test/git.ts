@@ -64,7 +64,7 @@ const head = (): string => git(bare, 'rev-parse', 'main'),
   version = (): string => git(bare, 'show', 'main:VERSION');
 
 const r = compile([
-  ...['core', 'text', 'json', 'http', 'list', 'map', 'retry', 'time'].map(n => src(`std/${n}.tape`)),
+  ...['core', 'text', 'json', 'http', 'list', 'map', 'retry', 'time', 'math'].map(n => src(`std/${n}.tape`)),
   src('examples/bump.tape'),
 ]);
 if (r.wasm === null) throw new Error(JSON.stringify(r.errors[0]));

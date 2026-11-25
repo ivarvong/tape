@@ -79,7 +79,9 @@ const MONO: ReadonlyMap<string, Type> = new Map([
     (n): [string, Type] => [n, INT],
   ),
   ...['slice', 'freeze'].map((n): [string, Type] => [n, VIEW]),
-  ...['floor', 'ceil', 'sqrt', 'sin', 'cos', 'exp', 'log', 'atan2', 'pow'].map((n): [string, Type] => [n, FLOAT]),
+  ...['floor', 'ceil', 'sqrt', 'sin', 'cos', 'tan', 'asin', 'acos', 'exp', 'log', 'atan2', 'pow'].map(
+    (n): [string, Type] => [n, FLOAT],
+  ),
 ]);
 /** The result type of a call, when its arguments say what the callee's type parameters are. */
 function peekCall(c: Ctx, e: Call): Type | null {

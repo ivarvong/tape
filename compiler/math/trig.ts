@@ -1,4 +1,4 @@
-// compiler/math/trig.ts: sin and cos, ported from musl (src/math/sin.c cos.c __sin.c __cos.c
+// compiler/math/trig.ts: sin, cos and tan, ported from musl (src/math/sin.c cos.c tan.c __sin.c __cos.c __tan.c
 // __rem_pio2.c __rem_pio2_large.c, as zig 0.14.1 ships them for wasm32-wasi, which drops the directed-rounding
 // fix-up of __rem_pio2: Wasm rounds to nearest). Line for line, but for what a Float cannot be: the NaN and
 // infinity branches are gone, and so is FORCE_EVAL, which only raises a floating-point exception.
@@ -13,6 +13,8 @@
 // is preserved.
 // ====================================================
 // Optimized by Bruce D. Evans (__sin, __cos, __rem_pio2).
+// __tan: Copyright 2004 Sun Microsystems, Inc. All Rights Reserved. Permission to use, copy, modify, and
+// distribute this software is freely granted, provided that this notice is preserved.
 import {
   F64,
   I32,
@@ -25,6 +27,7 @@ import {
   eqz,
   extU,
   f,
+  geU,
   floor,
   ge,
   gt,
@@ -91,6 +94,64 @@ const kCos: Def = {
     const hz = b.let(mul(f(0.5), z));
     b.set(w, sub(f(1), hz));
     b.ret(add(w, add(sub(sub(f(1), w), hz), sub(mul(z, r), mul(x, y)))));
+  },
+};
+
+// ---- __tan(x, y, odd): tan(x + y) (odd 0) or -1/tan(x + y) (odd 1) for |x + y| <= pi/4 (or a little more)
+const T = [
+  3.33333333333334091986e-1, 1.33333333333201242699e-1, 5.39682539762260521377e-2, 2.18694882948595424599e-2,
+  8.86323982359930005737e-3, 3.59207910759131235356e-3, 1.45620945432529025516e-3, 5.88041240820264096874e-4,
+  2.46463134818469906812e-4, 7.817944429395570923e-5, 7.14072491382608190305e-5, -1.85586374855275456654e-5,
+  2.59073051863633712884e-5,
+];
+const Tat = (ks: readonly number[]): number[] => ks.map(k => T[k] ?? 0);
+const pio4 = 7.85398163397448278999e-1,
+  pio4lo = 3.06161699786838301793e-17;
+/** x with its low 32 bits cleared (SET_LOW_WORD(x, 0)). */
+const highOnly = (x: E): E => double(and(bits(x), l(-(1n << 32n))));
+const kTan: Def = {
+  params: [F64, F64, I32],
+  results: [F64],
+  body(b) {
+    const x = b.p(0),
+      y = b.p(1),
+      odd = b.p(2);
+    const hx = b.let(hi(x));
+    // |x| >= 0.6744: tan(pi/4 - y), from (1 - tan y) / (1 + tan y)
+    const big = b.let(geU(and(hx, i(0x7fffffff)), i(0x3fe59428)));
+    const sign = b.let(shrU(hx, i(31)));
+    b.if(big, () => {
+      b.if(sign, () => {
+        b.set(x, neg(x));
+        b.set(y, neg(y));
+      });
+      b.set(x, add(sub(f(pio4), x), sub(f(pio4lo), y)));
+      b.set(y, f(0));
+    });
+    const z = b.let(mul(x, x));
+    const w = b.let(mul(z, z));
+    const r = b.let(poly(w, Tat([1, 3, 5, 7, 9, 11])));
+    const v = b.let(mul(z, poly(w, Tat([2, 4, 6, 8, 10, 12]))));
+    const s = b.let(mul(z, x));
+    b.set(r, add(add(y, mul(z, add(mul(s, add(r, v)), y))), mul(s, f(T[0] ?? 0))));
+    b.set(w, add(x, r));
+    b.if(big, () => {
+      b.set(s, toF(sub(i(1), mul(i(2), odd))));
+      b.set(v, sub(s, mul(f(2), add(x, sub(r, div(mul(w, w), add(w, s)))))));
+      b.if(sign, () => {
+        b.ret(neg(v));
+      });
+      b.ret(v);
+    });
+    b.if(eqz(odd), () => {
+      b.ret(w);
+    });
+    // -1/(x+r) has up to 2 ulp error, so compute it accurately
+    const w0 = b.let(highOnly(w));
+    b.set(v, sub(r, sub(w0, x)));
+    const a = b.let(div(f(-1), w));
+    const a0 = b.let(highOnly(a));
+    b.ret(add(a0, mul(a, add(add(f(1), mul(a0, w0)), mul(a0, v)))));
   },
 };
 
@@ -497,9 +558,27 @@ const cos: Def = {
     b.ret(b.call('k_sin', F64, y0, y1, i(1)));
   },
 };
+const tan: Def = {
+  params: [F64],
+  results: [F64],
+  body(b) {
+    const x = b.p(0);
+    b.if(small(x), () => {
+      // |x| < 2^-27: x itself
+      b.if(tiny(x, 0x3e400000), () => {
+        b.ret(x);
+      });
+      b.ret(b.call('k_tan', F64, x, f(0), i(0)));
+    });
+    const [n, y0, y1] = reduced(b, x);
+    b.ret(b.call('k_tan', F64, y0, y1, and(n, i(1))));
+  },
+};
 export const TRIG: Readonly<Record<string, Def>> = {
   k_sin: kSin,
   k_cos: kCos,
+  k_tan: kTan,
+  tan,
   rem_pio2: remPio2,
   rem_pio2_large: remPio2Large,
   sin,

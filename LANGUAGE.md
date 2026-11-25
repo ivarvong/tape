@@ -158,13 +158,17 @@ pattern (C19).
 On `Float`: `+ - * /` are IEEE 754's, rounded once to the nearest Float (a tie to the even one), the same bits in
 every engine Wasm runs in; a result that would be infinite or not a number (`1f / 0f`, `0f / 0f`, `1e308f * 10f`)
 traps (trap 8, float not finite), so every Float a program holds is finite. Unary `-` is exact. `== != < <= > >=`
-compare values, and `-0f == 0f`. There is no `%` and no bitwise operator (C19), and an Int and a Float do not mix
+compare values, and `-0f == 0f`. `x % y` is the remainder of `x / y` truncated toward zero, `x - n * y` for that
+whole n, with the sign of `x` as an Int's `%` has: exact (it is C's fmod, and JavaScript's `%`), so `7.5f % 2f` is
+`1.5f` and `-7.5f % 2f` is `-1.5f`, and `x % 0f` traps (trap 8, float not finite) as `0f / 0f` does. There is no
+bitwise operator (C19), and an Int and a Float do not mix
 (C14): `float(n)` is the Float nearest an Int, and `trunc(x)` the Int toward zero, trapping (integer overflow)
 outside the Ints. `floor(x)`, `ceil(x)`, `abs(x)` and `sqrt(x)` are exactly as IEEE 754 defines them (`sqrt` of a
 negative traps); `abs`, `min(a: …, b: …)` and `max(a: …, b: …)` take two Ints or two Floats. `sin(x)`, `cos(x)`,
-`atan2(y:, x:)`, `exp(x)`, `log(x)` and `pow(x:, y:)` are musl's (fdlibm's, and Arm's), compiled into the module as
-Wasm, so a result is the same bits in every engine and in a replay: within 1 ulp of the true value (atan2, 1.5 ulp),
-and a trap where it would be infinite or not a number (`log(0f)`, `exp(1000f)`, `pow(x: -8f, y: 0.5f)`). A
+`tan(x)`, `asin(x)`, `acos(x)`, `atan2(y:, x:)`, `exp(x)`, `log(x)`, `pow(x:, y:)` and `%` are musl's (fdlibm's, and
+Arm's), compiled into the module as Wasm, so a result is the same bits in every engine and in a replay: within 1 ulp
+of the true value (atan2, 1.5 ulp), and a trap where it would be infinite or not a number (`log(0f)`, `exp(1000f)`,
+`pow(x: -8f, y: 0.5f)`, `asin(x: 2f)`). std's `pi()` is the Float nearest pi. A
 Float is matched with a guard,
 `x if x == 0f ->`, never a literal pattern (C19).
 
@@ -558,7 +562,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Change a Dec's scale | `rescale(x: …, to: 3)` up, exactly; `round(x: …, to: 2, rounding: HalfEven)` down | C14 |
 | Divide a Dec, or apply a rate | `div(a: …, by: …, scale: 2, rounding: HalfEven)`, `mul(a: …, by: rate, scale: 2, rounding: HalfEven)`: exact, then rounded once | C19 |
 | Money in currencies of different places (USD 2, JPY 0) | one scale for all, `Dec[2]`; for a 0-place currency compute at scale 0 and rescale up, `rescale(x: mul(a: sub, by: rate, scale: 0, rounding: HalfUp), to: 2)`, rather than round a 2-place result (that rounds twice) | C14 |
-| Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back. sin, cos, atan2, exp, log and pow are Float's: a Dec has none (`sin(x)` of a Dec is C14), so an exact kernel stays Int, with Dec at its edges | C14 |
+| Measure | `Float`, with `f` literals; `float(n)` from an Int, `trunc(x)` back. sin, cos, tan, asin, acos, atan2, exp, log, pow and `%` are Float's, and `pi()` is std's: a Dec has none (`sin(x)` of a Dec is C14), so an exact kernel stays Int, with Dec at its edges | C14 |
 | Run something for what it does | `do f(…)` | C83-C85 |
 | Count, or do something n times | `fold` over `range(from:, to:)` | |
 | Write each item of a list | `fold(list, from: out, by: fn(out: Buf, item: T) -> Buf { … })` | |

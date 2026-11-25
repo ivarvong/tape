@@ -567,7 +567,7 @@ function floatExpr(g: G, d: number, env: Env): string {
       return floatLit(g);
     case 2:
     case 3:
-      return `(${F()} ${r.one(['+', '-', '*', '/'])} ${F()})`;
+      return `(${F()} ${r.one(['+', '-', '*', '/', '%'])} ${F()})`;
     case 4:
       return `float(${sub(g, INT, d, env)})`;
     case 5:
@@ -575,7 +575,7 @@ function floatExpr(g: G, d: number, env: Env): string {
     case 6:
       return `${r.one(['floor', 'ceil', 'sqrt', 'abs'])}(${F()})`;
     case 7:
-      return `${r.one(['sin', 'cos', 'exp', 'log'])}(${F()})`;
+      return `${r.one(['sin', 'cos', 'tan', 'asin', 'acos', 'exp', 'log'])}(${F()})`;
     case 8:
       return r.chance(2) ? `atan2(y: ${F()}, x: ${F()})` : `pow(x: ${F()}, y: ${F()})`;
     case 9:

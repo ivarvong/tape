@@ -251,6 +251,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 - [std/time.tape](#stdtimetape): [`Civil`](#type-civil), [`civil`](#fn-civil), [`rfc3339`](#fn-rfc3339), [`http_date`](#fn-http_date)
+- [std/math.tape](#stdmathtape): [`pi`](#fn-pi)
 
 ## Built-ins
 
@@ -431,6 +432,30 @@ cos(x: Float) -> Float
 ```
 
 The cosine, x in radians. musl's, in Wasm: the same bits everywhere, within 1 ulp.
+
+### builtin tan
+
+```tape
+tan(x: Float) -> Float
+```
+
+The tangent, x in radians; never infinite (no Float is that near an odd multiple of pi/2). musl's, in Wasm: the same bits everywhere, within 1 ulp.
+
+### builtin asin
+
+```tape
+asin(x: Float) -> Float
+```
+
+The arcsine, from -pi/2 to pi/2; outside -1 to 1 it traps (trap 8, float not finite). musl's, in Wasm: the same bits everywhere, within 1 ulp.
+
+### builtin acos
+
+```tape
+acos(x: Float) -> Float
+```
+
+The arccosine, from 0 to pi; outside -1 to 1 it traps (trap 8). `acos(x: -1f)` is `pi()`. musl's, in Wasm: the same bits everywhere, within 1 ulp.
 
 ### builtin exp
 
@@ -1883,4 +1908,25 @@ An instant as an HTTP date (RFC 9110 section 5.6.7, IMF-fixdate), `Wed, 25 Nov 2
 "Sun, 06 Nov 1994 08:49:37 GMT"
 > http_date(ms: -1)
 "Wed, 31 Dec 1969 23:59:59 GMT"
+```
+
+## std/math.tape
+
+Float's constants. Its functions (sqrt, sin, cos, tan, asin, acos, atan2, exp, log, pow) and its operators (+ - * / %) are built in, compiled into the module so they give the same bits everywhere: docs/std.md lists them with the built-ins.
+
+### fn pi
+
+```tape
+fn pi() -> Float
+```
+
+pi, as the Float nearest it (0x400921FB54442D18, which JavaScript's Math.PI is). A function, as std has no constants: `deg * pi() / 180f` is radians.
+
+```
+> pi()
+3.141592653589793f
+> acos(x: -1f) == pi()
+True
+> 2f * asin(x: 1f) == pi()
+True
 ```

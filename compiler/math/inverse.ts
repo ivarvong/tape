@@ -1,5 +1,5 @@
-// compiler/math/inverse.ts: atan2, and the atan it is made of, ported from musl (src/math/atan.c atan2.c, as zig
-// 0.14.1 ships them). Line for line, but for what a Float cannot be: the NaN and infinity branches are gone, and so
+// compiler/math/inverse.ts: atan2, and the atan it is made of, asin and acos, ported from musl (src/math/atan.c
+// atan2.c asin.c acos.c, as zig 0.14.1 ships them). Line for line, but for what a Float cannot be: the NaN and infinity branches are gone, and so
 // is FORCE_EVAL. atan(x) is atan2(x, 1f), bit for bit (atan2 calls atan for x = 1).
 //
 // From FreeBSD's msun, from fdlibm:
@@ -11,7 +11,32 @@
 // software is freely granted, provided that this notice
 // is preserved.
 // ====================================================
-import { F64, abs, add, and, div, eq, eqz, f, geU, hi, i, lo, ltU, mul, neg, or, poly, shrU, sub } from './wasm.ts';
+import {
+  F64,
+  abs,
+  add,
+  and,
+  bits,
+  div,
+  double,
+  eq,
+  eqz,
+  f,
+  geU,
+  hi,
+  i,
+  l,
+  leU,
+  lo,
+  ltU,
+  mul,
+  neg,
+  or,
+  poly,
+  shrU,
+  sqrt,
+  sub,
+} from './wasm.ts';
 import type { Def, E } from './wasm.ts';
 
 // ---- atan(x)
@@ -146,4 +171,113 @@ const atan2: Def = {
   },
 };
 
-export const INVERSE: Readonly<Record<string, Def>> = { atan, atan2 };
+// ---- asin(x), acos(x): R(z) is their rational approximation of (asin(x) - x) / x^3, z = x^2
+const pio2_hi = 1.570796326794896558,
+  pio2_lo = 6.12323399573676603587e-17;
+const pS = [
+  1.66666666666666657415e-1, -3.25565818622400915405e-1, 2.01212532134862925881e-1, -4.00555345006794114027e-2,
+  7.91534994289814532176e-4, 3.4793310759602116757e-5,
+];
+const qS = [1, -2.40339491173441421878, 2.02094576023350569471, -6.8828397160545329303e-1, 7.70381505559019352791e-2];
+const asinR: Def = {
+  params: [F64],
+  results: [F64],
+  body(b) {
+    const z = b.p(0);
+    b.ret(div(mul(z, poly(z, pS)), poly(z, qS)));
+  },
+};
+/** x with its low 32 bits cleared (SET_LOW_WORD(x, 0)). */
+const highOnly = (x: E): E => double(and(bits(x), l(-(1n << 32n))));
+/** NaN, as musl writes it for |x| > 1: 0/(x-x). The caller's test turns it into the trap. */
+const nan = (x: E): E => div(f(0), sub(x, x));
+const asin: Def = {
+  params: [F64],
+  results: [F64],
+  body(b) {
+    const x = b.p(0);
+    const hx = b.let(hi(x));
+    const ix = b.let(and(hx, i(0x7fffffff)));
+    // |x| >= 1: +-pi/2 at +-1, else not a number
+    b.if(geU(ix, i(0x3ff00000)), () => {
+      b.if(eqz(or(sub(ix, i(0x3ff00000)), lo(x))), () => {
+        b.ret(add(mul(x, f(pio2_hi)), f(2 ** -120)));
+      });
+      b.ret(nan(x));
+    });
+    // |x| < 0.5; x itself for 2^-1022 <= |x| < 2^-26
+    b.if(ltU(ix, i(0x3fe00000)), () => {
+      b.if(and(ltU(ix, i(0x3e500000)), geU(ix, i(0x00100000))), () => {
+        b.ret(x);
+      });
+      b.ret(add(x, mul(x, b.call('asin_r', F64, mul(x, x)))));
+    });
+    // 1 > |x| >= 0.5
+    const z = b.let(mul(sub(f(1), abs(x)), f(0.5)));
+    const s = b.let(sqrt(z));
+    const r = b.let(b.call('asin_r', F64, z));
+    b.if(
+      geU(ix, i(0x3fef3333)),
+      // |x| > 0.975
+      () => b.set(x, sub(f(pio2_hi), sub(mul(f(2), add(s, mul(s, r))), f(pio2_lo)))),
+      () => {
+        // f + c = sqrt(z)
+        const hs = b.let(highOnly(s));
+        const c = b.let(div(sub(z, mul(hs, hs)), add(s, hs)));
+        b.set(
+          x,
+          sub(
+            mul(f(0.5), f(pio2_hi)),
+            sub(sub(mul(mul(f(2), s), r), sub(f(pio2_lo), mul(f(2), c))), sub(mul(f(0.5), f(pio2_hi)), mul(f(2), hs))),
+          ),
+        );
+      },
+    );
+    b.if(shrU(hx, i(31)), () => {
+      b.ret(neg(x));
+    });
+    b.ret(x);
+  },
+};
+const acos: Def = {
+  params: [F64],
+  results: [F64],
+  body(b) {
+    const x = b.p(0);
+    const hx = b.let(hi(x));
+    const ix = b.let(and(hx, i(0x7fffffff)));
+    // |x| >= 1: 0 at 1, pi at -1, else not a number
+    b.if(geU(ix, i(0x3ff00000)), () => {
+      b.if(eqz(or(sub(ix, i(0x3ff00000)), lo(x))), () => {
+        b.if(shrU(hx, i(31)), () => {
+          b.ret(add(mul(f(2), f(pio2_hi)), f(2 ** -120)));
+        });
+        b.ret(f(0));
+      });
+      b.ret(nan(x));
+    });
+    // |x| < 0.5; pi/2 below 2^-57
+    b.if(ltU(ix, i(0x3fe00000)), () => {
+      b.if(leU(ix, i(0x3c600000)), () => {
+        b.ret(add(f(pio2_hi), f(2 ** -120)));
+      });
+      b.ret(sub(f(pio2_hi), sub(x, sub(f(pio2_lo), mul(x, b.call('asin_r', F64, mul(x, x)))))));
+    });
+    // x < -0.5
+    b.if(shrU(hx, i(31)), () => {
+      const z = b.let(mul(add(f(1), x), f(0.5)));
+      const s = b.let(sqrt(z));
+      const w = b.let(sub(mul(b.call('asin_r', F64, z), s), f(pio2_lo)));
+      b.ret(mul(f(2), sub(f(pio2_hi), add(s, w))));
+    });
+    // x > 0.5
+    const z = b.let(mul(sub(f(1), x), f(0.5)));
+    const s = b.let(sqrt(z));
+    const df = b.let(highOnly(s));
+    const c = b.let(div(sub(z, mul(df, df)), add(s, df)));
+    const w = b.let(add(mul(b.call('asin_r', F64, z), s), c));
+    b.ret(mul(f(2), add(df, w)));
+  },
+};
+
+export const INVERSE: Readonly<Record<string, Def>> = { atan, atan2, asin_r: asinR, asin, acos };

@@ -158,20 +158,12 @@ fn two_digits(text: View) -> Option[Int] {
 
 // ---------- the sun ----------
 
-fn pi() -> Float {
-  3.141592653589793f
-}
-
 fn rad(deg: Float) -> Float {
   deg * pi() / 180f
 }
 
 fn deg(rad: Float) -> Float {
   rad * 180f / pi()
-}
-
-fn asin(x: Float) -> Float {
-  atan2(y: x, x: sqrt(max(a: 0f, b: 1f - x * x)))
 }
 
 fn turn(deg: Float) -> Float {
@@ -193,7 +185,7 @@ fn sun(day: Int, minutes: Float) -> Sun {
   let lambda = rad(deg: l0 + c - 0.00569f - 0.00478f * sin(omega))
   let eps0 = 23f + (26f + (21.448f - jc * (46.815f + jc * (0.00059f - jc * 0.001813f))) / 60f) / 60f
   let eps = rad(deg: eps0 + 0.00256f * cos(omega))
-  let t = sin(eps / 2f) / cos(eps / 2f)
+  let t = tan(eps / 2f)
   let y = t * t
   let l = rad(deg: l0)
   let mr = rad(deg: m)
@@ -235,7 +227,7 @@ fn at_event(p: Place, zenith: Float, side: Float, minutes: Float) -> Option[Floa
   match {
     h < -1f or h > 1f -> None
     else -> Some(
-      value: noon_at(p, minutes) + side * 4f * deg(rad: atan2(y: sqrt(1f - h * h), x: h))
+      value: noon_at(p, minutes) + side * 4f * deg(rad: acos(x: h))
     )
   }
 }

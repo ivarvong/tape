@@ -57,7 +57,23 @@ export function finite(c: Ctx): void {
 // way, so this is not a change of meaning: the interpreter tests every operation.
 const DEFERRED = new WeakSet<Expr>();
 const PROPAGATE = new Set(['+', '-', '*', '/']);
-const QUIET_CALLS = new Set(['sin', 'cos', 'atan2', 'exp', 'log', 'pow', 'sqrt', 'abs', 'min', 'max', 'floor', 'ceil']);
+const QUIET_CALLS = new Set([
+  'sin',
+  'cos',
+  'tan',
+  'asin',
+  'acos',
+  'atan2',
+  'exp',
+  'log',
+  'pow',
+  'sqrt',
+  'abs',
+  'min',
+  'max',
+  'floor',
+  'ceil',
+]);
 function quiet(e: Expr): boolean {
   switch (e.k) {
     case 'float':
@@ -84,14 +100,19 @@ export function emitFloatBin(c: Ctx, e: Bin): Type {
   const compare = Object.hasOwn(COMPARE, op) ? COMPARE[op] : undefined;
   const arithmetic = Object.hasOwn(ARITHMETIC, op) ? ARITHMETIC[op] : undefined;
   const opcode = compare ?? arithmetic;
+  if (op === '%') {
+    // fmod (compiler/math/fmod.ts): exact, with the sign of the left side; x % 0f is NaN, and so the trap
+    need(c, c.emit(e.r, FLOAT, false), FLOAT, e, 'the right side of %');
+    c.code.push(0x10, ...uleb(mathIndex(c.B, 'fmod')));
+    finite(c);
+    return FLOAT;
+  }
   if (opcode === undefined)
     return fail(
       e,
       'C19',
       `Float values have no ${op}`,
-      op === '%'
-        ? 'A Float has + - * / and comparisons. For a remainder, `x - y * float(floor(x / y))`.'
-        : 'A Float has + - * / and comparisons; bitwise operators and ++ are for Int and text.',
+      'A Float has + - * / %, and comparisons; bitwise operators and ++ are for Int and text.',
     );
   if (op === '+' || op === '-' || op === '*') DEFERRED.add(e.r);
   need(c, c.emit(e.r, FLOAT, false), FLOAT, e, `the right side of ${op}`);
@@ -101,15 +122,17 @@ export function emitFloatBin(c: Ctx, e: Bin): Type {
   return FLOAT;
 }
 
-// ---- the math library (compiler/math): sin, cos, atan2, exp, log and pow, as Wasm functions of the module
+// ---- the math library (compiler/math): sin, cos, tan, asin, acos, atan2, exp, log, pow and fmod (`%`), as Wasm
+// functions of the module
 
 export function compileMath(B: Build, n: string): Compiled {
   const def = defOf(n);
   const link = { index: (m: string) => mathIndex(B, m), data: B.constData, scratch: B.room };
   return { sig: B.sig(def.params, def.results), body: assembleBody(def, link) };
 }
-// what can come out NaN or infinite: exp and pow overflow, log of 0 or less, pow of a negative to a fraction
-const CHECKED = new Set(['exp', 'log', 'pow']);
+// what can come out NaN or infinite: exp and pow overflow, log of 0 or less, pow of a negative to a fraction, asin
+// and acos beyond -1 to 1 (tan never overflows: no Float is near enough an odd multiple of pi/2)
+const CHECKED = new Set(['exp', 'log', 'pow', 'asin', 'acos']);
 
 /** The arguments of an intrinsic, in the order of its parameters. */
 const argsOf = (c: Ctx, e: Call): Arg[] => c.B.orderArgs(`function ${e.name}`, INTRINSICS.get(e.name) ?? [], e.args, e);
