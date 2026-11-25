@@ -196,9 +196,11 @@ fn value_byte(b: Int) -> Bool {
 }
 
 // The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and
-// Xml answer application/atom+xml, application/rss+xml and application/xml: a feed or an XML document, not a page.
-// The host labels those three, and the text types, charset=utf-8. application/xhtml+xml is not a Content, because
-// a browser would run it as a page.
+// Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the
+// text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as
+// pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy
+// does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page
+// is Html. text/xml is not one: it is obsolete and was sniffed.
 type Content {
   Html
   Json
