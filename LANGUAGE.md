@@ -19,8 +19,10 @@ waits on a call, another may run. Three things hold for every program:
 1. **Everything it does to the world is in a log.** SQL, calls to other programs, the clock, random numbers and
    timers are effects. Each is recorded, and a run can be repeated from its log.
 2. **Memory is the request's.** Values are immutable. Nothing lives past the request except rows.
-3. **What a call can do is visible where it is made.** A function reaches the database, another program, the clock
-   or a timer only if it, and everything that calls it, declares that capability as a parameter.
+3. **What a request can do is declared where it enters.** An entry point (`handle`, `woken`, an exported function)
+   declares each capability it uses, itself or through what it calls: the database, another program, the clock,
+   random numbers, a timer. A function it calls uses that capability by its name without passing it, and a
+   capability no entry point declares is refused with the call path to its use (C72, section 4).
 
 ## 2. Text
 
