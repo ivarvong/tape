@@ -4,7 +4,7 @@
 
 A code starts with the part of the compiler that gives it: L for the lexer (the characters of a file), P for the parser (its shape), C for the checker and the rules (what it means). A refusal is a code, a file and line, what is wrong there, and what to write instead; the line and the fix name what the program wrote. This page says what each code refuses whatever the program, and where [LANGUAGE.md](../LANGUAGE.md) or [the guide](guide.md) explains it.
 
-104 codes.
+105 codes.
 
 | Code | Refuses | Explained in |
 |---|---|---|
@@ -108,9 +108,10 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C85 | A call multiplied by 0, so what it does is hidden and its value thrown away. Write it as a step: `do call(…)` for a Done, `let 1 = …` or `let _ = …` for an Int. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Steps that only do something: do](guide.md#steps-that-only-do-something-do) |
 | C86 | An invariant that is not one SELECT, without placeholders, over the schema's tables and columns, or one whose name is used twice. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C87 | A match on a reply where one arm takes a refusal together with no answer and acts on the outcome: a timer asks for ever (the same key gets the same refusal), and a write or another call treats no answer as a refusal or a refusal as an answer. Such an arm may only answer the client. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
-| C88 | `repeat: True` or `no_floor: True` on a call whose statement its rule (C54 and C55, or C73) accepts anyway. The argument is a claim about the write, so it is refused where it is not true. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
+| C88 | `repeat: True` or `no_floor: True` on a call whose statement its rule (C54, C55 and C95, or C73) accepts anyway. The argument is a claim about the write, so it is refused where it is not true. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C93 | The set of `scan` that is not a text literal. The bytes are fixed when the program is compiled, so the scan reads 16 at a time. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C94 | A `private fn` called, passed as a function value or matched as a pattern outside the file that defines it. std's helpers are private: what it reads and writes for decode is reached through decode, is_json and json_member. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
+| C95 | An UPDATE a request reaches that takes a row chosen by what it changes (the next job that is ready, by a query or a subquery), with nothing that keys it to the request: sent again, the request takes a second row. Write the client's key into the row and read it back first, or claim an op id. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C99 | A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program. |  |
 
 ## Reserved

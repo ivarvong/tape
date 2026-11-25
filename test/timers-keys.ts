@@ -228,7 +228,7 @@ fn handle(raw: View, clock: Clock) -> Buf {
   // a helper stamps the delivery with the time, in a table of its own, and gives back the count it was given
   const helper = (
     gives: string,
-    stamp = 'do sql_exec(query: "UPDATE stamps SET at = :at WHERE delivery = :id", at: now(), id)\n  ',
+    stamp = 'let _ = sql_exec(query: "UPDATE stamps SET at = :at WHERE delivery = :id", at: now(), id)\n  ',
   ): string =>
     edit(outbox, [
       ...CLOCK,

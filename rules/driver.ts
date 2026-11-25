@@ -2,6 +2,7 @@
 import type { Program } from '../compiler/ast.ts';
 import type { Problem } from '../compiler/common.ts';
 import { inNames } from '../compiler/sqltext.ts';
+import { claimRules } from './claims.ts';
 import { commandRules } from './commands.ts';
 import { declaredRules } from './declared.ts';
 import { finalRules } from './final.ts';
@@ -45,6 +46,7 @@ export function rules(prog: Program): Problem[] {
   // table's keys and columns would refuse what is fine, so they wait for the schema to be fixed
   const schemaRead = reading.model.errors.length === 0;
   if (schemaRead) replayRules(reading); // C54-C56, C88
+  if (schemaRead) claimRules(reading); // C95
   commandRules(reading); // C71, C81, C87
   if (schemaRead) floorRules(reading); // C73
   guardRules(reading); // C74

@@ -199,6 +199,44 @@ refund sent on a catch-all that also takes `Timeout`, is refused, and so is a st
 (`test/no-answer.ts`, which failed eight of its checks on the rule before). It is one code and not a new one
 because it is one mistake with one fix: give `Rejected` its own arm.
 
+## A claim keyed by the request: C95
+
+`POST /lease` sent twice took two jobs ([`apps/queue/FRICTION.md`](../apps/queue/FRICTION.md), entry 7). The
+UPDATE that leases a job is a compare-and-set on the row it found, so C54 passes it, and it inserts nothing, so C55
+has nothing to say. What is wrong is how it found the row: the oldest job that is `ready`, and the UPDATE moves the
+job out of `ready`, so the same request run again finds another job.
+
+The rule, as shipped on 25 November 2026:
+
+- **Covered.** An UPDATE (through `sql_move`, `sql_first` or `sql_exec`) in a function `handle` reaches, whose row
+  is chosen by a column the UPDATE sets, in either of two ways: a subquery in its WHERE over its own table reads
+  that column (`WHERE id = (SELECT id FROM jobs WHERE state = 'ready' … LIMIT 1)`); or its WHERE names the row by a
+  whole key (`id = :id`, or a UNIQUE set), and the value given for it was read, through `let`s, patterns, fields
+  and the arguments of callers, from a row of the same table returned by a SELECT that does not name its row by a
+  key and whose WHERE reads that column. The query that chose must itself be in a function `handle` reaches.
+- **Not covered: keyed by the request.** The UPDATE writes a value the request brings into a column (`SET lease =
+  :key`), and a query of the same table reads by that column (`WHERE lease = :key`) in the UPDATE's function or the
+  function that chose the row: the same request finds what it claimed before. Or its WHERE holds an op-id guard
+  (`NOT EXISTS …`, which C56 checks).
+- **Not covered: run once per request.** The UPDATE is in the arm a claim of an op id lets through (`let 1 =
+  sql_exec(query: "INSERT … ON CONFLICT DO NOTHING")`), or in the Moved arm of a compare-and-set, in its function or
+  at every call of it that passes it the choice, as C54 reads both, and that guard does not take its key from the
+  row chosen (an op id made from the chosen row's id is a new op id on each run).
+- **Not covered: a choice made only in a timer's run.** A sweep takes the next row on each run, as it is meant to,
+  and a timer's run is keyed by its row (C78).
+- **Not covered: `repeat: True`.** Each request is meant to take another row; C88 accepts the argument there.
+- **Not read.** A choice the program makes in Tape rather than in SQL (reading every row and picking one), a
+  client key written into another table than the one claimed, and a read by the key elsewhere than in the two
+  functions named above.
+
+Run over every program in the repository (293: each `.tape` file alone and in the groups deployed together, and
+every `tape` block of the Markdown), the rule as first written, before the three ways out, refused three UPDATEs,
+all correct: the queue's lease (its key is written and read back first), tickets' promotion from the waitlist (each
+of its three callers runs it in a Moved arm or after a claim of the request's key), and tickets' refund of the next
+confirmed hold of a canceled event, which only the sweep's timer chooses. With them it refuses none. Taken out of
+the queue's lease, the key refuses it at the claim: the read by the key removed, the key not written, or both
+(`test/claims.ts`, with a seat taken by a subquery, an op id made from the seat chosen, and the forms accepted).
+
 ## Timers: C77 to C80
 
 Jepsen runs against the box office in production (`apps/tickets`) found two bugs that every local test and compile

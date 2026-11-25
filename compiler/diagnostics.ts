@@ -346,7 +346,7 @@ export const DIAGNOSTICS = {
   },
   C88: {
     meaning:
-      '`repeat: True` or `no_floor: True` on a call whose statement its rule (C54 and C55, or C73) accepts anyway. The argument is a claim about the write, so it is refused where it is not true.',
+      '`repeat: True` or `no_floor: True` on a call whose statement its rule (C54, C55 and C95, or C73) accepts anyway. The argument is a claim about the write, so it is refused where it is not true.',
   },
   C93: {
     meaning:
@@ -355,6 +355,10 @@ export const DIAGNOSTICS = {
   C94: {
     meaning:
       "A `private fn` called, passed as a function value or matched as a pattern outside the file that defines it. std's helpers are private: what it reads and writes for decode is reached through decode, is_json and json_member.",
+  },
+  C95: {
+    meaning:
+      "An UPDATE a request reaches that takes a row chosen by what it changes (the next job that is ready, by a query or a subquery), with nothing that keys it to the request: sent again, the request takes a second row. Write the client's key into the row and read it back first, or claim an op id.",
   },
   C99: {
     meaning:

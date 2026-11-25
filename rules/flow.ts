@@ -34,7 +34,7 @@ export function witnessed(cs: readonly Expr[], q: Query, calls: Calls): boolean 
 // op id (the ledger's debit after its transfer-id insert). The claim is in the write's own function, or every call
 // of that function is after one (the webhook's credit helper, called once its delivery id is claimed): a claim in
 // one caller says only that this call runs once, not that the function, called from elsewhere too, writes once.
-function claims(e: TapeExpr | undefined): boolean {
+export function claims(e: TapeExpr | undefined): boolean {
   if (e?.k !== 'call' || (e.name !== 'sql_first' && e.name !== 'sql_exec')) return false;
   const qq = e.args.find(a => a.label === 'query')?.value;
   if (qq?.k !== 'str') return false;
@@ -90,7 +90,7 @@ function movedArms(fn: FnDecl, calls: Calls): Set<Node> {
   return inside;
 }
 // An expression whose value is a sql_move outcome: the call itself, or a parameter every caller passes one for.
-function moveSource(e: TapeExpr | undefined, fn: FnDecl, calls: Calls, depth: number): boolean {
+export function moveSource(e: TapeExpr | undefined, fn: FnDecl, calls: Calls, depth: number): boolean {
   if (!e || depth > 4) return false;
   if (e.k === 'call' && e.name === 'sql_move') return true;
   if (e.k === 'var' && fn.params.some(p => p.name === e.name)) {
@@ -123,8 +123,8 @@ function countOfGuarded(e: TapeExpr | undefined, fn: FnDecl, calls: Calls, depth
   return false;
 }
 
-// The functions a request or a timer reaches: from handle and woken, through every call.
-export function reachable(prog: Program, calls: Calls): Set<string> {
+// The functions a request or a timer reaches: from handle and woken (or the entries `roots` names), through every call.
+export function reachable(prog: Program, calls: Calls, roots = /(^|\.)(handle|woken)$/): Set<string> {
   const edges = new Map<string, Set<string>>();
   for (const [callee, sites] of calls)
     for (const { from } of sites) {
@@ -132,9 +132,9 @@ export function reachable(prog: Program, calls: Calls): Set<string> {
       to.add(callee);
       edges.set(from.name, to);
     }
-  const roots = [...prog.fns.keys()].filter(n => /(^|\.)(handle|woken)$/.test(n)),
-    seen = new Set(roots),
-    todo = [...roots];
+  const entries = [...prog.fns.keys()].filter(n => roots.test(n)),
+    seen = new Set(entries),
+    todo = [...entries];
   while (todo.length > 0)
     for (const n of edges.get(todo.pop() ?? '') ?? [])
       if (!seen.has(n)) {

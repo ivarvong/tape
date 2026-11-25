@@ -2,6 +2,7 @@
 // timer reaches changes nothing the second time.
 import type { Analysis, Assign, Expr } from '../sql/ast.ts';
 import { conjunctsOf } from '../sql/tree.ts';
+import { claimed, requestedOf } from './claims.ts';
 import { reachable, witnessed } from './flow.ts';
 import { analysisOf } from './model.ts';
 import { lc } from './syntax.ts';
@@ -103,6 +104,7 @@ function inserted(r: Asked, q: Query, s: Extract<Write, { kind: 'insert' }>): vo
 
 export function replayRules(r: Reading): void {
   const checked = reachable(r.prog, r.calls);
+  const requested = requestedOf(r);
   // the tables the program records op ids in: those it inserts into. A statement that does not parse (C67 says
   // so) still names its table, read from its text, so that a write it guards is not refused as well
   const unread = (q: Query): string[] => {
@@ -134,12 +136,12 @@ export function replayRules(r: Reading): void {
         q,
         opTables,
       );
-    if (!found.includes('C54') && !found.includes('C55'))
+    if (!found.includes('C54') && !found.includes('C55') && !claimed(r, q, requested))
       r.bad(
         'C88',
         q.at,
         `this call says \`repeat: True\`, and a second run of its statement changes nothing more: ${reason}`,
-        'Take the argument out: it is only for a write the retry rules (C54, C55) would refuse, one that computes a column from the row it changes (`n = n + 1`) or inserts a row with no unique key, with nothing to stop a second run.',
+        'Take the argument out: it is only for a write the retry rules (C54, C55, C95) would refuse, one that computes a column from the row it changes (`n = n + 1`), takes the next row of many, or inserts a row with no unique key, with nothing to stop a second run.',
       );
   }
 }
