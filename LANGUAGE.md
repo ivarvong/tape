@@ -53,9 +53,9 @@ step's `->`, whose value may start on the next line. No statement starts with on
 does is the rest of the one before. `-` is not one of them, as it also starts a value (`-x`): `a - b` stays on one
 line or in parentheses (P02 says so). The formatter breaks a line that is too long before each `|>`, then before each
 `and` and `or`, and indents a carried line once more. A backslash at the end of a line inside a
-text literal carries the text on after the next line's indentation. An expression or a pattern stands at most 1000
-deep, each bracket, call, lambda and operator it is inside counted once, each `|>` twice and each match four times
-(P09): a deeper one is named with `let` or moved into a function of its own.
+text literal carries the text on after the next line's indentation. An expression or a pattern stands at most 500
+deep, each bracket, call and operator it is inside counted once, each `|>` twice, and each match and lambda four
+times (P09): a deeper one is named with `let` or moved into a function of its own.
 
 ```tape gives
 fn mark(b: Int) -> Int {

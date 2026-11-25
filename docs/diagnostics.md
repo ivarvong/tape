@@ -23,7 +23,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | P06 | An interface method that does not say `read` or `write`. It says whether a call may be repeated as it is or carries a key. |  |
 | P07 | The right side of a pipe is not a function call, so there is nothing to pass the value to. | [the guide: Pipes and ++](guide.md#pipes-and-) |
 | P08 | A literal outside its type: an Int past 64 bits, or a Dec past the 64-bit count of its scale. | [LANGUAGE.md: 2. Text](../LANGUAGE.md#2-text); [the guide: Numbers: exact, or a trap](guide.md#numbers-exact-or-a-trap) |
-| P09 | An expression nested more than 1000 deep. The parser stops there rather than run out of stack; name a part with `let`. | [LANGUAGE.md: 2. Text](../LANGUAGE.md#2-text) |
+| P09 | An expression nested more than 500 deep (a match or a lambda counts four). The parser stops there rather than run out of stack; name a part with `let`. | [LANGUAGE.md: 2. Text](../LANGUAGE.md#2-text) |
 | C01 | A type or interface declared twice, or with the name of a built-in type. A name means one type. | [the guide: Names: a program's own wins over std's](guide.md#names-a-programs-own-wins-over-stds) |
 | C02 | A type with no constructors. It would have no values, so nothing could be made or matched. |  |
 | C03 | A constructor declared twice. A constructor belongs to one type, so a pattern or a call of it means one thing. | [the guide: Names: a program's own wins over std's](guide.md#names-a-programs-own-wins-over-stds) |

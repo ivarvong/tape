@@ -2,12 +2,14 @@
 // it was reported: compiled and in the reference interpreter where both apply. Each case names the campaign and the
 // date, and was seen failing before its fix.
 import '../node25.ts';
+import { execFileSync } from 'node:child_process';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { instantiate, isEffect, replay } from '../host.ts';
 import { pack, unpack } from '../host/log.ts';
 import { nodeSql } from '../nodesql.ts';
 import { format } from '../fmt.ts';
+import { DEEP } from '../fuzz/deep.ts';
 import { handled, instance } from '../fuzz/run.ts';
 import { bare, finish, handleBare, same, std } from './harness.ts';
 
@@ -260,22 +262,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 // tree: 3,200 nested parentheses, a chain of 3,200 `+`, 800 nested lambdas, 1,600 nested matches, 3,200 nested
 // constructors. An expression more than 1000 deep (a match counts four, a pipe two) is refused, P09.
 {
-  const deep: [string, string][] = [
-    ['nested parentheses', `fn f(n: Int) -> Int {\n  ${'('.repeat(3200)}n${')'.repeat(3200)}\n}\n`],
-    ['a chain of +', `fn f(n: Int) -> Int {\n  n${' + n'.repeat(3200)}\n}\n`],
-    [
-      'nested lambdas',
-      `fn f(n: Int) -> Int {\n  ${'fold(list: range(from: 0, to: 2), from: n, by: fn(a: Int, k: Int) -> Int { '.repeat(800)}n${' })'.repeat(800)}\n}\n`,
-    ],
-    [
-      'nested constructors',
-      `fn f(n: Int) -> List[Int] {\n  ${'Cons(head: n, tail: '.repeat(3200)}Nil${')'.repeat(3200)}\n}\n`,
-    ],
-    [
-      'nested patterns',
-      `fn f(o: Option[Int]) -> Int {\n  match o {\n    ${'Some(value: '.repeat(3200)}_${')'.repeat(3200)} -> 1\n    _ -> 0\n  }\n}\n`,
-    ],
-  ];
+  const deep = DEEP;
   const refused = deep.map(([what, text]) => {
     try {
       const b = compile([...std, { name: 'deep.tape', text }], { exports: ['f'] });
@@ -287,6 +274,19 @@ fn handle(raw: View, db: Sql) -> Buf {
   same(
     'an expression nested past the bound is refused, P09, not thrown',
     refused,
+    deep.map(([what]) => `${what}: P09`),
+  );
+  // the same in a process of its own, cold (no function of the parser compiled by the JIT yet, so each frame is
+  // the interpreter's, the largest), under the stack the bound is set for: 800 nested lambdas passed the bound at
+  // 2 a level and overflowed at 400 like this, though they were refused in a warm process (seen in the gate)
+  const cold: unknown = JSON.parse(
+    execFileSync(process.execPath, ['--stack-size=850', new URL('../fuzz/deep.ts', import.meta.url).pathname], {
+      encoding: 'utf8',
+    }),
+  );
+  same(
+    'and in a cold process under --stack-size=850',
+    cold,
     deep.map(([what]) => `${what}: P09`),
   );
   const fine = compile(

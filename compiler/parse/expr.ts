@@ -123,6 +123,9 @@ const args = (c: Cursor): Arg[] => c.listUntil(')', arg);
 
 // a function value: fn(x: Int) -> Int { x + n }
 function lambda(c: Cursor, t: Token): Expr {
+  // a lambda's body is a block parsed as deep again as an argument: it counts four, as a match does (800 nested,
+  // 2 a level, passed the bound at 500 and threw RangeError at 400 under --stack-size=850, cold, 25 November 2026)
+  for (let i = 0; i < 4; i++) deeper(c);
   const ps = params(c);
   c.expect('op', '->', 'A function value states its result type: `fn(x: Int) -> Int { … }`.');
   return { k: 'lambda', params: ps, retAst: type(c), body: block(c), ...c.at(t) };
@@ -283,11 +286,14 @@ function pipe(c: Cursor, l: Expr, t: Token): Expr {
  * of an expression is walked by recursive functions (the parser itself, the checks, the code generator), so one too
  * deep for the engine's stack threw RangeError out of compile(): 800 nested lambdas, 1,600 nested matches, 3,200
  * nested parentheses or a chain of 3,200 `+` (fuzz/compile.ts, 23 November 2026). A match costs the passes more
- * stack than an operator, and counts four; a pipe counts two. At this bound every kind of nesting up to it compiles
- * under --stack-size=850 (Workers give a little less stack than Node's default); 256 refused test/depth.ts's chain
- * of 400 `+`.
+ * stack than an operator, and counts four, and so does a lambda; a pipe counts two. At this bound every kind of
+ * nesting up to it compiles under --stack-size=850 (Workers give a little less stack than Node's default) in a cold
+ * process, where no function of the parser is compiled by the JIT yet and each frame is the interpreter's
+ * (fuzz/deep.ts, run by test/fuzz-found.ts). It was 1000, which held only warm: cold, 1,000 nested parentheses
+ * and 800 nested constructors overflowed before the bound (25 November 2026). 256 refused test/depth.ts's chain of
+ * 400 `+`.
  */
-export const MAX_DEPTH = 1000;
+export const MAX_DEPTH = 500;
 /** an expression whose operators all bind at least as tightly as `min` */
 export function binary(c: Cursor, min: number): Expr {
   const outer = c.depth;

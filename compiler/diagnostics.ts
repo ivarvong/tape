@@ -64,7 +64,7 @@ export const DIAGNOSTICS = {
   P08: { meaning: 'A literal outside its type: an Int past 64 bits, or a Dec past the 64-bit count of its scale.' },
   P09: {
     meaning:
-      'An expression nested more than 1000 deep. The parser stops there rather than run out of stack; name a part with `let`.',
+      'An expression nested more than 500 deep (a match or a lambda counts four). The parser stops there rather than run out of stack; name a part with `let`.',
   },
 
   // ---- declarations and types
