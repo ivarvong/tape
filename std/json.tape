@@ -44,7 +44,7 @@ type JsonChar {
 fn json_first(v: View) -> JsonStep {
   let at = json_ws(v, at: 0)
   match {
-    at < len(v) and v[at] == 123 -> first_member(v, at: at + 1)
+    at < len(v) and v[at] == '{' -> first_member(v, at: at + 1)
     else -> Malformed
   }
 }
@@ -54,8 +54,8 @@ fn json_next(v: View, at: Int) -> JsonStep {
   let s = json_ws(v, at)
   match {
     s >= len(v) -> Malformed
-    v[s] == 125 -> Close(next: s + 1)
-    v[s] == 44 -> member(v, at: json_ws(v, at: s + 1))
+    v[s] == '}' -> Close(next: s + 1)
+    v[s] == ',' -> member(v, at: json_ws(v, at: s + 1))
     else -> Malformed
   }
 }
@@ -78,7 +78,7 @@ private fn json_ws(v: View, at: Int) -> Int {
 private fn first_member(v: View, at: Int) -> JsonStep {
   let s = json_ws(v, at)
   match {
-    s < len(v) and v[s] == 125 -> Close(next: s + 1)
+    s < len(v) and v[s] == '}' -> Close(next: s + 1)
     else -> member(v, at: s)
   }
 }
@@ -86,7 +86,7 @@ private fn first_member(v: View, at: Int) -> JsonStep {
 // A member that starts at `at` (its key's quote).
 private fn member(v: View, at: Int) -> JsonStep {
   match {
-    at < len(v) and v[at] == 34 -> member_key(v, key: json_text(v, at: at + 1))
+    at < len(v) and v[at] == '"' -> member_key(v, key: json_text(v, at: at + 1))
     else -> Malformed
   }
 }
@@ -103,7 +103,7 @@ private fn member_key(v: View, key: JsonText) -> JsonStep {
 private fn member_colon(v: View, key: View, at: Int) -> JsonStep {
   match {
     at < len(v)
-      and v[at] == 58 -> member_value(key, value: json_value(v, at: json_ws(v, at: at + 1)))
+      and v[at] == ':' -> member_value(key, value: json_value(v, at: json_ws(v, at: at + 1)))
     else -> Malformed
   }
 }
@@ -120,9 +120,9 @@ private fn member_value(key: View, value: JsonValue) -> JsonStep {
 fn json_value(v: View, at: Int) -> JsonValue {
   match {
     at >= len(v) -> BadValue
-    v[at] == 34 -> string_value(found: json_text(v, at: at + 1))
-    v[at] == 123 -> other(end: object_end(v, step: first_member(v, at: at + 1)))
-    v[at] == 91 -> other(end: array_end(v, at: json_ws(v, at: at + 1)))
+    v[at] == '"' -> string_value(found: json_text(v, at: at + 1))
+    v[at] == '{' -> other(end: object_end(v, step: first_member(v, at: at + 1)))
+    v[at] == '[' -> other(end: array_end(v, at: json_ws(v, at: at + 1)))
     has(v, at, word: "true") -> JsonValue(json: JsonBool(True), next: at + 4)
     has(v, at, word: "false") -> JsonValue(json: JsonBool(False), next: at + 5)
     has(v, at, word: "null") -> JsonValue(json: JsonOther, next: at + 4)
@@ -158,7 +158,7 @@ private fn object_end(v: View, step: JsonStep) -> Option[Int] {
 // `at` is the first non-space position after `[`.
 private fn array_end(v: View, at: Int) -> Option[Int] {
   match {
-    at < len(v) and v[at] == 93 -> Some(at + 1)
+    at < len(v) and v[at] == ']' -> Some(at + 1)
     else -> element(v, value: json_value(v, at))
   }
 }
@@ -175,20 +175,20 @@ private fn element(v: View, value: JsonValue) -> Option[Int] {
 private fn element_end(v: View, at: Int) -> Option[Int] {
   match {
     at >= len(v) -> None
-    v[at] == 93 -> Some(at + 1)
-    v[at] == 44 -> element(v, value: json_value(v, at: json_ws(v, at: at + 1)))
+    v[at] == ']' -> Some(at + 1)
+    v[at] == ',' -> element(v, value: json_value(v, at: json_ws(v, at: at + 1)))
     else -> None
   }
 }
 
 // -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?
 fn number_end(v: View, at: Int) -> Option[Int] {
-  let i = skip(v, at, byte: 45)
+  let i = skip(v, at, byte: '-')
   let d = digits_end(v, at: i)
   match {
     d == i -> None
-    v[i] == 48 and d > i + 1 -> None
-    d < len(v) and v[d] == 46 -> fraction_end(v, at: d + 1)
+    v[i] == '0' and d > i + 1 -> None
+    d < len(v) and v[d] == '.' -> fraction_end(v, at: d + 1)
     else -> exponent_end(v, at: d)
   }
 }
@@ -204,10 +204,10 @@ private fn fraction_end(v: View, at: Int) -> Option[Int] {
 
 // A number's exponent, if it has one.
 private fn exponent_end(v: View, at: Int) -> Option[Int] {
-  let i = skip(v, at: skip(v, at: at + 1, byte: 43), byte: 45)
+  let i = skip(v, at: skip(v, at: at + 1, byte: '+'), byte: '-')
   let d = digits_end(v, at: i)
   match {
-    at >= len(v) or (v[at] != 101 and v[at] != 69) -> Some(at)
+    at >= len(v) or (v[at] != 'e' and v[at] != 'E') -> Some(at)
     i > at + 2 or d == i -> None
     else -> Some(d)
   }
@@ -249,8 +249,8 @@ private fn decode_text(v: View, at: Int, out: Buf) -> Buf {
 private fn json_char(v: View, at: Int) -> JsonChar {
   match {
     at >= len(v) -> BadChar
-    v[at] == 34 -> Quote(next: at + 1)
-    v[at] == 92 -> escape(v, at: at + 1)
+    v[at] == '"' -> Quote(next: at + 1)
+    v[at] == '\\' -> escape(v, at: at + 1)
     v[at] < 32 -> BadChar
     v[at] < 128 -> Char(code: v[at], next: at + 1, escaped: False)
     else -> utf8_char(found: utf8_at(v, at))
@@ -269,7 +269,7 @@ private fn utf8_char(found: Utf8) -> JsonChar {
 private fn escape(v: View, at: Int) -> JsonChar {
   match {
     at >= len(v) -> BadChar
-    v[at] == 117 -> unicode(v, at: at + 5, unit: hex4(v, at: at + 1))
+    v[at] == 'u' -> unicode(v, at: at + 5, unit: hex4(v, at: at + 1))
     else -> simple(code: unescape(v[at]), next: at + 1)
   }
 }
@@ -277,14 +277,14 @@ private fn escape(v: View, at: Int) -> JsonChar {
 // The byte a one-letter escape stands for (`n` is a line feed).
 private fn unescape(b: Int) -> Option[Int] {
   match b {
-    34 -> Some(34)
-    92 -> Some(92)
-    47 -> Some(47)
-    98 -> Some(8)
-    102 -> Some(12)
-    110 -> Some(10)
-    114 -> Some(13)
-    116 -> Some(9)
+    '"' -> Some('"')
+    '\\' -> Some('\\')
+    '/' -> Some('/')
+    'b' -> Some('\b')
+    'f' -> Some('\f')
+    'n' -> Some('\n')
+    'r' -> Some('\r')
+    't' -> Some('\t')
     _ -> None
   }
 }
@@ -345,22 +345,22 @@ private fn hex4(v: View, at: Int) -> Option[Int] {
 
 // Is the byte a hex digit (0-9, a-f, A-F)?
 //
-//   > is_hex(b: 70)
+//   > is_hex(b: 'F')
 //   True
-//   > is_hex(b: 103)
+//   > is_hex(b: 'g')
 //   False
 fn is_hex(b: Int) -> Bool {
-  is_digit(b) or (b >= 97 and b <= 102) or (b >= 65 and b <= 70)
+  is_digit(b) or (b >= 'a' and b <= 'f') or (b >= 'A' and b <= 'F')
 }
 
 // The value of a hex digit (is_hex(b) must hold).
 //
-//   > hex(b: 102)
+//   > hex(b: 'f')
 //   15
 fn hex(b: Int) -> Int {
   match {
-    b <= 57 -> b - 48
-    b >= 97 -> b - 87
+    b <= '9' -> b - '0'
+    b >= 'a' -> b - 87
     else -> b - 55
   }
 }
@@ -406,7 +406,7 @@ fn json_member(json: View, key: View) -> Option[View] {
   let s = json_ws(v: json, at: 0)
   match {
     s < len(json)
-      and json[s] == 123 -> named_at(v: json, at: json_ws(v: json, at: s + 1), key, found: None)
+      and json[s] == '{' -> named_at(v: json, at: json_ws(v: json, at: s + 1), key, found: None)
     else -> None
   }
 }
@@ -415,7 +415,7 @@ fn json_member(json: View, key: View) -> Option[View] {
 // `key` before it.
 private fn named_at(v: View, at: Int, key: View, found: Option[View]) -> Option[View] {
   match {
-    at < len(v) and v[at] == 34 -> named_colon(v, at, key, end: string_close(v, at: at + 1), found)
+    at < len(v) and v[at] == '"' -> named_colon(v, at, key, end: string_close(v, at: at + 1), found)
     else -> None
   }
 }
@@ -427,7 +427,7 @@ private fn named_colon(v: View, at: Int, key: View, end: Int, found: Option[View
     else -> {
       let colon = json_ws(v, at: end)
       match {
-        colon < len(v) and v[colon] == 58 -> {
+        colon < len(v) and v[colon] == ':' -> {
           let from = json_ws(v, at: colon + 1)
           named_value(
             v,
@@ -463,8 +463,8 @@ private fn named_value(
       }
       let s = json_ws(v, at: to)
       match {
-        s < len(v) and v[s] == 44 -> named_at(v, at: json_ws(v, at: s + 1), key, found: kept)
-        s < len(v) and v[s] == 125 and json_ws(v, at: s + 1) == len(v) -> kept
+        s < len(v) and v[s] == ',' -> named_at(v, at: json_ws(v, at: s + 1), key, found: kept)
+        s < len(v) and v[s] == '}' and json_ws(v, at: s + 1) == len(v) -> kept
         else -> None
       }
     }
@@ -476,7 +476,7 @@ private fn named_value(
 private fn key_is(v: View, at: Int, key: View) -> Bool {
   let e = text_run(v, at)
   match {
-    e < len(v) and v[e] == 34 -> slice(v, from: at, to: e) == key
+    e < len(v) and v[e] == '"' -> slice(v, from: at, to: e) == key
     else -> match tree_text(v, at) {
       Json_Got(text) -> text == key
       Json_NoText -> False
@@ -517,9 +517,9 @@ private fn value_end(v: View, at: Int) -> Int {
 private fn next_value(v: View, at: Int, open: Json_Open) -> Int {
   match {
     at >= len(v) -> -1
-    v[at] == 123 -> opened(v, at: json_ws(v, at: at + 1), open, close: 125)
-    v[at] == 91 -> opened(v, at: json_ws(v, at: at + 1), open, close: 93)
-    v[at] == 34 -> after_value(v, at: string_close(v, at: at + 1), open)
+    v[at] == '{' -> opened(v, at: json_ws(v, at: at + 1), open, close: '}')
+    v[at] == '[' -> opened(v, at: json_ws(v, at: at + 1), open, close: ']')
+    v[at] == '"' -> after_value(v, at: string_close(v, at: at + 1), open)
     has(v, at, word: "true") -> after_value(v, at: at + 4, open)
     has(v, at, word: "false") -> after_value(v, at: at + 5, open)
     has(v, at, word: "null") -> after_value(v, at: at + 4, open)
@@ -527,11 +527,11 @@ private fn next_value(v: View, at: Int, open: Json_Open) -> Int {
   }
 }
 
-// After `{` (close 125) or `[` (close 93) and whitespace.
+// After `{` (close `'}'`) or `[` (close `']'`) and whitespace.
 private fn opened(v: View, at: Int, open: Json_Open, close: Int) -> Int {
   match {
     at < len(v) and v[at] == close -> after_value(v, at: at + 1, open)
-    close == 125 -> next_key(v, at, open: open_push(open, object: 1))
+    close == '}' -> next_key(v, at, open: open_push(open, object: 1))
     else -> next_value(v, at, open: open_push(open, object: 0))
   }
 }
@@ -539,14 +539,14 @@ private fn opened(v: View, at: Int, open: Json_Open, close: Int) -> Int {
 // A member's key starts at `at`; then its colon and its value.
 private fn next_key(v: View, at: Int, open: Json_Open) -> Int {
   match {
-    at < len(v) and v[at] == 34 -> {
+    at < len(v) and v[at] == '"' -> {
       let e = string_close(v, at: at + 1)
       let colon = match {
         e < 0 -> len(v)
         else -> json_ws(v, at: e)
       }
       match {
-        colon < len(v) and v[colon] == 58 -> next_value(v, at: json_ws(v, at: colon + 1), open)
+        colon < len(v) and v[colon] == ':' -> next_value(v, at: json_ws(v, at: colon + 1), open)
         else -> -1
       }
     }
@@ -563,10 +563,10 @@ private fn after_value(v: View, at: Int, open: Json_Open) -> Int {
       let s = json_ws(v, at)
       match {
         s >= len(v) -> -1
-        v[s] == 44 and (bits & 1) == 1 -> next_key(v, at: json_ws(v, at: s + 1), open)
-        v[s] == 44 -> next_value(v, at: json_ws(v, at: s + 1), open)
-        v[s] == 125 and (bits & 1) == 1 -> after_value(v, at: s + 1, open: open_pop(open))
-        v[s] == 93 and (bits & 1) == 0 -> after_value(v, at: s + 1, open: open_pop(open))
+        v[s] == ',' and (bits & 1) == 1 -> next_key(v, at: json_ws(v, at: s + 1), open)
+        v[s] == ',' -> next_value(v, at: json_ws(v, at: s + 1), open)
+        v[s] == '}' and (bits & 1) == 1 -> after_value(v, at: s + 1, open: open_pop(open))
+        v[s] == ']' and (bits & 1) == 0 -> after_value(v, at: s + 1, open: open_pop(open))
         else -> -1
       }
     }
@@ -587,9 +587,9 @@ private fn string_close(v: View, at: Int) -> Int {
   let e = text_run(v, at)
   match {
     e >= len(v) -> -1
-    v[e] == 34 -> e + 1
-    v[e] != 92 or e + 1 >= len(v) -> -1
-    v[e + 1] == 117 -> escape_close(v, at: e + 6, ok: hex4(v, at: e + 2))
+    v[e] == '"' -> e + 1
+    v[e] != '\\' or e + 1 >= len(v) -> -1
+    v[e + 1] == 'u' -> escape_close(v, at: e + 6, ok: hex4(v, at: e + 2))
     else -> escape_close(v, at: e + 2, ok: unescape(v[e + 1]))
   }
 }
@@ -610,7 +610,7 @@ private fn escape_close(v: View, at: Int, ok: Option[Int]) -> Int {
 //   > buf() |> write_json_string(text: "a\nb") |> freeze
 //   "\"a\\nb\""
 fn write_json_string(out: Buf, text: View) -> Buf {
-  push(buf: write_chars(out: push(buf: out, byte: 34), text, from: 0, at: 0), byte: 34)
+  push(buf: write_chars(out: push(buf: out, byte: '"'), text, from: 0, at: 0), byte: '"')
 }
 
 // Copies runs of plain bytes whole; `from` is the start of the current run. A byte of 128 or more starts
@@ -634,7 +634,9 @@ private fn write_chars(out: Buf, text: View, from: Int, at: Int) -> Buf {
         )
       }
     }
-    text[at] >= 32 and text[at] != 34 and text[at] != 92 -> write_chars(out, text, from, at: at + 1)
+    text[at] >= 32
+      and text[at] != '"'
+      and text[at] != '\\' -> write_chars(out, text, from, at: at + 1)
     else -> write_chars(
       out: write_escape(out: append(buf: out, view: slice(v: text, from, to: at)), b: text[at]),
       text,
@@ -647,13 +649,13 @@ private fn write_chars(out: Buf, text: View, from: Int, at: Int) -> Buf {
 // One byte of a JSON string as its escape.
 private fn write_escape(out: Buf, b: Int) -> Buf {
   match b {
-    34 -> append(buf: out, view: "\\\"")
-    92 -> append(buf: out, view: "\\\\")
-    8 -> append(buf: out, view: "\\b")
-    12 -> append(buf: out, view: "\\f")
-    10 -> append(buf: out, view: "\\n")
-    13 -> append(buf: out, view: "\\r")
-    9 -> append(buf: out, view: "\\t")
+    '"' -> append(buf: out, view: "\\\"")
+    '\\' -> append(buf: out, view: "\\\\")
+    '\b' -> append(buf: out, view: "\\b")
+    '\f' -> append(buf: out, view: "\\f")
+    '\n' -> append(buf: out, view: "\\n")
+    '\r' -> append(buf: out, view: "\\r")
+    '\t' -> append(buf: out, view: "\\t")
     _ -> push(
       buf: push(buf: append(buf: out, view: "\\u00"), byte: hex_digit(b >> 4)),
       byte: hex_digit(b & 15)
@@ -664,7 +666,7 @@ private fn write_escape(out: Buf, b: Int) -> Buf {
 // 0-15 as a lowercase hex digit's byte.
 private fn hex_digit(d: Int) -> Int {
   match {
-    d < 10 -> 48 + d
+    d < 10 -> '0' + d
     else -> 87 + d
   }
 }
@@ -739,9 +741,9 @@ private fn json_tree(v: View) -> Option[Json_Tree] {
 private fn tree_value(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
   match {
     at >= len(v) -> None
-    v[at] == 123 -> tree_open_object(v, at: json_ws(v, at: at + 1), stack)
-    v[at] == 91 -> tree_open_array(v, at: json_ws(v, at: at + 1), stack)
-    v[at] == 34 -> tree_string(v, got: tree_text(v, at: at + 1), stack)
+    v[at] == '{' -> tree_open_object(v, at: json_ws(v, at: at + 1), stack)
+    v[at] == '[' -> tree_open_array(v, at: json_ws(v, at: at + 1), stack)
+    v[at] == '"' -> tree_string(v, got: tree_text(v, at: at + 1), stack)
     has(v, at, word: "true") -> tree_done(v, node: Json_Bool(True), at: at + 4, stack)
     has(v, at, word: "false") -> tree_done(v, node: Json_Bool(False), at: at + 5, stack)
     has(v, at, word: "null") -> tree_done(v, node: Json_Null, at: at + 4, stack)
@@ -752,7 +754,7 @@ private fn tree_value(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_
 // After `{` and whitespace.
 private fn tree_open_object(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
   match {
-    at < len(v) and v[at] == 125 -> tree_done(v, node: Json_Obj(members: Nil), at: at + 1, stack)
+    at < len(v) and v[at] == '}' -> tree_done(v, node: Json_Obj(members: Nil), at: at + 1, stack)
     else -> tree_key(v, at, members: Nil, stack)
   }
 }
@@ -760,7 +762,7 @@ private fn tree_open_object(v: View, at: Int, stack: List[Json_Frame]) -> Option
 // After `[` and whitespace.
 private fn tree_open_array(v: View, at: Int, stack: List[Json_Frame]) -> Option[Json_Tree] {
   match {
-    at < len(v) and v[at] == 93 -> tree_done(v, node: Json_Arr(items: Nil), at: at + 1, stack)
+    at < len(v) and v[at] == ']' -> tree_done(v, node: Json_Arr(items: Nil), at: at + 1, stack)
     else -> tree_value(v, at, stack: Cons(head: Json_InArr(items: Nil), tail: stack))
   }
 }
@@ -773,7 +775,7 @@ private fn tree_key(
   stack: List[Json_Frame]
 ) -> Option[Json_Tree] {
   match {
-    at < len(v) and v[at] == 34 -> tree_colon(v, got: tree_text(v, at: at + 1), members, stack)
+    at < len(v) and v[at] == '"' -> tree_colon(v, got: tree_text(v, at: at + 1), members, stack)
     else -> None
   }
 }
@@ -801,7 +803,7 @@ private fn tree_member(
 ) -> Option[Json_Tree] {
   match {
     at < len(v)
-      and v[at] == 58 -> tree_value(
+      and v[at] == ':' -> tree_value(
         v,
         at: json_ws(v, at: at + 1),
         stack: Cons(head: Json_InObj(members, key), tail: stack)
@@ -848,27 +850,27 @@ private fn tree_done(
     Nil if s == len(v) -> Some(value: node)
     Nil -> None
     Cons(head: Json_InArr(items), tail) if s < len(v)
-      and v[s] == 44 -> tree_value(
+      and v[s] == ',' -> tree_value(
         v,
         at: json_ws(v, at: s + 1),
         stack: Cons(head: Json_InArr(items: Cons(head: node, tail: items)), tail)
       )
     Cons(head: Json_InArr(items), tail) if s < len(v)
-      and v[s] == 93 -> tree_done(
+      and v[s] == ']' -> tree_done(
         v,
         node: Json_Arr(items: reverse(list: Cons(head: node, tail: items))),
         at: s + 1,
         stack: tail
       )
     Cons(head: Json_InObj(members, key), tail) if s < len(v)
-      and v[s] == 44 -> tree_key(
+      and v[s] == ',' -> tree_key(
         v,
         at: json_ws(v, at: s + 1),
         members: Cons(head: Json_Member(key, value: node), tail: members),
         stack: tail
       )
     Cons(head: Json_InObj(members, key), tail) if s < len(v)
-      and v[s] == 125 -> tree_done(
+      and v[s] == '}' -> tree_done(
         v,
         node: Json_Obj(
           members: reverse(list: Cons(head: Json_Member(key, value: node), tail: members))
@@ -886,9 +888,10 @@ private fn tree_done(
 private fn tree_text(v: View, at: Int) -> Json_Got {
   let e = text_run(v, at)
   match {
-    e < len(v) and v[e] == 34 -> Json_Got(text: slice(v, from: at, to: e), whole: True, next: e + 1)
     e < len(v)
-      and v[e] == 92 -> text_escaped(
+      and v[e] == '"' -> Json_Got(text: slice(v, from: at, to: e), whole: True, next: e + 1)
+    e < len(v)
+      and v[e] == '\\' -> text_escaped(
         v,
         at: e,
         out: append(buf: buf(), view: slice(v, from: at, to: e)),
@@ -898,8 +901,7 @@ private fn tree_text(v: View, at: Int) -> Json_Got {
   }
 }
 
-// Past plain ASCII and well-formed UTF-8: the first quote, backslash, control byte or byte that is not
-// UTF-8.
+// Past plain ASCII and well-formed UTF-8: the first quote, backslash, control byte or byte that is not UTF-8.
 private fn text_run(v: View, at: Int) -> Int {
   let e = scan_plain(v, at)
   match {
@@ -934,13 +936,13 @@ private fn text_more(v: View, at: Int, out: Buf, whole: Bool) -> Json_Got {
   let e = text_run(v, at)
   match {
     e < len(v)
-      and v[e] == 34 -> Json_Got(
+      and v[e] == '"' -> Json_Got(
         text: freeze(append(buf: out, view: slice(v, from: at, to: e))),
         whole,
         next: e + 1
       )
     e < len(v)
-      and v[e] == 92 -> text_escaped(
+      and v[e] == '\\' -> text_escaped(
         v,
         at: e,
         out: append(buf: out, view: slice(v, from: at, to: e)),
@@ -960,7 +962,7 @@ private fn no_text(gone: View) -> Json_Got {
 private fn tree_escape(v: View, at: Int) -> Json_Code {
   match {
     at >= len(v) -> Json_NoCode
-    v[at] == 117 -> tree_unicode(v, at: at + 5, unit: hex4(v, at: at + 1))
+    v[at] == 'u' -> tree_unicode(v, at: at + 5, unit: hex4(v, at: at + 1))
     else -> tree_simple(code: unescape(v[at]), next: at + 1)
   }
 }
@@ -1015,8 +1017,7 @@ private fn json_object(v: View) -> Result[Json_Tree, View] {
   }
 }
 
-// The array v holds, or why decode refuses it: "empty", "not JSON" or "expected an array" (decode as
-// List[T]).
+// The array v holds, or why decode refuses it: "empty", "not JSON" or "expected an array" (decode as List[T]).
 private fn json_array(v: View) -> Result[Json_Tree, View] {
   match json_tree(v) {
     Some(value: Json_Arr(items)) -> Ok(value: Json_Arr(items))
@@ -1219,7 +1220,7 @@ private fn json_append(out: Buf, view: View) -> Buf {
 
 // write_json of a list: an array of its items, each as write_json writes it.
 private fn wire_write_list[T](out: Buf, list: List[T]) -> Buf {
-  wire_items(out: push(buf: out, byte: 91), list, first: True)
+  wire_items(out: push(buf: out, byte: '['), list, first: True)
 }
 
 // The loop of wire_write_list.
@@ -1231,18 +1232,18 @@ private fn wire_items[T](out: Buf, list: List[T], first: Bool) -> Buf {
       first: False
     )
     Cons(head, tail) -> wire_items(
-      out: write_json(out: push(buf: out, byte: 44), value: head),
+      out: write_json(out: push(buf: out, byte: ','), value: head),
       list: tail,
       first: False
     )
-    Nil -> push(buf: out, byte: 93)
+    Nil -> push(buf: out, byte: ']')
   }
 }
 
 // A key of an object being written, after a comma when something was written before it (`more`).
 private fn wire_key(out: Buf, more: Bool, key: View) -> Buf {
   match more {
-    True -> append(buf: push(buf: out, byte: 44), view: key)
+    True -> append(buf: push(buf: out, byte: ','), view: key)
     False -> append(buf: out, view: key)
   }
 }
@@ -1415,9 +1416,9 @@ private fn json_count(text: View, scale: Int) -> Option[Int] {
 
 // json_count of text that is a JSON number.
 private fn count_exact(text: View, scale: Int) -> Option[Int] {
-  let i = skip(v: text, at: 0, byte: 45)
+  let i = skip(v: text, at: 0, byte: '-')
   let d = digits_end(v: text, at: i)
-  let f = skip(v: text, at: d, byte: 46)
+  let f = skip(v: text, at: d, byte: '.')
   let e = digits_end(v: text, at: f)
   let tail = trailing_zeros(text, from: f, to: e)
   let tz = match {
@@ -1457,8 +1458,8 @@ private fn count_fold(
 ) -> Option[Int] {
   match {
     k >= to -> Some(value)
-    k < d - i -> count_digit(text, i, d, f, k, to, value, digit: text[i + k] - 48)
-    else -> count_digit(text, i, d, f, k, to, value, digit: text[f + k - (d - i)] - 48)
+    k < d - i -> count_digit(text, i, d, f, k, to, value, digit: text[i + k] - '0')
+    else -> count_digit(text, i, d, f, k, to, value, digit: text[f + k - (d - i)] - '0')
   }
 }
 
@@ -1516,8 +1517,7 @@ private fn json_some[T](decoded: Result[T, View]) -> Result[Option[T], View] {
   }
 }
 
-// The elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its
-// index.
+// The elements of an array, each decoded by `by`, in order. The first that fails is the reason, with its index.
 private fn json_each[T](
   arr: Json_Tree,
   by: Fn[Json_Tree, Result[T, View]]
@@ -1594,9 +1594,9 @@ private fn json_plain(error: View) -> View {
 //   > json_int(text: "9007199254740992")
 //   None
 fn json_int(text: View) -> Option[Int] {
-  let i = skip(v: text, at: 0, byte: 45)
+  let i = skip(v: text, at: 0, byte: '-')
   let d = digits_end(v: text, at: i)
-  let f = skip(v: text, at: d, byte: 46)
+  let f = skip(v: text, at: d, byte: '.')
   let e = digits_end(v: text, at: f)
   let tail = trailing_zeros(text, from: f, to: e)
   let tz = match {
@@ -1628,7 +1628,7 @@ private fn trailing_zeros(text: View, from: Int, to: Int) -> Int {
 // The loop of trailing_zeros: where the 0 digits that end text[from..at] begin.
 private fn back_past_zeros(text: View, from: Int, at: Int) -> Int {
   match {
-    at > from and text[at - 1] == 48 -> back_past_zeros(text, from, at: at - 1)
+    at > from and text[at - 1] == '0' -> back_past_zeros(text, from, at: at - 1)
     else -> at
   }
 }
@@ -1641,7 +1641,7 @@ private fn leading_zeros(text: View, from: Int, to: Int) -> Int {
 // The loop of leading_zeros: the first position at or after `at` that is not a 0 digit.
 private fn past_zeros(text: View, at: Int, to: Int) -> Int {
   match {
-    at < to and text[at] == 48 -> past_zeros(text, at: at + 1, to)
+    at < to and text[at] == '0' -> past_zeros(text, at: at + 1, to)
     else -> at
   }
 }
@@ -1683,7 +1683,7 @@ private fn int_exact(
 private fn fold_digits(v: View, at: Int, to: Int, value: Int) -> Int {
   match {
     at >= to -> value
-    else -> fold_digits(v, at: at + 1, to, value: value * 10 + (v[at] - 48))
+    else -> fold_digits(v, at: at + 1, to, value: value * 10 + (v[at] - '0'))
   }
 }
 
@@ -1691,8 +1691,8 @@ private fn fold_digits(v: View, at: Int, to: Int, value: Int) -> Int {
 private fn exponent_of(text: View, at: Int) -> Int {
   match {
     at >= len(text) -> 0
-    text[at + 1] == 45 -> 0 - exponent_digits(text, at: at + 2, value: 0)
-    text[at + 1] == 43 -> exponent_digits(text, at: at + 2, value: 0)
+    text[at + 1] == '-' -> 0 - exponent_digits(text, at: at + 2, value: 0)
+    text[at + 1] == '+' -> exponent_digits(text, at: at + 2, value: 0)
     else -> exponent_digits(text, at: at + 1, value: 0)
   }
 }
@@ -1702,7 +1702,7 @@ private fn exponent_digits(text: View, at: Int, value: Int) -> Int {
   match {
     at >= len(text) -> value
     value > 100000000 -> 1000000000
-    else -> exponent_digits(text, at: at + 1, value: value * 10 + (text[at] - 48))
+    else -> exponent_digits(text, at: at + 1, value: value * 10 + (text[at] - '0'))
   }
 }
 
@@ -1725,14 +1725,14 @@ private fn in_range(value: Int, neg: Bool) -> Option[Int] {
 
 // Every row of a query as a JSON array, each row written as write_json writes it.
 fn write_rows[T](out: Buf, rows: Rows[T]) -> Buf {
-  let open = push(buf: out, byte: 91)
+  let open = push(buf: out, byte: '[')
   let first = size(buf: open)
   rows
     |> fold_rows(from: open, by: fn(o: Buf, value: T) -> Buf {
       match {
         size(buf: o) == first -> write_json(out: o, value)
-        else -> write_json(out: push(buf: o, byte: 44), value)
+        else -> write_json(out: push(buf: o, byte: ','), value)
       }
     })
-    |> push(byte: 93)
+    |> push(byte: ']')
 }

@@ -2,9 +2,9 @@
 
 // The part of v before the first `byte`, or all of v when it has none.
 //
-//   > until(v: "key=value", byte: 61)
+//   > until(v: "key=value", byte: '=')
 //   "key"
-//   > "no equals sign" |> until(byte: 61)
+//   > "no equals sign" |> until(byte: '=')
 //   "no equals sign"
 fn until(v: View, byte: Int) -> View {
   slice(v, from: 0, to: find(v, byte, at: 0))
@@ -12,9 +12,9 @@ fn until(v: View, byte: Int) -> View {
 
 // The part of v after the first `byte`, or nothing when it has none.
 //
-//   > after(v: "key=value", byte: 61)
+//   > after(v: "key=value", byte: '=')
 //   "value"
-//   > after(v: "key", byte: 61)
+//   > after(v: "key", byte: '=')
 //   ""
 fn after(v: View, byte: Int) -> View {
   let at = find(v, byte, at: 0)
@@ -49,12 +49,12 @@ fn has(v: View, at: Int, word: View) -> Bool {
 
 // Is the byte an ASCII digit, 0-9?
 //
-//   > is_digit(b: 55)
+//   > is_digit(b: '7')
 //   True
-//   > is_digit(b: 97)
+//   > is_digit(b: 'a')
 //   False
 fn is_digit(b: Int) -> Bool {
-  b >= 48 and b <= 57
+  b >= '0' and b <= '9'
 }
 
 // Is the byte an ASCII lower-case letter, a-z?
@@ -62,7 +62,7 @@ fn is_digit(b: Int) -> Bool {
 //   > is_lower(b: "a"[0])
 //   True
 fn is_lower(b: Int) -> Bool {
-  b >= 97 and b <= 122
+  b >= 'a' and b <= 'z'
 }
 
 // Is the byte an ASCII upper-case letter, A-Z?
@@ -70,7 +70,7 @@ fn is_lower(b: Int) -> Bool {
 //   > is_upper(b: "a"[0])
 //   False
 fn is_upper(b: Int) -> Bool {
-  b >= 65 and b <= 90
+  b >= 'A' and b <= 'Z'
 }
 
 // Is the byte an ASCII letter, a-z or A-Z?
@@ -91,15 +91,15 @@ fn is_alnum(b: Int) -> Bool {
 
 // Is the byte white space: a space, a tab, a line feed or a carriage return?
 //
-//   > is_space(b: 9)
+//   > is_space(b: '\t')
 //   True
 fn is_space(b: Int) -> Bool {
-  b == 32 or b == 9 or b == 10 or b == 13
+  b == ' ' or b == '\t' or b == '\n' or b == '\r'
 }
 
 // Does every byte of v pass `keep`? True for "" (nothing fails). For a slug, a key or a code of a fixed alphabet:
 //
-//   > every_byte(v: "order-17", keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == 45 })
+//   > every_byte(v: "order-17", keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == '-' })
 //   True
 //   > every_byte(v: "Order 17", keep: is_alnum)
 //   False
@@ -183,7 +183,7 @@ fn digits_end(v: View, at: Int) -> Int {
 fn decimal(v: View) -> Option[Int] {
   match {
     len(v) == 0 or len(v) > 16 or digits_end(v, at: 0) < len(v) -> None
-    v[0] == 48 and len(v) > 1 -> None
+    v[0] == '0' and len(v) > 1 -> None
     else -> Some(decimal_value(v, at: 0, value: 0))
   }
 }
@@ -192,7 +192,7 @@ fn decimal(v: View) -> Option[Int] {
 private fn decimal_value(v: View, at: Int, value: Int) -> Int {
   match {
     at >= len(v) -> value
-    else -> decimal_value(v, at: at + 1, value: value * 10 + v[at] - 48)
+    else -> decimal_value(v, at: at + 1, value: value * 10 + v[at] - '0')
   }
 }
 
@@ -236,10 +236,10 @@ private fn int_more(text: View, at: Int, value: Int, negative: Bool) -> Option[I
   match {
     at >= len(text) -> Some(value)
     not is_digit(text[at]) -> None
-    negative and value < (-9223372036854775808 + (text[at] - 48)) / 10 -> None
-    negative -> int_more(text, at: at + 1, value: value * 10 - (text[at] - 48), negative)
-    value > (9223372036854775807 - (text[at] - 48)) / 10 -> None
-    else -> int_more(text, at: at + 1, value: value * 10 + (text[at] - 48), negative)
+    negative and value < (-9223372036854775808 + (text[at] - '0')) / 10 -> None
+    negative -> int_more(text, at: at + 1, value: value * 10 - (text[at] - '0'), negative)
+    value > (9223372036854775807 - (text[at] - '0')) / 10 -> None
+    else -> int_more(text, at: at + 1, value: value * 10 + (text[at] - '0'), negative)
   }
 }
 
@@ -260,7 +260,7 @@ fn decimal_text(value: Int) -> View {
 fn write_int(out: Buf, value: Int) -> Buf {
   match {
     value < 0 -> write_digits(
-      out: push(buf: out, byte: 45),
+      out: push(buf: out, byte: '-'),
       value: 0 - (value / 10),
       last: 0 - (value % 10)
     )
@@ -271,8 +271,8 @@ fn write_int(out: Buf, value: Int) -> Buf {
 // The loop of write_int.
 private fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
   match {
-    value > 0 -> push(buf: write_digits(out, value: value / 10, last: value % 10), byte: 48 + last)
-    else -> push(buf: out, byte: 48 + last)
+    value > 0 -> push(buf: write_digits(out, value: value / 10, last: value % 10), byte: '0' + last)
+    else -> push(buf: out, byte: '0' + last)
   }
 }
 
@@ -287,7 +287,7 @@ private fn write_digits(out: Buf, value: Int, last: Int) -> Buf {
 //   "-9.223372036854775808"
 private fn write_units(out: Buf, units: Int, scale: Int) -> Buf {
   let signed = match {
-    units < 0 -> push(buf: out, byte: 45)
+    units < 0 -> push(buf: out, byte: '-')
     else -> out
   }
   // a scale above 18 overflows, as 10^scale does
@@ -313,10 +313,10 @@ private fn write_place(out: Buf, units: Int, at: Int, scale: Int) -> Buf {
     else -> out
   }
   let pointed = match {
-    at + 1 == scale -> push(buf: higher, byte: 46)
+    at + 1 == scale -> push(buf: higher, byte: '.')
     else -> higher
   }
-  push(buf: pointed, byte: 48 + match {
+  push(buf: pointed, byte: '0' + match {
     d < 0 -> 0 - d
     else -> d
   })
@@ -390,7 +390,7 @@ fn utf8_at(v: View, at: Int) -> Utf8 {
 //
 //   > utf8_end(v: "aé!", at: 1)
 //   3
-//   > utf8_end(v: buf() |> push(byte: 97) |> push(byte: 195) |> push(byte: 33) |> freeze, at: 1)
+//   > utf8_end(v: buf() |> push(byte: 'a') |> push(byte: 195) |> push(byte: '!') |> freeze, at: 1)
 //   -2
 fn utf8_end(v: View, at: Int) -> Int {
   match utf8_at(v, at) {

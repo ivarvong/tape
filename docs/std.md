@@ -859,9 +859,9 @@ fn until(v: View, byte: Int) -> View
 The part of v before the first `byte`, or all of v when it has none.
 
 ```
-> until(v: "key=value", byte: 61)
+> until(v: "key=value", byte: '=')
 "key"
-> "no equals sign" |> until(byte: 61)
+> "no equals sign" |> until(byte: '=')
 "no equals sign"
 ```
 
@@ -874,9 +874,9 @@ fn after(v: View, byte: Int) -> View
 The part of v after the first `byte`, or nothing when it has none.
 
 ```
-> after(v: "key=value", byte: 61)
+> after(v: "key=value", byte: '=')
 "value"
-> after(v: "key", byte: 61)
+> after(v: "key", byte: '=')
 ""
 ```
 
@@ -920,9 +920,9 @@ fn is_digit(b: Int) -> Bool
 Is the byte an ASCII digit, 0-9?
 
 ```
-> is_digit(b: 55)
+> is_digit(b: '7')
 True
-> is_digit(b: 97)
+> is_digit(b: 'a')
 False
 ```
 
@@ -987,7 +987,7 @@ fn is_space(b: Int) -> Bool
 Is the byte white space: a space, a tab, a line feed or a carriage return?
 
 ```
-> is_space(b: 9)
+> is_space(b: '\t')
 True
 ```
 
@@ -1000,7 +1000,7 @@ fn every_byte(v: View, keep: Fn[Int, Bool]) -> Bool
 Does every byte of v pass `keep`? True for "" (nothing fails). For a slug, a key or a code of a fixed alphabet:
 
 ```
-> every_byte(v: "order-17", keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == 45 })
+> every_byte(v: "order-17", keep: fn(b: Int) -> Bool { is_lower(b) or is_digit(b) or b == '-' })
 True
 > every_byte(v: "Order 17", keep: is_alnum)
 False
@@ -1162,7 +1162,7 @@ Where the UTF-8 sequence that starts at `at` (a byte of 128 or more) ends. When 
 ```
 > utf8_end(v: "aé!", at: 1)
 3
-> utf8_end(v: buf() |> push(byte: 97) |> push(byte: 195) |> push(byte: 33) |> freeze, at: 1)
+> utf8_end(v: buf() |> push(byte: 'a') |> push(byte: 195) |> push(byte: '!') |> freeze, at: 1)
 -2
 ```
 
@@ -1269,9 +1269,9 @@ fn is_hex(b: Int) -> Bool
 Is the byte a hex digit (0-9, a-f, A-F)?
 
 ```
-> is_hex(b: 70)
+> is_hex(b: 'F')
 True
-> is_hex(b: 103)
+> is_hex(b: 'g')
 False
 ```
 
@@ -1284,7 +1284,7 @@ fn hex(b: Int) -> Int
 The value of a hex digit (is_hex(b) must hold).
 
 ```
-> hex(b: 102)
+> hex(b: 'f')
 15
 ```
 
