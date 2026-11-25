@@ -61,7 +61,13 @@ describe('a stored build is a cache of the source', () => {
     expect(at(await got('/ivar/gone', { method: 'POST', body: `${greet}\n` }), 'version')).toBe(2);
     const r = await hello('/ivar/gone/v/1/');
     const body = await json(r);
-    expect([r.status, at(body, 'error')]).toEqual([503, 'rebuild_failed']);
+    expect([r.status, at(body, 'error'), at(body, 'outcome'), at(body, 'transient'), r.headers.get('retry-after')]).toEqual([
+      503,
+      'rebuild_failed',
+      'not_applied',
+      undefined,
+      null,
+    ]);
     expect(JSON.stringify(at(body, 'errors'))).toContain('respond_with');
     // the other version still serves
     const v2 = await hello('/ivar/gone/v/2/');

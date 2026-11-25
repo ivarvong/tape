@@ -62,8 +62,9 @@ marked `contract` and waits until every older live version is retired. An upload
 live version, or whose machine the stored rows do not satisfy, is refused with 409. A program's `Remote`
 parameters reach the latest version of the program with that name in the same account.
 
-Every response names its request (`tape-request-id`), says what the request did (`tape-outcome`), and carries a
-trace link (`traceparent`). An operator's response also carries signed links to its trace as a page
+Every answer from a program route names its request (`tape-request-id`), says what the request did
+(`tape-outcome`), and carries a trace link (`traceparent`). A 401, and a public 404 for a name that is not
+published, are answered before that route and carry none of the three. An operator's response also carries signed links to its trace as a page
 (`tape-trace-url`) and as OTLP/JSON (`tape-otlp-url`). The operator's run of a version also carries `server-timing`, the host's entry first:
 `tape-invoke;desc="wall time waiting on the program (not CPU)";dur=<ms>`. `<ms>` is the whole milliseconds this
 Worker waited on the program's object, from the invoke span's begin to its done, which is after the body is
@@ -79,20 +80,30 @@ recorded before the tag has no `step_version`. A stored module is rebuilt with t
 it runs, so the module that runs carries the current accounting and the log keeps the version recorded with that
 run. The `build` id is a hash of the source, so after the accounting changes the same program version and the same
 build can count the same request differently, and `step_version` is what tells the two counts apart. A storage failure at commit answers 503
-with `retry-after: 1` and says whether anything was kept (`applied`, and `outcome`); a trap answers 500.
+`not_applied` with `retry-after: 1`. A trap answers 500 `not_applied` with no `retry-after`.
 
 ### What a client should do
 
-`tape-outcome` is one of four states. The body of a failure carries the same `outcome` and a `retry` line.
+`tape-outcome` is one of four states. The body of a failure carries the same `outcome` and a `retry` line. `outcome`
+and `retry` say whether sending the request again is safe. `transient` and `retry-after` say whether waiting and
+sending it again may succeed. A `not_applied` with no `retry-after` (a trap, a retired version, a version the
+compiler cannot build, a version whose contract migration is held) will not succeed by being sent again; sending
+it again still cannot apply it twice. An answer with no `tape-outcome` is `unknown`: the strongest claim is never
+the default.
+
+The idempotency key is the program's own: a key it stores, or the `Idempotency-Key` header when the program reads
+it. A program with no such key can send a `not_applied` request again as it stands. For `partly` and `unknown` the
+client action is the same: read the resource back before another write. The difference between those two is
+diagnostic (`partly` says which stretch was kept).
 
 | `outcome` | What happened | What to do |
 |---|---|---|
-| `applied` | The request finished. Anything it wrote was kept. | Do not send it again: sending it again can apply it a second time. |
-| `not applied` | Nothing this request wrote was kept. The run rolled back, or it failed before its log began (a Durable Object storage reset: the log is written in the same transaction as the writes, so no log means nothing was kept). | Send the same request again, with the same idempotency key. `retry-after` says how long to wait. |
-| `partly` | The writes before the run's last call were kept. The rest was rolled back. | Send it again only with the same idempotency key. |
-| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | Send it again only with the same idempotency key, and treat another success as the same effect. There is no `retry-after`: that header is only on `not applied`. |
+| `applied` | The request finished, and what it wrote was kept. A program that answers after rolling its own writes back is `not_applied`, or `partly` when an earlier call had committed. | Do not send it again: sending it again can apply it a second time. |
+| `not_applied` | Nothing this request wrote was kept. The run rolled back, or it failed before its log began (a Durable Object storage reset: the log is written in the same transaction as the writes, so no log means nothing was kept). | Sending it again cannot apply it twice. When the answer has `retry-after`, wait that long and send the same request. |
+| `partly` | The writes before the run's last call were kept. The rest was rolled back. | Read the resource back, or send it again only with the program's own idempotency key. There is no `retry-after`. |
+| `unknown` | The object stopped after the run may have committed, and the service cannot see which. | The same as `partly`: read the resource back, or send it again only with the program's own idempotency key. There is no `retry-after`. |
 
-The service does not retry a request itself. A storage reset fails the requests in flight on that object together, and an immediate retry hits the object while it is being reset. A GET is not a read: a program may write on any method, so the method is not a reason to retry. `not applied` is the reason, and the client is the one that waits and sends the same key again.
+The service does not retry a request itself. A storage reset fails the requests in flight on that object together, and an immediate retry hits the object while it is being reset. A GET is not a read: a program may write on any method, so the method is not a reason to retry. `not_applied` is the reason, and the client is the one that waits and sends the same key again.
 
 ### What a program answers
 
@@ -124,7 +135,8 @@ After `PUT /_public/:account/:name {"published": true}` (operator), `/p/:account
 POST (a body of at most 64 KB) from anyone, through the latest live version, without a signed trace link (that link
 opens the run, and it is the operator's) and without the operator route's `tape-invoke` entry. A public answer still
 carries `tape-request-id`, `traceparent` and `tape-outcome`, and a `server-timing` the program itself set. A name that
-is not published is answered by the list of published names and never calls the program's object, and a request the
+is not published is answered by the list of published names and never calls the program's object (that 404 has no
+`tape-request-id`, `traceparent` or `tape-outcome`), and a request the
 route refuses before that call (405, 413) has no `server-timing` from the host. A HEAD is run as the GET it stands
 for (the program sees `GET`, and the body is not sent), on this route and every other. The program sees who called:
 the request line ends in ` public`, and std/http's `Request(caller: Operator | Anyone)` says so.

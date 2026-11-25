@@ -78,7 +78,12 @@ describe('kv jepsen: the trace checker', () => {
         ? { type: 'ok', live: true, ...seen, read: at(body, 'value') }
         : { type: 'ok', live: false, ...seen };
     if (status === 200 || status === 201) return { type: 'ok', ...seen };
-    if ((status === 500 || status === 503) && at(body, 'applied') === false) return { type: 'fail', applied: false };
+    if (
+      (status === 500 || status === 503) &&
+      (at(body, 'applied') === false ||
+        (at(body, 'outcome') === 'not_applied' && (status === 500 || at(body, 'transient') === true)))
+    )
+      return { type: 'fail', applied: false };
     return { type: 'info' };
   };
   const op = async (f: 'get' | 'put', key: string, value?: string, plan: Plan | null = null): Promise<Attempt> => {

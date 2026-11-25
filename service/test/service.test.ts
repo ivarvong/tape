@@ -308,7 +308,14 @@ fn count(found: Option[Count]) -> Buf {
     expect(at(third, 'held')).toBe(
       'migration 3 "drop the pin index" is a contract and waits until v1, v2 are retired (DELETE /:account/:name/v/:version)',
     );
-    expect((await call('/ivar/notes/v/3/notes')).status).toBe(409);
+    const heldRun = await call('/ivar/notes/v/3/notes');
+    const heldBody = await json(heldRun);
+    expect([heldRun.status, at(heldBody, 'outcome'), heldRun.headers.get('tape-outcome'), heldRun.headers.get('retry-after')]).toEqual([
+      409,
+      'not_applied',
+      'not_applied',
+      null,
+    ]);
     await call('/ivar/notes/v/1', { method: 'DELETE' });
     const released = await got('/ivar/notes/v/2', { method: 'DELETE' });
     expect([at(released, 'live'), at(released, 'held')]).toEqual([[3], null]);

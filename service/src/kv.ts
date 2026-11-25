@@ -369,11 +369,11 @@ const lookedUp = async (k: Keyed, fault: Fault | null): Promise<Awaited<ReturnTy
       refused: json(
         {
           error: 'the cluster lookup failed before any shard was called: nothing was applied; send the request again',
-          ...encodeOutcome(APPLY['not applied'], true).body,
+          ...encodeOutcome(APPLY.not_applied, true).body,
           reason: messageOf(e),
         },
         503,
-        encodeOutcome(APPLY['not applied'], true).headers,
+        encodeOutcome(APPLY.not_applied, true).headers,
       ),
     };
   }

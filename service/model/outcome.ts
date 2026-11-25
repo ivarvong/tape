@@ -6,7 +6,7 @@ import type { Step } from './explore.ts';
 
 export type Bounds = { keyed: boolean };
 export type Flags = { retryUnknown?: boolean };
-type Outcome = 'applied' | 'not applied' | 'partly' | 'unknown';
+type Outcome = 'applied' | 'not_applied' | 'partly' | 'unknown';
 export type State = {
   phase: 'open' | 'answered' | 'done';
   outcome: Outcome | null;
@@ -38,7 +38,7 @@ const follow = (s: State, flags: Flags): Step<State>[] => {
   const t = clone(s);
   t.phase = 'done';
   const retryWithoutKey = s.outcome === 'unknown' && !s.key && flags.retryUnknown === true;
-  if (s.outcome === 'not applied' || (s.outcome === 'unknown' && s.key) || (s.outcome === 'partly' && s.key))
+  if (s.outcome === 'not_applied' || (s.outcome === 'unknown' && s.key) || (s.outcome === 'partly' && s.key))
     return [[`client retries ${s.outcome} with the same request`, t]];
   if (retryWithoutKey) {
     t.twice = s.kept;
@@ -49,7 +49,7 @@ const follow = (s: State, flags: Flags): Step<State>[] => {
 export function actions(s: State, flags: Flags = {}): Step<State>[] {
   if (s.phase === 'open')
     return [
-      ['service: not applied', answer(s, 'not applied', false)],
+      ['service: not_applied', answer(s, 'not_applied', false)],
       ['service: applied', answer(s, 'applied', true)],
       ['service: partly', answer(s, 'partly', true)],
       ['service: unknown, kept', answer(s, 'unknown', true)],

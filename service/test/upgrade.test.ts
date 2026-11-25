@@ -189,7 +189,7 @@ describe('upgrade: a cluster made with an older examples/kv.tape', () => {
       `UPGRADE-SKEW ${JSON.stringify(Object.fromEntries([...statuses].map(([k, v]) => [k, v.length])))} sent ${sent.length} ops ${next}`,
     );
     expect([...statuses.keys()].every(st => [200, 201, 400, 503].includes(st))).toBe(true);
-    expect((statuses.get(503) ?? []).every(o => at(o.body, 'outcome') === 'not applied')).toBe(true);
+    expect((statuses.get(503) ?? []).every(o => at(o.body, 'outcome') === 'not_applied')).toBe(true);
     expect(sent.some(o => o.status === 400) && sent.some(o => o.status === 200 || o.status === 201)).toBe(true);
   }, 60000);
 

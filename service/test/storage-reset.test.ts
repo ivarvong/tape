@@ -1,6 +1,7 @@
 // A Durable Object storage reset before the run's log begins (R-ANS-7). The log is written in the transaction of
-// the writes, so a run that never logged committed nothing: the answer is 503, outcome "not applied", and it names
-// the request and a trace. The service answers that once. It does not run the request again.
+// the writes, so a run that never logged committed nothing: the answer is 503, outcome "not_applied", and it names
+// the request and a trace. The service answers that once. It does not run the request again. The injected fault
+// throws once and then storage is healthy; a store that keeps failing is the facet rejection, which is `unknown`.
 import { describe, expect, it } from 'vitest';
 import { anyone, at, call, got, json } from './help.ts';
 
@@ -12,7 +13,7 @@ type N { N(v: Int) }
 fn handle(raw: View, db: Sql) -> Buf {
   match request(raw) {
     Request(method: "PUT") -> put(db)
-    Request(method: "GET") -> got(found: sql_first(db, row: N, query: "SELECT v FROM n"))
+    Request(method: "GET") -> got(found: sql_first(db, row: N, query: "SELECT count(*) AS v FROM n"))
     _ -> respond(status: 405)
   }
 }
@@ -54,13 +55,11 @@ describe('a storage reset before the log begins', () => {
     expect(put.status).toBe(503);
     expect(at(body, 'error')).toBe(`nothing was applied: ${RESET}`);
     expect(at(body, 'reason')).toBe(RESET);
-    expect(at(body, 'outcome')).toBe('not applied');
-    expect(at(body, 'applied')).toBe(false);
+    expect(at(body, 'outcome')).toBe('not_applied');
     expect(at(body, 'transient')).toBe(true);
-    expect(String(at(body, 'retry'))).toContain('idempotency key');
+    expect(String(at(body, 'retry'))).toContain('cannot apply it twice');
     expect(put.headers.get('retry-after')).toBe('1');
-    expect(put.headers.get('tape-outcome')).toBe('not applied');
-    expect(put.headers.get('tape-applied')).toBe('false');
+    expect(put.headers.get('tape-outcome')).toBe('not_applied');
     expect(put.headers.get('tape-request-id')).toMatch(/^[0-9a-f-]{36}$/);
     expect(put.headers.get('traceparent')).toMatch(new RegExp(`^00-${trace}-[0-9a-f]{16}-01$`));
     const id = put.headers.get('tape-request-id') ?? '';
@@ -73,7 +72,7 @@ describe('a storage reset before the log begins', () => {
     expect(await page.text()).toContain('nothing was applied');
     // the plan's only fault was that PUT; this GET runs, and the row is not there
     const read = await call(`/${account}/${name}/v/1/`);
-    expect([read.status, await read.text(), read.headers.get('tape-outcome')]).toEqual([404, '', 'applied']);
+    expect([read.status, await read.text(), read.headers.get('tape-outcome')]).toEqual([200, '0', 'applied']);
     expect((await faults(account, null)).status).toBe(200);
     // the same request again, now that the object is up: it applies once
     expect((await call(`/${account}/${name}/v/1/`, { method: 'PUT' })).status).toBe(201);
@@ -92,19 +91,49 @@ describe('a storage reset before the log begins', () => {
     });
     const body = await json(got503);
     expect(got503.status).toBe(503);
-    expect(at(body, 'outcome')).toBe('not applied');
-    expect(at(body, 'applied')).toBe(false);
+    expect(at(body, 'outcome')).toBe('not_applied');
     expect(String(at(body, 'error'))).toContain(RESET);
     expect(got503.headers.get('tape-request-id')).toMatch(/^[0-9a-f-]{36}$/);
-    expect(got503.headers.get('tape-outcome')).toBe('not applied');
+    expect(got503.headers.get('tape-outcome')).toBe('not_applied');
     expect(got503.headers.get('traceparent')).toMatch(new RegExp(`^00-${trace}-[0-9a-f]{16}-01$`));
     expect(got503.headers.get('retry-after')).toBe('1');
     expect([got503.headers.get('tape-trace-url'), got503.headers.get('tape-otlp-url')]).toEqual([null, null]);
     expect((await faults(account, null)).status).toBe(200);
     const after = await anyone(`/p/${account}/${name}/`);
-    expect([after.status, after.headers.get('tape-outcome'), await after.text()]).toEqual([404, 'applied', '']);
+    expect([after.status, after.headers.get('tape-outcome'), await after.text()]).toEqual([200, 'applied', '0']);
     expect(after.headers.get('tape-request-id')).toMatch(/^[0-9a-f-]{36}$/);
     expect(after.headers.get('traceparent')).toMatch(/^00-[0-9a-f]{32}-[0-9a-f]{16}-01$/);
     expect(after.headers.get('tape-trace-url')).toBeNull();
+  });
+
+  it('a program rollback answers with its status and not_applied: the writes did not stay', async () => {
+    const account = 'jepsen-resetback';
+    const source = `migration 1 "n" {
+  CREATE TABLE n(v INTEGER NOT NULL)
+}
+type N { N(v: Int) }
+fn handle(raw: View, db: Sql) -> Buf {
+  match request(raw) {
+    Request(method: "POST") -> post(db)
+    Request(method: "GET") -> got(found: sql_first(db, row: N, query: "SELECT count(*) AS v FROM n"))
+    _ -> respond(status: 405)
+  }
+}
+fn post(db: Sql) -> Buf {
+  let _ = sql_exec(db, query: "INSERT INTO n(v) VALUES (1)", repeat: True)
+  let 1 = sql_exec(db, query: "UPDATE n SET v = 2 WHERE v = 0") else -> rollback(out: respond(status: 200))
+  respond(status: 500)
+}
+fn got(found: Option[N]) -> Buf {
+  match found {
+    Some(value: N(v)) -> respond(status: 200) |> write_int(value: v)
+    None -> respond(status: 404)
+  }
+}
+`;
+    expect((await call(`/${account}/n`, { method: 'POST', body: source })).status).toBe(201);
+    const rolled = await call(`/${account}/n/v/1/`, { method: 'POST' });
+    expect([rolled.status, await rolled.text(), rolled.headers.get('tape-outcome')]).toEqual([200, '', 'not_applied']);
+    expect(await (await call(`/${account}/n/v/1/`)).text()).toBe('0');
   });
 });
