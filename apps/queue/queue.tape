@@ -174,8 +174,8 @@ fn add(body: View) -> Outcome {
     key,
     kind,
     payload,
-    run_at: now() + delay_of(given: delay_ms),
-    most: most_of(given: most)
+    run_at: now() + value_or(given: delay_ms, otherwise: 0),
+    most: value_or(given: most, otherwise: 5)
   ) else {
     None -> again(found: sql_first(row: Job, query: "SELECT * FROM jobs WHERE client = :key", key))
   }
@@ -186,20 +186,6 @@ fn again(found: Option[Job]) -> Outcome {
   match found {
     Some(value) -> Shown(status: 200, job: value)
     None -> Problem(status: 500, reason: "the job vanished")
-  }
-}
-
-fn delay_of(given: Option[Delay]) -> Int {
-  match given {
-    Some(value) -> value
-    None -> 0
-  }
-}
-
-fn most_of(given: Option[Most]) -> Int {
-  match given {
-    Some(value) -> value
-    None -> 5
   }
 }
 

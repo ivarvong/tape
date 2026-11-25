@@ -53,6 +53,20 @@ type Rounding {
   Ceiling
 }
 
+// The value an Option holds, or `otherwise` when it holds none. A refined type is its base type here: an
+// `Option[Delay]` gives an Int where an Int is asked.
+//
+//   > value_or(given: Some(value: 3), otherwise: 0)
+//   3
+//   > value_or(given: None, otherwise: "none")
+//   "none"
+fn value_or[T](given: Option[T], otherwise: T) -> T {
+  match given {
+    Some(value) -> value
+    None -> otherwise
+  }
+}
+
 // One step through the rows of a query: next(rows) gives Next(value, rest) or End.
 type Step[T] {
   Next(value: T, rest: Rows[T])

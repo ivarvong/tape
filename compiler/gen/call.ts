@@ -8,7 +8,7 @@ import { I32, fail, loadOp, sleb, stemOf, storeOp, uleb, utf8 } from '../common.
 import { ROW_CALLS } from '../rows.ts';
 import { BOOL, CAPABILITIES, FLOAT, INT, INTRINSICS, RETIRED, T, VIEW, decType, key } from '../types.ts';
 import type { Type } from '../types.ts';
-import { fresh, get, mark, need, releaseLevel, set } from './fn.ts';
+import { fresh, get, mark, need, refines, releaseLevel, set } from './fn.ts';
 import type { Binding, Build, CExpr, Ctx, Stored } from './fn.ts';
 import type { Compiled } from './assemble.ts';
 import { emitCallOut } from './callout.ts';
@@ -40,14 +40,24 @@ const asAst = (t: Type, at: At): TypeAst => ({
 });
 
 // ---- generic functions
-// Type arguments come from the expected result type and from arguments whose type is known without context.
-function unify(vars: readonly string[], bind: Bind, pat: Type, t: Type | null | undefined): void {
+// Type arguments come from the expected result type and from arguments whose type is known without context. Two
+// arguments that differ only by a refinement bind the less refined of the two (`value_or(given: most, otherwise:
+// 0)` with `most: Option[Most]` is T = Int): the refined one stands where its base is asked (fn.ts refines).
+function unify(
+  vars: readonly string[],
+  bind: Bind,
+  pat: Type,
+  t: Type | null | undefined,
+  fits?: (got: Type, want: Type) => boolean,
+): void {
   if (!t) return;
   if (vars.includes(pat.name) && pat.args.length === 0) {
-    if (!bind.has(pat.name)) bind.set(pat.name, t);
+    const had = bind.get(pat.name);
+    if (!had) bind.set(pat.name, t);
+    else if (fits && !fits(t, had) && fits(had, t)) bind.set(pat.name, t);
     return;
   }
-  if (pat.name === t.name) pat.args.forEach((a, i) => unify(vars, bind, a, t.args[i]));
+  if (pat.name === t.name) pat.args.forEach((a, i) => unify(vars, bind, a, t.args[i], fits));
 }
 
 export const fnType = (params: readonly Type[], ret: Type): Type | null => {
@@ -85,7 +95,7 @@ function peekCall(c: Ctx, e: Call): Type | null {
   const bind: Bind = new Map();
   for (const a of e.args) {
     const pm = g.params.find(x => x.name === a.label) ?? (g.params.length === 1 ? g.params[0] : null);
-    if (pm) unify(g.tparams, bind, pm.typeAst, peek(c, a.value));
+    if (pm) unify(g.tparams, bind, pm.typeAst, peek(c, a.value), (x, w) => refines(c, x, w));
   }
   return g.tparams.every(t => bind.has(t)) ? c.B.resolve(g.retAst, bind) : null;
 }
@@ -99,7 +109,7 @@ function peekCtor(c: Ctx, e: Extract<Expr, { k: 'ctor' }>): Type | null {
   const fields = decl.variants[made.vi]?.fields ?? [];
   for (const a of e.args) {
     const fl = fields.find(x => x.name === a.label) ?? (fields.length === 1 ? fields[0] : null);
-    if (fl) unify(decl.params, bind, fl.type, peek(c, a.value));
+    if (fl) unify(decl.params, bind, fl.type, peek(c, a.value), (x, w) => refines(c, x, w));
   }
   const args = decl.params.flatMap(t => bind.get(t) ?? []);
   return args.length === decl.params.length ? T(decl.name, ...args) : null;
@@ -163,7 +173,7 @@ export function instance(
   if (expected) unify(g.tparams, bind, g.retAst, expected);
   g.params.forEach((pm, i) => {
     const arg = args[i];
-    if (arg) unify(g.tparams, bind, pm.typeAst, peek(c, arg.value));
+    if (arg) unify(g.tparams, bind, pm.typeAst, peek(c, arg.value), (x, w) => refines(c, x, w));
   });
   const open = g.tparams.find(t => !bind.has(t));
   if (open !== undefined)

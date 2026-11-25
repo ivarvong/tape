@@ -114,7 +114,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | `Rows[T]` | the rows of a query, read with `next` |
 | `Sql` `Remote` `Clock` `Entropy` `Timer` | capabilities: only ever parameters, never stored or returned |
 | `type T { A(x: Int)  B }` | a sum of constructors, each with named fields. `type T[P] { … }` takes type parameters |
-| `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition. `… else "lowercase letters, digits and -"` is what decode's 400 says of a value for which the condition does not hold (section 6) |
+| `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition. It stands wherever its base type is asked, and so does an `Option`, `List` or `Result` of it (`Option[Delay]` where `Option[Int]` is asked); a function goes the other way in what it takes (`Fn[Int, X]` is an `Fn[Delay, X]`), and any other type of it is only itself. `… else "lowercase letters, digits and -"` is what decode's 400 says of a value for which the condition does not hold (section 6) |
 | `interface Git { read head(Ref) -> Head }` | what a capability bound by the host can be asked |
 
 std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `Err(error)`), `Rounding`

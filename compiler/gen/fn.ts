@@ -163,9 +163,38 @@ export function store(c: Ctx, t: Type): number[] {
   return ls;
 }
 
+/** The std types whose type argument a value only holds, to be read: an `Option[Delay]` is an `Option[Int]`. */
+const COVARIANT: ReadonlySet<string> = new Set(['Option', 'List', 'Result']);
+/**
+ * A value of `got` may stand where `want` is asked: the same type, a refinement of it (a refined type is its base
+ * type at run time, and its condition holds of every value it has), or, through the type arguments of a type whose
+ * values are immutable and only read, arguments that do (`Option[Delay]` where `Option[Int]` is asked; a `Result`
+ * in both its arguments). A function goes the other way in what it takes: `Fn[Int, X]` stands for `Fn[Delay, X]`,
+ * since every Delay is an Int, and not the reverse, which would hand a function an Int its condition was not proved
+ * of. Any other type (a program's own generic type, `Map`, `Rows`, `Buf`) is the same type or nothing.
+ */
+export function refines(c: Ctx, got: Type, want: Type): boolean {
+  if (same(got, want)) return true;
+  const base = c.B.strip(got);
+  if (base !== got && refines(c, base, want)) return true;
+  if (got.name !== want.name || got.args.length === 0 || got.args.length !== want.args.length) return false;
+  const pairs = got.args.map((g, i): [Type, Type | undefined] => [g, want.args[i]]);
+  if (COVARIANT.has(got.name)) return pairs.every(([g, w]) => w !== undefined && refines(c, g, w));
+  if (got.name === 'Fn' || got.name === 'Fn2') {
+    const result = pairs.at(-1);
+    return (
+      result !== undefined &&
+      result[1] !== undefined &&
+      refines(c, result[0], result[1]) &&
+      pairs.slice(0, -1).every(([g, w]) => w !== undefined && refines(c, w, g))
+    );
+  }
+  return false;
+}
+
 /** The type found is the type wanted (or refines it); gives it back. */
 export function need(c: Ctx, got: Type, want: Type, at: Place, what: string): Type {
-  if (same(got, want) || same(c.B.strip(got), want)) return got;
+  if (refines(c, got, want)) return got;
   const sh = shadowedHint(got, want);
   return fail(
     at,
