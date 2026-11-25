@@ -502,6 +502,19 @@ fn byte_literal(src: View, at: Int, out: Buf, state: Scan) -> Buf {
   }
 }
 
+// Where a hole's scan goes on after a single quote at `at`: past the byte literal it opens when that literal is
+// whole (`')'` and `'"'` are bytes, not the hole's bracket or the text's end), else the next byte (the lexer
+// refuses the rest).
+fn hole_byte(src: View, at: Int) -> Int {
+  let close = match {
+    byte_at(src, at: at + 1) == '\\' -> at + 3
+    else -> at + 2
+  }
+  match {
+    byte_at(src, at: close) == '\'' -> close + 1
+    else -> at + 1
+  }
+}
 fn byte_end(src: View, at: Int) -> End {
   let i = at + 1
   match {
@@ -577,6 +590,7 @@ fn hole_end(src: View, at: Int, depth: Int) -> End {
     src[at] == 41 and depth == 1 -> Closed(at: at + 1)
     src[at] == 41 -> hole_end(src, at: at + 1, depth: depth - 1)
     src[at] == 40 -> hole_end(src, at: at + 1, depth: depth + 1)
+    src[at] == '\'' -> hole_end(src, at: hole_byte(src, at), depth)
     else -> hole_end(src, at: at + 1, depth)
   }
 }

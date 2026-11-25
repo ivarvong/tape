@@ -598,6 +598,9 @@ const EDGES: [string, string][] = [
   ["'\"'", sp('n', "'&quot;'")],
   ["b == '*'", `${sp('i', 'b')} ${sp('o', '==')} ${sp('n', "'*'")}`],
   [`"\\('*')"`, sp('s', `&quot;${hole(sp('n', "'*'"))}&quot;`)],
+  // in a hole too: `')'` is a byte, not the hole's end, and `'"'` is not the text's
+  [`"\\(')')"`, sp('s', `&quot;${hole(sp('n', "')'"))}&quot;`)],
+  [`"\\('"')"`, sp('s', `&quot;${hole(sp('n', "'&quot;'"))}&quot;`)],
   ["''", sp('n x', "''")],
   ["'ab'", sp('n x', "'ab'")],
   ["'", sp('n x', "'")],
@@ -657,6 +660,8 @@ function fuzz(h: Highlighter): { cases: number; refused: number; bad: string[] }
     '"{"',
     '"a\\(x)b"',
     '"\\(f(1, y.z))"',
+    `"\\(')')"`,
+    `"\\('(')"`,
     '"x \\\n   y"',
     '"\\(n) \\\n  \\(m)"',
     'invariant "\\(i)" {',

@@ -27,8 +27,10 @@ waits on a call, another may run. Three things hold for every program:
 `//` starts a comment. An Int runs from `-9223372036854775808` to `9223372036854775807`. Written in digits, a `-`
 before them is part of the literal (`-7`, and in a pattern `-1 ->`), and a literal outside that range is refused
 (P08). A byte is that Int written as the byte: `'*'` is 42, `' '` is 32, `'\n'` is 10 and `'\''` is 39. It is one
-source character whose code is 0 to 127, or one escape (`\' \" \\ \/ \n \r \t \b \f`); empty, two characters, a
-character past ASCII, or an unknown escape is L07, and a byte from 128 to 255 stays a decimal integer. It is an
+printable ASCII character (32 to 126) other than `'` and `\`, or one escape (`\' \" \\ \/ \n \r \t \b \f`); empty,
+two characters, a character past ASCII, a raw control character (a tab, a NUL), or an unknown escape is L07, and a byte
+from 128 to 255, or a control byte with no escape, stays a decimal integer. Inside a text's `\( )` it is one token, so
+`"\(')')"` holds the byte `)`. It is an
 Int, so the compiled code is that integer's, and a `-` before it is part of the literal, as before digits
 (`-'*'` is -42). A single quote inside a migration's SQL is that SQL's quote. A number with a point is an exact
 decimal, a Dec whose scale is the digits written after the point:

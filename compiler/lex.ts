@@ -127,10 +127,16 @@ function hole(sc: Scan): Token[] {
         'a \\( hole in a text literal is not closed, or has a text literal inside it',
         'A hole holds one expression with no text literal in it: `"Hello, \\(name)"`. Bind anything longer with `let` first.',
       );
+    // a byte literal is one token, so `'('`, `')'` and `'"'` in a hole are bytes, not its brackets or its end
+    if (c === "'") {
+      const close = j + (sc.text[j + 1] === '\\' ? 3 : 2);
+      if (sc.text[close] === "'") j = close;
+      continue;
+    }
     if (c === '(') depth++;
     if (c === ')') depth--;
   }
-  const inner = lex(sc.file, sc.text.slice(from, j - 1)).map(t => ({ ...t, line: sc.line }));
+  const inner = lex(sc.file, sc.text.slice(from, j - 1), sc.line).map(t => ({ ...t, line: sc.line }));
   sc.i = j;
   // without the line end lex adds: the hole is one expression
   return [...inner.slice(0, -2), { t: 'eof', line: sc.line, file: sc.file }];
@@ -205,6 +211,15 @@ function byteLiteral(sc: Scan): void {
     // next character: there is nothing to ask `fromCodePoint` how long.
     const cp = sc.text.codePointAt(sc.i + 1) ?? 0;
     if (cp > 127) fail(here(sc), 'L07', 'a byte literal holds one byte', BYTE_ONE);
+    // a tab, a NUL or a DEL between the quotes reads as nothing in the source: it is written as its escape or
+    // its number
+    if (cp < 32 || cp === 127)
+      fail(
+        here(sc),
+        'L07',
+        `a byte literal holds a control character (${cp})`,
+        `Write it as its escape (\\t \\n \\r \\b \\f) or as the number: ${cp}.`,
+      );
     byte = cp;
     sc.i += 2;
   }
@@ -410,8 +425,9 @@ export function lexed(file: string, source: string): readonly Token[] {
 /** How many files the cache holds, and their characters (test/lex-cache.ts). */
 export const lexedHeld = (): { files: number; chars: number } => ({ files: LEXED.size, chars: lexedChars });
 
-export function lex(file: string, source: string): Token[] {
-  const sc: Scan = { file, text: source, toks: [], open: [], i: 0, line: 1 };
+/** The tokens of a file; `line` is the first line's number (a hole's own line, so its errors say where it is). */
+export function lex(file: string, source: string, line = 1): Token[] {
+  const sc: Scan = { file, text: source, toks: [], open: [], i: 0, line };
   while (sc.i < source.length) step(sc);
   sc.toks.push({ t: 'nl', ...here(sc) }, { t: 'eof', ...here(sc) });
   return sc.toks;

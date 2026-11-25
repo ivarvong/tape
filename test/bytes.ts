@@ -228,6 +228,17 @@ for (const [what, digits, literal] of pairs) sameModule(what, digits, literal);
   const hole = `fn hit(b: Int) -> Int {\n  len("\\('*')")\n}\n`;
   const got = ran(hole, 0n);
   same("a hole writes the digits of '*'", [got.value, got.interp], ['2', '2']);
+  // a byte literal in a hole is one token: `')'` does not close the hole, and `'"'` does not end the text (it was
+  // L07 and L05)
+  for (const [lit, digits] of [
+    ["')'", '2'],
+    ["'('", '2'],
+    ["'\"'", '2'],
+    ["'\\''", '2'],
+  ] as const) {
+    const r = ran(`fn hit(b: Int) -> Int {\n  len("\\(${lit})")\n}\n`, 0n);
+    same(`a hole holds ${lit}`, [r.value, r.interp], [digits, digits]);
+  }
 }
 
 // ---- what is not one byte
@@ -243,6 +254,15 @@ for (const [what, digits, literal] of pairs) sameModule(what, digits, literal);
   same("'\\n without its quote is not closed", refused("'\\n"), 'L07 a byte literal is not closed');
   same('an unknown escape', refused("'\\q'"), 'L07 unknown escape \\q in a byte literal');
   same('an emoji is more than one byte', refused("'😀'"), 'L07 a byte literal holds one byte');
+  // a raw control character between the quotes is invisible in the source: its escape or its number says it
+  same('a raw tab', refused("'\t'"), 'L07 a byte literal holds a control character (9)');
+  same('a raw DEL', refused("'\x7f'"), 'L07 a byte literal holds a control character (127)');
+  // an error inside a hole is on the hole's line, not the hole's first line counted from 1
+  same(
+    'a hole reports its own line',
+    problems(`fn f() -> Int {\n  let n = 1\n  len("\\(;)")\n}\n`).map(e => `${e.code}:${e.line}`),
+    ['L01:3'],
+  );
 }
 
 // ---- a pattern `"…"[0]` is P01, and the fix spells the byte from BYTE_ESC (the table the lexer reads)
