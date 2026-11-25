@@ -16,11 +16,11 @@
     "functions": 118
   },
   "corpus/blog.tape": {
-    "bytes": 93299,
-    "functions": 274
+    "bytes": 96787,
+    "functions": 281
   },
   "corpus/md.tape": {
-    "bytes": 52785,
+    "bytes": 52901,
     "functions": 168
   },
   "examples/bump.tape": {

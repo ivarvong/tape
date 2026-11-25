@@ -46,9 +46,9 @@ export function functionsOf(wasm: Uint8Array): number {
   return 0;
 }
 /** Where the Wasm of the program at `path` (or of those files, in order) is kept. Made when it is not there yet. */
-export function wasmPath(path: string | readonly string[]): string {
+export function wasmPath(path: string | readonly string[], baseNames = false): string {
   const paths = typeof path === 'string' ? [path] : [...path];
-  const files = programFiles(paths);
+  const files = programFiles(paths, baseNames);
   const file = `${DIR}/${paths.join('+').replaceAll('/', '_')}-${hashOf(files)}.wasm`;
   if (existsSync(file)) return file;
   const r = compile([...std, ...files]);

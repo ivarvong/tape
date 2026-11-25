@@ -21,7 +21,7 @@ for (const name of names.length > 0 ? names : NAMES) {
   const pinned = w.now;
   if (pinned !== undefined) Date.now = () => pinned;
   const ways = VARIANTS.map(([label, o]) => {
-    const r = compile([...std, ...programFiles(sourcesOf(w))], o);
+    const r = compile([...std, ...programFiles(sourcesOf(w), w.baseNames === true)], o);
     if (!r.wasm) throw new Error(`${w.name} (${label}) does not compile`);
     const module = new WebAssembly.Module(r.wasm);
     return { label, module, run: makeWay(w, 'tape-nolog', module), ms: Array.of<number>() };

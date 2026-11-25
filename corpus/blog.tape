@@ -39,10 +39,10 @@ migration 1 "posts" {
   CREATE INDEX posts_newest ON posts(published DESC, slug DESC)
 }
 
-type Slug = View where slug_ok(self)
-type Title = View where title_ok(self)
-type Day = View where day_ok(self)
-type ClientKey = View where key_ok(self)
+type Slug = View where slug_ok(self) else "1-80 of [a-z0-9-], not starting or ending with -"
+type Title = View where title_ok(self) else "1-200 bytes, no CR LF NUL"
+type Day = View where day_ok(self) else "YYYY-MM-DD"
+type ClientKey = View where key_ok(self) else "1-128 visible bytes"
 
 type Post {
   Post(
@@ -62,7 +62,7 @@ type Stamp { Stamp(n: Int, updated_ms: Int) }
 type Issue { Issue(error: View) }
 
 type Check {
-  Fine
+  Fine(slug: Slug, title: Title, published: Day, key: ClientKey)
   Bad(status: Int, reason: View)
 }
 
@@ -71,13 +71,14 @@ type Outcome {
   Written(post: Post)
   Shown(post: Post, html: View)
   Article(html: View, hash: View)
-  Home(rows: Rows[Post], page: Int, total: Int)
-  Feed(rows: Rows[Post])
+  Home(rows: Rows[Post], page: Int, total: Int, updated_ms: Int)
+  Feed(rows: Rows[Post], total: Int, updated_ms: Int)
   Removed(slug: View)
   NotModified(etag: View)
   Problem(status: Int, reason: View)
 }
 
+// clock is the grant now() reads. The compiler passes it into now by that name.
 fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
   answered(r: request(raw), db)
 }
@@ -94,6 +95,7 @@ fn answered(r: Request, db: Sql) -> Buf {
       published: header_of(request: r, name: "x-date"),
       markdown: body,
       key: header_of(request: r, name: "idempotency-key"),
+      r,
       db
     )
     Request(method: "POST", path: "/posts/" ++ slug, body, caller: Operator) -> post(
@@ -102,37 +104,42 @@ fn answered(r: Request, db: Sql) -> Buf {
       published: header_of(request: r, name: "x-date"),
       markdown: body,
       key: header_of(request: r, name: "idempotency-key"),
+      r,
       db
     )
     Request(method: "DELETE", path: "/posts/" ++ slug, caller: Operator) -> deleted(
       slug,
       key: header_of(request: r, name: "idempotency-key"),
+      r,
       db
     )
     Request(method: "PUT", path: "/posts/" ++ slug) -> render(
       o: Problem(status: 403, reason: "writes are operator-only"),
+      r,
       db
     )
     Request(method: "POST", path: "/posts/" ++ slug) -> render(
       o: Problem(status: 403, reason: "writes are operator-only"),
+      r,
       db
     )
     Request(method: "DELETE", path: "/posts/" ++ slug) -> render(
       o: Problem(status: 403, reason: "writes are operator-only"),
+      r,
       db
     )
-    _ -> render(o: Problem(status: 404, reason: "no such page"), db)
+    _ -> render(o: Problem(status: 404, reason: "no such page"), r, db)
   }
 }
 
 fn listed(query: Option[View], r: Request, db: Sql) -> Buf {
   match page_of(query) {
-    None -> render(o: Problem(status: 400, reason: "page must be an integer >= 1"), db)
+    None -> render(o: Problem(status: 400, reason: "page must be an integer >= 1"), r, db)
     Some(value: page) -> {
       let Stamp(n: total, updated_ms) = stamp(db)
       let tag = "i:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms)
       match if_match(r, tag) {
-        True -> render(o: NotModified(etag: tag), db)
+        True -> render(o: NotModified(etag: tag), r, db)
         False -> render(
           o: Home(
             rows: sql_all(
@@ -144,8 +151,10 @@ fn listed(query: Option[View], r: Request, db: Sql) -> Buf {
               off: (page - 1) * flags.page_size
             ),
             page: page,
-            total: total
+            total: total,
+            updated_ms: updated_ms
           ),
+          r,
           db
         )
       }
@@ -157,14 +166,19 @@ fn fed(r: Request, db: Sql) -> Buf {
   let Stamp(n: total, updated_ms) = stamp(db)
   let tag = "f:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms)
   match if_match(r, tag) {
-    True -> render(o: NotModified(etag: tag), db)
+    True -> render(o: NotModified(etag: tag), r, db)
     False -> render(
-      o: Feed(rows: sql_all(
-        db,
-        row: Post,
-        query: "SELECT * FROM posts ORDER BY published DESC, slug DESC LIMIT :lim",
-        lim: flags.feed_size
-      )),
+      o: Feed(
+        rows: sql_all(
+          db,
+          row: Post,
+          query: "SELECT * FROM posts ORDER BY published DESC, slug DESC LIMIT :lim",
+          lim: flags.feed_size
+        ),
+        total: total,
+        updated_ms: updated_ms
+      ),
+      r,
       db
     )
   }
@@ -172,24 +186,29 @@ fn fed(r: Request, db: Sql) -> Buf {
 
 fn shown(slug: View, r: Request, db: Sql) -> Buf {
   match load(slug, db) {
-    None -> render(o: Problem(status: 404, reason: "no such post"), db)
-    Some(value: post) -> match if_match(r, tag: post.hash) {
-      True -> render(o: NotModified(etag: post.hash), db)
-      False -> render(
-        o: Shown(post, html: html_of(hash: post.hash, markdown: post.markdown, db)),
-        db
-      )
+    None -> render(o: Problem(status: 404, reason: "no such post"), r, db)
+    Some(value: post) -> {
+      let tag = page_tag(post)
+      match if_match(r, tag) {
+        True -> render(o: NotModified(etag: tag), r, db)
+        False -> render(
+          o: Shown(post, html: html_of(hash: post.hash, markdown: post.markdown, db)),
+          r,
+          db
+        )
+      }
     }
   }
 }
 
 fn article(slug: View, r: Request, db: Sql) -> Buf {
   match load(slug, db) {
-    None -> render(o: Problem(status: 404, reason: "no such post"), db)
+    None -> render(o: Problem(status: 404, reason: "no such post"), r, db)
     Some(value: post) -> match if_match(r, tag: post.hash) {
-      True -> render(o: NotModified(etag: post.hash), db)
+      True -> render(o: NotModified(etag: post.hash), r, db)
       False -> render(
         o: Article(html: html_of(hash: post.hash, markdown: post.markdown, db), hash: post.hash),
+        r,
         db
       )
     }
@@ -202,16 +221,18 @@ fn put(
   published: Option[View],
   markdown: View,
   key: Option[View],
+  r: Request,
   db: Sql
 ) -> Buf {
   match fields(slug, title, published, key) {
-    Bad(status, reason) -> render(o: Problem(status, reason), db)
-    Fine -> saved(
-      slug,
-      title: title_of(title),
-      published: day_of(published),
+    Bad(status, reason) -> render(o: Problem(status, reason), r, db)
+    Fine(slug: s, title: t, published: d, key: k) -> saved(
+      s,
+      title: t,
+      published: d,
       markdown,
-      key: key_of(key),
+      key: k,
+      r,
       db
     )
   }
@@ -223,95 +244,114 @@ fn post(
   published: Option[View],
   markdown: View,
   key: Option[View],
+  r: Request,
   db: Sql
 ) -> Buf {
   match fields(slug, title, published, key) {
-    Bad(status, reason) -> render(o: Problem(status, reason), db)
-    Fine -> created(
-      slug,
-      title: title_of(title),
-      published: day_of(published),
+    Bad(status, reason) -> render(o: Problem(status, reason), r, db)
+    Fine(slug: s, title: t, published: d, key: k) -> created(
+      s,
+      title: t,
+      published: d,
       markdown,
-      key: key_of(key),
+      key: k,
+      r,
       db
     )
   }
 }
 
 fn fields(slug: View, title: Option[View], published: Option[View], key: Option[View]) -> Check {
-  match {
-    not slug_ok(slug) -> Bad(
-      status: 400,
-      reason: "slug is 1-80 of [a-z0-9-], not starting or ending with -"
-    )
-    not some_ok(v: title, ok: title_ok) -> Bad(
-      status: 400,
-      reason: "x-title is required, 1-200 bytes, no CR LF NUL"
-    )
-    not some_ok(v: published, ok: day_ok) -> Bad(
-      status: 400,
-      reason: "x-date is required, YYYY-MM-DD"
-    )
-    not some_ok(v: key, ok: key_ok) -> Bad(status: 428, reason: "idempotency-key is required")
-    else -> Fine
+  match slug {
+    Slug(s) -> match title {
+      Some(value: Title(t)) -> match published {
+        Some(value: Day(d)) -> match key {
+          Some(value: ClientKey(k)) -> Fine(slug: s, title: t, published: d, key: k)
+          _ -> Bad(status: 428, reason: "idempotency-key is required")
+        }
+        _ -> Bad(status: 400, reason: "x-date is required, YYYY-MM-DD")
+      }
+      _ -> Bad(status: 400, reason: "x-title is required, 1-200 bytes, no CR LF NUL")
+    }
+    _ -> Bad(status: 400, reason: "slug is 1-80 of [a-z0-9-], not starting or ending with -")
   }
 }
 
-fn created(slug: View, title: View, published: View, markdown: View, key: View, db: Sql) -> Buf {
+fn created(
+  slug: View,
+  title: View,
+  published: View,
+  markdown: View,
+  key: View,
+  r: Request,
+  db: Sql
+) -> Buf {
   let req_hash = digest(
     text: "POST\n" ++ slug ++ "\n" ++ title ++ "\n" ++ published ++ "\n" ++ markdown
   )
   match claimed(key, method: "POST", slug, req_hash, status: 201, db) {
-    Some(value: op) -> replayed(op, req_hash, db)
+    Some(value: op) -> replayed(op, req_hash, r, db)
     None -> match load(slug, db) {
-      Some(value: _) -> render(o: Problem(status: 409, reason: "a post with this slug exists"), db)
-      None -> render(o: insert(slug, title, published, markdown, db), db)
+      Some(value: _) -> render(
+        o: Problem(status: 409, reason: "a post with this slug exists"),
+        r,
+        db
+      )
+      None -> render(o: insert(slug, title, published, markdown, db), r, db)
     }
   }
 }
 
-fn saved(slug: View, title: View, published: View, markdown: View, key: View, db: Sql) -> Buf {
+fn saved(
+  slug: View,
+  title: View,
+  published: View,
+  markdown: View,
+  key: View,
+  r: Request,
+  db: Sql
+) -> Buf {
   let req_hash = digest(
     text: "PUT\n" ++ slug ++ "\n" ++ title ++ "\n" ++ published ++ "\n" ++ markdown
   )
   match claimed(key, method: "PUT", slug, req_hash, status: 200, db) {
-    Some(value: op) -> replayed(op, req_hash, db)
+    Some(value: op) -> replayed(op, req_hash, r, db)
     None -> match load(slug, db) {
-      Some(value: was) -> render(o: update(was, title, published, markdown, db), db)
+      Some(value: was) -> render(o: update(was, title, published, markdown, db), r, db)
       None -> {
         do sql_exec(db, query: "UPDATE ops SET status = 201 WHERE key = :key", key)
-        render(o: insert(slug, title, published, markdown, db), db)
+        render(o: insert(slug, title, published, markdown, db), r, db)
       }
     }
   }
 }
 
-fn deleted(slug: View, key: Option[View], db: Sql) -> Buf {
-  match {
-    not slug_ok(slug) -> render(
+fn deleted(slug: View, key: Option[View], r: Request, db: Sql) -> Buf {
+  match slug {
+    Slug(s) -> match key {
+      Some(value: ClientKey(k)) -> removed(s, key: k, r, db)
+      _ -> render(o: Problem(status: 428, reason: "idempotency-key is required"), r, db)
+    }
+    _ -> render(
       o: Problem(status: 400, reason: "slug is 1-80 of [a-z0-9-], not starting or ending with -"),
+      r,
       db
     )
-    not some_ok(v: key, ok: key_ok) -> render(
-      o: Problem(status: 428, reason: "idempotency-key is required"),
-      db
-    )
-    else -> removed(slug, key: key_of(key), db)
   }
 }
 
-fn removed(slug: View, key: View, db: Sql) -> Buf {
+fn removed(slug: View, key: View, r: Request, db: Sql) -> Buf {
   let req_hash = digest(text: "DELETE\n" ++ slug)
   match claimed(key, method: "DELETE", slug, req_hash, status: 204, db) {
-    Some(value: op) -> replayed(op, req_hash, db)
+    Some(value: op) -> replayed(op, req_hash, r, db)
     None -> match load(slug, db) {
       None -> {
         do sql_exec(db, query: "UPDATE ops SET status = 404 WHERE key = :key", key)
-        render(o: Problem(status: 404, reason: "no such post"), db)
+        render(o: Problem(status: 404, reason: "no such post"), r, db)
       }
       Some(value: _) -> {
         do sql_exec(db, query: "DELETE FROM posts WHERE slug = :slug", slug)
-        render(o: Removed(slug), db)
+        render(o: Removed(slug), r, db)
       }
     }
   }
@@ -342,22 +382,24 @@ fn claimed(
   }
 }
 
-fn replayed(op: Op, req_hash: View, db: Sql) -> Buf {
+fn replayed(op: Op, req_hash: View, r: Request, db: Sql) -> Buf {
   let Op(key, method, slug, status, req_hash: stored) = op
   match {
     stored != req_hash -> render(
       o: Problem(status: 409, reason: "idempotency-key was reused with a different request"),
+      r,
       db
     )
-    method == "DELETE" and status == 204 -> render(o: Removed(slug), db)
-    method == "DELETE" -> render(o: Problem(status, reason: "no such post"), db)
+    method == "DELETE" and status == 204 -> render(o: Removed(slug), r, db)
+    method == "DELETE" -> render(o: Problem(status, reason: "no such post"), r, db)
     else -> match load(slug, db) {
       None -> render(
         o: Problem(status: 409, reason: "idempotency-key refers to a missing post"),
+        r,
         db
       )
-      Some(value: post) if status == 201 -> render(o: Created(post), db)
-      Some(value: post) -> render(o: Written(post), db)
+      Some(value: post) if status == 201 -> render(o: Created(post), r, db)
+      Some(value: post) -> render(o: Written(post), r, db)
     }
   }
 }
@@ -417,13 +459,7 @@ fn cached(hash: View, markdown: View, db: Sql) -> View {
 }
 
 fn ensure_cached(hash: View, markdown: View, db: Sql) -> Int {
-  match sql_first(db, row: Render, query: "SELECT * FROM renders WHERE hash = :hash", hash) {
-    Some(value: Render(hash: stored, html)) -> 0
-    None -> {
-      let html = freeze(buf: write_doc(out: buf(), text: markdown))
-      sql_exec(db, query: "INSERT INTO renders(hash, html) VALUES (:hash, :html)", hash, html)
-    }
-  }
+  len(cached(hash, markdown, db))
 }
 
 fn html_of(hash: View, markdown: View, db: Sql) -> View {
@@ -447,42 +483,108 @@ fn stamp(db: Sql) -> Stamp {
 
 fn if_match(r: Request, tag: View) -> Bool {
   match header_of(request: r, name: "if-none-match") {
-    Some(value: given) if etag_of(given) == tag -> True
+    Some(value: given) if etag_matches(given, tag) -> True
     _ -> False
   }
 }
 
-fn etag_of(t: View) -> View {
+// RFC 9110: a quoted tag, a weak tag, a comma-separated list, or *
+fn etag_matches(given: View, tag: View) -> Bool {
   match {
-    len(t) >= 2 and t[0] == 34 and t[len(t) - 1] == 34 -> slice(v: t, from: 1, to: len(t) - 1)
-    else -> t
+    given == "*" -> True
+    else -> etag_one(given, tag, at: 0)
   }
 }
 
-fn render(o: Outcome, db: Sql) -> Buf {
+fn when(b: Bool, yes: Int, no: Int) -> Int {
+  match b {
+    True -> yes
+    False -> no
+  }
+}
+
+fn etag_one(given: View, tag: View, at: Int) -> Bool {
+  let start = skip_ws(t: given, at)
+  match {
+    start >= len(given) -> False
+    else -> {
+      let weak = start + 1 < len(given) and given[start] == 'W' and given[start + 1] == '/'
+      let from = start + when(weak, yes: 2, no: 0)
+      let quoted = from < len(given) and given[from] == '"'
+      let body = from + when(quoted, yes: 1, no: 0)
+      let end = etag_stop(t: given, at: body, quoted)
+      let value = slice(v: given, from: body, to: end)
+      let past = end + when(quoted, yes: 1, no: 0)
+      let rest = after_comma(t: given, at: past)
+      value == tag or value == "*" or (rest >= 0 and etag_one(given, tag, at: rest))
+    }
+  }
+}
+
+fn etag_stop(t: View, at: Int, quoted: Bool) -> Int {
+  match {
+    at >= len(t) -> at
+    quoted and t[at] == '"' -> at
+    not quoted and (t[at] == ',' or t[at] == ' ' or t[at] == '\t') -> at
+    else -> etag_stop(t, at: at + 1, quoted)
+  }
+}
+
+fn after_comma(t: View, at: Int) -> Int {
+  let s = skip_ws(t, at: at)
+  match {
+    s < len(t) and t[s] == ',' -> skip_ws(t, at: s + 1)
+    else -> -1
+  }
+}
+
+fn skip_ws(t: View, at: Int) -> Int {
+  match {
+    at < len(t) and (t[at] == ' ' or t[at] == '\t') -> skip_ws(t, at: at + 1)
+    else -> at
+  }
+}
+
+fn page_tag(post: Post) -> View {
+  post.hash ++ ":" ++ decimal_text(value: post.updated_ms)
+}
+
+fn quoted(tag: View) -> View {
+  "\"" ++ tag ++ "\""
+}
+
+// tape-base is the URL the program's / is at; without it the path is the whole location
+fn place(r: Request, path: View) -> View {
+  match header_of(request: r, name: "tape-base") {
+    Some(value: base) -> base ++ path
+    None -> path
+  }
+}
+
+fn render(o: Outcome, r: Request, db: Sql) -> Buf {
   match o {
     Created(post) -> post_headers(out: json_ok(status: 201, post), tag: post.hash, store: False)
-      |> header(name: "location", value: "/posts/" ++ post.slug)
+      |> header(name: "location", value: place(r, path: "/posts/" ++ post.slug))
     Written(post) -> post_headers(out: json_ok(status: 200, post), tag: post.hash, store: False)
-    Shown(post, html) -> post_headers(out: page_post(post, html), tag: post.hash, store: True)
+    Shown(post, html) -> post_headers(out: page_post(post, html), tag: page_tag(post), store: True)
     Article(html, hash) -> post_headers(
       out: respond_as(status: 200, content: Html) |> append(view: html),
       tag: hash,
       store: True
     )
-    Home(rows, page, total) -> {
-      let Stamp(n, updated_ms) = stamp(db)
-      let tag = "i:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms)
-      post_headers(out: page_home(rows, page, total), tag, store: True)
-    }
-    Feed(rows) -> {
-      let Stamp(n: total, updated_ms: at) = stamp(db)
-      let feed_tag = "f:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: at)
-      post_headers(out: atom(rows, updated_ms: at, db), tag: feed_tag, store: True)
-    }
+    Home(rows, page, total, updated_ms) -> post_headers(
+      out: page_home(rows, page, total),
+      tag: "i:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms),
+      store: True
+    )
+    Feed(rows, total, updated_ms) -> post_headers(
+      out: atom(rows, updated_ms, db),
+      tag: "f:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms),
+      store: True
+    )
     Removed(slug) -> respond(status: 204) |> header(name: "cache-control", value: "no-store")
     NotModified(etag) -> respond(status: 304)
-      |> header(name: "etag", value: etag)
+      |> header(name: "etag", value: quoted(etag))
       |> header(name: "cache-control", value: "public, max-age=60")
     Problem(status: 404, reason) -> post_headers(
       out: html_error(status: 404, title: "Not found", reason),
@@ -495,12 +597,13 @@ fn render(o: Outcome, db: Sql) -> Buf {
 }
 
 fn post_headers(out: Buf, tag: View, store: Bool) -> Buf {
+  let etag = quoted(tag)
   match store {
     True -> out
-      |> header(name: "etag", value: tag)
+      |> header(name: "etag", value: etag)
       |> header(name: "cache-control", value: "public, max-age=60")
     False -> out
-      |> header(name: "etag", value: tag)
+      |> header(name: "etag", value: etag)
       |> header(name: "cache-control", value: "no-store")
   }
 }
@@ -539,13 +642,20 @@ fn page_end(out: Buf) -> Buf {
   append(buf: out, view: "</body></html>")
 }
 
+fn posts_word(total: Int) -> View {
+  match total {
+    1 -> " post, page "
+    _ -> " posts, page "
+  }
+}
+
 fn page_home(rows: Rows[Post], page: Int, total: Int) -> Buf {
   let pages = pages_of(total)
   page_shell(status: 200, title: "Blog")
     |> append(view: "<nav><a href=\"./\">Blog</a> &middot; <a \
         href=\"./feed.xml\">Atom</a></nav><h1>Blog</h1><p class=note>")
     |> append(view: decimal_text(value: total))
-    |> append(view: " posts, page ")
+    |> append(view: posts_word(total))
     |> append(view: decimal_text(value: page))
     |> append(view: " of ")
     |> append(view: decimal_text(value: pages))
@@ -631,7 +741,7 @@ fn html_error(status: Int, title: View, reason: View) -> Buf {
 }
 
 fn atom(rows: Rows[Post], updated_ms: Int, db: Sql) -> Buf {
-  respond(status: 200)
+  respond_as(status: 200, content: Atom)
     |> append(view: "<?xml version=\"1.0\" encoding=\"utf-8\"?><feed \
         xmlns=\"http://www.w3.org/2005/Atom\"><title>Blog</title><id>tag:tape.blog,2026:feed</id><updated>")
     |> append(view: iso_utc(updated_ms))
@@ -662,7 +772,7 @@ fn write_atom_entry(out: Buf, post: Post, db: Sql) -> Buf {
     |> append(view: iso_utc(updated_ms))
     |> append(view: "</updated><published>")
     |> write_html(text: published)
-    |> append(view: "T00:00:00Z</published><link href=\"/posts/")
+    |> append(view: "T00:00:00Z</published><link href=\"posts/")
     |> write_html(text: slug)
     |> append(view: "\"/><content type=\"html\"><![CDATA[")
     |> append(view: html_of(hash, markdown: post.markdown, db))
@@ -682,48 +792,25 @@ fn page_of(query: Option[View]) -> Option[Int] {
     Some(value: q) -> match form_field(body: q, name: "page") {
       None -> Some(value: 1)
       Some(value: t) -> match parse_int(text: t) {
-        Some(value: n) if n >= 1 -> Some(value: n)
+        Some(value: n) if n >= 1 and page_fits(n) -> Some(value: n)
         _ -> None
       }
     }
   }
 }
 
-fn some_ok(v: Option[View], ok: Fn[View, Bool]) -> Bool {
-  match v {
-    Some(value: s) -> ok(s)
-    None -> False
-  }
-}
-
-fn title_of(v: Option[View]) -> View {
-  match v {
-    Some(value: s) -> s
-    None -> ""
-  }
-}
-
-fn day_of(v: Option[View]) -> View {
-  match v {
-    Some(value: s) -> s
-    None -> ""
-  }
-}
-
-fn key_of(v: Option[View]) -> View {
-  match v {
-    Some(value: s) -> s
-    None -> ""
-  }
+// (page - 1) * page_size traps when the page is past what an Int can hold
+fn page_fits(n: Int) -> Bool {
+  flags.page_size >= 1 and (n == 1 or n - 1 <= 9223372036854775807 / flags.page_size)
 }
 
 fn slug_ok(s: View) -> Bool {
   let n = len(s)
-  n >= 1 and n <= 80 and s[0] != 45 and s[n - 1] != 45 and every_byte(v: s, keep: slug_byte)
+  n >= 1 and n <= 80 and s[0] != '-' and s[n - 1] != '-' and every_byte(v: s, keep: slug_byte)
 }
 
 fn slug_byte(b: Int) -> Bool {
-  is_digit(b) or b == 45 or (b >= 97 and b <= 122)
+  is_digit(b) or b == '-' or (b >= 'a' and b <= 'z')
 }
 
 fn title_ok(s: View) -> Bool {
@@ -731,7 +818,7 @@ fn title_ok(s: View) -> Bool {
 }
 
 fn text_byte(b: Int) -> Bool {
-  b != 0 and b != 10 and b != 13
+  b != 0 and b != '\n' and b != '\r'
 }
 
 fn key_ok(s: View) -> Bool {
@@ -739,25 +826,35 @@ fn key_ok(s: View) -> Bool {
 }
 
 fn visible(b: Int) -> Bool {
-  b >= 33 and b <= 126
+  b >= '!' and b <= '~'
 }
 
 fn day_ok(s: View) -> Bool {
-  len(s) == 10 and s[4] == 45 and s[7] == 45 and ymd_ok(s)
+  len(s) == 10 and s[4] == '-' and s[7] == '-' and ymd_ok(s)
+}
+
+fn digits(s: View) -> Bool {
+  every_byte(v: s, keep: is_digit)
 }
 
 fn ymd_ok(s: View) -> Bool {
-  match parse_int(text: slice(v: s, from: 0, to: 4)) {
-    None -> False
-    Some(value: y) -> match parse_int(text: slice(v: s, from: 5, to: 7)) {
+  let y = slice(v: s, from: 0, to: 4)
+  let m = slice(v: s, from: 5, to: 7)
+  let d = slice(v: s, from: 8, to: 10)
+  match {
+    not digits(y) or not digits(m) or not digits(d) -> False
+    else -> match parse_int(text: y) {
       None -> False
-      Some(value: m) -> match parse_int(text: slice(v: s, from: 8, to: 10)) {
+      Some(value: year) -> match parse_int(text: m) {
         None -> False
-        Some(value: d) -> y >= 1
-          and m >= 1
-          and m <= 12
-          and d >= 1
-          and d <= days_in(year: y, month: m)
+        Some(value: month) -> match parse_int(text: d) {
+          None -> False
+          Some(value: day) -> year >= 1
+            and month >= 1
+            and month <= 12
+            and day >= 1
+            and day <= days_in(year, month)
+        }
       }
     }
   }
@@ -818,13 +915,13 @@ fn iso_utc(ms: Int) -> View {
         out: buf(),
         days: z
       )
-          |> push(byte: 84)
+          |> push(byte: 'T')
           |> pad2(n: rem / 3600)
-          |> push(byte: 58)
+          |> push(byte: ':')
           |> pad2(n: rem % 3600 / 60)
-          |> push(byte: 58)
+          |> push(byte: ':')
           |> pad2(n: rem % 60)
-          |> push(byte: 90))
+          |> push(byte: 'Z'))
     }
   }
 }
@@ -860,9 +957,9 @@ fn shift_month(out: Buf, days: Int, year: Int, month: Int) -> Buf {
   match {
     days >= span -> shift_month(out, days: days - span, year, month: month + 1)
     else -> pad4(out, n: year)
-      |> push(byte: 45)
+      |> push(byte: '-')
       |> pad2(n: month)
-      |> push(byte: 45)
+      |> push(byte: '-')
       |> pad2(n: days + 1)
   }
 }

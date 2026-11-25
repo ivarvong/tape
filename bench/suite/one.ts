@@ -27,7 +27,7 @@ if (w.twin === false && (mode === 'js' || mode === 'all'))
   throw new Error(`${w.name} has no JS twin; pass tape-log or tape-nolog`);
 if (mode === 'all' && w.fresh === true)
   throw new Error(`${w.name} starts a database per request; pass one way, not all`);
-const bytes = mode === 'js' ? null : readFileSync(wasmPath(sourcesOf(w)));
+const bytes = mode === 'js' ? null : readFileSync(wasmPath(sourcesOf(w), w.baseNames === true));
 const MODES: Mode[] = ['js', 'tape-log', 'tape-nolog'];
 const asMode = (m: string): Mode => {
   const found = MODES.find(x => x === m);

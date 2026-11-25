@@ -69,7 +69,7 @@ function jsWay(wl: Workload): (req: Uint8Array) => Uint8Array {
   if (db) wl.seed?.(db);
   return db ? req => db.transaction(() => h(req)) : h;
 }
-const bytesOf = (): Uint8Array => readFileSync(wasmPath(sourcesOf(w)));
+const bytesOf = (): Uint8Array => readFileSync(wasmPath(sourcesOf(w), w.baseNames === true));
 const jsAsked = kind === 'time' || ((kind === 'mem' || kind === 'cold') && (rest[0] ?? 'js') === 'js');
 if (jsAsked && w.twin === false) throw new Error(`${w.name} has no JS twin; pass tape for mem or cold`);
 if ((kind === 'time' || kind === 'mem') && w.fresh === true)
@@ -168,7 +168,7 @@ if (kind === 'time') {
   const t3 = performance.now();
   print({ compile: t1 - t0, setup: t2 - t1, request: t3 - t2, total: t3 - t0 });
 } else if (kind === 'compile') {
-  const files = [...std, ...programFiles(sourcesOf(w))];
+  const files = [...std, ...programFiles(sourcesOf(w), w.baseNames === true)];
   const once = (): { ms: number; wasm: Uint8Array } => {
     const t = performance.now();
     const r = compile(files);

@@ -64,7 +64,7 @@ that load. `--quick` leaves out the service suite, three simulations and the app
 | `proof/sim-transcript.ts --check` | the transcript the service is compared with is current |
 | `tape sim` on `apps/tickets` | 300 guided runs with `pay`, and 300 with it stood in for |
 | `proof/interp-effects.ts` | the compiled builds and the interpreter ask for the same effects and answer the same bytes |
-| `bench/*.ts` | each benchmark's answers match the JavaScript beside it (not its times) |
+| `bench/*.ts` | the six benchmarks' answers match the JavaScript beside them (not their times); `bench/blog.ts` holds the renderer's and the blog's steps and arena bytes |
 | `apps/highlight/test.ts`, `apps/trace/test.ts`, `apps/playground/test.ts` | the highlighter and the trace renderer (both in Tape) against oracles that are not them; the playground's logic and build without a browser |
 | `proof/sim-all.ts`, `proof/sim-invariants.ts`, `proof/sim-plants.ts` (full only) | the simulator on every program; a bug planted against every invariant; tickets' planted bugs found from the programs alone |
 | the apps' `--plants` (full only) | 13 bugs planted in `highlight.tape`, 37 in `trace.tape`, 18 in the playground's modules, each caught by the test meant for it |

@@ -318,6 +318,7 @@ Production speed is not measured beyond one cut-short comparison on a free accou
 | `examples/`, `apps/` | Example programs, and applications written as a user would, each with its friction log; `apps/playground/` is the homepage and playground. |
 | `test/`, `proof/` | The tests, one file per subject, and the checks that are more than a test; `proof/all.ts` runs everything. |
 | `bench/`, `experiments/` | Benchmarks, and the experiments behind the rules, kept as they were run. |
+| `corpus/` | Programs the size gate and the bench measure that are not examples: a CommonMark renderer and a blog that uses it. |
 | `testdata/` | Programs the checks read that are not examples: odd formatting, failing doc examples, and two workflow programs (billing, an agent loop) with planted bugs. |
 
 ## License

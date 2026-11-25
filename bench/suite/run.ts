@@ -32,7 +32,7 @@ for (const name of asked) {
     console.log(`${name}: no JS twin; node bench/suite/profile.ts ${name} tape-nolog`);
     continue;
   }
-  wasmPath(sourcesOf(w));
+  wasmPath(sourcesOf(w), w.baseNames === true);
   chosen.push(name);
 }
 const SAMPLES = quick ? 10 : 30;

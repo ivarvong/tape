@@ -178,7 +178,7 @@ for (const name of names.length > 0 ? names : NAMES) {
   const pinned = w.now;
   if (pinned !== undefined) Date.now = () => pinned;
   const r = compile(
-    [...std, ...programFiles(sourcesOf(w))],
+    [...std, ...programFiles(sourcesOf(w), w.baseNames === true)],
     argv.includes('--no-reductions') ? { reductions: false } : {},
   );
   if (!r.wasm) throw new Error(`${w.name} does not compile`);
