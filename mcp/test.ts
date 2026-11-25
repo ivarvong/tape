@@ -209,7 +209,10 @@ const VARIES = new Set([
   // the second of two calls with one program is answered from the compile cache (the cache test checks it)
   'cached',
 ]);
-/** A value with what differs between two runs of the same input replaced: ids, times, and attributes holding them. */
+/** A value with what differs between two runs of the same input replaced: ids, times, and attributes holding them.
+ * A key ending `_ms` (invoke_wall_ms, compile_ms, and any other duration) differs between two runs of the same
+ * input, so it is treated as varying. A cost field has to keep that suffix or these comparisons stop being
+ * deterministic. */
 function stable(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(stable);
   if (!isFields(v)) return v;
@@ -2142,7 +2145,7 @@ const PLANTS: Plant[] = [
     test: 'run',
     what: 'the answer leaves off the caller wait',
     file: 'tools.ts',
-    from: "const invoke_wall_ms = typeof fromCaller === 'number' ? fromCaller : usage.run_ms;",
+    from: "const invoke_wall_ms = Math.max(0, typeof fromCaller === 'number' ? fromCaller : usage.run_ms);",
     to: 'const invoke_wall_ms = undefined;',
   },
 ];

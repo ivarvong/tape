@@ -105,7 +105,9 @@ const runIn =
     // covering every request in the call, the replay and a line trace, because they share the invocation.
     const t0 = Date.now();
     const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId);
-    return { ...ran, run_id: runId, invoke_wall_ms: Date.now() - t0 };
+    // A clock step back is 0, so the field stays an integer at least 0, which is what the schema says. Date.now
+    // is already a whole millisecond.
+    return { ...ran, run_id: runId, invoke_wall_ms: Math.max(0, Date.now() - t0) };
   };
 /** A doc examples build (doctest.ts), its functions called in a Dynamic Worker: this Worker cannot compile Wasm. */
 const examplesIn =

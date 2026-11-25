@@ -218,7 +218,8 @@ describe('public route', () => {
     const p = await got('/_public/ivar/pub', { method: 'PUT', body: '{"published":true}' });
     expect([at(p, 'published'), at(p, 'latest'), at(p, 'url')]).toEqual([true, 1, 'http://tape/p/ivar/pub/']);
     const r = await anyone('/p/ivar/pub/');
-    expect(r.headers.get('server-timing')).toMatch(/^tape-invoke;desc="caller-wall-ms-not-cpu";dur=\d+$/);
+    // no tape-invoke on a public answer: the wait is a 1 ms sample of the object's call, and this route has no token
+    expect(r.headers.get('server-timing')).toBeNull();
     expect([r.status, r.headers.get('content-type'), await r.text()]).toEqual([
       200,
       'text/html; charset=utf-8',

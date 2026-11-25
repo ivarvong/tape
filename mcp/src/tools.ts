@@ -864,10 +864,10 @@ export async function runTool(
       usage,
     };
   // The Worker's own reading of the RPC (index.ts) when it sent one; otherwise the wait just measured, which
-  // in Node is the in-process run (the clock there does advance during compute). Date.now is already a whole
-  // millisecond, so there is nothing to reject.
+  // in Node is the in-process run (the clock there does advance during compute). A clock step back is 0.
+  // Date.now is already a whole millisecond.
   const fromCaller = all.invoke_wall_ms;
-  const invoke_wall_ms = typeof fromCaller === 'number' ? fromCaller : usage.run_ms;
+  const invoke_wall_ms = Math.max(0, typeof fromCaller === 'number' ? fromCaller : usage.run_ms);
   const timed = { invoke_wall_ms };
   if (!all.ok)
     return {
