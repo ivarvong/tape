@@ -1,7 +1,7 @@
 // sim/world.ts: a world of the simulator. Every program on its own SQLite, one clock, and the calls and timers the
 // simulator holds until a choice says what becomes of each.
 import '../node25.ts';
-import { NO_TIMERS, instantiate } from '../host.ts';
+import { NO_TIMERS, fixedSecrets, instantiate } from '../host.ts';
 import type { App, Cell, Observed, Service, ServiceOptions, ServiceReply, SqlParam, Transaction } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { NodeSql } from '../nodesql.ts';
@@ -24,6 +24,8 @@ export type Model = {
   modules: Readonly<Record<string, WebAssembly.Module>>;
   /** the program the clients send to */
   entry: string;
+  /** what each program's `secret(from:, name:)` reads, by program, then by name (version 1 of each) */
+  secrets?: Readonly<Record<string, Readonly<Record<string, string>>>>;
   /** Remotes no program here serves: the reply type of each method */
   stubs?: Readonly<Record<string, Readonly<Record<string, Schema | null>>>>;
   clients: (rand: () => number) => Op[][];
@@ -151,6 +153,7 @@ function programIn(world: World, model: Model, name: string, account: string): P
     services: servicesOf(world, model, name),
     random: dice(world.seed, name),
     timers: NO_TIMERS,
+    secrets: fixedSecrets(model.secrets?.[name] ?? {}),
     observe: observe ? (r): void => observe(name, r) : null,
   });
   return { sql, tx: { transaction: f => sql.transaction(f) }, app, fired: new Map() };

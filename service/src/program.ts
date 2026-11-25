@@ -19,7 +19,18 @@ import {
   isEffect,
   isHead,
 } from './host.ts';
-import type { App, Effect, Header, MachineSpec, ServiceReply, Sql, TraceEvent, Transaction } from './host.ts';
+import { redactedText } from './host.ts';
+import type {
+  App,
+  Effect,
+  Header,
+  MachineSpec,
+  SecretStore,
+  ServiceReply,
+  Sql,
+  TraceEvent,
+  Transaction,
+} from './host.ts';
 import versions from './versions.ts';
 import type { VersionBuild } from './versions.ts';
 import { storageKind, transientAtEdge, transientBetween } from './host.ts';
@@ -41,6 +52,7 @@ import type {
   RunHead,
   StatementError,
   Step,
+  StoredSecret,
   Woke,
 } from './records.ts';
 
@@ -48,8 +60,11 @@ export type Env = {
   PLAN: Plan;
   /** this object's name: its command keys are the same in every version */
   SELF: string;
-  /** other programs in the same account */
-  CALLS: { call: (to: string, meta: CallMeta, bytes: Uint8Array) => Promise<ServiceReply> };
+  /** other programs in the same account; and this program's own secrets, every version kept (Name.secretValues) */
+  CALLS: {
+    call: (to: string, meta: CallMeta, bytes: Uint8Array) => Promise<ServiceReply>;
+    secrets: (all: boolean) => Promise<StoredSecret[]>;
+  };
 };
 
 const LOG =
@@ -84,8 +99,8 @@ const methodsOf = (m: WebAssembly.Module): { name: string; fingerprint: string }
     .map(fieldsOf)
     .map(x => ({ name: textOf(x.name), fingerprint: textOf(x.fingerprint) }));
 
-/** A live version: its builds, and what is read from them once. */
-type Version = VersionBuild & { lines: string[]; queries: string[]; chain: Chain; woken: boolean };
+/** A live version: its builds, and what is read from them once. `secrets`: it reads secrets (imports env.secret). */
+type Version = VersionBuild & { lines: string[]; queries: string[]; chain: Chain; woken: boolean; secrets: boolean };
 const V = new Map<number, Version>(
   Object.entries(versions).map(([v, b]) => [
     Number(v),
@@ -95,6 +110,7 @@ const V = new Map<number, Version>(
       queries: section(b.plain, 'queries').map(q => textOf(fieldsOf(q).sql)),
       chain: chainOf(b.plain),
       woken: methodsOf(b.plain).some(m => m.name === 'woken'),
+      secrets: WebAssembly.Module.imports(b.plain).some(i => i.module === 'env' && i.name === 'secret'),
     },
   ]),
 );
@@ -152,6 +168,8 @@ const effectLine = (e: TraceEvent): Line[] | null => {
   if ('wake' in e) return [['mut', `      wake ${e.wake} after ${e.after} ms → due ${new Date(e.due).toISOString()}`]];
   if ('now' in e) return [['mut', `      now -> ${e.now}`]];
   if ('random' in e) return [['mut', `      random -> ${e.random}`]];
+  if ('secret' in e)
+    return [['mut', `      secret ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`]];
   if ('sql' in e)
     return [
       ['mut', `      sql ${e.sql} ${JSON.stringify(e.p)} → ${e.rows ? JSON.stringify(e.rows) : `${e.r} written`}`],
@@ -420,8 +438,46 @@ const failedResponse = (
   });
 };
 
+/** Every string in a view with each secret value written `[secret <name>]`: what a run read never reaches a page,
+ * a span or a log the service answers, even where the program put it (a row it wrote, a call's message). */
+function scrubbed<T>(v: T, held: readonly StoredSecret[]): T {
+  const read = held.filter(s => s.value.length > 0).map(s => ({ name: s.name, value: s.value }));
+  if (read.length === 0) return v;
+  // in place: each string of each object and array, written again
+  const walk = (x: unknown): void => {
+    if (Array.isArray(x))
+      x.forEach((y: unknown, i) => {
+        if (typeof y === 'string') x[i] = redactedText(y, read);
+        else walk(y);
+      });
+    else if (typeof x === 'object' && x !== null && !(x instanceof Uint8Array))
+      for (const [k, y] of Object.entries(x)) {
+        if (typeof y === 'string') Reflect.set(x, k, redactedText(y, read));
+        else walk(y);
+      }
+  };
+  walk(v);
+  return v;
+}
+
 export class Program extends DurableObject<Env> {
   readonly #apps = new Map<number, App>();
+  /** this name's secrets, every version kept, as its object held them when the run in hand began */
+  #held: StoredSecret[] = [];
+  /** what the host reads them through: the newest version of a name, or a version a log names */
+  readonly #secrets: SecretStore = {
+    read: name => {
+      let best: StoredSecret | null = null;
+      for (const s of this.#held) if (s.name === name && (best === null || s.version > best.version)) best = s;
+      return best === null ? null : { value: best.value, version: best.version };
+    },
+    at: (name, version) => this.#held.find(s => s.name === name && s.version === version)?.value ?? null,
+  };
+  /** Before a run of a version that reads secrets: what the name's object holds now (one call; none otherwise). */
+  async #loadSecrets(version: number): Promise<void> {
+    if (V.get(version)?.secrets !== true) return;
+    this.#held = await this.env.CALLS.secrets(true);
+  }
   /** { id } of the migration run this wake recorded, or { error } when the chain diverged */
   #migration: { id: string } | { error: string } | null = null;
   /** the machine triggers installed, or why they could not be */
@@ -498,7 +554,13 @@ export class Program extends DurableObject<Env> {
             calls.call(String(to), { method, fingerprint, key, withinMs, trace }, bytes),
       },
     );
-    const app = instantiate(b.plain, { sql: this.ctx.storage.sql, name: this.env.SELF, services, migrations: false });
+    const app = instantiate(b.plain, {
+      sql: this.ctx.storage.sql,
+      name: this.env.SELF,
+      services,
+      secrets: this.#secrets,
+      migrations: false,
+    });
     this.#apps.set(version, app);
     return app;
   }
@@ -682,6 +744,7 @@ export class Program extends DurableObject<Env> {
         return r;
       });
     try {
+      await this.#loadSecrets(version);
       const ran = await app.runLogged(bytes, { transaction, trace: parent });
       const { status, body, type, headers } = split(ran.out);
       // A stretch that committed has a log id before this write. runLogged returning means each of those
@@ -795,6 +858,7 @@ export class Program extends DurableObject<Env> {
       });
     try {
       const { method, fingerprint, key, withinMs, trace } = meta;
+      await this.#loadSecrets(version);
       const { status, body, effects } = await this.app(version).serve(
         {
           method,
@@ -955,6 +1019,7 @@ export class Program extends DurableObject<Env> {
       ran: WokenRun[] = [];
     if (this.nextWake() === null) return { ran, next: null };
     const app = this.app(version);
+    await this.#loadSecrets(version);
     for (const key of app.due()) {
       const one = await this.#wakeOne(app, version, key, faulty.includes(key));
       if (one) ran.push(one);
@@ -970,8 +1035,16 @@ export class Program extends DurableObject<Env> {
       return Promise.resolve({ status: 'rejected', body: enc.encode(`no function ${method}`), version, id: null });
     return this.serve({ method, fingerprint: m.fingerprint, key: null, withinMs: 10000, trace: null }, bytes);
   }
-  // One request as data: what came in, what went out (replayed), the log, and the trace made from it now.
-  view(id: string): RequestView | null {
+  // One request as data: what came in, what went out (replayed), the log, and the trace made from it now. A run that
+  // read secrets is replayed with the versions its log names, and every string of the view has each value the name
+  // holds written `[secret <name>]`.
+  async view(id: string): Promise<RequestView | null> {
+    const [row] = this.ctx.storage.sql.exec('SELECT version FROM _tape_log WHERE id = ?1', id).toArray();
+    if (!row) return null;
+    await this.#loadSecrets(numberOf(row.version));
+    return scrubbed(this.#view(id), V.get(numberOf(row.version))?.secrets === true ? this.#held : []);
+  }
+  #view(id: string): RequestView | null {
     const [row] = this.ctx.storage.sql
       .exec('SELECT version, request, effects, at FROM _tape_log WHERE id = ?1', id)
       .toArray();
@@ -994,7 +1067,7 @@ export class Program extends DurableObject<Env> {
         trace: [],
         error: `v${version} is no longer live, so its trace cannot be made`,
       };
-    return { ...base, ...runView(b, head, sent, effects) };
+    return { ...base, ...runView(b, head, sent, effects, this.#secrets) };
   }
 }
 
@@ -1023,11 +1096,13 @@ const runView = (
   head: RunHead,
   sent: Uint8Array,
   effects: readonly Entry[],
+  secrets: SecretStore,
 ): Pick<RequestView, 'request' | 'status' | 'response' | 'trace' | 'error' | 'partial' | 'failed'> => {
   const { method } = head,
     called = method !== undefined && method !== '',
     request = called ? `${method} ${shown(head.message)}` : dec.decode(sent),
-    replay = (): ReturnType<typeof traceOf> => traceOf(b.traced, called ? null : sent, replayable(effects));
+    replay = (): ReturnType<typeof traceOf> =>
+      traceOf(b.traced, called ? null : sent, replayable(effects), undefined, { secrets });
   if (head.partial === true) {
     // the run stopped while it waited on a call: its log ends at that call, and what it wrote before it committed
     let events: TraceEvent[] = [];

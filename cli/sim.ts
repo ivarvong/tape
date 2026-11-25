@@ -163,6 +163,14 @@ export async function simulate(args: readonly string[]): Promise<never> {
     }
     process.exit(1);
   }
+  // --secret name=value: what every program's secret(from:, name:) reads (version 1)
+  const secrets: Record<string, string> = {};
+  args.forEach((a, i) => {
+    const given = a === '--secret' ? (args[i + 1] ?? '') : '';
+    if (given.indexOf('=') > 0) secrets[given.slice(0, given.indexOf('='))] = given.slice(given.indexOf('=') + 1);
+  });
+  if (Object.keys(secrets).length > 0)
+    Object.assign(model.model, { secrets: Object.fromEntries(files.map(f => [f.name, secrets])) });
   const say: Say = args.includes('--quiet') ? () => {} : console.log;
   describe(say, files, model);
 

@@ -154,6 +154,10 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
   timer that retries, takes the next answer. Each call is in the
   effect log with what it got, and the replay answers it from there, so a request replays to the same bytes.
   [`mcp/test/remote.tape`](../mcp/test/remote.tape) answers each outcome; at most 200 answers a run.
+- `secrets` gives the program's `Secrets`: `{"stripe": "sk_test_…"}`, each read by `secret(from: secrets, name:
+  "stripe")` as version 1 (a name not given is None; at most 64, each at most 4,096 characters). The effect log and
+  every trace name the secret and its version (`kind: "secret"`), never the value, and no part of the answer repeats
+  `secrets`; only an answer the program itself writes the value into holds it.
 - `replayed` is true when the service ran the request again from that log alone, through the same build, and got
   the same bytes back (or, for a trap, the same trap). `replay_error` says why when it did not.
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive

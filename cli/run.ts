@@ -1,6 +1,7 @@
 // tape program.tape 'METHOD /path' …: compile one program with std, check its SQL against its schema, run the
 // requests against it on one in-memory SQLite, and print each response, its effect log, and the trace made
-// afterwards from that log. Remotes are not provided here.
+// afterwards from that log. Remotes are not provided here. `--secret name=value` gives the program's Secrets that
+// secret (version 1); the log records its name and version, never its value.
 import { readFileSync } from 'node:fs';
 import { checkQueries } from '../check.ts';
 import { compile } from '../compiler.ts';
@@ -8,8 +9,10 @@ import type { Built } from '../compiler.ts';
 import {
   answerText,
   instantiate,
+  fixedSecrets,
   isCall,
   isHead,
+  isSecret,
   isNow,
   isRandom,
   isWake,
@@ -31,6 +34,7 @@ function effectLine(plain: Built, e: Effect): string {
   const undone = 'undone' in e && e.undone ? '  (undone)' : '';
   if (isHead(e)) return `start   build ${e.build}  flags ${JSON.stringify(e.flags)}  ${measuredText(e)}${undone}`;
   if (isCall(e)) return `call    ${e.call}.${e.method} within ${e.within} ms -> ${e.status}`;
+  if (isSecret(e)) return `secret  ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`;
   if (isWake(e)) return `wake    ${e.wake} after ${e.after} ms (due ${new Date(e.due).toISOString()})${undone}`;
   if (isNow(e)) return `now     -> ${e.now}`;
   if (isRandom(e)) return `random  -> ${e.random}`;
@@ -78,13 +82,34 @@ function compiled(file: string, text: string): { plain: Built; traced: Built } {
   return { plain, traced };
 }
 
-export async function runRequests(file: string, requests: readonly string[]): Promise<void> {
+/** The requests among the arguments, and the secrets the options give. */
+function options(args: readonly string[]): { requests: string[]; secrets: Record<string, string> } {
+  const requests: string[] = [],
+    secrets: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i] ?? '';
+    if (a === '--secret') {
+      const given = args[++i] ?? '',
+        eq = given.indexOf('=');
+      if (eq <= 0) {
+        console.error('--secret takes name=value');
+        process.exit(2);
+      }
+      secrets[given.slice(0, eq)] = given.slice(eq + 1);
+    } else requests.push(a);
+  }
+  return { requests, secrets };
+}
+
+export async function runRequests(file: string, args: readonly string[]): Promise<void> {
   const text = readFileSync(file, 'utf8');
   const lines = text.split('\n');
   const { plain, traced } = compiled(file, text);
   const tmod = new WebAssembly.Module(traced.wasm);
   const db = nodeSql();
-  const app = instantiate(new WebAssembly.Module(plain.wasm), { sql: db, name: 'cli' });
+  const { requests, secrets: given } = options(args);
+  const secrets = fixedSecrets(given);
+  const app = instantiate(new WebAssembly.Module(plain.wasm), { sql: db, name: 'cli', secrets });
   console.log(`${file}: ${plain.wasm.length} bytes of Wasm, ${plain.functions.length} functions`);
   for (const r of requests.length > 0 ? requests : ['']) {
     // `\n` ends the request line and `\r` starts a header on it (`'POST /x\rcontent-type: text/csv\nbody'`)
@@ -101,7 +126,7 @@ export async function runRequests(file: string, requests: readonly string[]): Pr
       `\n→ ${r}\n← ${answerText(responseOf(ran.out)).replaceAll('\r', ' ␍ ').replaceAll('\n', ' ⏎ ')}\n\n  effect log`,
     );
     for (const e of ran.effects) console.log(`    ${effectLine(plain, e)}`);
-    const t = traceOf(tmod, req, ran.effects);
+    const t = traceOf(tmod, req, ran.effects, undefined, { secrets });
     const out = [...traceLines(traced, file, lines, t.events), ...(t.error === null ? [] : [`  ${t.error}`])];
     console.log(`\n  trace, from that log\n${out.join('\n')}`);
   }

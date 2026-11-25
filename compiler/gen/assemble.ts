@@ -44,6 +44,7 @@ function importList({ imports, opts, tables }: Parts): [string, number][] {
     [imports.usesAsk, 'ask', [I32], [F64]],
     [imports.usesMember, 'member', [I32, F64], [I32]],
     [imports.usesWake, 'wake', [F64, F64], [F64]],
+    [imports.usesSecret, 'secret', [I32, I32], [I32]],
     [imports.usesFloat, 'float_text', [F64], [I32]],
     [imports.usesFloat, 'float_of', [I32, I32], [F64]],
   ];
@@ -51,12 +52,11 @@ function importList({ imports, opts, tables }: Parts): [string, number][] {
   const typed = new Map(
     wanted.flatMap(([on, field, p, r]): [string, number][] => (on ? [[field, sig(tables, p, r)]] : [])),
   );
-  return ['sql', 'call_key', 'member', 'ask', 'wake', 'float_text', 'float_of', 'trace', 'allocated'].flatMap(
-    (field): [string, number][] => {
-      const type = typed.get(field);
-      return type === undefined ? [] : [[field, type]];
-    },
-  );
+  const order = ['sql', 'call_key', 'member', 'ask', 'wake', 'secret', 'float_text', 'float_of', 'trace'];
+  return [...order, 'allocated'].flatMap((field): [string, number][] => {
+    const type = typed.get(field);
+    return type === undefined ? [] : [[field, type]];
+  });
 }
 
 function exportsSection({ imports, opts, tables, entry }: Parts): number[] {

@@ -85,6 +85,8 @@ const BY_TYPE: Readonly<Record<string, (p: string) => readonly [string, string]>
   Clock: p => ['clock', `takes ${p}: Clock`],
   Entropy: p => ['entropy', `takes ${p}: Entropy`],
   Timer: p => ['timer', `takes ${p}: Timer`],
+  // no policy grants it: a tool's account is shared by every agent with its token, a secret is the operator's
+  Secrets: p => ['secrets', `takes ${p}: Secrets`],
   Remote: p => [`remote:${p}`, `takes ${p}: Remote, the program named ${p}`],
   // a family reaches every program named <name>-<n>; a policy lists programs by name, so a family is granted only
   // by the literal entry <name>-* (and a call to a member is still checked by its own name when it is made)
@@ -114,6 +116,7 @@ export function needsOf(built: Tool): { needs: Need[]; imports: string[] } {
     if (imports.includes(imp) && !needs.some(n => n.cap.startsWith('remote:')))
       add('remote:?', `its module imports ${imp}`);
   if (imports.includes('env.wake')) add('timer', 'its module imports env.wake');
+  if (imports.includes('env.secret')) add('secrets', 'its module imports env.secret');
   return { needs, imports };
 }
 
@@ -161,7 +164,9 @@ export function refusal(name: string, built: Tool, policy: Policy | null | undef
     granted: grants(policy),
     hint: missing.some(n => n.cap === 'timer')
       ? 'A tool runs only when an agent calls it, so no policy grants Timer: take the timer out, or upload it as a program (POST /:account/:name); nothing was stored.'
-      : `An operator grants capabilities with PUT /_policy/:account, for example ${examples}; nothing was stored.`,
+      : missing.some(n => n.cap === 'secrets')
+        ? "A tool is called by any agent with its account's token, so no policy grants Secrets: take the secret out, or upload it as a program (POST /:account/:name) and set its secrets with PUT /_secrets/:account/:name/:secret; nothing was stored."
+        : `An operator grants capabilities with PUT /_policy/:account, for example ${examples}; nothing was stored.`,
   };
 }
 

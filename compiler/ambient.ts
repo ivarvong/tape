@@ -1,6 +1,6 @@
 // compiler/ambient.ts: capabilities used by name, added as parameters.
 //
-// A function may use a capability (Sql, a Remote, Timer, Clock, Entropy, an interface) by the name an entry point
+// A function may use a capability (Sql, a Remote, Timer, Clock, Entropy, Secrets, an interface) by the name an entry point
 // declares it under, without listing it as a parameter. The compiler adds it: each function gets, as parameters,
 // the capabilities its body reads and those of every function it calls; each call passes them on by name. Entry
 // points (`handle` and exported functions) are where the host grants capabilities, so they must still declare every
@@ -50,7 +50,7 @@ function named(prog: Program): Named {
   return new Map([...types].flatMap(([n, t]): [string, TypeAst][] => (t ? [[n, t]] : [])));
 }
 
-// A built-in that takes a capability (sql_*'s db, now's clock, random's from, wake's timer) is given the one
+// A built-in that takes a capability (sql_*'s db, now's clock, random's from, wake's timer, secret's from) is given the one
 // capability of that type, when the program names exactly one.
 const BUILTIN_CAP: ReadonlyMap<string, readonly [label: string, type: string]> = new Map([
   ['sql_exec', ['db', 'Sql']],
@@ -60,6 +60,7 @@ const BUILTIN_CAP: ReadonlyMap<string, readonly [label: string, type: string]> =
   ['now', ['clock', 'Clock']],
   ['random', ['from', 'Entropy']],
   ['wake', ['timer', 'Timer']],
+  ['secret', ['from', 'Secrets']],
 ]);
 function fillBuiltIns(prog: Program, types: Named): void {
   const only = (type: string): string | null => {

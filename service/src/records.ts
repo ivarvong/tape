@@ -116,7 +116,7 @@ export type Step = MigrateStep | PrepareStep | MachinesStep;
 /** One entry of a stored log. */
 export type Entry = Exclude<Effect, Head> | RunHead | MigrationsHead | CheckHead | Step;
 
-const TAGS = ['build', 'q', 'call', 'now', 'random', 'wake', 'migrate', 'prepare', 'machines'];
+const TAGS = ['build', 'q', 'call', 'secret', 'now', 'random', 'wake', 'migrate', 'prepare', 'machines'];
 /** Is this value, read from a stored log, one of its entries? Told by the field that names its kind. */
 export const isEntry = (v: unknown): v is Entry => typeof v === 'object' && v !== null && TAGS.some(tag => tag in v);
 export const isCheckHead = (e: Entry | undefined): e is CheckHead => e !== undefined && 'check' in e;
@@ -154,6 +154,15 @@ export type Plan = {
   machines?: MachineSpec[];
 };
 export type Chain = { n: number; name: string; contract: boolean; statements: string[]; hash: string }[];
+/** A secret as the name's object gives it to its program's run (Name.secretValues): never logged, never answered. */
+export type StoredSecret = { name: string; version: number; value: Uint8Array };
+/** The operator's answers about secrets: never a value. */
+export type SecretSet =
+  | { account: string; name: string; secret: string; version: number; bytes: number; at: number }
+  | { error: string; status: 409 };
+export type SecretGone = { account: string; name: string; secret: string; deleted: number };
+export type SecretListed = { name: string; version: number; at: number; bytes: number; kept: number[] };
+
 /** What a call carries besides its message. */
 export type CallMeta = {
   method: string;

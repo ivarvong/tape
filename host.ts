@@ -20,14 +20,17 @@
 import { link, listed } from './host/run.ts';
 import type { App, Heap, LinkOptions } from './host/run.ts';
 import type { Effect, Sql, TraceEvent } from './host/log.ts';
+import type { SecretStore } from './host/secrets.ts';
 import { dropMachines, installMachines, migrate } from './host/schema.ts';
 import type { Link, MachineSpec, Migrated } from './host/schema.ts';
 
 export { storageKind, transientAtEdge, transientBetween } from './host/failure.ts';
 export { NO_TIMERS, TimedOut } from './host/call.ts';
 export type { Service, ServiceOptions, ServiceReply, Timers } from './host/call.ts';
-export { isCall, isEffect, isHead, isNow, isRandom, isSql, isWake, measuredText, spans } from './host/log.ts';
-export type { Cell, Effect, Flags, Head, Packed, Sql, SqlParam, Status, TraceEvent } from './host/log.ts';
+export { isCall, isEffect, isHead, isNow, isRandom, isSecret, isSql, isWake, measuredText, spans } from './host/log.ts';
+export type { Cell, Effect, Flags, Head, Packed, SecretEffect, Sql, SqlParam, Status, TraceEvent } from './host/log.ts';
+export { SECRET_MAX, SECRET_NAME, fixedSecrets, redacted, redactedText } from './host/secrets.ts';
+export type { SecretStore, SecretValue } from './host/secrets.ts';
 export { MAX_WAKE_MS, stepVersionOf } from './host/run.ts';
 export type { App, Broken, Observed, Ran, RunOptions, Served, Woken } from './host/run.ts';
 export {
@@ -266,15 +269,22 @@ export function instantiate(
   module: WebAssembly.Module,
   options: InstantiateOptions = {},
 ): App & { migrated: Migrated[] } {
-  const { sql, log, services, name, sink, random, timers, observe } = options;
+  const { sql, log, services, name, sink, random, timers, observe, secrets } = options;
   const migrated = sql ? prepare(sql, module, options) : [];
-  const given = { sql, log, services, name, sink, random, timers, observe };
+  const given = { sql, log, services, name, sink, random, timers, observe, secrets };
   const set = Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined));
   return Object.assign(link(module, set), { migrated });
 }
 
-export function replay(module: WebAssembly.Module, bytes: Uint8Array | null, effects: Effect[]): Uint8Array {
-  const app = link(module, { recorded: effects });
+/** What a replay reads beside its log: the secrets, by the versions the log names. */
+export type ReplayOptions = { secrets?: SecretStore | null };
+export function replay(
+  module: WebAssembly.Module,
+  bytes: Uint8Array | null,
+  effects: Effect[],
+  { secrets = null }: ReplayOptions = {},
+): Uint8Array {
+  const app = link(module, { recorded: effects, secrets });
   const out = app.handle(bytes);
   if (app.replayed() !== effects.length)
     throw new Error(
@@ -299,10 +309,11 @@ export function traceOf(
   bytes: Uint8Array | null,
   effects: Effect[],
   most: number = TRACE_SITES,
+  { secrets = null }: ReplayOptions = {},
 ): { events: TraceEvent[]; out: Uint8Array | null; error: string | null; cut: number } {
   const events: TraceEvent[] = [];
   const cut = { n: 0 };
-  const app = link(tracedModule, { recorded: effects, trace: events, traceMost: most, traceCut: cut });
+  const app = link(tracedModule, { recorded: effects, trace: events, traceMost: most, traceCut: cut, secrets });
   try {
     const out = app.handle(bytes);
     return { events, out, error: null, cut: cut.n };
@@ -313,9 +324,14 @@ export function traceOf(
 
 // Where a request's memory went, made after the fact like a trace: run a build compiled with { profile: true }
 // against the request's effect log. `functions` is largest first; `from` is the callers, by bytes.
-export function heapOf(profiledModule: WebAssembly.Module, bytes: Uint8Array | null, effects: Effect[]) {
+export function heapOf(
+  profiledModule: WebAssembly.Module,
+  bytes: Uint8Array | null,
+  effects: Effect[],
+  { secrets = null }: ReplayOptions = {},
+) {
   const heap: Heap = { total: 0, by: new Map() };
-  const app = link(profiledModule, { recorded: effects, heap });
+  const app = link(profiledModule, { recorded: effects, heap, secrets });
   let error: string | null = null;
   try {
     app.handle(bytes);

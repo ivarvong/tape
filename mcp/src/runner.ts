@@ -11,8 +11,8 @@
 // request every timer due by then runs, oldest first (`woken`, as a result of its own), so a test can step past a
 // window or a retry delay. The host reads Date.now() (host/run.ts: now, wake and the due check), so the clock is
 // Date.now itself, replaced for the length of the run; runs in one isolate are taken one at a time for that.
-import { TimedOut, framed, instantiate, isEffect, replay, traceOf } from './host.ts';
-import type { App, Effect, Service, ServiceReply, TraceEvent } from './host.ts';
+import { TimedOut, fixedSecrets, framed, instantiate, isEffect, replay, traceOf } from './host.ts';
+import type { App, Effect, SecretStore, Service, ServiceReply, TraceEvent } from './host.ts';
 import { loadSqlite, nodeSql, sqliteReady } from './sqlite.ts';
 import type { InitSqlJs, NodeSql, SqlJs } from './sqlite.ts';
 
@@ -208,9 +208,10 @@ function replayed(
   effects: Effect[],
   out: Uint8Array | null,
   failed: string | null,
+  secrets: SecretStore,
 ): { replayed: boolean; replay_error: string | null } {
   try {
-    const again = replay(module, bytes, effects);
+    const again = replay(module, bytes, effects, { secrets });
     if (out !== null && same(again, out)) return { replayed: true, replay_error: null };
     return {
       replayed: false,
@@ -233,8 +234,10 @@ export function runAll(
   requests: readonly (string | RunRequest)[],
   traced: WebAssembly.Module | null = null,
   remotes: Scripts = {},
+  secrets: Readonly<Record<string, string>> = {},
 ): Promise<RanAll> {
-  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced, remotes));
+  const store = fixedSecrets(secrets);
+  const mine = queue.then(() => runInOrder(module, requests.map(asRequest), traced, remotes, store));
   queue = mine.catch(() => null);
   return mine;
 }
@@ -289,9 +292,10 @@ function lineTrace(
   bytes: Uint8Array,
   effects: Effect[],
   steps: number,
+  secrets: SecretStore,
 ): NonNullable<Ran['trace']> {
   if (steps > TRACE_STEPS) return { too_long: steps };
-  const t = traceOf(traced, bytes, effects);
+  const t = traceOf(traced, bytes, effects, undefined, { secrets });
   return { events: t.events, error: t.error };
 }
 
@@ -300,6 +304,7 @@ async function runInOrder(
   requests: readonly RunRequest[],
   traced: WebAssembly.Module | null,
   remotes: Scripts,
+  secrets: SecretStore,
 ): Promise<RanAll> {
   const own = requests.some(r => r.at_ms !== null);
   const realNow = Date.now,
@@ -307,7 +312,7 @@ async function runInOrder(
   let t = 0;
   if (own) Date.now = () => start + t;
   try {
-    return await runEach(module, traced, requests, own, start, remotes, (ms: number) => {
+    return await runEach(module, traced, requests, own, start, { remotes, secrets }, (ms: number) => {
       t = ms;
     });
   } finally {
@@ -321,14 +326,14 @@ async function runEach(
   requests: readonly RunRequest[],
   own: boolean,
   start: number,
-  remotes: Scripts,
+  { remotes, secrets }: { remotes: Scripts; secrets: SecretStore },
   setClock: (ms: number) => void,
 ): Promise<RanAll> {
   const db: NodeSql = nodeSql();
   try {
     let app: ReturnType<typeof instantiate>;
     try {
-      app = instantiate(module, { sql: db, name: NAME, services: servicesOf(remotes), random: seeded(7) });
+      app = instantiate(module, { sql: db, name: NAME, services: servicesOf(remotes), random: seeded(7), secrets });
     } catch (e) {
       return { ok: false, error: `the program could not be linked to a fresh database: ${messageOf(e)}` };
     }
@@ -368,11 +373,11 @@ async function runEach(
         out,
         effects,
         failed,
-        ...replayed(module, bytes, effects, out, failed?.error ?? null),
+        ...replayed(module, bytes, effects, out, failed?.error ?? null, secrets),
         steps,
         at,
         took,
-        ...(traced === null ? {} : { trace: lineTrace(traced, bytes, effects, steps) }),
+        ...(traced === null ? {} : { trace: lineTrace(traced, bytes, effects, steps, secrets) }),
       });
     }
     const memory: RunMemory = {

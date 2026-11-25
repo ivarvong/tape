@@ -92,13 +92,14 @@ type Deps = ToolsM.Deps;
 const depsOf = (m: Mods, over: Partial<Deps> = {}): Deps => ({
   std,
   hello: { name: 'hello.tape', text: HELLO },
-  run: async (program, requests, remotes) => {
+  run: async (program, requests, remotes, secrets) => {
     await m.runner.startSqlite(init, sqlite3);
     return m.runner.runAll(
       new WebAssembly.Module(program.wasm),
       requests,
       program.traced ? new WebAssembly.Module(program.traced) : null,
       remotes,
+      secrets,
     );
   },
   examples: (wasm, fns) => Promise.resolve(callExamples(new WebAssembly.Module(wasm), fns)),
@@ -656,6 +657,7 @@ const tests: Test[] = [
           { files, requests, trace: 'lines', effects: 'compact' },
           { requests, trace: 'full', effects: 'full' },
           { requests, trace: 'none', remotes: { payments: { charge: [{ payment: 1 }, 'timeout'] } } },
+          { requests, secrets: { stripe: 'sk_test_0123456789' } },
         ],
         feedback: ['bug', 'confusing', 'missing', 'idea', 'praise'].map(kind => ({
           text: 'x',
@@ -1137,6 +1139,42 @@ const tests: Test[] = [
         const b = await tool(m, 'run', { files, requests: ['POST /pay/1'], remotes: bad });
         if (!b.isError || b.out['error'] !== 'bad_remotes')
           out.push(`remotes ${JSON.stringify(bad)}: ${JSON.stringify(b.out).slice(0, 200)}`);
+      }
+      return out;
+    },
+  },
+  {
+    name: 'secrets',
+    // run's `secrets`: the program reads each by name; the answer (its effects, its trace, the OTLP of `full`)
+    // says the name and the version, and holds the value nowhere unless the program answered it itself
+    run: async m => {
+      const out: string[] = [];
+      const value = 'sk_test_0123456789abcdef';
+      const text = `fn handle(raw: View, secrets: Secrets) -> Response {\n  match secret(name: "stripe") {\n    Some(value) -> buf() |> write_int(value: len(value)) |> respond(status: 200)\n    None -> empty(status: 404)\n  }\n}\n`;
+      const files = [{ name: 'secret.tape', text }];
+      for (const trace of ['lines', 'full']) {
+        const { out: r, isError } = await tool(m, 'run', {
+          files,
+          requests: ['GET /'],
+          secrets: { stripe: value },
+          trace,
+        });
+        const [one] = RESULTS(r);
+        if (isError || one?.['status'] !== 200 || one['body'] !== String(value.length))
+          out.push(`${trace}: ${JSON.stringify(one).slice(0, 200)}`);
+        const read = L(one?.['effects'])
+          .map(F)
+          .find(e => e['kind'] === 'secret');
+        if (read?.['name'] !== 'stripe' || read['version'] !== 1) out.push(`${trace}: effects ${JSON.stringify(read)}`);
+        if (one?.['replayed'] !== true) out.push(`${trace}: replayed ${String(one?.['replay_error'])}`);
+        if (JSON.stringify(r).includes(value)) out.push(`${trace}: the answer holds the value`);
+      }
+      const none = RESULTS((await tool(m, 'run', { files, requests: ['GET /'] })).out)[0];
+      if (none?.['status'] !== 404) out.push(`without secrets: ${String(none?.['status'])}`);
+      for (const bad of [[1], { Stripe: 'x' }, { stripe: 7 }]) {
+        const b = await tool(m, 'run', { files, requests: ['GET /'], secrets: bad });
+        if (!b.isError || b.out['error'] !== 'bad_secrets')
+          out.push(`secrets ${JSON.stringify(bad)}: ${JSON.stringify(b.out).slice(0, 200)}`);
       }
       return out;
     },

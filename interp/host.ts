@@ -29,5 +29,7 @@ export type Host = {
   wake(key: number, after: number): number;
   now(): number;
   random(): number;
+  /** a secret's value, or null for none (the host logs the version, never the value) */
+  secret?(name: string): Uint8Array | null;
 };
 export type Source = { name: string; text: string };

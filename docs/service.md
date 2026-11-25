@@ -156,6 +156,33 @@ box office served this way.
 runs each public request. The Worker keeps a name's "published" from the account-wide list for up to ten minutes per
 isolate, which only saves that lookup; for those ten minutes an unpublished name's object is asked and answers 404 itself.
 
+### Secrets
+
+```
+PUT    /_secrets/:account/:name/:secret   body: the value, 8 bytes to 4 KB -> 201 {secret, version, bytes, at}
+DELETE /_secrets/:account/:name/:secret   every version of it -> {deleted}
+GET    /_secrets/:account/:name           [{name, version, at, bytes, kept: [versions]}]: never a value
+```
+
+A program that declares `secrets: Secrets` reads one with `secret(from: secrets, name: "stripe")`, an
+`Option[View]`: the newest version, or None. The values are kept in the name's own Durable Object storage, set and
+seen only with the operator's token, and no answer of the service holds one: a PUT says the version it made and a GET
+the names, versions and sizes. Each PUT is a new version, a counter that never goes back (a DELETE keeps it, so a
+version never names two values), and the last 5 versions are kept; a name holds at most 64 secrets. A secret's name is
+1 to 64 of `a-z 0-9 _ -`. A tool cannot read one: no policy grants Secrets (an agent with the account's token could
+call it).
+
+The effect log records `{secret: "stripe", version: 3}`, never the value. A trace page, its text and OTLP forms, the
+log route and the request listing are made from the log, replayed with the version it names; a run whose version was
+deleted, or replaced more than 5 times since, cannot be replayed, and its page says `the secret stripe at version 3,
+which this run read, is no longer held` rather than run the program on a value it never saw. Every string on those
+pages also has each value the name holds written `[secret stripe]`, so a value the program put somewhere itself (a
+row it wrote, a call's message, its answer) is not shown either; that is why a value is at least 8 bytes. What a
+program answers its client is the program's: the service hides a secret from its own pages, not from the program's
+answers. Elsewhere: `node tape.ts program.tape … --secret stripe=sk_test_…` and `tape sim … --secret name=value` give
+the value as version 1, and the hosted `/v1/run` takes `"secrets": {"stripe": "sk_test_…"}`, which no part of its
+answer repeats.
+
 ## Tools for agents
 
 A tool is a program made only of exported functions. The operator sets what an account's tools may use; an agent

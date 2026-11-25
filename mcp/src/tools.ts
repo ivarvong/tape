@@ -65,7 +65,12 @@ export type Deps = {
   std: readonly Source[];
   /** examples/hello.tape, the program used when no files are given */
   hello: Source;
-  run: (program: Program, requests: readonly RunRequest[], remotes: Scripts) => Promise<RanAll>;
+  run: (
+    program: Program,
+    requests: readonly RunRequest[],
+    remotes: Scripts,
+    secrets: Readonly<Record<string, string>>,
+  ) => Promise<RanAll>;
   /** call a doc examples build's functions (doctest.ts), where Wasm can be instantiated: host/examples.ts */
   examples: (wasm: Uint8Array, fns: readonly string[]) => Promise<Called[]>;
   /** the wall-clock guard on a run call (LIMITS.wallMs; a test shortens it) */
@@ -110,6 +115,7 @@ export type EffectOut =
     }
   | { kind: 'now'; now: number }
   | { kind: 'random'; random: number }
+  | { kind: 'secret'; name: string; version: number | null }
   | { kind: 'wake'; key: number; after_ms: number; due: number; undone?: true };
 export type TraceMode = (typeof TRACE_MODES)[number];
 export type EffectsMode = (typeof EFFECTS_MODES)[number];
@@ -234,6 +240,12 @@ export const REMOTES_SCHEMA = {
     'Answers for calls to other programs, which otherwise answer Unreachable: {"payments": {"charge": [{"payment": 7}, {"error": "Rejected", "reason": "card declined"}, "timeout", "unreachable"]}}, by the Remote parameter\'s name and the method. Each call takes the next answer for its method: the reply\'s value as JSON, a refusal ({"error": "Skew", …} for a key used for another message), no answer in time, or none; once they run out, Unreachable. A repeated `once` key gets the reply or refusal it got before; after a timeout or none, it takes the next answer.',
   additionalProperties: { type: 'object', additionalProperties: { type: 'array', items: {} } },
 } as const;
+export const SECRETS_SCHEMA = {
+  type: 'object',
+  description:
+    'Values for the program\'s Secrets: {"stripe": "sk_test_…"}, each read by `secret(from: secrets, name: "stripe")` as version 1 (a name not given is None). The effect log and the trace say the name and the version, never the value, and the answer never repeats them.',
+  additionalProperties: { type: 'string', maxLength: 4096 },
+} as const;
 export const TRACE_MODES = ['lines', 'full', 'none'] as const;
 export const EFFECTS_MODES = ['compact', 'full'] as const;
 export const COMPILE_INPUT = {
@@ -254,6 +266,7 @@ export const RUN_INPUT = {
         'lines (the default for one request): the line trace, each arm tried (✓ taken, ✗ not) at its file:line with the effects it made, a trap at its line; full: OTLP/JSON; none (the default for more than one request: ask for lines to see them).',
     },
     remotes: REMOTES_SCHEMA,
+    secrets: SECRETS_SCHEMA,
     effects: {
       type: 'string',
       enum: EFFECTS_MODES,
@@ -312,6 +325,23 @@ export function remotesOf(args: Fields): Scripts | Refusal {
     }
   }
   if (answers > LIMITS.requests * 4) return bad(`${answers} answers; a run takes at most ${LIMITS.requests * 4}`);
+  return out;
+}
+
+/** run's `secrets`, or why not: by name, the value as text (host/secrets.ts: a name is 1-64 of a-z 0-9 _ -). */
+export function secretsOf(args: Fields): Record<string, string> | Refusal {
+  const given = args['secrets'];
+  if (given === undefined || given === null) return {};
+  const bad = (why: string): Refusal =>
+    refused(400, 'bad_secrets', `${why}; \`secrets\` is {"<name>": "<value>"}, a name 1-64 of a-z 0-9 _ -`);
+  if (!isFields(given)) return bad('`secrets` is not an object');
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(given)) {
+    if (!/^[a-z0-9_-]{1,64}$/.test(name)) return bad(`${JSON.stringify(name.slice(0, 70))} is not a secret's name`);
+    if (typeof value !== 'string' || value.length > 4096) return bad(`secrets.${name} is not text of at most 4096`);
+    out[name] = value;
+  }
+  if (Object.keys(out).length > 64) return bad('more than 64 secrets');
   return out;
 }
 
@@ -631,6 +661,7 @@ function effectsOut(
       ];
     if ('now' in e) return [{ kind: 'now', now: e.now }];
     if ('random' in e) return [{ kind: 'random', random: e.random }];
+    if ('secret' in e) return [{ kind: 'secret', name: e.secret, version: e.version }];
     if ('wake' in e)
       return [
         { kind: 'wake', key: e.wake, after_ms: e.after, due: e.due, ...(e.undone ? { undone: true as const } : {}) },
@@ -727,6 +758,8 @@ export function lineTraceOf(
     else if ('wake' in e) out.push(`      wake ${e.wake} after ${e.after} ms${e.undone ? ', undone' : ''}`);
     else if ('now' in e) out.push(`      now -> ${e.now}`);
     else if ('random' in e) out.push(`      random -> ${e.random}`);
+    else if ('secret' in e)
+      out.push(`      secret ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`);
   }
   if (error !== null) out.push(`  ✗ ${error}${last ? ` at ${at(last.file, last.line)}` : ''}`);
   return out.length > TRACE_LINES
@@ -824,6 +857,8 @@ export async function runTool(
   if (isRefusal(effects)) return { result: effects, usage: null };
   const remotes = remotesOf(args);
   if (isRefusal(remotes)) return { result: remotes, usage: null };
+  const secrets = secretsOf(args);
+  if (isRefusal(secrets)) return { result: secrets, usage: null };
   const usage = usageOf(c, requests.length);
   const built = c.built;
   if (!built)
@@ -838,7 +873,7 @@ export async function runTool(
   const t0 = Date.now();
   let all: RanAll | 'timeout';
   try {
-    all = await within(deps.run(program, requests, remotes), deps.wallMs ?? LIMITS.wallMs);
+    all = await within(deps.run(program, requests, remotes, secrets), deps.wallMs ?? LIMITS.wallMs);
   } catch (e) {
     usage.run_ms = Date.now() - t0;
     return {

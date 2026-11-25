@@ -56,6 +56,7 @@ const fx = (e: Entry): string => {
   if ('wake' in e) return `wake    ${e.wake} after ${e.after} ms (due ${iso(e.due)})`;
   if ('now' in e) return `now     -> ${e.now}`;
   if ('random' in e) return `random  -> ${e.random}`;
+  if ('secret' in e) return `secret  ${e.secret} -> ${e.version === null ? 'none' : `version ${e.version}`}`;
   return `sql ${e.q}   ${JSON.stringify(e.p)} -> ${e.rows ? JSON.stringify(e.rows) : `${e.r} written`}`;
 };
 
@@ -200,6 +201,9 @@ const entryEvents = (e: Entry, t: number, queries: readonly string[]): OtlpEvent
     ];
   if ('now' in e) return [event(t, 'tape.clock', { 'tape.now': e.now })];
   if ('random' in e) return [event(t, 'tape.entropy', { 'tape.random': e.random })];
+  // the name and the version read, never the value: the log has none
+  if ('secret' in e)
+    return [event(t, 'tape.secret', { 'tape.secret.name': e.secret, 'tape.secret.version': e.version ?? undefined })];
   if ('migrate' in e)
     return e.statements.map(st =>
       event(t, 'db.migration', {

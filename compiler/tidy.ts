@@ -14,7 +14,19 @@ import type { Problem } from './common.ts';
 import { stdName } from './shadow.ts';
 import { CAPABILITIES } from './types.ts';
 
-const EFFECTS = ['sql_exec', 'sql_first', 'sql_all', 'sql_move', 'wake', 'call', 'ask', 'random', 'now', 'rollback'];
+const EFFECTS = [
+  'sql_exec',
+  'sql_first',
+  'sql_all',
+  'sql_move',
+  'wake',
+  'call',
+  'ask',
+  'random',
+  'now',
+  'rollback',
+  'secret',
+];
 // what each effect gives but wake, whose value is Done, the one `do` runs (C82)
 const GIVES: Readonly<Record<string, string>> = {
   sql_exec: 'Int',
@@ -26,6 +38,7 @@ const GIVES: Readonly<Record<string, string>> = {
   random: 'Int',
   now: 'Int',
   rollback: 'a Response',
+  secret: 'an Option',
 };
 const typeText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(typeText).join(', ')}]` : t.name);
 /** How to run `name` as a step of its own: `do` for a Done, or, for a value `do` does not run, what to do with it. */

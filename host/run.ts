@@ -12,8 +12,37 @@
 import { Pending, REAL_TIMERS, perform } from './call.ts';
 import { transientBetween } from './failure.ts';
 import type { Service, Timers } from './call.ts';
-import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, isWake, pack, unpack } from './log.ts';
-import type { CallEffect, Cell, Effect, Flags, From, Head, Span, Sql, Status, TraceEvent, WakeEffect } from './log.ts';
+import {
+  STATUS,
+  begin,
+  clockUs,
+  hex,
+  isCall,
+  isHead,
+  isNow,
+  isRandom,
+  isSecret,
+  isSql,
+  isWake,
+  pack,
+  unpack,
+} from './log.ts';
+import type {
+  CallEffect,
+  Cell,
+  Effect,
+  Flags,
+  From,
+  Head,
+  SecretEffect,
+  Span,
+  Sql,
+  Status,
+  TraceEvent,
+  WakeEffect,
+} from './log.ts';
+import { SECRET_NAME } from './secrets.ts';
+import type { Read, SecretStore } from './secrets.ts';
 import {
   answerAt,
   frameAt,
@@ -163,6 +192,8 @@ export type LinkOptions = {
   timers?: Timers | undefined;
   /** every run that reached its answer, with the log it ran against (proof/interp-effects.ts) */
   observe?: ((run: Observed) => void) | null;
+  /** what `secret(from:, name:)` reads; none: every secret is None. A replay asks it for the versions its log names */
+  secrets?: SecretStore | null;
 };
 type Target = { name: string; params: readonly HostParam[]; method?: string };
 /** A rollback: the stretch's writes are undone, and the handler's answer is still given. */
@@ -183,6 +214,8 @@ type Linked = {
   readonly C: CallDecl[];
   readonly M: Method[];
   readonly o: Required<Omit<LinkOptions, 'sql' | 'timers'>> & { sql: Sql | undefined; timers: Timers };
+  /** the secrets this run has read, in order, for keeping their values out of what it logs */
+  read: Read;
   readonly live: boolean;
   /** the module's function names by index, read when a trap 9 asks */
   readonly names: () => Map<number, string>;
@@ -318,6 +351,50 @@ function callOut(
   return replyBlock(L.mem, STATUS.indexOf(e.status), unpack(e.reply));
 }
 
+const lenient = new TextDecoder('utf-8', { fatal: false, ignoreBOM: true });
+const NO_SECRET = 0xffffffff;
+
+// env.secret(ptr, len): the value of the secret of that name, as a block (its length as 4 bytes, NO_SECRET for none,
+// then its bytes). Logged as { secret, version }, never the value: a replay reads that version from the store, and
+// when the store no longer has it, the replay stops and says so, rather than give the run a value it never saw.
+function secretOf(L: Linked, ptr: number, len: number): number {
+  const name = lenient.decode(copyOut(L.mem, ptr, len));
+  const store = L.o.secrets;
+  let value: Uint8Array | null = null;
+  const read = (): SecretEffect => {
+    const got = SECRET_NAME.test(name) ? (store?.read(name) ?? null) : null;
+    value = got?.value ?? null;
+    return { secret: name, version: got?.version ?? null };
+  };
+  const e = effect(
+    L,
+    isSecret,
+    x => x.secret === name,
+    () => `the secret ${name}`,
+    read,
+  );
+  if (e.version !== null && value === null) {
+    value = store?.at(name, e.version) ?? null;
+    if (value === null)
+      throw new Error(
+        `the secret ${name} at version ${e.version}, which this run read, is no longer held (it was deleted or replaced since): the run cannot be run again from its log`,
+      );
+  }
+  L.o.trace?.push({ secret: e.secret, version: e.version });
+  if (value === null) {
+    const at = L.mem.alloc(4);
+    new DataView(L.mem.memory.buffer).setUint32(at, NO_SECRET, true);
+    return at;
+  }
+  const got: Uint8Array = value;
+  if (!L.read.some(r => r.name === name && r.value.length === got.length && r.value.every((b, i) => b === got[i])))
+    L.read.push({ name, value: got });
+  const at = L.mem.alloc(4 + got.length);
+  new DataView(L.mem.memory.buffer).setUint32(at, got.length, true);
+  new Uint8Array(L.mem.memory.buffer, at + 4, got.length).set(got);
+  return at;
+}
+
 // env.member(family, index): the Remote named <family>-<index>, added to this run's remotes. The same index gives
 // the same Remote, and a replay asks in the same order, so the numbers agree.
 function member(L: Linked, family: number, index: number): number {
@@ -439,6 +516,7 @@ function envOf(get: () => Linked): Record<string, (...args: never[]) => unknown>
     member: (family: number, index: number) => member(get(), family, index),
     ask: (kind: number) => ask(get(), kind),
     wake: (key: number, after: number) => wake(get(), key, after),
+    secret: (ptr: number, len: number) => secretOf(get(), ptr, len),
     // a Float's text: the shortest digits that read back as it (ECMA-262 Number::toString), as interp/float.ts
     float_text: (x: number) => block(get().mem, String(x)),
     // a decimal number's nearest Float (ECMA-262 StringToNumber, correctly rounded), for parse_float; NaN for none
@@ -494,9 +572,9 @@ function argsOf(L: Linked, bytes: Uint8Array): number[] {
     if (p.type === 'View') return [copyIn(L.mem, bytes), bytes.length];
     if (p.type === 'Remote') return [L.remotes.indexOf(p.name)];
     if (p.type === 'Remotes') return [L.families.indexOf(p.name)];
-    if (['Sql', 'Clock', 'Entropy', 'Timer'].includes(p.type)) return [];
+    if (['Sql', 'Clock', 'Entropy', 'Timer', 'Secrets'].includes(p.type)) return [];
     throw new Error(
-      `handle's parameter ${p.name} is a ${p.type}; the host can pass a View (the request), Sql, Remote, Remotes, Clock, Entropy and Timer`,
+      `handle's parameter ${p.name} is a ${p.type}; the host can pass a View (the request), Sql, Remote, Remotes, Clock, Entropy, Timer and Secrets`,
     );
   });
 }
@@ -504,6 +582,7 @@ function argsOf(L: Linked, bytes: Uint8Array): number[] {
 /** One run of the handler from the start of the request, against the log so far. */
 function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
   L.pos = 0;
+  L.read = [];
   const logged = !(L.live && !L.o.log);
   const bytes = logged ? startOf(L, given) : (given ?? fail('no request bytes were given'));
   if (L.o.trace && L.F.length > 0) L.o.trace.push({ flags: { ...L.flagNow } });
@@ -953,6 +1032,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     name = null,
   } = options;
   const { sink = null, heap = null, random = null, timers = REAL_TIMERS, observe = null } = options;
+  const { secrets = null } = options;
   const holder: { L: Linked | null } = { L: null };
   let names: Map<number, string> | null = null;
   const raw = new WebAssembly.Instance(module, {
@@ -969,7 +1049,23 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     BUILD: String(section(module, 'build')),
     C: listed<CallDecl>(module, 'calls'),
     M: listed<Method>(module, 'methods'),
-    o: { sql, log, recorded, trace, traceMost, traceCut, services, name, sink, heap, random, timers, observe },
+    o: {
+      sql,
+      log,
+      recorded,
+      trace,
+      traceMost,
+      traceCut,
+      services,
+      name,
+      sink,
+      heap,
+      random,
+      timers,
+      observe,
+      secrets,
+    },
+    read: [],
     live: !recorded,
     mem: { memory, alloc: size => Number(alloc(size)) },
     raw,

@@ -91,11 +91,13 @@ export type Imports = {
   usesMember: boolean;
   usesAsk: boolean;
   usesWake: boolean;
+  usesSecret: boolean;
   usesFloat: boolean;
   CALL_IMPORT: number;
   MEMBER_IMPORT: number;
   ASK_IMPORT: number;
   WAKE_IMPORT: number;
+  SECRET_IMPORT: number;
   FLOAT_TEXT_IMPORT: number;
   FLOAT_OF_IMPORT: number;
   TRACE_IMPORT: number;
@@ -128,7 +130,7 @@ function checkWoken(setter: FnDecl | undefined, served: readonly Served[]): void
     );
 }
 
-type Uses = Pick<Imports, 'usesSql' | 'usesCall' | 'usesMember' | 'usesAsk' | 'usesWake' | 'usesFloat'>;
+type Uses = Pick<Imports, 'usesSql' | 'usesCall' | 'usesMember' | 'usesAsk' | 'usesWake' | 'usesSecret' | 'usesFloat'>;
 
 /** The index of each import that is used, in the order the module lists them, and of the functions after them. */
 function numbered(uses: Uses, opts: Options): Imports {
@@ -137,7 +139,8 @@ function numbered(uses: Uses, opts: Options): Imports {
   const MEMBER_IMPORT = CALL_IMPORT + n(uses.usesCall);
   const ASK_IMPORT = MEMBER_IMPORT + n(uses.usesMember);
   const WAKE_IMPORT = ASK_IMPORT + n(uses.usesAsk);
-  const FLOAT_TEXT_IMPORT = WAKE_IMPORT + n(uses.usesWake);
+  const SECRET_IMPORT = WAKE_IMPORT + n(uses.usesWake);
+  const FLOAT_TEXT_IMPORT = SECRET_IMPORT + n(uses.usesSecret);
   const FLOAT_OF_IMPORT = FLOAT_TEXT_IMPORT + n(uses.usesFloat);
   const TRACE_IMPORT = FLOAT_OF_IMPORT + n(uses.usesFloat);
   const PROFILE_IMPORT = TRACE_IMPORT + n(opts.trace);
@@ -148,6 +151,7 @@ function numbered(uses: Uses, opts: Options): Imports {
     MEMBER_IMPORT,
     ASK_IMPORT,
     WAKE_IMPORT,
+    SECRET_IMPORT,
     FLOAT_TEXT_IMPORT,
     FLOAT_OF_IMPORT,
     TRACE_IMPORT,
@@ -203,6 +207,8 @@ export function importsOf(prog: Program, callsOf: CallGraph, opts: Options, serv
       // remote(of: family, index): the Remote of one member of a family (the host names it <family>-<index>)
       usesMember: anyCalls('remote'),
       usesWake: setter !== undefined,
+      // secret(from:, name:): only what the exports reach, as for wake
+      usesSecret: [...reached].some(x => callsOf.get(x)?.has('secret')),
       // a Float's text is the host's (env.float_text): imported by a program that has Floats at all, since which
       // hole holds one is known only once the types are
       usesFloat: mentionsFloat(prog, reached),

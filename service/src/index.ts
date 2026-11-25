@@ -16,6 +16,10 @@
 // the caller's log with what each callee did: ran (with its own log and trace), or answered from a stored reply.
 //
 //   DELETE /:account/:name/v/:version        retires a version, which may release a held contract migration
+//   PUT    /_secrets/:account/:name/:secret   body: the value (at most 4 KB) -> { version }: what the program's
+//                                            secret(from:, name:) reads; each PUT is a new version
+//   DELETE /_secrets/:account/:name/:secret   every version of it
+//   GET    /_secrets/:account/:name           each secret's name, version, size and versions kept: never a value
 //   PUT  /_faults/:account   body: a fault plan (see faults.ts), or null to stop; only accounts named jepsen-*
 //   GET  /_faults/:account   the faults injected so far, in order
 //
@@ -49,7 +53,8 @@ import { kv } from './kv.ts';
 import { Name, WIPED_ERROR } from './name.ts';
 import { secured } from './headers.ts';
 import { buyerOf, routes, run, targetOf, traceLinks } from './programs.ts';
-import type { CallMeta } from './records.ts';
+import type { CallMeta, StoredSecret } from './records.ts';
+import { SECRET_MAX, SECRET_NAME } from '../../host/secrets.ts';
 import { manifest, mcp, policyOf, refusal } from './tools.ts';
 import hosted, { RunTail } from '../../mcp/src/index.ts';
 import type { Policy, ToolEntry, ToolResult } from './tools.ts';
@@ -114,6 +119,14 @@ export class Calls extends WorkerEntrypoint<Env, { account: string; from: string
       () => Names.getByName(`${account}/${to}`).serve(account, to, meta, bytes, fault?.kind),
       () => Names.getByName(`${account}/${from}`).reset('jepsen: the caller was reset while it waited for a reply'),
     );
+  }
+  // The secrets of the program this binding is for, and no other's: the props are the supervisor's, not the
+  // program's to choose. A tool has none (its account's policy grants no Secrets).
+  async secrets(all: boolean): Promise<StoredSecret[]> {
+    const { account, from } = this.ctx.props;
+    if (from.startsWith('tool-')) return [];
+    const held: StoredSecret[] = await this.ctx.exports.Name.getByName(`${account}/${from}`).secretValues(all);
+    return held;
   }
 }
 
@@ -430,6 +443,28 @@ const publishRoute = async (
   await ctx.exports.Name.getByName(PUBLISHED).setPublished(`${account}/${name}`, published);
   return reply({ account, name, ...done, url: at.url });
 };
+// PUT or DELETE /_secrets/:account/:name/:secret, GET /_secrets/:account/:name: a program's secrets. No answer ever
+// holds a value: a PUT says the version it made, a GET each secret's name, version, size and the versions kept.
+const SECRET_PATH = /^\/_secrets\/([^/]+)\/([^/]+)(?:\/([^/]+))?$/;
+const secretsRoute = async (request: Request, ctx: ExecutionContext, m: RegExpMatchArray): Promise<Response> => {
+  const [, account = '', name = '', secret] = m;
+  if (!SEGMENT.test(account) || !SEGMENT.test(name)) return reply({ error: NAMES }, 400);
+  if (/^(kv|tool)-/.test(name)) return reply({ error: 'KV shards and tools have no secrets' }, 400);
+  const stub = ctx.exports.Name.getByName(`${account}/${name}`);
+  if (secret === undefined) {
+    if (request.method !== 'GET') return reply({ error: 'GET /_secrets/:account/:name lists the secrets' }, 405);
+    return reply({ account, name, secrets: await stub.listSecrets() });
+  }
+  if (!SECRET_NAME.test(secret)) return reply({ error: 'a secret name is 1-64 of a-z 0-9 _ -' }, 400);
+  if (request.method === 'DELETE') return reply(await stub.deleteSecret(account, name, secret));
+  if (request.method !== 'PUT') return reply({ error: 'PUT, DELETE, or GET /_secrets/:account/:name' }, 405);
+  const value = await bodyOf(request, SECRET_MAX);
+  if (value === null) return tooLarge('a secret', SECRET_MAX);
+  // a value that short would be found in every view's text, and could not be told apart there to be hidden
+  if (value.length < 8) return reply({ error: 'a secret is at least 8 bytes; DELETE removes one' }, 400);
+  const set = await stub.putSecret(account, name, secret, value);
+  return 'error' in set ? reply({ error: set.error }, set.status) : reply(set, 201);
+};
 // PUT or GET /_faults/:account: a fault plan (faults.ts) for an account named jepsen-*, and the faults so far
 const faultsRoute = async (request: Request, ctx: ExecutionContext, account: string): Promise<Response> => {
   if (!FAULTY.test(account) || !SEGMENT.test(account))
@@ -550,6 +585,8 @@ const operatorRoute = (request: Request, env: Env, ctx: ExecutionContext, url: U
     });
   const faults = /^\/_faults\/([^/]+)$/.exec(path);
   if (faults) return faultsRoute(request, ctx, faults[1] ?? '');
+  const secrets = SECRET_PATH.exec(path);
+  if (secrets) return secretsRoute(request, ctx, secrets);
   const retention = /^\/_retention\/([^/]+)\/([^/]+)$/.exec(path);
   if (retention) return retentionRoute(request, ctx, retention);
   if (path === '/_ids' && request.method === 'POST') return idsRoute(request, ctx);

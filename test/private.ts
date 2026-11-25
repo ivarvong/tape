@@ -58,10 +58,10 @@ const two = (call: string) => [
   { name: 'a.tape', text: handle(`buf() |> write_int(value: ${call})`) },
   {
     name: 'b.tape',
-    text: 'private fn secret(n: Int) -> Int {\n  n + 1\n}\nfn open(n: Int) -> Int {\n  secret(n)\n}\n',
+    text: 'private fn hidden(n: Int) -> Int {\n  n + 1\n}\nfn open(n: Int) -> Int {\n  hidden(n)\n}\n',
   },
 ];
-same("another file's private fn", c94(two('secret(n: 1)')), ['C94:a.tape:2']);
+same("another file's private fn", c94(two('hidden(n: 1)')), ['C94:a.tape:2']);
 same('the public function beside it', c94(two('open(n: 1)')), []);
 
 // ---- not refused

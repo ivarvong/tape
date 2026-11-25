@@ -10,6 +10,7 @@ import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
 import hostFailure from '../../host/failure.ts?erased';
+import hostSecrets from '../../host/secrets.ts?erased';
 import programSrc from './program.ts?erased';
 import recordsSrc from './records.ts?erased';
 import webSrc from './web.ts?erased';
@@ -33,7 +34,11 @@ import type {
   Plan,
   Routed,
   Run,
+  SecretGone,
+  SecretListed,
+  SecretSet,
   ServedRow,
+  StoredSecret,
 } from './records.ts';
 import { MAX_SHARDS } from './kv.ts';
 import { fresh, recordOf } from './spans.ts';
@@ -52,6 +57,7 @@ const HOST_PARTS = {
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
   'host/failure.js': hostFailure,
+  'host/secrets.js': hostSecrets,
 };
 
 // RUNTIME-SPEC R-RET-6: the trace records of the newest TRACE_KEEP requests of each object are kept; a prune runs
@@ -64,6 +70,9 @@ export const WIPED_ERROR = 'this name was deleted';
 
 type Row = Record<string, SqlStorageValue>;
 const int = (v: unknown): number => (typeof v === 'number' ? v : 0);
+/** The versions of a secret kept, and the most secrets one name holds. */
+const SECRETS_KEPT = 5,
+  SECRETS_MOST = 64;
 const intOrNull = (v: unknown): number | null => (typeof v === 'number' ? v : null);
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' ? v : null);
@@ -1139,6 +1148,78 @@ export class Name extends DurableObject {
         Math.max(...cuts.map(c => c.at ?? 0)),
       );
     return { deleted: cuts.reduce((sum, c) => sum + c.deleted, 0), pruned_before: this.keep().pruned_before };
+  }
+  // ---- Secrets (issue #13): what the program's `secret(from:, name:)` reads, set by the operator
+  // (PUT /_secrets/:account/:name/:secret). Each PUT is a new version of the secret, a counter that never goes back
+  // (a DELETE keeps the counter, so a version is never reused for another value and a replay never reads a value its
+  // run did not see). The last SECRETS_KEPT versions are kept, so a run logged before a rotation can still be
+  // replayed for its trace page; past that, its replay stops and says the version is gone.
+  #secretTables(): void {
+    this.#sql.exec(
+      'CREATE TABLE IF NOT EXISTS _tape_secrets(name TEXT NOT NULL, version INTEGER NOT NULL, value BLOB NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (name, version)) WITHOUT ROWID',
+    );
+    this.#sql.exec(
+      'CREATE TABLE IF NOT EXISTS _tape_secret_counters(name TEXT PRIMARY KEY, last INTEGER NOT NULL) WITHOUT ROWID',
+    );
+  }
+  async putSecret(account: string, name: string, secret: string, value: Uint8Array | ArrayBuffer): Promise<SecretSet> {
+    this.#secretTables();
+    const held = this.#sql.exec('SELECT count(DISTINCT name) AS n FROM _tape_secrets WHERE name <> ?1', secret).one();
+    if (int(held.n) >= SECRETS_MOST)
+      return { error: `a name holds at most ${SECRETS_MOST} secrets; delete one first`, status: 409 };
+    const at = Date.now();
+    const version = this.ctx.storage.transactionSync(() => {
+      const [row] = this.#sql.exec('SELECT last FROM _tape_secret_counters WHERE name = ?1', secret).toArray();
+      const next = int(row?.last) + 1;
+      this.#sql.exec(
+        'INSERT INTO _tape_secret_counters VALUES (?1, ?2) ON CONFLICT(name) DO UPDATE SET last = excluded.last',
+        secret,
+        next,
+      );
+      this.#sql.exec('INSERT INTO _tape_secrets VALUES (?1, ?2, ?3, ?4)', secret, next, new Uint8Array(value), at);
+      this.#sql.exec('DELETE FROM _tape_secrets WHERE name = ?1 AND version <= ?2', secret, next - SECRETS_KEPT);
+      return next;
+    });
+    await this.enrol(account, name, 'program');
+    return { account, name, secret, version, bytes: new Uint8Array(value).length, at };
+  }
+  deleteSecret(account: string, name: string, secret: string): SecretGone {
+    if (!this.#has('_tape_secrets')) return { account, name, secret, deleted: 0 };
+    const n = int(this.#sql.exec('SELECT count(*) AS n FROM _tape_secrets WHERE name = ?1', secret).one().n);
+    this.#sql.exec('DELETE FROM _tape_secrets WHERE name = ?1', secret);
+    return { account, name, secret, deleted: n };
+  }
+  /** Each secret's name, its current version and when it was set, and the versions kept: never a value. */
+  listSecrets(): SecretListed[] {
+    if (!this.#has('_tape_secrets')) return [];
+    const rows = this.#sql
+      .exec('SELECT name, version, at, length(value) AS bytes FROM _tape_secrets ORDER BY name, version')
+      .toArray();
+    const by = new Map<string, SecretListed>();
+    for (const r of rows) {
+      const name = str(r.name),
+        had = by.get(name);
+      const one = { name, version: int(r.version), at: int(r.at), bytes: int(r.bytes), kept: [int(r.version)] };
+      by.set(name, had ? { ...one, kept: [...had.kept, int(r.version)] } : one);
+    }
+    return [...by.values()];
+  }
+  /** The values the program's run may read: the current version of each (`all`: every version kept, for a replay).
+   * Asked only by this name's own program, through Calls, which is bound to it. */
+  secretValues(all: boolean): StoredSecret[] {
+    if (!this.#has('_tape_secrets')) return [];
+    const rows = this.#sql
+      .exec(
+        all
+          ? 'SELECT name, version, value FROM _tape_secrets'
+          : 'SELECT name, version, value FROM _tape_secrets s WHERE version = (SELECT max(version) FROM _tape_secrets WHERE name = s.name)',
+      )
+      .toArray();
+    return rows.map(r => ({
+      name: str(r.name),
+      version: int(r.version),
+      value: r.value instanceof ArrayBuffer ? new Uint8Array(r.value) : new Uint8Array(0),
+    }));
   }
   // ---- An account's names (RUNTIME-SPEC R-RET-7), at <account>/~registry
   registryTable(): void {

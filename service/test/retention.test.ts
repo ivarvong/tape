@@ -233,6 +233,7 @@ describe('retention: trace records (R-RET-6)', () => {
       'served',
       'findRuns',
       'view',
+      '#view',
       'requests',
       'requestHeads',
     ]);

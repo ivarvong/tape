@@ -23,7 +23,7 @@ import { asRows, exact, isDec } from './value.ts';
 
 const EFFECTS = [
   ...(['sql_exec', 'sql_first', 'sql_all', 'sql_move', 'decode', 'write_json', 'next'] as const),
-  ...(['wake', 'now', 'random', 'call', 'ask', 'rollback', 'remote'] as const),
+  ...(['wake', 'now', 'random', 'call', 'ask', 'rollback', 'remote', 'secret'] as const),
 ];
 type Effect = (typeof EFFECTS)[number];
 // a leading U+FEFF is part of the text: a decoder's default drops it
@@ -46,7 +46,7 @@ const typeName = (s: Site, label: string): string => {
   return a?.k === 'ctor' ? a.name : stop(`${s.name}: argument ${label} should be a type name`);
 };
 // what the host is asked through; a host without it cannot follow the program
-const host = <K extends keyof Host>(it: Interp, k: K): Host[K] =>
+const host = <K extends keyof Host>(it: Interp, k: K): NonNullable<Host[K]> =>
   (it.host ?? fail(new Unsupported(k)))[k] ?? fail(new Unsupported(k));
 
 // ---- JSON
@@ -150,6 +150,11 @@ function remoteCall(s: Site): Value {
   }
 }
 
+// ---- secrets
+function secret(s: Site): Value {
+  const v = host(s.it, 'secret')(utf8.decode(asBytes(value(s, 'name'))));
+  return v === null ? adt('None') : adt('Some', { value: v });
+}
 // ---- timers, and the rest
 function wake(s: Site): Value {
   const key = exact(asInt(value(s, 'key')), 'wake'),
@@ -194,6 +199,8 @@ function effectOf(s: Site): Value {
     case 'call':
     case 'ask':
       return remoteCall(s);
+    case 'secret':
+      return secret(s);
     default:
       return unreachable(s.name, 'effect');
   }

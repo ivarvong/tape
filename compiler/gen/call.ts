@@ -92,6 +92,7 @@ function peekCall(c: Ctx, e: Call): Type | null {
     return r?.k === 'ctor' && c.B.types.has(r.name) ? T(ROW_RESULT[e.name] ?? '', T(r.name)) : null;
   }
   if (e.name === 'wake') return T(stdName(c.B.prog, 'types', 'Done'));
+  if (e.name === 'secret') return T('Option', VIEW);
   if (INTRINSICS.has(e.name)) return MONO.get(e.name) ?? null;
   const g = c.B.find(e.name, c.f.file, e);
   if (!g) return null;

@@ -12,11 +12,12 @@ export const BUILTIN_TYPES = new Set([
   'Clock',
   'Entropy',
   'Timer',
+  'Secrets',
   'Rows',
   'Fn',
   'Fn2',
 ]);
-export const CAPABILITIES = ['Sql', 'Remote', 'Remotes', 'Clock', 'Entropy', 'Timer'];
+export const CAPABILITIES = ['Sql', 'Remote', 'Remotes', 'Clock', 'Entropy', 'Timer', 'Secrets'];
 
 // An interface's name is a capability type, like Remote, for the build that declares it and no longer: compile()
 // takes back what a build added, whether or not the build succeeded.
@@ -76,6 +77,7 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     now: null,
     random: null,
     wake: null,
+    secret: ['from', 'name'],
     write_json: ['out', 'value'],
     write_float: ['out', 'value'],
     wrapping_add: ['a', 'b'],

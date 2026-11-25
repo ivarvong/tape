@@ -346,6 +346,7 @@ would otherwise take it without a word. A match that names too few is C24.
 | `wake(after: ms, key: n)` | `Timer` | `Done`, run with `do`: asks for `export fn woken(…, message: Wake)` to run later with `Wake(key: n)`. A run cut short at a call runs again, and so does a run that fails on a storage error, after a wait that doubles each time (1 s up to 15 min); a run that traps is not retried |
 | `now()` | `Clock` | milliseconds since 1970 |
 | `random()` | `Entropy` | 53 random bits |
+| `secret(from: secrets, name: "stripe")` | `Secrets` | the program's secret of that name, `Option[View]`: on the service, what the operator set with `PUT /_secrets/…` ([docs/service.md](docs/service.md#secrets)). The log records the name and the version read, never the value; a replay reads that version, and stops, saying so, when it is gone |
 | `rollback(out)` | | answers `out` and undoes this request's writes since its last call; the effect log marks each write and each timer it undid `undone` (as it does for a trap), and so does the trace |
 
 A query names each value it takes, `WHERE id = :id AND state = :from`, and the call passes each by that name: `id`

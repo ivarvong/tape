@@ -319,6 +319,12 @@ const BUILT_INS: BuiltIn[] = [
   { name: 'now', sig: 'now() -> Int', needs: 'Clock', doc: 'Milliseconds since 1970, in the log so a replay sees it.' },
   { name: 'random', sig: 'random() -> Int', needs: 'Entropy', doc: '53 random bits, in the log.' },
   {
+    name: 'secret',
+    sig: 'secret(name: View) -> Option[View]',
+    needs: 'Secrets',
+    doc: "The value of the program's secret of that name (the service's `PUT /_secrets/:account/:name/:secret`, the command line's `--secret name=value`), or None. The log records the name and the version read, never the value; a replay reads that version, and fails, saying so, when it is gone.",
+  },
+  {
     name: 'wake',
     sig: 'wake(after: Int, key: Int) -> Done',
     needs: 'Timer',

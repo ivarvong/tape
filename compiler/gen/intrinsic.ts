@@ -337,6 +337,40 @@ function wake(c: Ctx, e: Call): Type {
   return done;
 }
 
+/** The capability argument of a built-in: its type checked, nothing emitted (a capability holds no value). */
+function capability(u: Use, i: number, cap: string, label: string, does: string): void {
+  if (u.c.emit(argAt(u, i).value, T(cap), false).name !== cap)
+    fail(
+      argAt(u, i),
+      'C14',
+      `${u.n} needs the ${cap} capability`,
+      `Add \`${label}: ${cap}\` to this function's parameters and pass it here, so every caller shows that it ${does}.`,
+    );
+}
+
+/**
+ * secret(from: secrets, name) -> Option[View]: the value of the secret of that name the host holds for this program,
+ * or None. The host answers a block, the value's length as 4 bytes (0xffffffff for none) and its bytes; the log
+ * records the name and the version read, never the value (host/run.ts secretOf).
+ */
+function secret(u: Use): Type {
+  const { c } = u;
+  capability(u, 0, 'Secrets', 'secrets', 'reads secrets');
+  const [p, n] = view(u, 1);
+  const [r, len, at] = [fresh(c, I32), fresh(c, I32), fresh(c, I32)];
+  const opt = T('Option', VIEW);
+  const adt = c.B.adtOf(opt, u.e);
+  const which = (name: string): number => adt.variants.findIndex(v => v.name === name);
+  const asked = [...get(p), ...get(n), 0x10, ...uleb(c.B.SECRET_IMPORT), 0x22, ...uleb(r), ...ld(0), ...set(len)];
+  c.code.push(...asked, ...get(r), ...i32(4), 0x6a, ...set(at), ...get(len), ...i32(-1), 0x47);
+  open(c, 0x04, adt.slots);
+  buildVariant(c, adt, which('Some'), [at, len]);
+  c.code.push(0x05);
+  buildVariant(c, adt, which('None'), []);
+  close(c);
+  return opt;
+}
+
 // remote(of: shards, index: i): one Remote of a family; which one is decided at run time, so the number of
 // members is not fixed when the program is built (a router over N shards)
 function remote(c: Ctx, e: Call): Type {
@@ -461,6 +495,7 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   push,
   append,
   answer_body: answerBody,
+  secret,
   // rollback(out): the Response, as it was given, with the stretch's writes marked to be undone
   rollback: u => {
     const want = T(stdName(u.c.B.prog, 'types', 'Response'));

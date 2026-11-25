@@ -21,6 +21,7 @@ import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
 import hostFailure from '../../host/failure.ts?erased';
+import hostSecrets from '../../host/secrets.ts?erased';
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { serve } from './serve.ts';
 import { tailLines } from './tail.ts';
@@ -47,6 +48,7 @@ const MODULES = {
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
   'host/failure.js': hostFailure,
+  'host/secrets.js': hostSecrets,
 };
 // sql.js's Wasm, for the Dynamic Worker's modules: decoded once per isolate, when a run first needs it. Decoded at
 // the top level (and by a callback per byte) it was 34 of the 53 ms this Worker's module takes to start, in every
@@ -94,7 +96,12 @@ async function runnerOf(env: Env, ctx: ExecutionContext, program: Uint8Array, tr
 
 const runIn =
   (env: Env, ctx: ExecutionContext) =>
-  async (program: Program, requests: readonly RunRequest[], remotes: Scripts = {}): Promise<RanAll> => {
+  async (
+    program: Program,
+    requests: readonly RunRequest[],
+    remotes: Scripts = {},
+    secrets: Readonly<Record<string, string>> = {},
+  ): Promise<RanAll> => {
     const traced = program.traced ?? program.wasm;
     const runner = await runnerOf(env, ctx, program.wasm, traced);
     // the run's id: the runner logs it, so its tail's line (RunTail) and the call's line name the same run
@@ -104,7 +111,7 @@ const runIn =
     // is logged after this response, so the wait is what a client can be shown: a wall-clock reading at 1 ms,
     // covering every request in the call, the replay and a line trace, because they share the invocation.
     const t0 = Date.now();
-    const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId);
+    const ran = await runner.run([...requests], program.traced !== undefined, remotes, runId, secrets);
     // A clock step back is 0, so the field stays an integer at least 0, which is what the schema says. Date.now
     // is already a whole millisecond.
     return { ...ran, run_id: runId, invoke_wall_ms: Math.max(0, Date.now() - t0) };
