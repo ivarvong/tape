@@ -256,7 +256,7 @@ for (const [what, digits, literal] of pairs) sameModule(what, digits, literal);
   same('an emoji is more than one byte', refused("'😀'"), 'L07 a byte literal holds one byte');
   // a raw control character between the quotes is invisible in the source: its escape or its number says it
   same('a raw tab', refused("'\t'"), 'L07 a byte literal holds a control character (9)');
-  same('a raw DEL', refused("'\x7f'"), 'L07 a byte literal holds a control character (127)');
+  same('a raw DEL', refused("'\u007F'"), 'L07 a byte literal holds a control character (127)');
   // an error inside a hole is on the hole's line, not the hole's first line counted from 1
   same(
     'a hole reports its own line',
