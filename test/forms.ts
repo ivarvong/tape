@@ -15,7 +15,7 @@ import type { Options } from '../compiler.ts';
 import { TimedOut, instantiate, isHead, isWake, replay } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { Effect, Head, Service, Transaction } from '../host.ts';
-import { bare, built, call, finish, messageOf, moduleOf, objectIn, same as T } from './harness.ts';
+import { answered, bare, built, call, finish, messageOf, moduleOf, objectIn, same as T } from './harness.ts';
 const NOW = Date.now(); // R-RET-1: a kv op id is <t>_<id>, t the client's clock in ms when it was first sent
 const BUILDS: Partial<Options>[] = [{}, { reuse: false }, { check: true }];
 /** fn(args) in one build: its answer, the first thing refused, or its trap. */
@@ -610,8 +610,8 @@ T(
   // a program with a flag that only `handle` reads: an example of a pure function compiles without `handle` as an
   // export, and the flag is still read (it was C38 "flag limit is never read" on every example)
   const flagged = `flag limit: Int = 3
-fn handle(raw: View) -> Buf {
-  respond(status: 200) |> write_int(value: twice(flags.limit))
+fn handle(raw: View) -> Response {
+  buf() |> write_int(value: twice(flags.limit)) |> respond(status: 200)
 }
 
 //   > twice(4)
@@ -646,14 +646,14 @@ fn twice(n: Int) -> Int {
   const timers = `schema "CREATE TABLE IF NOT EXISTS hits(key INTEGER PRIMARY KEY, n INTEGER NOT NULL)"
 type Count { Count(n: Int) }
 type Done { Done(key: Int, n: Int) }
-fn handle(req: View, db: Sql, timer: Timer) -> Buf {
+fn handle(req: View, db: Sql, timer: Timer) -> Response {
   match req {
     "POST /later/" ++ decimal(ms) -> later(timer, ms, key: 7, status: 202)
-    "POST /backoff/" ++ decimal(n) -> respond(status: 202) |> append(view: said(decided: retry_later(timer, key: 8, policy: Backoff(first: 100, factor: 10, most: 5000, tries: 3), failed: n)))
+    "POST /backoff/" ++ decimal(n) -> buf() |> append(view: said(decided: retry_later(timer, key: 8, policy: Backoff(first: 100, factor: 10, most: 5000, tries: 3), failed: n))) |> respond(status: 202)
     "POST /sooner" -> later(timer, ms: 0 - 40, key: 7, status: 202)
     "POST /undo" ++ _ -> rollback(out: later(timer, ms: 10, key: 9, status: 500))
     "POST /trap" ++ _ -> later(timer, ms: 0, key: 0, status: 202)
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 fn said(decided: Retry) -> View {
@@ -662,9 +662,9 @@ fn said(decided: Retry) -> View {
     GaveUp(tries) -> "gave up after " ++ decimal_text(value: tries)
   }
 }
-fn later(timer: Timer, ms: Int, key: Int, status: Int) -> Buf {
+fn later(timer: Timer, ms: Int, key: Int, status: Int) -> Response {
   do wake(timer, after: ms, key)
-  respond(status)
+  empty(status)
 }
 export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   let Wake(key) = message
@@ -679,7 +679,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     app = instantiate(mod, { sql, name: 'demo' });
   const run = async (t: string) => {
     const r = await app.runLogged(enc.encode(t.trim()), { transaction: tx });
-    return { ...r, text: dec.decode(r.out) };
+    return { ...r, text: answered(r.out) };
   };
   const pending = () => sql.exec('SELECT key, due FROM _wakes ORDER BY key').toArray();
   /** When the timer a run set is due. */
@@ -709,7 +709,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   );
   T(
     'timer: a replay answers wake from the log, setting nothing',
-    [dec.decode(replay(mod, enc.encode('POST /later/250'), set.effects)), pending().length],
+    [answered(replay(mod, enc.encode('POST /later/250'), set.effects)), pending().length],
     ['202\n', 1],
   );
   await run('POST /sooner');
@@ -795,7 +795,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     ftx: Transaction = f => fsql.transaction(f);
   /** The JSON object on the second line of an answer. */
   const second2 = (answer: Uint8Array | undefined): Record<string, unknown> =>
-    objectIn(dec.decode(answer).split('\n')[1] ?? '{}');
+    objectIn(answered(answer ?? new Uint8Array()).split('\n')[1] ?? '{}');
   const bodyIn = (answer: Uint8Array | undefined): Record<string, unknown> => objectIn(dec.decode(answer));
   let reserveTimeouts = 2;
   const services: Record<string, Service> = {
@@ -816,7 +816,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   T(
     'fulfillment: a step that timed out stalls, counts the failure, and says when it is tried again',
     [
-      dec.decode(order.out).split('\n')[0],
+      answered(order.out).split('\n')[0],
       o1.state,
       o1.retries,
       o1.stall,
@@ -856,20 +856,19 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
   );
   T(
     'fulfillment: a read of an order that does not exist is 404, not the 409 of a step that lost a race (P2)',
-    dec.decode((await fapp.runLogged(enc.encode('GET /orders/9999'), { transaction: ftx })).out),
+    answered((await fapp.runLogged(enc.encode('GET /orders/9999'), { transaction: ftx })).out),
     '404\n{"error":"no such order"}',
   );
   T(
     'fulfillment: woken cannot be reached from HTTP, only from the timer',
-    dec.decode((await fapp.runLogged(enc.encode('POST /woken\n{"key":1}'), { transaction: ftx })).out),
+    answered((await fapp.runLogged(enc.encode('POST /woken\n{"key":1}'), { transaction: ftx })).out),
     '404\n{"error":"no such route"}',
   );
 }
 
 // ---- 5. examples/kv.tape: one shard of the sharded KV service (service/src/kv.ts routes keys to shards)
 {
-  const enc = new TextEncoder(),
-    dec = new TextDecoder();
+  const enc = new TextEncoder();
   const kv = moduleOf(built(readFileSync(here('examples/kv.tape'), 'utf8')));
   const shard = () => {
     const sql = nodeSql(),
@@ -880,7 +879,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
         all = new Uint8Array(h.length + b.length);
       all.set(h);
       all.set(b, h.length);
-      return dec.decode((await app.runLogged(all, { transaction: f => sql.transaction(f) })).out);
+      return answered((await app.runLogged(all, { transaction: f => sql.transaction(f) })).out);
     };
   };
   // the router's hash (service/src/kv.ts), here so the two can be compared without workerd

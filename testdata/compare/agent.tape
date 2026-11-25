@@ -59,14 +59,14 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, model: Remote, tools: Remote) -> Buf {
+fn handle(raw: View, db: Sql, model: Remote, tools: Remote) -> Response {
   routed(raw) |> rendered
 }
 
 // db, model and tools are the capabilities handle declares; the functions below use them by name (C72).
 fn routed(raw: View) -> Outcome {
   match request(raw) {
-    Request(method: "POST", path: "/runs", body) -> {
+    Request(method: Post, path: "/runs", body) -> {
       let Ok(value: NewRun(key, prompt)) = decode(json: body, as: NewRun) else {
         Err(error) -> Problem(status: 400, reason: error)
       }
@@ -93,11 +93,11 @@ fn routed(raw: View) -> Outcome {
       }
       advance(run)
     }
-    Request(method: "POST", path: "/runs/" ++ decimal(id) ++ "/advance") -> {
+    Request(method: Post, path: "/runs/" ++ decimal(id) ++ "/advance") -> {
       let Some(value: run) = load(id) else -> missing()
       advance(run)
     }
-    Request(method: "GET", path: "/runs/" ++ decimal(id)) -> show(status: 200, found: load(id))
+    Request(method: Get, path: "/runs/" ++ decimal(id)) -> show(status: 200, found: load(id))
     _ -> Problem(status: 404, reason: "no such route")
   }
 }
@@ -222,13 +222,14 @@ fn missing() -> Outcome {
   Problem(status: 404, reason: "no such run")
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, run) -> write_json(out: respond(status), value: run)
-    Problem(status, reason) -> respond(status)
+    Shown(status, run) -> write_json(out: buf(), value: run) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

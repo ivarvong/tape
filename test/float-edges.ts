@@ -9,7 +9,7 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import type { SqlParam } from '../interp.ts';
 import { nodeSql } from '../nodesql.ts';
-import { finish, same, std } from './harness.ts';
+import { finish, same, std, answered } from './harness.ts';
 
 const program = `migration 1 "readings" {
   CREATE TABLE readings(id INTEGER PRIMARY KEY, r REAL NOT NULL)
@@ -27,20 +27,20 @@ type Out {
   Out(r: Float, twice: Float, rs: List[Float], read: Float)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "PUT", path: "/r", body) -> put(body, db)
-    _ -> respond(status: 404)
+    Request(method: Put, path: "/r", body) -> put(body, db)
+    _ -> empty(status: 404)
   }
 }
 
-fn put(body: View, db: Sql) -> Buf {
+fn put(body: View, db: Sql) -> Response {
   let Ok(value: In(id, r, rs)) = decode(json: body, as: In) else {
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
   let _ = sql_exec(query: "INSERT INTO readings(id, r) VALUES (:id, :r) ON CONFLICT(id) DO UPDATE SET r = excluded.r", id, r)
-  let Some(value: Reading(r: back)) = sql_first(row: Reading, query: "SELECT id, r FROM readings WHERE id = :id", id) else -> respond(status: 404)
-  respond_as(status: 200, content: Json) |> write_json(value: Out(r, twice: r * 2f, rs, read: back))
+  let Some(value: Reading(r: back)) = sql_first(row: Reading, query: "SELECT id, r FROM readings WHERE id = :id", id) else -> empty(status: 404)
+  buf() |> write_json(value: Out(r, twice: r * 2f, rs, read: back)) |> respond_as(status: 200, content: Json)
 }
 `;
 const b = compile([...std, { name: 'edges.tape', text: program }]);
@@ -80,7 +80,7 @@ const compiled = (body: string): string => {
 };
 const interpreted = (body: string): string => {
   try {
-    const out = dec.decode(it.handle(enc.encode(`PUT /r\n${body}`)));
+    const out = answered(it.handle(enc.encode(`PUT /r\n${body}`)));
     const [line = '', ...rest] = out.split('\n');
     return `${line.split(' ')[0] ?? ''} ${rest.join('\n')}`;
   } catch (e) {

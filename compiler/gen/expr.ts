@@ -1,4 +1,5 @@
 // compiler/gen/expr.ts: an expression checked and written as Wasm; its type is what the emitter gives back.
+import { isStd } from '../shadow.ts';
 import { eachExpr, eachPattern, eachType, patternsIn, unreachable } from '../ast.ts';
 import type { Arg, Expr, Pattern, TypeAst, Variant } from '../ast.ts';
 import { I32, I64, TRAP, f64, fail, sleb, uleb } from '../common.ts';
@@ -398,7 +399,10 @@ function emitCtor(c: Ctx, e: Of<'ctor'>, expected: Type | null): Type {
     c.code.push(0x41, e.name === 'True' ? 1 : 0);
     return BOOL;
   }
-  if (B.types.get(e.name)?.refine)
+  // in std's code a program's refined type does not take the name from std's own constructor (std/http.tape's
+  // `content: Text` beside a program's `type Text = View where …`), as in a pattern (shadow.ts refinedPattern)
+  const refined = B.types.get(e.name);
+  if (refined?.refine && !(isStd(c.f.file) && !isStd(refined.file) && B.ctors.has(e.name)))
     fail(
       e,
       'C36',

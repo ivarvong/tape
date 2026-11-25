@@ -27,7 +27,7 @@ const programs: { name: string; files: { name: string; text: string }[] }[] = [
     })),
   },
   // refused: a type error, and a write a retry would apply twice (a rule, found after the checks)
-  { name: 'a type error', files: [{ name: 'bad.tape', text: 'fn handle(raw: View) -> Buf {\n  1 + "a"\n}\n' }] },
+  { name: 'a type error', files: [{ name: 'bad.tape', text: 'fn handle(raw: View) -> Response {\n  1 + "a"\n}\n' }] },
 ];
 const hex = (b: Uint8Array | null): string => (b ? Buffer.from(b).toString('hex') : 'null');
 const shape = (b: Built): unknown => [hex(b.wasm), b.sites, b.queries, b.build, b.refused];

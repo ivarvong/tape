@@ -6,7 +6,8 @@ import { compile } from '../compiler.ts';
 import type { Built, Options, Source } from '../compiler.ts';
 import type { Problem } from '../compiler/common.ts';
 import { std } from '../std.ts';
-import { floatOfBytes } from '../host/memory.ts';
+import { floatOfBytes, frameAt } from '../host/memory.ts';
+import { answerText, responseOf } from '../host.ts';
 
 export { std };
 
@@ -93,19 +94,23 @@ export function bare(module: WebAssembly.Module): Bare {
 /** Why a call failed: the module's trap code, or the error's own message. */
 export const trapOf = (b: Bare, e: unknown): string =>
   `trap ${b.why() || (e instanceof Error ? e.message : String(e))}`;
-/** `handle` called on bytes copied into the module's memory: what it answered, or `trap <why>`. */
+/** `handle` called on bytes copied into the module's memory: what it answered, as host.ts answerText pictures the
+ * Response (`200\nbody`, `201 application/json\n{…}`, a header after a carriage return), or `trap <why>`. */
 export function handleBare(b: Bare, input: Uint8Array): string {
   call(b.fns, 'reset');
   const at = Number(call(b.fns, 'alloc', input.length));
   new Uint8Array(b.memory.buffer, at, input.length).set(input);
   try {
     const h = Number(call(b.fns, 'handle', at, input.length));
-    const d = new DataView(b.memory.buffer);
-    return new TextDecoder().decode(new Uint8Array(b.memory.buffer, d.getUint32(h, true), d.getUint32(h + 4, true)));
+    return answerText(responseOf(frameAt(b, h)));
   } catch (e) {
     return trapOf(b, e);
   }
 }
+/** An answer's bytes (a module's or the interpreter's handle) as host.ts answerText pictures the Response. */
+export const answered = (out: Uint8Array): string => answerText(responseOf(out));
+/** An answer's body, as text: for a test that reads only the body (a JSON document, a page). */
+export const answerBody = (out: Uint8Array): string => new TextDecoder().decode(responseOf(out).body);
 /** One export called; an error when the module has no such function. */
 export function call(fns: Functions, name: string, ...args: (number | bigint)[]): unknown {
   const f = fns[name];

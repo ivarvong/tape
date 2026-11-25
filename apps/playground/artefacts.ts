@@ -57,9 +57,7 @@ function tool(file: string, text: string): ((input: string) => string) & { wasm:
   const wasm = r.wasm;
   return Object.assign(
     (input: string): string => {
-      const raw = app.handle(enc.encode(input));
-      const answer = dec.decode(raw);
-      return /^\s*(<\?xml|<svg)/.test(answer) ? answer : dec.decode(responseOf(raw).body);
+      return dec.decode(responseOf(app.handle(enc.encode(input))).body);
     },
     { wasm },
   );

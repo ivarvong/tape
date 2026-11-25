@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { compile } from '../compiler.ts';
 import type { Options, Source } from '../compiler.ts';
-import { bare, call, handleBare, trapOf } from '../test/harness.ts';
+import { answered, bare, call, handleBare, trapOf } from '../test/harness.ts';
 import type { Bare } from '../test/harness.ts';
 import type { Log } from './replay-logs.ts';
 import { std } from '../std.ts';
@@ -42,6 +42,9 @@ const wasmCall = (ex: Bare, fn: string, args: bigint[]): string => {
 };
 const meant = (it: ReturnType<typeof interpret>, fn: string, args: bigint[] | Uint8Array<ArrayBuffer>[]): string => {
   try {
+    // handle's answer is a Response, framed as the build frames it, and pictured as handleBare pictures it
+    const [raw] = args;
+    if (fn === 'handle' && raw instanceof Uint8Array) return answered(it.handle(raw));
     return show(it.call(fn, args));
   } catch (e) {
     if (e instanceof Trap) return `trap ${e.code}`;
@@ -148,7 +151,7 @@ const meant = (it: ReturnType<typeof interpret>, fn: string, args: bigint[] | Ui
 // 2b. logs as the service stores them: recorded here from three programs, then replayed through three builds
 if (process.env.VERIFY_ONLY !== 'generated') {
   const { logOf, replayLogs } = await import('./replay-logs.ts'),
-    { instantiate } = await import('../host.ts'),
+    { answerText, instantiate, responseOf } = await import('../host.ts'),
     { nodeSql } = await import('../nodesql.ts');
   const enc = new TextEncoder(),
     plans = {
@@ -187,9 +190,10 @@ if (process.env.VERIFY_ONLY !== 'generated') {
       const ran = await app.runLogged(enc.encode(r), { transaction: f => sql.transaction(f) });
       // the first request of each plan is one the program accepts and writes for: if it is refused, the plan has gone
       // stale against the program (as it had, 15 to 19 November 2026) and what follows would check nothing
-      if (recorded.length === 0 && !/^20\d/.test(dec.decode(ran.out))) {
+      const answer = answerText(responseOf(ran.out));
+      if (recorded.length === 0 && !/^20\d/.test(answer)) {
         bad++;
-        note ||= `${name}: its first request is refused (${dec.decode(ran.out).slice(0, 60).replaceAll('\n', ' ')}): the plan no longer fits the program`;
+        note ||= `${name}: its first request is refused (${answer.slice(0, 60).replaceAll('\n', ' ')}): the plan no longer fits the program`;
       }
       // as it is stored: through JSON and back
       recorded.push(

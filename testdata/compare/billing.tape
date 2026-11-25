@@ -70,7 +70,7 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, payments: Remote, tools: Remote) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote, tools: Remote) -> Response {
   routed(raw) |> rendered
 }
 
@@ -78,7 +78,7 @@ fn handle(raw: View, db: Sql, payments: Remote, tools: Remote) -> Buf {
 // passes them; an entry point that does not declare one it reaches is refused, C72).
 fn routed(raw: View) -> Outcome {
   match request(raw) {
-    Request(method: "POST", path: "/subs", body) -> {
+    Request(method: Post, path: "/subs", body) -> {
       let Ok(value: NewSub(key, card, price)) = decode(json: body, as: NewSub) else {
         Err(error) -> Problem(status: 400, reason: error)
       }
@@ -102,14 +102,14 @@ fn routed(raw: View) -> Outcome {
       }
       Shown(status: 201, sub)
     }
-    Request(method: "POST", path: "/renew/" ++ decimal(id), body) -> {
+    Request(method: Post, path: "/renew/" ++ decimal(id), body) -> {
       let Ok(value: Renew(period)) = decode(json: body, as: Renew) else {
         Err(error) -> Problem(status: 400, reason: error)
       }
       let Some(value: sub) = load(id) else -> missing()
       renew(sub, period)
     }
-    Request(method: "POST", path: "/paid/" ++ decimal(id)) -> show(
+    Request(method: Post, path: "/paid/" ++ decimal(id)) -> show(
       status: 200,
       found: latest(
         id,
@@ -121,7 +121,7 @@ fn routed(raw: View) -> Outcome {
         )
       )
     )
-    Request(method: "POST", path: "/cancel/" ++ decimal(id)) -> show(
+    Request(method: Post, path: "/cancel/" ++ decimal(id)) -> show(
       status: 200,
       found: latest(
         id,
@@ -134,7 +134,7 @@ fn routed(raw: View) -> Outcome {
         )
       )
     )
-    Request(method: "GET", path: "/subs/" ++ decimal(id)) -> show(status: 200, found: load(id))
+    Request(method: Get, path: "/subs/" ++ decimal(id)) -> show(status: 200, found: load(id))
     _ -> Problem(status: 404, reason: "no such route")
   }
 }
@@ -313,13 +313,14 @@ fn missing() -> Outcome {
   Problem(status: 404, reason: "no such subscription")
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, sub) -> write_json(out: respond(status), value: sub)
-    Problem(status, reason) -> respond(status)
+    Shown(status, sub) -> write_json(out: buf(), value: sub) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

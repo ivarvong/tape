@@ -13,26 +13,26 @@ const program = `migration 1 "kv" {
 
 type Kv { Kv(k: View, v: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/up") -> upsert()
-    Request(method: "POST", path: "/two") -> respond(status: 200)
-      |> write_rows(rows: sql_all(row: Kv, query: "INSERT INTO kv(k, v) VALUES ('x', 1), ('y', 2) RETURNING *"))
-    Request(method: "POST", path: "/exec") -> respond(status: 200)
-      |> write_int(value: sql_exec(query: "INSERT INTO kv(k, v) VALUES ('e', 1) ON CONFLICT(k) DO NOTHING"))
-    Request(method: "POST", path: "/rename") -> respond(status: 200)
-      |> write_int(value: sql_exec(query: "UPDATE kv SET k = k || 'z' WHERE k = 'e'"))
-    _ -> respond(status: 200) |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv ORDER BY k"))
+    Request(method: Post, path: "/up") -> upsert()
+    Request(method: Post, path: "/two") -> buf()
+      |> write_rows(rows: sql_all(row: Kv, query: "INSERT INTO kv(k, v) VALUES ('x', 1), ('y', 2) RETURNING *")) |> respond(status: 200)
+    Request(method: Post, path: "/exec") -> buf()
+      |> write_int(value: sql_exec(query: "INSERT INTO kv(k, v) VALUES ('e', 1) ON CONFLICT(k) DO NOTHING")) |> respond(status: 200)
+    Request(method: Post, path: "/rename") -> buf()
+      |> write_int(value: sql_exec(query: "UPDATE kv SET k = k || 'z' WHERE k = 'e'")) |> respond(status: 200)
+    _ -> buf() |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv ORDER BY k")) |> respond(status: 200)
   }
 }
 
-fn upsert() -> Buf {
+fn upsert() -> Response {
   let Some(value: row) = sql_first(
     row: Kv,
     query: "INSERT INTO kv(k, v) VALUES ('a', 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING *",
     repeat: True
-  ) else -> respond(status: 500)
-  respond(status: 200) |> write_json(value: row)
+  ) else -> empty(status: 500)
+  buf() |> write_json(value: row) |> respond(status: 200)
 }
 `;
 

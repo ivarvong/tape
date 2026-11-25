@@ -2,7 +2,7 @@
 // division, shifts), Bool, View (slices, holes, `++`, the byte scans of std/text.tape), Float (the math functions,
 // parse_float), Dec at several scales (mul, div, round, rescale, to_dec, parse_dec), Option, List (fold, range,
 // map, filter), Map, a record and a sum type, write_json and decode round trips, and recursive helpers (tail and
-// not) with fuel. program(seed) is the source of `fn handle(raw: View) -> Buf`, which writes every value it made
+// not) with fuel. program(seed) is the source of `fn handle(raw: View) -> Response`, which writes every value it made
 // into its answer, so a value computed wrong shows in the bytes. The generator only ever writes programs the
 // compiler should take: a refusal is either a generator bug or a compiler bug, and is reported as a finding.
 import { unreachable } from '../compiler/ast.ts';
@@ -896,7 +896,7 @@ export function parts(seed: number, size = 1): { text: string; entries: string[]
       `fn ${name}(raw: View) -> Buf {\n${lets.join('\n')}\n  buf()\n${outs.map(o => `    |> ${o}`).join('\n')}\n}\n`,
     );
   }
-  const handle = `fn handle(raw: View) -> Buf {\n  buf()\n${entries.map(e => `    |> append(view: freeze(buf: ${e}(raw)))`).join('\n')}\n}\n`;
+  const handle = `fn handle(raw: View) -> Response {\n  buf()\n${entries.map(e => `    |> append(view: freeze(buf: ${e}(raw)))`).join('\n')}\n    |> respond(status: 200)\n}\n`;
   return {
     text: `${TYPES}\n${HELPERS}\n${g.fns.join('\n')}\n${bodies.join('\n')}\n${handle}`,
     entries: ['handle', ...entries],

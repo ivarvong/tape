@@ -44,16 +44,16 @@ type Intent { Intent(id: Int, find: View, replace: View, expected: View, time: I
 type Bumped { Bumped(id: Int, state: BumpState) }
 type ForBump { ForBump(bump: Int) }
 
-fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/version") -> version()
-    Request(method: "POST", path: "/bump", body) -> start(body)
-    Request(method: "POST", path: "/retry/" ++ decimal(id)) -> retry(id)
+    Request(method: Get, path: "/version") -> version()
+    Request(method: Post, path: "/bump", body) -> start(body)
+    Request(method: Post, path: "/retry/" ++ decimal(id)) -> retry(id)
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn version() -> Buf {
+fn version() -> Response {
   let Ok(value: File(content)) = repo.read_file(
     send: ReadFile(ref: "main", path: "VERSION"),
     within: 2000
@@ -61,13 +61,14 @@ fn version() -> Buf {
     Err(error: Rejected(reason)) -> problem(status: 502, reason)
     _ -> problem(status: 504, reason: "the repository did not answer")
   }
-  respond(status: 200)
+  buf()
     |> append(view: "{\"version\":")
     |> write_json_string(text: until(v: content, byte: 10))
     |> append(view: "}")
+    |> respond(status: 200)
 }
 
-fn start(body: View) -> Buf {
+fn start(body: View) -> Response {
   let Ok(value: Bump(key, from, to)) = decode(json: body, as: Bump) else {
     Err(error) -> problem(status: 400, reason: error)
   }
@@ -98,14 +99,14 @@ fn start(body: View) -> Buf {
   edit(intent)
 }
 
-fn again(found: Option[Intent]) -> Buf {
+fn again(found: Option[Intent]) -> Response {
   match found {
     Some(value) -> edit(intent: value)
     None -> problem(status: 404, reason: "no such pending bump")
   }
 }
 
-fn retry(id: Int) -> Buf {
+fn retry(id: Int) -> Response {
   let Some(value: intent) = sql_first(
     row: Intent,
     query: "SELECT * FROM bumps WHERE id = :id AND state = 'pending'",
@@ -115,7 +116,7 @@ fn retry(id: Int) -> Buf {
 }
 
 // The edit is a command with the bump's key: sent again, the repository answers what it did the first time.
-fn edit(intent: Intent) -> Buf {
+fn edit(intent: Intent) -> Response {
   let Intent(id, find, replace, expected, time) = intent
   let Ok(value: Edited(commit)) = repo.edit_file(
     send: Edit(
@@ -156,26 +157,28 @@ fn edit(intent: Intent) -> Buf {
 }
 
 // Pushed, whether this request moved the bump or a retry racing it did (both heard the same stored reply).
-fn pushed(commit: View, moved: Move[Bumped]) -> Buf {
+fn pushed(commit: View, moved: Move[Bumped]) -> Response {
   match moved {
     NoRow -> problem(status: 404, reason: "no such pending bump")
-    _ -> respond(status: 200)
+    _ -> buf()
       |> append(view: "{\"commit\":")
       |> write_json_string(text: commit)
       |> append(view: "}")
+      |> respond(status: 200)
   }
 }
 
-fn refused(reason: View, moved: Move[Bumped]) -> Buf {
+fn refused(reason: View, moved: Move[Bumped]) -> Response {
   match moved {
     NoRow -> problem(status: 404, reason: "no such pending bump")
     _ -> problem(status: 409, reason)
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  respond(status)
+fn problem(status: Int, reason: View) -> Response {
+  buf()
     |> append(view: "{\"error\":")
     |> write_json_string(text: reason)
     |> append(view: "}")
+    |> respond(status)
 }

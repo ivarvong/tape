@@ -140,8 +140,8 @@ const schemaFirst = (sql: Sql): void => {
   }
 };
 
-// "201\n{...}" is a status and a body, "200 text/html\n…" a status, a content type and a body (host.ts,
-// responseOf); output with no status line is a 200.
+// The program's Response, as the frame its generated `handle` writes (host.ts responseOf): the status, the content
+// type, the headers and the body, each checked; a status or a header the host refuses is a 500 that says why.
 const split = responseOf;
 
 /** A trace event's line when it is an effect; null when it is a place in the program. */

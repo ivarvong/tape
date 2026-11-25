@@ -12,9 +12,9 @@ const codes = (text: string): string => {
 const said = (text: string): string => compile([...std, { name: 'program.tape', text }]).errors[0]?.message ?? '';
 const head = `migration 1 "t" {\n  CREATE TABLE t(\n    id INTEGER PRIMARY KEY,\n    n INTEGER NOT NULL,\n    mean REAL NOT NULL DEFAULT 0\n  );\n  INSERT INTO t(id, n) VALUES (1, 2)\n}\n\ntype N { N(n: Int) }\n\ntype R { R(id: Int, xs: List[Int]) }\n\ntype Two {\n  A(n: Int)\n  B(n: Int)\n}\n\n`;
 const h = (body: string): string =>
-  `${head}fn handle(raw: View, db: Sql) -> Buf {\n${body}\n}\n\nfn shown(found: Option[N]) -> Buf {\n  match found {\n    Some(value: N(n)) -> respond(status: 200) |> write_int(value: n)\n    None -> respond(status: 404)\n  }\n}\n`;
+  `${head}fn handle(raw: View, db: Sql) -> Response {\n${body}\n}\n\nfn shown(found: Option[N]) -> Response {\n  match found {\n    Some(value: N(n)) -> buf() |> write_int(value: n) |> respond(status: 200)\n    None -> empty(status: 404)\n  }\n}\n`;
 const reads = (type: string): string =>
-  `${head}fn handle(raw: View, db: Sql) -> Buf {\n  match sql_first(row: ${type}, query: "SELECT ${type === 'R' ? 'id, n' : 'n'} FROM t") {\n    Some(value) -> respond(status: 200)\n    None -> respond(status: 404)\n  }\n}\n`;
+  `${head}fn handle(raw: View, db: Sql) -> Response {\n  match sql_first(row: ${type}, query: "SELECT ${type === 'R' ? 'id, n' : 'n'} FROM t") {\n    Some(value) -> empty(status: 200)\n    None -> empty(status: 404)\n  }\n}\n`;
 
 // sql.ts: what may be NULL
 ok(
@@ -24,17 +24,17 @@ ok(
 ok(
   'avg() may be NULL: it cannot be written to a NOT NULL column (C69)',
   codes(
-    h('  let _ = sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  respond(status: 200)'),
+    h('  let _ = sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  empty(status: 200)'),
   ) === 'C69' &&
     said(
-      h('  let _ = sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  respond(status: 200)'),
+      h('  let _ = sql_exec(query: "UPDATE t SET mean = (SELECT avg(n) FROM t) WHERE id = 1")\n  empty(status: 200)'),
     ).includes('may be NULL'),
 );
 ok(
   'and with coalesce it can',
   codes(
     h(
-      '  let _ = sql_exec(query: "UPDATE t SET mean = coalesce((SELECT avg(n) FROM t), 0.0) WHERE id = 1")\n  respond(status: 200)',
+      '  let _ = sql_exec(query: "UPDATE t SET mean = coalesce((SELECT avg(n) FROM t), 0.0) WHERE id = 1")\n  empty(status: 200)',
     ),
   ) === 'builds',
 );
@@ -43,7 +43,7 @@ ok(
   'an aggregate in a VALUES row is refused (C68)',
   codes(
     h(
-      '  let _ = sql_exec(query: "INSERT INTO t(id, n) VALUES (7, count(*)) ON CONFLICT(id) DO NOTHING")\n  respond(status: 200)',
+      '  let _ = sql_exec(query: "INSERT INTO t(id, n) VALUES (7, count(*)) ON CONFLICT(id) DO NOTHING")\n  empty(status: 200)',
     ),
   ) === 'C68',
 );

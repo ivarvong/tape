@@ -42,25 +42,23 @@ type Answer {
 
 type Place { Place(lat: Float, lon: Float, day: Int, tz: Float) }
 
-fn handle(raw: View, clock: Clock) -> Buf {
+fn handle(raw: View, clock: Clock) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/", query: None) -> home()
-    Request(method: "GET", path: "/", query: Some(value: q)) -> match place(q) {
+    Request(method: Get, path: "/", query: None) -> home()
+    Request(method: Get, path: "/", query: Some(value: q)) -> match place(q) {
       Ok(value: p) -> shown(p)
-      Err(error) -> page(status: 400, title: "Not a place")
+      Err(error) -> page(title: "Not a place")
         |> append(view: "<p>")
         |> write_html(text: error)
         |> append(view: ". Try <a href=\"?lat=51.4769&amp;lon=-0.0005\">Greenwich</a>.</p>")
-        |> end
+        |> end(status: 400)
     }
-    Request(method: "GET", path: "/api", query: Some(value: q)) -> match place(q) {
-      Ok(value: p) -> respond_as(status: 200, content: Json) |> write_json(value: answer(p))
-      Err(error) -> respond_as(status: 400, content: Json) |> write_json(value: Problem(error))
+    Request(method: Get, path: "/api", query: Some(value: q)) -> match place(q) {
+      Ok(value: p) -> json(status: 200, value: answer(p))
+      Err(error) -> json(status: 400, value: Problem(error))
     }
-    Request(method: "GET", path: "/api") -> respond_as(status: 400, content: Json)
-      |> write_json(value: Problem(error: "lat: missing"))
-    _ -> respond_as(status: 404, content: Json)
-      |> write_json(value: Problem(error: "no such route"))
+    Request(method: Get, path: "/api") -> json(status: 400, value: Problem(error: "lat: missing"))
+    _ -> json(status: 404, value: Problem(error: "no such route"))
   }
 }
 
@@ -192,9 +190,9 @@ fn sun(day: Int, minutes: Float) -> Sun {
   let eot = 4f * deg(rad: y * sin(2f * l) - 2f * e * sin(mr) + 4f * e * y * sin(mr) * cos(
     2f * l
   ) - 0.5f * y * y * sin(
-      4f * l
-    ) - 1.25f * e * e * sin(
-      2f * mr
+    4f * l
+  ) - 1.25f * e * e * sin(
+    2f * mr
   ))
   Sun(decl: deg(rad: asin(sin(eps) * sin(lambda))), eot)
 }
@@ -226,9 +224,7 @@ fn at_event(p: Place, zenith: Float, side: Float, minutes: Float) -> Option[Floa
   let h = cos_hour(p, zenith, minutes)
   match {
     h < -1f or h > 1f -> None
-    else -> Some(
-      value: noon_at(p, minutes) + side * 4f * deg(rad: acos(x: h))
-    )
+    else -> Some(value: noon_at(p, minutes) + side * 4f * deg(rad: acos(x: h)))
   }
 }
 
@@ -376,59 +372,58 @@ fn two(n: Int) -> View {
 
 // ---------- pages ----------
 
-fn page(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn page(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><meta name=robots \
         content=\"noindex\"><title>")
     |> write_html(text: title)
     |> append(view: " · sunclock</title><style>")
     |> append(
-    view: ":root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--card:#fff;"
-  )
+      view: ":root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--card:#fff;"
+    )
     |> append(view: "--line:#e3e4e6;--acc:#2856c7;--night:#1f2a44;--twi:#6b7fb5;--day:#f4c542}")
     |> append(
-    view: "@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;"
-  )
+      view: "@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;"
+    )
     |> append(view: "--card:#1d2024;--line:#30343a;--acc:#86a8ff;--night:#0b1120;--twi:#3c4f86;--day:#e9b82f}}")
     |> append(view: "body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 \
         system-ui,sans-serif}")
     |> append(
-    view: "main{max-width:44rem;margin:0 auto;padding:2rem 1rem}h1{font-size:1.5rem;margin:0}"
-  )
+      view: "main{max-width:44rem;margin:0 auto;padding:2rem 1rem}h1{font-size:1.5rem;margin:0}"
+    )
     |> append(view: "a{color:var(--acc)}.mute{color:var(--mute)}.grid{display:grid;")
     |> append(
-    view: "grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;margin:1rem 0}"
-  )
+      view: "grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;margin:1rem 0}"
+    )
     |> append(
-    view: ".grid div{background:var(--card);border:1px solid var(--line);border-radius:10px;"
-  )
+      view: ".grid div{background:var(--card);border:1px solid var(--line);border-radius:10px;"
+    )
     |> append(
-    view: "padding:.6rem .8rem}.grid b{display:block;font-size:1.35rem;font-variant-numeric:"
-  )
+      view: "padding:.6rem .8rem}.grid b{display:block;font-size:1.35rem;font-variant-numeric:"
+    )
     |> append(
-    view: "tabular-nums}svg{width:100%;height:auto;display:block}.night{fill:var(--night)}"
-  )
+      view: "tabular-nums}svg{width:100%;height:auto;display:block}.night{fill:var(--night)}"
+    )
     |> append(
-    view: ".twi{fill:var(--twi)}.day{fill:var(--day)}.tick{stroke:var(--mute);stroke-width:1}"
-  )
+      view: ".twi{fill:var(--twi)}.day{fill:var(--day)}.tick{stroke:var(--mute);stroke-width:1}"
+    )
     |> append(view: ".lbl{fill:var(--mute);font:11px system-ui,sans-serif}</style><main>")
     |> append(view: "<p class=mute><a href=\"/p/demo/sunclock/\">sunclock</a></p><h1>")
     |> write_html(text: title)
     |> append(view: "</h1>")
 }
 
-fn end(out: Buf) -> Buf {
+fn end(out: Buf, status: Int) -> Response {
   out
-    |> append(view: "<p class=mute>Computed in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/sunclock/sunclock.tape\">source</a>) from NOAA's solar equations: sunrise and \
-        sunset when the top of the sun meets the horizon (refraction 34′), dawn and dusk at 6° \
-        below it (civil twilight). Within a minute or two of an ephemeris away from the \
-        poles.</p></main></html>")
+    |> append(view: "<p class=mute>Computed in <a href=\"/\">Tape</a> (<a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/sunclock/sunclock.tape\">source</a>) from NOAA's solar equations: sunrise and sunset when the top of the sun meets the horizon (refraction 34′), dawn and dusk at 6° below it (civil twilight). Within a minute or two of an ephemeris away from the poles.</p></main></html>")
+    |> respond_as(status, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
-fn home() -> Buf {
-  page(status: 200, title: "Sunrise and sunset, anywhere")
+fn home() -> Response {
+  page(title: "Sunrise and sunset, anywhere")
     |> append(view: "<p>Give a latitude and a longitude in the address: \
         <code>?lat=51.4769&amp;lon=-0.0005</code>, and optionally \
         <code>&amp;date=2026-12-21</code> and <code>&amp;tz=-5</code> (hours from \
@@ -441,12 +436,12 @@ fn home() -> Buf {
         December)</li><li><a \
         href=\"?lat=78.2232&amp;lon=15.6267&amp;tz=1&amp;date=2026-06-21\">Longyearbyen at \
         midsummer</a></li></ul>")
-    |> end
+    |> end(status: 200)
 }
 
-fn shown(p: Place) -> Buf {
+fn shown(p: Place) -> Response {
   let a = answer(p)
-  page(status: 200, title: "The sun on \(a.date)")
+  page(title: "The sun on \(a.date)")
     |> append(view: "<p class=mute>at \(p.lat)°, \(p.lon)° · times at UTC\(offset(tz: p.tz)) · ")
     |> append(view: "<a href=\"/p/demo/sunclock/api?lat=\(p.lat)&amp;lon=\(p.lon)&amp;date=\(a.date)&amp;tz=\(p.tz)\">JSON</a></p>")
     |> bar(s: sky(p), tz: p.tz)
@@ -457,14 +452,15 @@ fn shown(p: Place) -> Buf {
     |> tile(name: "Sunset", found: a.sunset)
     |> tile(name: "Dusk", found: a.dusk)
     |> append(
-    view: "<div>Day length<b>\(a.day_minutes / 60) h \(two(n: a.day_minutes % 60)) m</b></div>"
-  )
+      view: "<div>Day length<b>\(a.day_minutes / 60) h \(two(n: a.day_minutes % 60)) m</b></div>"
+    )
     |> append(view: "<div>Sun at noon<b>\(a.noon_elevation)°</b></div></div>")
     |> append(view: match a.sky {
-    "up all day" -> "<p>The sun does not set today.</p>"
-    "down all day" -> "<p>The sun does not rise today.</p>"
-    _ -> ""
-  }) |> end
+      "up all day" -> "<p>The sun does not set today.</p>"
+      "down all day" -> "<p>The sun does not rise today.</p>"
+      _ -> ""
+    })
+    |> end(status: 200)
 }
 
 fn offset(tz: Float) -> View {
@@ -500,10 +496,10 @@ fn spans(out: Buf, s: Sky, shift: Float) -> Buf {
   match s {
     Rises(dawn, rise, set, dusk) -> out
       |> band(
-      class: "twi",
-      from: or_else(found: dawn, other: rise) + shift,
-      to: or_else(found: dusk, other: set) + shift
-    )
+        class: "twi",
+        from: or_else(found: dawn, other: rise) + shift,
+        to: or_else(found: dusk, other: set) + shift
+      )
       |> band(class: "day", from: rise + shift, to: set + shift)
     AllDay -> out |> band(class: "day", from: 0f, to: 1440f)
     AllNight(dawn: Some(value: d), dusk: Some(value: k)) -> out

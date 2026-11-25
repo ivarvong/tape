@@ -25,7 +25,11 @@ type End {
   Open(at: Int)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  highlighted(raw) |> respond_as(status: 200, content: Html)
+}
+
+fn highlighted(raw: View) -> Buf {
   scan(src: raw, at: 0, out: buf(), state: fresh())
 }
 

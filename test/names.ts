@@ -152,10 +152,10 @@ T(
 // Text, and the program's Text(…) pattern is its refinement (examples/tools/notes.tape has `type Text`; until
 // 2026-11-23, std/http.tape:225 was C14 in such a program as soon as it called respond_as)
 const RT = `type Text = View where len(self) <= 5
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match raw {
-    Text(t) -> respond_as(status: 200, content: Json) |> append(view: t)
-    _ -> respond(status: 413)
+    Text(t) -> buf() |> append(view: t) |> respond_as(status: 200, content: Json)
+    _ -> empty(status: 413)
   }
 }
 `;
@@ -172,8 +172,8 @@ T("std's Text arm, beside a program's refined Text (interp)", Number(interp(RT2,
 // bare name. `content: Atom` is then the program's, and C13 has to say so: the missing field is not a hint that
 // std's Atom, which has none, was shadowed.
 const SHADOW_ATOM = `type Atom { Atom(n: Int) }
-fn f() -> Buf {
-  respond_as(status: 200, content: Atom)
+fn f() -> Response {
+  buf() |> respond_as(status: 200, content: Atom)
 }
 `;
 const atomErr = compile([...std, { name: 't.tape', text: SHADOW_ATOM }], { exports: ['f'] }).errors.find(
@@ -280,20 +280,20 @@ machine subs.state: SubState {
   Trialing -> Canceled
   Active -> Canceled
 }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(path: "/a/" ++ decimal(id)) -> settle(id, state: "canceled")
     Request(path: "/b/" ++ decimal(id), body) -> settle(id, state: body)
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
-fn settle(id: Int, state: View) -> Buf {
+fn settle(id: Int, state: View) -> Response {
   match state {
 ${arm}
   }
 }
-fn done(n: Int) -> Buf {
-  respond(status: 200) |> write_int(value: n)
+fn done(n: Int) -> Response {
+  buf() |> write_int(value: n) |> respond(status: 200)
 }
 type SubState { Trialing Active PastDue Canceled }
 `;
@@ -304,23 +304,21 @@ const c59 = (src: string) =>
     .map(c => c.split(':')[0]);
 T(
   'after a "canceled" arm, the state is not canceled: the write passes',
-  c59(M(`    "canceled" -> respond(status: 409)\n    _ -> ${W}`)),
+  c59(M(`    "canceled" -> empty(status: 409)\n    _ -> ${W}`)),
   [],
 );
 T('without the arm, canceled -> active from the literal path is C59', c59(M(`    _ -> ${W}`)), ['C59']);
-T(
-  'a guarded arm excludes nothing after it',
-  c59(M(`    "canceled" if id > 5 -> respond(status: 409)\n    _ -> ${W}`)),
-  ['C59'],
-);
+T('a guarded arm excludes nothing after it', c59(M(`    "canceled" if id > 5 -> empty(status: 409)\n    _ -> ${W}`)), [
+  'C59',
+]);
 T(
   'in the "past_due" arm the state is past_due: the write passes',
-  c59(M(`    "past_due" -> ${W}\n    _ -> respond(status: 409)`)),
+  c59(M(`    "past_due" -> ${W}\n    _ -> empty(status: 409)`)),
   [],
 );
 T(
   'excluding canceled leaves active -> active (a no-op) and past_due -> active, trialing -> active: declared',
-  c59(M(`    "canceled" -> respond(status: 409)\n    "x" -> respond(status: 409)\n    _ -> ${W}`)),
+  c59(M(`    "canceled" -> empty(status: 409)\n    "x" -> empty(status: 409)\n    _ -> ${W}`)),
   [],
 );
 T(
@@ -328,7 +326,7 @@ T(
   c59(
     M(`    _ -> pick(id, state)`).replace(
       'fn done(',
-      `fn pick(id: Int, state: View) -> Buf {\n  match {\n    state == "canceled" -> respond(status: 409)\n    else -> ${W}\n  }\n}\nfn done(`,
+      `fn pick(id: Int, state: View) -> Response {\n  match {\n    state == "canceled" -> empty(status: 409)\n    else -> ${W}\n  }\n}\nfn done(`,
     ),
   ),
   [],
@@ -337,7 +335,7 @@ T(
   'a copy under another name is not followed (C60, documented)',
   c59(
     M(
-      `    "canceled" -> respond(status: 409)\n    _ -> {\n      let s = state\n      ${W.replace(', state))', ', state: s))')}\n    }`,
+      `    "canceled" -> empty(status: 409)\n    _ -> {\n      let s = state\n      ${W.replace(', state))', ', state: s))')}\n    }`,
     ),
   ),
   ['C60'],
@@ -345,21 +343,21 @@ T(
 // C77 is left out too: this fragment moves subs to "active" and never on to "canceled" (no way out; test/timers-way-out.ts)
 T(
   'the machine programs above have no other errors (C62: they write through sql_exec; C77: no way out of active)',
-  codes(M(`    "canceled" -> respond(status: 409)\n    _ -> ${W}`)).filter(
+  codes(M(`    "canceled" -> empty(status: 409)\n    _ -> ${W}`)).filter(
     c => !c.startsWith('C62') && !c.startsWith('C77'),
   ),
   [],
 );
 T(
   '… and C77 is that: no write moves a subscription out of "active"',
-  codes(M(`    "canceled" -> respond(status: 409)\n    _ -> ${W}`)).filter(c => c.startsWith('C77')),
+  codes(M(`    "canceled" -> empty(status: 409)\n    _ -> ${W}`)).filter(c => c.startsWith('C77')),
   ['C77:2'],
 );
 {
   const set = `done(n: sql_exec(query: "UPDATE subs SET state = :state WHERE id = :id AND state = 'trialing'", state, id))`;
   T(
     'a to-state known only by exclusion is still C60',
-    c59(M(`    "canceled" -> respond(status: 409)\n    _ -> ${set}`)),
+    c59(M(`    "canceled" -> empty(status: 409)\n    _ -> ${set}`)),
     ['C60'],
   );
 }
@@ -373,7 +371,7 @@ T(
   const rest = ['Trialing', 'Active', 'PastDue'].map(s => `    ${s} -> ${W}`).join('\n');
   T(
     'a constructor arm narrows: Canceled answers 409, the other states move to active',
-    codes(typed(`    Canceled -> respond(status: 409)\n${rest}`)).filter(
+    codes(typed(`    Canceled -> empty(status: 409)\n${rest}`)).filter(
       c => !c.startsWith('C62') && !c.startsWith('C77'),
     ),
     [],

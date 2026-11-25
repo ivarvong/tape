@@ -32,18 +32,19 @@ type NewOrder { NewOrder(key: Key, item: View) }
 type Reserve { Reserve(item: View) }
 type Reserved { Reserved(item: View, remaining: Int) }
 
-fn handle(raw: View, db: Sql, stock: Remote) -> Buf {
+fn handle(raw: View, db: Sql, stock: Remote) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> place(body)
-    Request(method: "POST", path: "/retry/" ++ decimal(id)) -> retry(id)
-    Request(method: "GET", path: "/orders") -> respond(status: 200)
+    Request(method: Post, path: "/orders", body) -> place(body)
+    Request(method: Post, path: "/retry/" ++ decimal(id)) -> retry(id)
+    Request(method: Get, path: "/orders") -> buf()
       |> write_rows(rows: sql_all(row: Order, query: "SELECT * FROM orders ORDER BY id"))
+      |> respond(status: 200)
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
 // The order this request makes, or the one an earlier request with the same key made.
-fn place(body: View) -> Buf {
+fn place(body: View) -> Response {
   let Ok(value: NewOrder(key, item)) = decode(json: body, as: NewOrder) else {
     Err(error) -> problem(status: 400, reason: error)
   }
@@ -65,7 +66,7 @@ fn place(body: View) -> Buf {
 }
 
 // The same key again: a pending order is sent to stock again (same once key); a settled one is shown as it stands.
-fn again(found: Option[Order]) -> Buf {
+fn again(found: Option[Order]) -> Response {
   match found {
     Some(value: order = Order(state: Pending)) -> reserve(order)
     Some(value: order = Order(state: Confirmed)) -> shown(status: 200, order)
@@ -74,7 +75,7 @@ fn again(found: Option[Order]) -> Buf {
   }
 }
 
-fn retry(id: Int) -> Buf {
+fn retry(id: Int) -> Response {
   let Some(value: order) = sql_first(
     row: Order,
     query: "SELECT * FROM orders WHERE id = :id AND state = 'pending'",
@@ -84,7 +85,7 @@ fn retry(id: Int) -> Buf {
 }
 
 // The order is committed before the call is made: a call is a commit point. Each way the call can fail is an arm.
-fn reserve(order: Order) -> Buf {
+fn reserve(order: Order) -> Response {
   let Order(id, item) = order
   let Ok(value: Reserved) = call(
     to: stock,
@@ -127,22 +128,23 @@ fn reserve(order: Order) -> Buf {
 }
 
 // Refused, whether this request moved the order or a retry racing it did.
-fn refused(reason: View, moved: Move[Order]) -> Buf {
+fn refused(reason: View, moved: Move[Order]) -> Response {
   match moved {
     NoRow -> problem(status: 404, reason: "no such pending order")
     _ -> problem(status: 409, reason)
   }
 }
 
-fn shown(status: Int, order: Order) -> Buf {
-  respond(status) |> write_json(value: order)
+fn shown(status: Int, order: Order) -> Response {
+  buf() |> write_json(value: order) |> respond(status)
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  respond(status)
+fn problem(status: Int, reason: View) -> Response {
+  buf()
     |> append(view: "{\"error\":")
     |> write_json_string(text: reason)
     |> append(view: "}")
+    |> respond(status)
 }
 
 // Across two programs: what stock gave out, against the orders. Each order's reserve carries the order's key, so an

@@ -98,9 +98,7 @@ async function tool(url: string): Promise<(input: string) => string> {
   if (!r.ok) throw new Error(`${url} did not load (${r.status})`);
   const app: App = instantiate(await WebAssembly.compile(await r.arrayBuffer()), {});
   return input => {
-    const raw = app.handle(enc.encode(input));
-    const t = dec.decode(raw);
-    return /^\s*(<\?xml|<svg)/.test(t) ? t : dec.decode(responseOf(raw).body);
+    return dec.decode(responseOf(app.handle(enc.encode(input))).body);
   };
 }
 

@@ -5,13 +5,23 @@ import { readFileSync } from 'node:fs';
 import { checkQueries } from '../check.ts';
 import { compile } from '../compiler.ts';
 import type { Built } from '../compiler.ts';
-import { instantiate, isCall, isHead, isNow, isRandom, isWake, measuredText, traceOf } from '../host.ts';
+import {
+  answerText,
+  instantiate,
+  isCall,
+  isHead,
+  isNow,
+  isRandom,
+  isWake,
+  measuredText,
+  responseOf,
+  traceOf,
+} from '../host.ts';
 import type { Cell, Effect, TraceEvent } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 
 const enc = new TextEncoder();
-const dec = new TextDecoder();
 const answer = (e: { rows?: Cell[][] | undefined; r?: number | undefined }): string =>
   e.rows ? JSON.stringify(e.rows) : `${e.r} written`;
 
@@ -86,8 +96,10 @@ export async function runRequests(file: string, requests: readonly string[]): Pr
     );
     // each stretch of the run in a transaction, as the service runs it: a rollback(out) or a trap undoes its writes
     const ran = await app.runLogged(req, { transaction: f => db.transaction(f) });
-    // a header the program set stands on the status line after a carriage return: shown as ␍
-    console.log(`\n→ ${r}\n← ${dec.decode(ran.out).replaceAll('\r', ' ␍ ').replaceAll('\n', ' ⏎ ')}\n\n  effect log`);
+    // the answer as a status line: a header the program set stands on it after a carriage return, shown as ␍
+    console.log(
+      `\n→ ${r}\n← ${answerText(responseOf(ran.out)).replaceAll('\r', ' ␍ ').replaceAll('\n', ' ⏎ ')}\n\n  effect log`,
+    );
     for (const e of ran.effects) console.log(`    ${effectLine(plain, e)}`);
     const t = traceOf(tmod, req, ran.effects);
     const out = [...traceLines(traced, file, lines, t.events), ...(t.error === null ? [] : [`  ${t.error}`])];

@@ -17,9 +17,9 @@ type Refused {
   Refused(error: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let Ok(value: Cart(lines, rate)) = decode(json: raw, as: Cart) else {
-    Err(error) -> buf() |> write_json(value: Refused(error))
+    Err(error) -> json(status: 200, value: Refused(error))
   }
   let subtotal = fold(
     list: lines,
@@ -27,5 +27,5 @@ fn handle(raw: View) -> Buf {
     by: fn(sum: Dec[2], line: Line) -> Dec[2] { sum + line.price * line.qty }
   )
   let tax = mul(a: subtotal, by: rate, scale: 2, rounding: HalfEven)
-  buf() |> write_json(value: Priced(subtotal, tax, total: subtotal + tax))
+  json(status: 200, value: Priced(subtotal, tax, total: subtotal + tax))
 }

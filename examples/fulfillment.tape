@@ -128,7 +128,7 @@ fn handle(
   payments: Remote,
   shipping: Remote,
   timer: Timer
-) -> Buf {
+) -> Response {
   routed(raw) |> rendered
 }
 
@@ -136,19 +136,16 @@ fn handle(
 // name; the compiler passes them, and refuses an entry point that reaches one it does not declare (C72).
 fn routed(raw: View) -> Outcome {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> start(
+    Request(method: Post, path: "/orders", body) -> start(
       wait: 2000,
       order: decode(json: body, as: NewOrder)
     )
-    Request(method: "POST", path: "/orders/wait/" ++ decimal(ms), body) -> start(
+    Request(method: Post, path: "/orders/wait/" ++ decimal(ms), body) -> start(
       wait: ms,
       order: decode(json: body, as: NewOrder)
     )
-    Request(
-      method: "POST",
-      path: "/advance/" ++ decimal(id)
-    ) -> advance(wait: 2000, found: load(id))
-    Request(method: "GET", path: "/orders/" ++ decimal(id)) -> shown(found: load(id))
+    Request(method: Post, path: "/advance/" ++ decimal(id)) -> advance(wait: 2000, found: load(id))
+    Request(method: Get, path: "/orders/" ++ decimal(id)) -> shown(found: load(id))
     _ -> Problem(status: 404, reason: "no such route")
   }
 }
@@ -454,13 +451,14 @@ fn show(status: Int, found: Option[Order]) -> Outcome {
 }
 
 // An outcome as an HTTP response: the order as JSON, or {"error": reason}.
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, order) -> write_json(out: respond(status), value: order)
-    Problem(status, reason) -> respond(status)
+    Shown(status, order) -> write_json(out: buf(), value: order) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

@@ -7,14 +7,14 @@ import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { instantiate, traceOf, TRACE_SITES } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
-import { finish, ok, same, std } from './harness.ts';
+import { answered, finish, ok, same, std } from './harness.ts';
 
 const program = `schema "CREATE TABLE IF NOT EXISTS seen(n INTEGER NOT NULL)"
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let n = count(v: request(raw).body, at: 0, k: 0)
   let _ = sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
-  respond(status: 200) |> append(view: "\\(n)")
+  buf() |> append(view: "\\(n)") |> respond(status: 200)
 }
 
 fn count(v: View, at: Int, k: Int) -> Int {
@@ -46,7 +46,7 @@ ok(
   'the SQL after the cut is still in the trace',
   cut.events.some(e => 'sql' in e),
 );
-same('and the replay answers as the run did', new TextDecoder().decode(cut.out ?? new Uint8Array()), '200\n10');
+same('and the replay answers as the run did', cut.out ? answered(cut.out) : '', '200\n10');
 
 // 200,000 bytes: about 600,000 events; the default keeps TRACE_SITES of them
 const big = enc.encode(`POST /\n${'x'.repeat(200_000)}`);

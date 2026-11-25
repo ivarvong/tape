@@ -7,7 +7,7 @@ import { CONTENT_TYPES, instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { effectLine, queryNames } from '../apps/playground/src/lines.ts';
 import { nodeSql } from '../nodesql.ts';
-import { bare, built, call, finish, read, same } from './harness.ts';
+import { bare, built, call, finish, read, same, answered } from './harness.ts';
 
 const said = (text: string): string => {
   const [e] = compile([...std, { name: 't.tape', text }], { exports: ['f'] }).errors;
@@ -46,26 +46,26 @@ same(
   CREATE TABLE a(k TEXT PRIMARY KEY NOT NULL, b INTEGER NOT NULL)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let r = request(raw)
   match r.path {
     "/in/" ++ id -> received(id)
     OTHER
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn received(id: View) -> Buf {
-  let 1 = sql_exec(query: "INSERT INTO d(id, n) VALUES (:id, 1) ON CONFLICT(id) DO NOTHING", id) else -> respond(status: 200) |> append(view: "dup")
+fn received(id: View) -> Response {
+  let 1 = sql_exec(query: "INSERT INTO d(id, n) VALUES (:id, 1) ON CONFLICT(id) DO NOTHING", id) else -> buf() |> append(view: "dup") |> respond(status: 200)
   match id {
     "refund" -> credit(k: "acme", by: -5)
     _ -> credit(k: "acme", by: 5)
   }
 }
 
-fn credit(k: View, by: Int) -> Buf {
+fn credit(k: View, by: Int) -> Response {
   let _ = sql_exec(query: "INSERT INTO a(k, b) VALUES (:k, :by) ON CONFLICT(k) DO UPDATE SET b = b + :by", k, by)
-  respond(status: 200) |> append(view: "ok")
+  buf() |> append(view: "ok") |> respond(status: 200)
 }
 `;
   const codesOf = (text: string): string[] =>
@@ -79,7 +79,7 @@ fn credit(k: View, by: Int) -> Buf {
       if (!r.wasm) return 'does not compile';
       const sql = nodeSql();
       const app = instantiate(new WebAssembly.Module(r.wasm), { sql, log: false });
-      const send = (): string => new TextDecoder().decode(app.handle(new TextEncoder().encode('POST /in/x1\n')));
+      const send = (): string => answered(app.handle(new TextEncoder().encode('POST /in/x1\n')));
       return [send(), send(), sql.exec("SELECT b FROM a WHERE k = 'acme'").toArray()[0]?.['b']];
     })(),
     ['200\nok', '200\ndup', 5],
@@ -91,7 +91,12 @@ fn credit(k: View, by: Int) -> Buf {
   );
   same(
     'C54: a call where the claim failed (its else) is refused',
-    codesOf(claimed.replace('else -> respond(status: 200) |> append(view: "dup")', 'else -> credit(k: "acme", by: 1)')),
+    codesOf(
+      claimed.replace(
+        'else -> buf() |> append(view: "dup") |> respond(status: 200)',
+        'else -> credit(k: "acme", by: 1)',
+      ),
+    ),
     ['C54:23'],
   );
 }
@@ -110,17 +115,17 @@ type Note {
   Note(text: View, at: Option[Int])
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let r = request(raw)
   match r.path {
     "/ev" -> match decode(json: r.body, as: Ev) {
-      Ok(value: Paid(id, amount)) -> respond(status: 200) |> append(view: "paid \\(id) \\(amount)")
-      Ok(value: Refunded(id)) -> respond(status: 200) |> append(view: "refunded \\(id)")
-      Err(error) -> respond(status: 400) |> append(view: error)
+      Ok(value: Paid(id, amount)) -> buf() |> append(view: "paid \\(id) \\(amount)") |> respond(status: 200)
+      Ok(value: Refunded(id)) -> buf() |> append(view: "refunded \\(id)") |> respond(status: 200)
+      Err(error) -> buf() |> append(view: error) |> respond(status: 400)
     }
     _ -> match decode(json: r.body, as: Note) {
-      Ok(value: Note(text)) -> respond(status: 200) |> append(view: text)
-      Err(error) -> respond(status: 400) |> append(view: error)
+      Ok(value: Note(text)) -> buf() |> append(view: text) |> respond(status: 200)
+      Err(error) -> buf() |> append(view: error) |> respond(status: 400)
     }
   }
 }
@@ -144,7 +149,7 @@ fn handle(raw: View) -> Buf {
     const got = app ? responseOf(app.handle(enc.encode(req))) : null;
     same(
       `decode: ${req.replace('\n', ' ')}`,
-      [got ? `${got.status}\n${dec.decode(got.body)}` : 'does not compile', dec.decode(it.handle(enc.encode(req)))],
+      [got ? `${got.status}\n${dec.decode(got.body)}` : 'does not compile', answered(it.handle(enc.encode(req)))],
       [want, want],
     );
   }
@@ -181,13 +186,13 @@ fn handle(raw: View) -> Buf {
 // the only types were Html, Json, Text, Css and Svg). The type and charset are RFC 4180's and the WHATWG's.
 {
   const P =
-    'fn handle(raw: View) -> Buf {\n  respond_as(status: 200, content: Csv) |> append(view: "day,total\\n1,5\\n")\n}\n';
+    'fn handle(raw: View) -> Response {\n  buf() |> append(view: "day,total\\n1,5\\n") |> respond_as(status: 200, content: Csv)\n}\n';
   const r = compile([...std, { name: 't.tape', text: P }]);
   const got = r.wasm
     ? responseOf(instantiate(new WebAssembly.Module(r.wasm), {}).handle(new TextEncoder().encode('GET /\n')))
     : null;
   same(
-    'respond_as(content: Csv) is served as text/csv',
+    'buf() |> respond_as(content: Csv) is served as text/csv',
     got ? [got.status, got.type, new TextDecoder().decode(got.body)] : r.errors.map(e => e.message),
     [200, 'text/csv; charset=utf-8', 'day,total\n1,5\n'],
   );
@@ -232,8 +237,12 @@ fn handle(raw: View) -> Buf {
     const out = responseOf(new TextEncoder().encode(s));
     return [out.status, out.type, new TextDecoder().decode(out.body)];
   };
+  // a type is Content's constructor, written by the host: text that named one (a page type, an obsolete XML type,
+  // a parameter on the token) is no frame, and is a 500 that says so, never served as that type or as a body
+  const unframed = (n: number): string =>
+    `the program's answer is not a response frame (a bug in the host or the compiler): ${n} bytes that do not start "\\0tap"`;
   same(
-    'a page type, an obsolete XML type, or a parameter on the token is all body',
+    'text that names a page type, an obsolete XML type, or a parameter on the token is no frame: 500',
     [
       head('200 application/xhtml+xml\n<html/>'),
       head('200 text/xml\n<a/>'),
@@ -241,10 +250,10 @@ fn handle(raw: View) -> Buf {
       head('200 text/javascript\nalert(1)'),
     ],
     [
-      [200, plain, '200 application/xhtml+xml\n<html/>'],
-      [200, plain, '200 text/xml\n<a/>'],
-      [200, plain, '200 application/atom+xml; charset=utf-8\n<feed/>'],
-      [200, plain, '200 text/javascript\nalert(1)'],
+      [500, plain, unframed(33)],
+      [500, plain, unframed(17)],
+      [500, plain, unframed(47)],
+      [500, plain, unframed(28)],
     ],
   );
 }
@@ -260,19 +269,19 @@ fn handle(raw: View) -> Buf {
 
 type Account { Account(id: View, balance: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(path: "/accounts/" ++ id) -> shown(found: sql_first(row: Account, query: "SELECT id, balance FROM accounts WHERE id = :id", id))
     Request(path: "/to/" ++ to) -> shown(found: sql_first(row: Account, query: "SELECT id, balance FROM accounts WHERE id = :to", to))
     Request(path: "/n/" ++ id) -> shown(found: sql_first(row: Account, query: "SELECT id, balance FROM accounts WHERE id = :id AND balance > 0", id))
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn shown(found: Option[Account]) -> Buf {
+fn shown(found: Option[Account]) -> Response {
   match found {
-    Some(value: Account(balance)) -> respond(status: 200) |> append(view: "\\(balance)")
-    None -> respond(status: 404)
+    Some(value: Account(balance)) -> buf() |> append(view: "\\(balance)") |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 `;

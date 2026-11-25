@@ -6,24 +6,24 @@
 // walk's: a direct port of it here, and URLSearchParams where a browser agrees.
 import '../node25.ts';
 import { interpret } from '../interp.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { built, finish, moduleOf, ok, same, std } from './harness.ts';
 
 const PROGRAM = {
   name: 'form.tape',
-  text: `fn handle(raw: View) -> Buf {
+  text: `fn handle(raw: View) -> Response {
   match request(raw) {
     Request(path: "/n/" ++ decimal(n)) -> read_all(n)
     Request(path: "/each/" ++ decimal(n)) -> each(n)
     Request(path: "/get", query: Some(value: q), body) -> shown(o: form_field(body: q, name: body))
-    Request(method: "POST", path: "/check", body) -> checked(body)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/check", body) -> checked(body)
+    _ -> empty(status: 404)
   }
 }
 
-fn read_all(n: Int) -> Buf {
+fn read_all(n: Int) -> Response {
   let q = freeze(buf: form(out: buf(), i: 0, n))
-  respond(status: 200) |> write_int(value: walk(q, at: 0, acc: 0))
+  buf() |> write_int(value: walk(q, at: 0, acc: 0)) |> respond(status: 200)
 }
 
 // One pass: each byte is in one scan, so the steps follow the bytes, not the square of the fields.
@@ -58,9 +58,9 @@ fn form(out: Buf, i: Int, n: Int) -> Buf {
   }
 }
 
-fn each(n: Int) -> Buf {
+fn each(n: Int) -> Response {
   let q = freeze(buf: form(out: buf(), i: 0, n))
-  respond(status: 200) |> write_int(value: total(q, i: 0, n, acc: 0))
+  buf() |> write_int(value: total(q, i: 0, n, acc: 0)) |> respond(status: 200)
 }
 
 fn total(q: View, i: Int, n: Int, acc: Int) -> Int {
@@ -77,19 +77,19 @@ fn found(o: Option[View]) -> Int {
   }
 }
 
-fn shown(o: Option[View]) -> Buf {
+fn shown(o: Option[View]) -> Response {
   match o {
-    Some(value) -> respond(status: 200) |> append(view: "[\\(value)]")
-    None -> respond(status: 200) |> append(view: "none")
+    Some(value) -> buf() |> append(view: "[\\(value)]") |> respond(status: 200)
+    None -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 
-fn checked(body: View) -> Buf {
-  let Some(value: n) = decimal(until(v: body, byte: 10)) else -> respond(status: 400)
+fn checked(body: View) -> Response {
+  let Some(value: n) = decimal(until(v: body, byte: 10)) else -> empty(status: 400)
   let rest = after(v: body, byte: 10)
   match form_field(body: slice(v: rest, from: n, to: len(rest)), name: slice(v: rest, from: 0, to: n)) {
-    Some(value) -> respond(status: 200) |> push(byte: 49) |> append(view: value)
-    None -> respond(status: 200) |> push(byte: 48)
+    Some(value) -> buf() |> push(byte: 49) |> append(view: value) |> respond(status: 200)
+    None -> buf() |> push(byte: 48) |> respond(status: 200)
   }
 }
 `,
@@ -98,10 +98,8 @@ fn checked(body: View) -> Buf {
 type Handler = { handle: (bytes: Uint8Array) => Uint8Array };
 const enc = new TextEncoder();
 const dec = new TextDecoder();
-const textOf = (out: Uint8Array): string => {
-  const nl = out.indexOf(10);
-  return dec.decode(nl < 0 ? out : out.subarray(nl + 1));
-};
+/** The body of an answer, as text. */
+const textOf = (out: Uint8Array): string => dec.decode(responseOf(out).body);
 const stepsOf = (mod: { exports: object }): number => {
   if (!('cost' in mod.exports)) throw new TypeError('the module exports no cost');
   const g = mod.exports.cost;
@@ -258,10 +256,10 @@ const e256 = lookups[0];
 const e1024 = lookups[1];
 const e1536 = lookups[2];
 for (const row of lookups) same(`${row.n} form_field lookups find every field`, row.body, String(row.n));
-same('256 form_field lookups take 242,912 steps (the byte walk took 460,920)', e256?.steps, 242_912);
-same('256 form_field lookups use 43,120 bytes', e256?.bytes, 43_120);
-same('1,024 form_field lookups take 3,750,252 steps (the byte walk took 7,738,996)', e1024?.steps, 3_750_252);
-same('1,024 form_field lookups use 172,144 bytes', e1024?.bytes, 172_144);
+same('256 form_field lookups take 242,915 steps (the byte walk took 460,920)', e256?.steps, 242_915);
+same('256 form_field lookups use 43,208 bytes', e256?.bytes, 43_208);
+same('1,024 form_field lookups take 3,750,255 steps (the byte walk took 7,738,996)', e1024?.steps, 3_750_255);
+same('1,024 form_field lookups use 172,232 bytes', e1024?.bytes, 172_232);
 same(
   '4× the fields, read with form_field 4× as often, is still about n² (15.4× the steps) and at most about 4× the memory',
   e256 !== undefined &&
@@ -272,8 +270,8 @@ same(
   true,
 );
 same(
-  'the 1,536-field form (11 KB) that ran out of memory answers in 8,581,244 steps and 262,256 bytes',
-  e1536 !== undefined && e1536.body === '1536' && e1536.steps === 8_581_244 && e1536.bytes === 262_256,
+  'the 1,536-field form (11 KB) that ran out of memory answers in 8,581,247 steps and 262,344 bytes',
+  e1536 !== undefined && e1536.body === '1536' && e1536.steps === 8_581_247 && e1536.bytes === 262_344,
   true,
 );
 // the build without cell reuse answers the same counts
@@ -329,7 +327,7 @@ const checkReq = (name: Uint8Array, form: Uint8Array): Uint8Array => {
   return req;
 };
 const payload = (out: Uint8Array): Uint8Array | null => {
-  const rest = out.subarray(out.indexOf(10) + 1);
+  const rest = responseOf(out).body;
   const tag = rest[0];
   if (tag === 48) return null;
   if (tag === 49) return rest.subarray(1);

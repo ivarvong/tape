@@ -8,7 +8,11 @@
 
 type Name = View where len(self) >= 1 and len(self) <= 8
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answered(raw) |> respond(status: 200)
+}
+
+fn answered(raw: View) -> Buf {
   match raw {
     "j" ++ json -> buf()
       |> append(view: match {

@@ -357,6 +357,10 @@ export const DIAGNOSTICS = {
     meaning:
       "An UPDATE a request reaches that takes a row chosen by what it changes (the next job that is ready, by a query or a subquery), with nothing that keys it to the request: sent again, the request takes a second row. Write the client's key into the row and read it back first, or claim an op id.",
   },
+  C96: {
+    meaning:
+      'A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none). A status that is a value is checked when the host answers, which says why in a 500.',
+  },
   C97: {
     meaning:
       "A match on a machine's states with an arm that takes the states the arms beside it do not name (`_`, a name, a row pattern that leaves the state out). A state added to the machine would be taken there without a word; each state gets an arm of its own.",

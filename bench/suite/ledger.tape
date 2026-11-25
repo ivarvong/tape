@@ -16,25 +16,27 @@ type Account { Account(name: View, balance: Int) }
 type Done { Done(payer: View, payee: View, amount: Int) }
 type Named { Named(name: View) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/transfers", body) -> batch(body)
-    _ -> respond(status: 404) |> append(view: "{\"error\":\"no such route\"}")
+    Request(method: Post, path: "/transfers", body) -> batch(body)
+    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
   }
 }
 
-fn batch(body: View) -> Buf {
+fn batch(body: View) -> Response {
   let Ok(value: Batch(transfers)) = decode(json: body, as: Batch) else {
-    Err(error) -> respond(status: 400)
+    Err(error) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: error)
       |> append(view: "}")
+      |> respond(status: 400)
   }
-  let out = respond(status: 200) |> append(view: "{\"results\":[")
+  let out = buf() |> append(view: "{\"results\":[")
   each(transfers, out, first: True)
     |> append(view: "],\"accounts\":")
     |> write_rows(rows: sql_all(row: Account, query: "SELECT * FROM accounts ORDER BY name"))
     |> append(view: "}")
+    |> respond(status: 200)
 }
 
 fn each(transfers: List[Transfer], out: Buf, first: Bool) -> Buf {

@@ -57,7 +57,7 @@ describe('a stored build is a cache of the source', () => {
   it('answers 503 rebuild_failed, with the diagnostics, for a source today’s compiler cannot build', async () => {
     expect(at(await got('/ivar/gone', { method: 'POST', body: greet }), 'version')).toBe(1);
     // a source an older compiler took, which this one refuses (here: a name it does not know)
-    await stale('ivar/gone', 1, greet.replace('respond(status: 200)', 'respond_with(status: 200)'));
+    await stale('ivar/gone', 1, greet.replace('respond(status: 400)', 'respond_with(status: 400)'));
     expect(at(await got('/ivar/gone', { method: 'POST', body: `${greet}\n` }), 'version')).toBe(2);
     const r = await hello('/ivar/gone/v/1/');
     const body = await json(r);

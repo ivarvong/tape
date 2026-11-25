@@ -13,15 +13,15 @@ import { DEPTH_BUDGET, LEVEL_BASE } from '../compiler/common.ts';
 import { instantiate } from '../host.ts';
 import { interpret, Trap } from '../interp.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
-const DEPTH = `fn handle(raw: View) -> Buf {
+const DEPTH = `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/depth/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: depth(n))
-    Request(method: "GET", path: "/ints/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: count(list: ints(n, acc: Nil)))
-    Request(method: "GET", path: "/texts/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: count(list: texts(n, acc: Nil)))
-    Request(method: "GET", path: "/ping/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: ping(n))
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/depth/" ++ decimal(n)) -> buf() |> write_int(value: depth(n)) |> respond(status: 200)
+    Request(method: Get, path: "/ints/" ++ decimal(n)) -> buf() |> write_int(value: count(list: ints(n, acc: Nil))) |> respond(status: 200)
+    Request(method: Get, path: "/texts/" ++ decimal(n)) -> buf() |> write_int(value: count(list: texts(n, acc: Nil))) |> respond(status: 200)
+    Request(method: Get, path: "/ping/" ++ decimal(n)) -> buf() |> write_int(value: ping(n)) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -70,10 +70,10 @@ fn pong(n: Int) -> Int {
 // a frame of 400 values live across the call
 const lets = Array.from({ length: 400 }, (_, i) => `  let a${i} = n * ${i + 3} + ${i + 1}`).join('\n');
 const sum = Array.from({ length: 400 }, (_, i) => ` + a${i}`).join('');
-const WIDE = `fn handle(raw: View) -> Buf {
+const WIDE = `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/wide/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: wide(n))
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/wide/" ++ decimal(n)) -> buf() |> write_int(value: wide(n)) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -99,7 +99,7 @@ const askerOf = (b: Built): ((path: string) => string) => {
   const app = instantiate(new WebAssembly.Module(b.wasm), { log: false });
   return path => {
     try {
-      return dec.decode(app.handle(enc.encode(`GET ${path}`))).replace('\n', ' ');
+      return answered(app.handle(enc.encode(`GET ${path}`))).replace('\n', ' ');
     } catch (e) {
       return e instanceof Error ? e.message : String(e);
     }

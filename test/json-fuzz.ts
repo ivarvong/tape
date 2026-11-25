@@ -15,7 +15,7 @@ import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
-import { finish, ok, same } from './harness.ts';
+import { answerBody, finish, ok, same } from './harness.ts';
 
 type Kind =
   | { k: 'int'; min?: number; max?: number; refined?: string }
@@ -493,7 +493,7 @@ for (let i = 0; i < N; i++) {
   const doc = documentOf(type);
   const req = Uint8Array.from([...enc.encode(`${type}\n`), ...doc]);
   const want = reference(type, doc);
-  const got = dec.decode(app.handle(req));
+  const got = answerBody(app.handle(req));
   if (got === want) agree++;
   else if (shown.length < 5)
     shown.push(
@@ -503,7 +503,7 @@ for (let i = 0; i < N; i++) {
   else reasons.add(want.replaceAll(/\[\d+\]/g, '[i]').replace(/"[^"]*"/, '"k"'));
   if (FLAT.has(type)) {
     interpRuns++;
-    const said = dec.decode(it.handle(req));
+    const said = answerBody(it.handle(req));
     if (said === want) interpAgree++;
     else if (shown.length < 5)
       shown.push(

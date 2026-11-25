@@ -9,7 +9,7 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import type { SqlParam } from '../interp.ts';
 import { nodeSql } from '../nodesql.ts';
-import { bare, call, finish, same, std } from './harness.ts';
+import { bare, call, finish, same, std, answered } from './harness.ts';
 
 const program = `migration 1 "pay" {
   CREATE TABLE pay(id INTEGER PRIMARY KEY, amount INTEGER NOT NULL, fee INTEGER)
@@ -29,25 +29,25 @@ type Out {
   Out(amount: Dec[2], fee: Dec[3], read: Dec[2], units: Int, parts: List[Dec[2]])
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "PUT", path: "/p", body) -> put(body, db)
-    Request(method: "GET", path: "/text/" ++ text) -> parsed(text)
-    Request(method: "GET", path: "/flat") -> respond_as(status: 200, content: Json)
-      |> write_json(value: Flat(amount: -0.05, fee: 92233720368547.758))
-    _ -> respond(status: 404)
+    Request(method: Put, path: "/p", body) -> put(body, db)
+    Request(method: Get, path: "/text/" ++ text) -> parsed(text)
+    Request(method: Get, path: "/flat") -> buf()
+      |> write_json(value: Flat(amount: -0.05, fee: 92233720368547.758)) |> respond_as(status: 200, content: Json)
+    _ -> empty(status: 404)
   }
 }
 
-fn put(body: View, db: Sql) -> Buf {
+fn put(body: View, db: Sql) -> Response {
   let Ok(value: In(id, amount, fee, parts)) = decode(json: body, as: In) else {
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
   let _ = sql_exec(query: "INSERT INTO pay(id, amount, fee) VALUES (:id, :amount, :fee) ON CONFLICT(id) DO UPDATE SET amount = excluded.amount, fee = excluded.fee", id, amount, fee: ofFee(fee))
-  let Some(value: Paid(amount: back, fee: kept)) = sql_first(row: Paid, query: "SELECT id, amount, fee FROM pay WHERE id = :id", id) else -> respond(status: 404)
-  let Some(value: units) = sql_first(row: Units, query: "SELECT amount AS units FROM pay WHERE id = :id", id) else -> respond(status: 404)
-  respond_as(status: 200, content: Json)
-    |> write_json(value: Out(amount, fee: ofFee(kept), read: back, units: units.units, parts))
+  let Some(value: Paid(amount: back, fee: kept)) = sql_first(row: Paid, query: "SELECT id, amount, fee FROM pay WHERE id = :id", id) else -> empty(status: 404)
+  let Some(value: units) = sql_first(row: Units, query: "SELECT amount AS units FROM pay WHERE id = :id", id) else -> empty(status: 404)
+  buf()
+    |> write_json(value: Out(amount, fee: ofFee(kept), read: back, units: units.units, parts)) |> respond_as(status: 200, content: Json)
 }
 
 type Flat {
@@ -65,10 +65,10 @@ fn ofFee(fee: Option[Dec[3]]) -> Dec[3] {
   }
 }
 
-fn parsed(text: View) -> Buf {
+fn parsed(text: View) -> Response {
   match parse_dec(text, scale: 2) {
-    Some(value) -> respond(status: 200) |> append(view: "\\(value)")
-    None -> respond(status: 422)
+    Some(value) -> buf() |> append(view: "\\(value)") |> respond(status: 200)
+    None -> empty(status: 422)
   }
 }
 `;
@@ -108,7 +108,7 @@ const compiled = (req: string): string => {
 };
 const interpreted = (req: string): string => {
   try {
-    const out = dec.decode(it.handle(enc.encode(req)));
+    const out = answered(it.handle(enc.encode(req)));
     const [line = '', ...rest] = out.split('\n');
     return `${line.split(' ')[0] ?? ''} ${rest.join('\n')}`;
   } catch (e) {

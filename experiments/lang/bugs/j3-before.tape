@@ -54,12 +54,12 @@ type Refunded { Refunded(balance: Int) }
 type Ship { Ship(address: View, sku: View, qty: Int) }
 type Shipped { Shipped(label: Int) }
 
-fn handle(raw: View, db: Sql, inventory: Remote, payments: Remote, shipping: Remote) -> Buf {
+fn handle(raw: View, db: Sql, inventory: Remote, payments: Remote, shipping: Remote) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> start(db, inventory, payments, shipping, wait: 2000, order: decode(json: body, as: NewOrder))
-    Request(method: "POST", path: "/orders/wait/" ++ decimal(ms), body) -> start(db, inventory, payments, shipping, wait: ms, order: decode(json: body, as: NewOrder))
-    Request(method: "POST", path: "/advance/" ++ decimal(id)) -> advance(db, inventory, payments, shipping, wait: 2000, found: load(db, id))
-    Request(method: "GET", path: "/orders/" ++ decimal(id)) -> show(status: 200, found: load(db, id))
+    Request(method: Post, path: "/orders", body) -> start(db, inventory, payments, shipping, wait: 2000, order: decode(json: body, as: NewOrder))
+    Request(method: Post, path: "/orders/wait/" ++ decimal(ms), body) -> start(db, inventory, payments, shipping, wait: ms, order: decode(json: body, as: NewOrder))
+    Request(method: Post, path: "/advance/" ++ decimal(id)) -> advance(db, inventory, payments, shipping, wait: 2000, found: load(db, id))
+    Request(method: Get, path: "/orders/" ++ decimal(id)) -> show(status: 200, found: load(db, id))
     _ -> problem(status: 404, reason: "no such route")
   }
 }
@@ -68,7 +68,7 @@ fn load(db: Sql, id: Int) -> Option[Order] {
   sql_first(db, row: Order, query: "SELECT id, sku, qty, card, address, amount, state, label, note, steps FROM orders WHERE id = :id", id)
 }
 
-fn start(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, order: Result[NewOrder, View]) -> Buf {
+fn start(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, order: Result[NewOrder, View]) -> Response {
   match order {
     Ok(value: NewOrder(sku, qty, card, address)) -> advance(db, inventory, payments, shipping, wait, found: sql_first(db, row: Order, query: "INSERT INTO orders(sku, qty, card, address) VALUES (:sku, :qty, :card, :address) RETURNING id, sku, qty, card, address, amount, state, label, note, steps", sku, qty, card, address))
     Err(error) -> problem(status: 400, reason: error)
@@ -76,7 +76,7 @@ fn start(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: I
 }
 
 // The state names the next step. A finished order (done or failed) is shown as it is.
-fn advance(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, found: Option[Order]) -> Buf {
+fn advance(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, found: Option[Order]) -> Response {
   match found {
     Some(value: Order(id, sku, qty, state: "reserving")) -> reserved(db, inventory, payments, shipping, wait, id, reply: call(to: inventory, method: "reserve", send: Reserve(sku, qty), reply: Reserved, within: wait, once: id))
     Some(value: Order(id, card, amount, state: "charging")) -> charged(db, inventory, payments, shipping, wait, id, reply: call(to: payments, method: "charge", send: Charge(card, amount), reply: Charged, within: wait, once: id))
@@ -94,7 +94,7 @@ fn move(db: Sql, id: Int, from: View, to: View, note: View) -> Option[Order] {
   sql_first(db, row: Order, query: "UPDATE orders SET state = :to, note = :note, steps = steps + 1 WHERE id = :id AND state = :from RETURNING id, sku, qty, card, address, amount, state, label, note, steps", to, note, id, from)
 }
 
-fn reserved(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Reserved, CallError]) -> Buf {
+fn reserved(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Reserved, CallError]) -> Response {
   match reply {
     Ok(value: Reserved(price)) -> advance(db, inventory, payments, shipping, wait, found: sql_first(db, row: Order, query: "UPDATE orders SET state = 'charging', amount = :price * qty, note = '', steps = steps + 1 WHERE id = :id AND state = 'reserving' RETURNING id, sku, qty, card, address, amount, state, label, note, steps", price, id))
     Err(error: Rejected(reason)) -> show(status: 409, found: move(db, id, from: "reserving", to: "failed", note: reason))
@@ -102,7 +102,7 @@ fn reserved(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait
   }
 }
 
-fn charged(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Charged, CallError]) -> Buf {
+fn charged(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Charged, CallError]) -> Response {
   match reply {
     Ok(value) -> advance(db, inventory, payments, shipping, wait, found: move(db, id, from: "charging", to: "shipping", note: ""))
     Err(error: Rejected(reason)) -> advance(db, inventory, payments, shipping, wait, found: move(db, id, from: "charging", to: "releasing", note: reason))
@@ -110,7 +110,7 @@ fn charged(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait:
   }
 }
 
-fn shipped(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Shipped, CallError]) -> Buf {
+fn shipped(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Shipped, CallError]) -> Response {
   match reply {
     Ok(value: Shipped(label)) -> advance(db, inventory, payments, shipping, wait, found: sql_first(db, row: Order, query: "UPDATE orders SET state = 'done', label = :label, note = '', steps = steps + 1 WHERE id = :id AND state = 'shipping' RETURNING id, sku, qty, card, address, amount, state, label, note, steps", label, id))
     Err(error: Rejected(reason)) -> advance(db, inventory, payments, shipping, wait, found: move(db, id, from: "shipping", to: "refunding", note: reason))
@@ -119,14 +119,14 @@ fn shipped(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait:
 }
 
 // Compensation: the note keeps the reason the workflow turned back.
-fn refunded(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Refunded, CallError]) -> Buf {
+fn refunded(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Refunded, CallError]) -> Response {
   match reply {
     Ok(value) -> advance(db, inventory, payments, shipping, wait, found: sql_first(db, row: Order, query: "UPDATE orders SET state = 'releasing', steps = steps + 1 WHERE id = :id AND state = 'refunding' RETURNING id, sku, qty, card, address, amount, state, label, note, steps", id))
     Err(error) -> stalled(db, id, step: "payments.refund", error)
   }
 }
 
-fn released(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Released, CallError]) -> Buf {
+fn released(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait: Int, id: Int, reply: Result[Released, CallError]) -> Response {
   match reply {
     Ok(value) -> show(status: 200, found: sql_first(db, row: Order, query: "UPDATE orders SET state = 'failed', steps = steps + 1 WHERE id = :id AND state = 'releasing' RETURNING id, sku, qty, card, address, amount, state, label, note, steps", id))
     Err(error) -> stalled(db, id, step: "inventory.release", error)
@@ -135,7 +135,7 @@ fn released(db: Sql, inventory: Remote, payments: Remote, shipping: Remote, wait
 
 // A step that did not finish: the order stays in that step's state, and says why. A refusal while compensating
 // (a refund or a release turned down) is not retried by itself either; it needs a person.
-fn stalled(db: Sql, id: Int, step: View, error: CallError) -> Buf {
+fn stalled(db: Sql, id: Int, step: View, error: CallError) -> Response {
   match error {
     Timeout -> show(status: 202, found: noted(db, id, step, what: " did not answer in time; POST /advance/<id> resumes from here", reason: ""))
     Unreachable -> show(status: 202, found: noted(db, id, step, what: " is unreachable; POST /advance/<id> resumes from here", reason: ""))
@@ -149,15 +149,15 @@ fn noted(db: Sql, id: Int, step: View, what: View, reason: View) -> Option[Order
   sql_first(db, row: Order, query: "UPDATE orders SET note = :step || :what || :reason WHERE id = :id RETURNING id, sku, qty, card, address, amount, state, label, note, steps", step, what, reason, id)
 }
 
-fn show(status: Int, found: Option[Order]) -> Buf {
+fn show(status: Int, found: Option[Order]) -> Response {
   match found {
-    Some(value) -> write_json(out: respond(status), value)
+    Some(value) -> write_json(out: buf(), value) |> respond(status)
     None -> problem(status: 409, reason: "the order is not in the state this step expected")
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  append(buf: write_json_string(out: append(buf: respond(status), view: "{\"error\":"), text: reason), view: "}")
+fn problem(status: Int, reason: View) -> Response {
+  append(buf: write_json_string(out: append(buf: buf(), view: "{\"error\":"), text: reason), view: "}") |> respond(status)
 }
 // added for rule RM: the states of the table and the moves between them
 machine orders.state {

@@ -189,11 +189,11 @@ same(
 
 // parse_float in a program, through the host: Some of the nearest Float, None when it is not finite or not a number
 // (the program names no Float itself: parse_float is what makes the module import float_of, test/imports.ts)
-const program = `fn handle(raw: View) -> Buf {
-  let Request(body) = request(raw) else -> respond(status: 400)
+const program = `fn handle(raw: View) -> Response {
+  let Request(body) = request(raw) else -> empty(status: 400)
   match parse_float(body) {
-    Some(value: x) -> respond(status: 200) |> append(view: "\\(x)")
-    None -> respond(status: 200) |> append(view: "none")
+    Some(value: x) -> buf() |> append(view: "\\(x)") |> respond(status: 200)
+    None -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 `;

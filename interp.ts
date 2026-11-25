@@ -34,10 +34,35 @@ const given = (g: FnDecl, message: Value | null): Value[] =>
 // a Buf comes back as its bytes
 const frozen = (r: Value): Value =>
   typeof r === 'object' && !(r instanceof Uint8Array) && r.k === 'buf' ? Uint8Array.from(r.buf) : r;
-const answer = (r: Value): Uint8Array => {
-  const out = frozen(r);
-  return out instanceof Uint8Array ? out : stop(`an entry point answered ${kindOf(out)}, not bytes`);
-};
+// Content's constructors in their order in std/http.tape: the frame's content byte
+const CONTENT = ['Html', 'Json', 'Text', 'Css', 'Svg', 'Csv', 'Atom', 'Rss', 'Xml'];
+/** a program's own constructor of std's name moves std's aside as `std.Name` */
+const stdCtor = (c: string): string => (c.startsWith('std.') ? c.slice(4) : c);
+const u32 = (n: number): number[] => [n & 255, (n >>> 8) & 255, (n >>> 16) & 255, (n >>> 24) & 255];
+/**
+ * handle's Response in the frame host.ts responseOf reads, as the function the compiler generates around handle
+ * writes it (std/http.tape framed): written here from the value, not by running that code.
+ */
+function framedOf(r: Value): Uint8Array {
+  const { status, content, headers, body } = asAdt(r).f;
+  const tag = CONTENT.indexOf(stdCtor(asAdt(content).c));
+  if (tag < 0) stop(`a Response's content is ${kindOf(content)}`);
+  const st = new Uint8Array(8);
+  new DataView(st.buffer).setBigInt64(
+    0,
+    typeof status === 'bigint' ? status : stop('a status that is not an Int'),
+    true,
+  );
+  const heads: number[][] = [];
+  for (let at = headers; ;) {
+    const cell = asAdt(at);
+    if (stdCtor(cell.c) !== 'Cons') break;
+    const { name, value } = asAdt(cell.f['head']).f;
+    heads.unshift([...u32(asBytes(name).length), ...asBytes(name), ...u32(asBytes(value).length), ...asBytes(value)]);
+    at = cell.f['tail'];
+  }
+  return Uint8Array.from([0, 0x74, 0x61, 0x70, 1, ...st, tag, ...u32(heads.length), ...heads.flat(), ...asBytes(body)]);
+}
 // "1" and the reason: a method's refusal
 const refusal = (why: Value | undefined): Uint8Array => Uint8Array.from([49, ...asBytes(why)]);
 
@@ -70,7 +95,7 @@ export function interpret(
       it.undone = false;
       it.depth = 0;
       const g = entry('handle');
-      return answer(run(it, callable(g), given(g, bytes)));
+      return framedOf(run(it, callable(g), given(g, bytes)));
     },
     /** one message to an exported method: the reply is "0" and the record as JSON, or "1" and the reason */
     serve(method: string, bytes: Uint8Array): Uint8Array {

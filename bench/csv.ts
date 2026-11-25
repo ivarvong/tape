@@ -1,7 +1,7 @@
 // bench/csv.ts: examples/csv.tape against bench/csv-baseline.ts. First the same answers on generated and edge-case
 // inputs, then time per request (median of 15 after warm-up) at three sizes. Local numbers, one machine.
 import '../node25.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { built, moduleOf, read } from '../test/harness.ts';
 import { handle as js } from './csv-baseline.ts';
 import { gen } from './csv-gen.ts';
@@ -31,7 +31,7 @@ const inputs = [
 ];
 /** Where the two answers differ, or null. */
 const differs = (b: Uint8Array): string | null => {
-  const tape = dec.decode(app.handle(b));
+  const tape = dec.decode(responseOf(app.handle(b)).body);
   const want = dec.decode(js(b));
   return tape === want
     ? null

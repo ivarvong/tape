@@ -144,7 +144,7 @@ describe('traces: a routed request is one tree', () => {
   });
 
   it('the program route: router -> invoke -> supervisor -> run, and the run log link shows the whole request', async () => {
-    const hello = 'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_text(text: "hi")\n}\n';
+    const hello = 'fn handle(raw: View) -> Response {\n  buf() |> write_text(text: "hi") |> respond(status: 200)\n}\n';
     expect((await call('/trc/hi', { method: 'POST', body: hello })).status).toBe(201);
     const { trace, client, res } = traced('/trc/hi/v/1/x');
     const r = await res;
@@ -274,22 +274,22 @@ describe('traces: faults leave an explicit trace', () => {
   CREATE TABLE t(x INTEGER NOT NULL)
 }
 type N { N(n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "GET") -> count(found: sql_first(db, row: N, query: "SELECT count(*) AS n FROM t"))
+    Request(method: Get) -> count(found: sql_first(db, row: N, query: "SELECT count(*) AS n FROM t"))
     _ -> divide(wrote: sql_first(db, row: N, repeat: True, query: "INSERT INTO t(x) VALUES (1) RETURNING x AS n"))
   }
 }
-fn count(found: Option[N]) -> Buf {
+fn count(found: Option[N]) -> Response {
   match found {
-    Some(value: N(n)) -> respond(status: 200) |> write_int(value: n)
-    None -> respond(status: 500)
+    Some(value: N(n)) -> buf() |> write_int(value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
-fn divide(wrote: Option[N]) -> Buf {
+fn divide(wrote: Option[N]) -> Response {
   match wrote {
-    Some(value: N(n)) -> respond(status: 200) |> write_int(value: 10 / (n - 1))
-    None -> respond(status: 500)
+    Some(value: N(n)) -> buf() |> write_int(value: 10 / (n - 1)) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 `;

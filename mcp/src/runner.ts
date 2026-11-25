@@ -11,7 +11,7 @@
 // request every timer due by then runs, oldest first (`woken`, as a result of its own), so a test can step past a
 // window or a retry delay. The host reads Date.now() (host/run.ts: now, wake and the due check), so the clock is
 // Date.now itself, replaced for the length of the run; runs in one isolate are taken one at a time for that.
-import { TimedOut, instantiate, isEffect, replay, traceOf } from './host.ts';
+import { TimedOut, framed, instantiate, isEffect, replay, traceOf } from './host.ts';
 import type { App, Effect, Service, ServiceReply, TraceEvent } from './host.ts';
 import { loadSqlite, nodeSql, sqliteReady } from './sqlite.ts';
 import type { InitSqlJs, NodeSql, SqlJs } from './sqlite.ts';
@@ -70,7 +70,7 @@ export type Ran = {
   at_ms?: number;
   /** a timer's run: its key, and when it was due (ms from the run's start) */
   woken?: { key: number; due_ms: number };
-  /** the program's answer: `STATUS LF BODY`, or, when it trapped, null */
+  /** the program's answer, in the frame host.ts responseOf reads, or, when it trapped, null */
   out: Uint8Array | null;
   effects: Effect[];
   /** set when the run trapped: what it said; its writes were rolled back */
@@ -250,8 +250,9 @@ async function wokenRun(app: App, db: NodeSql, key: number, due: number, start: 
     const w = await app.wake(key, { transaction: f => db.transaction(f), now });
     if (w) {
       effects = w.effects;
-      const head = w.status === 'ok' ? '200 application/json\n' : '500\n';
-      out = new Uint8Array([...enc.encode(head), ...w.body]);
+      // in the frame a request's answer is in: Ok's JSON as application/json (Content Json, 1), Err's text plain (2)
+      out =
+        w.status === 'ok' ? framed({ status: 200, content: 1, body: w.body }) : framed({ status: 500, body: w.body });
     }
   } catch (e) {
     effects = loggedOf(e);

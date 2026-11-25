@@ -3,7 +3,7 @@
 import type { Arg, Call } from '../ast.ts';
 import { F64, I32, I64, TRAP, fail, sleb, uleb, utf8 } from '../common.ts';
 import { stdName } from '../shadow.ts';
-import { BUF, FLOAT, INT, INTRINSICS, REMOTE, T, VIEW, key, scaleOf } from '../types.ts';
+import { BUF, FLOAT, INT, INTRINSICS, PRIVATE_INTRINSICS, REMOTE, T, VIEW, key, scaleOf } from '../types.ts';
 import { written } from './text.ts';
 import type { Type } from '../types.ts';
 import { buildVariant, close, fresh, get, inLocals, mathIndex, need, open, set, trapIf } from './fn.ts';
@@ -99,6 +99,31 @@ function append(u: Use): Type {
   const longer = [...get(h), ...get(h), ...ld(4), ...get(len), 0x6a, ...st(4)];
   const reserved = [...get(h), ...get(len), 0x10, ...uleb(c.B.RESERVE)];
   c.code.push(...reserved, ...end, ...get(ptr), ...get(len), 0xfc, 0x0a, 0, 0, ...longer, ...get(h));
+  return BUF;
+}
+
+/**
+ * answer_body(out, body): where the body of an answer is, not its bytes: the View's address and its length, 4 bytes
+ * each, little-endian, after the head std/http.tape `framed` wrote. The host reads the body from there (host/run.ts
+ * answered), so an answer costs its head and not a second copy of its body. Only `framed` writes one: in any other
+ * file the name is not a function, so no program reads an address.
+ */
+function answerBody(u: Use): Type {
+  const { c } = u;
+  if (c.f.file !== PRIVATE_INTRINSICS.get('answer_body'))
+    return fail(
+      u.e,
+      'C22',
+      'unknown function answer_body',
+      "answer_body is std/http.tape's own, for the frame the host reads; a program gives a Response.",
+    );
+  const h = bufArg(u, 0);
+  const [ptr, len] = view(u, 1);
+  const end = [...get(h), ...ld(0), ...get(h), ...ld(4), 0x6a];
+  const longer = [...get(h), ...get(h), ...ld(4), ...i32(8), 0x6a, ...st(4)];
+  // room for 8 bytes, then the address and the length, each an i32.store with alignment 1 (the head is any length)
+  const reserved = [...get(h), ...i32(8), 0x10, ...uleb(c.B.RESERVE)];
+  c.code.push(...reserved, ...end, ...get(ptr), 0x36, 0, 0, ...end, ...get(len), 0x36, 0, 4, ...longer, ...get(h));
   return BUF;
 }
 
@@ -435,9 +460,14 @@ const BY_NAME: Readonly<Record<string, (u: Use) => Type>> = {
   buf: newBuf,
   push,
   append,
+  answer_body: answerBody,
+  // rollback(out): the Response, as it was given, with the stretch's writes marked to be undone
   rollback: u => {
-    u.c.code.push(...i32(1), 0x24, u.c.B.G_UNDO, ...get(bufArg(u, 0)));
-    return BUF;
+    const want = T(stdName(u.c.B.prog, 'types', 'Response'));
+    const s = inLocals(u.c, argAt(u, 0).value, want);
+    need(u.c, s.type, want, argAt(u, 0), paramName(u, 0));
+    u.c.code.push(...i32(1), 0x24, u.c.B.G_UNDO, ...s.locals.flatMap(l => get(l)));
+    return s.type;
   },
   freeze: u => {
     const h = bufArg(u, 0);

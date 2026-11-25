@@ -7,17 +7,17 @@ schema "CREATE TABLE IF NOT EXISTS counters(name TEXT PRIMARY KEY, n INTEGER NOT
 
 type Count { Count(n: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/" ++ name) -> show(found: sql_first(db, row: Count, query: "INSERT INTO counters(name, n) VALUES (:name, :step) ON CONFLICT(name) DO UPDATE SET n = n + :step RETURNING n", name, step: flags.step))
-    Request(method: "GET", path: "/" ++ name) -> show(found: sql_first(db, row: Count, query: "SELECT n FROM counters WHERE name = :name", name))
-    _ -> append(buf: respond(status: 405), view: "{\"error\":\"method_not_allowed\"}")
+    Request(method: Post, path: "/" ++ name) -> show(found: sql_first(db, row: Count, query: "INSERT INTO counters(name, n) VALUES (:name, :step) ON CONFLICT(name) DO UPDATE SET n = n + :step RETURNING n", name, step: flags.step))
+    Request(method: Get, path: "/" ++ name) -> show(found: sql_first(db, row: Count, query: "SELECT n FROM counters WHERE name = :name", name))
+    _ -> append(buf: buf(), view: "{\"error\":\"method_not_allowed\"}") |> respond(status: 405)
   }
 }
 
-fn show(found: Option[Count]) -> Buf {
+fn show(found: Option[Count]) -> Response {
   match found {
-    Some(value) -> push(buf: write_int(out: append(buf: respond(status: 200), view: "{\"count\":"), value: value.n), byte: 125)
-    None -> append(buf: respond(status: 200), view: "{\"count\":0}")
+    Some(value) -> push(buf: write_int(out: append(buf: buf(), view: "{\"count\":"), value: value.n), byte: 125) |> respond(status: 200)
+    None -> append(buf: buf(), view: "{\"count\":0}") |> respond(status: 200)
   }
 }

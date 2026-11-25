@@ -2,7 +2,7 @@
 // on every edit. The compiler and host are the tree's own .ts files, served with their types stripped (serve.ts).
 import { compile } from '../../compiler.ts';
 import type { Source } from '../../compiler.ts';
-import { instantiate } from '../../host.ts';
+import { instantiate, responseOf } from '../../host.ts';
 
 const $ = <T extends HTMLElement>(id: string, kind: abstract new () => T): T => {
   const el = document.querySelector(`#${id}`);
@@ -62,7 +62,7 @@ async function start(): Promise<void> {
     const input = enc.encode(src.value),
       t = performance.now();
     try {
-      const html = dec.decode(app.handle(input)),
+      const html = dec.decode(responseOf(app.handle(input)).body),
         ms = performance.now() - t,
         cost = app.exports['cost'],
         steps = cost instanceof WebAssembly.Global ? String(cost.value) : '?';

@@ -48,10 +48,10 @@ fn read() -> Int {
   }
 }
 `;
-const GET = `fn handle(raw: View) -> Buf {
+const GET = `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> respond(status: 200) |> append(view: "ok")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/") -> buf() |> append(view: "ok") |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 `;

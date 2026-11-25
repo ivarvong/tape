@@ -3,6 +3,7 @@
 // METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. The request headers
 // the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case.
 // `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests.
+// What `handle` gives back is a Response (below), never bytes: the host writes the status and the headers from it.
 
 // Who sent a request: the operator (with the token), or Anyone, through a published name's public route.
 type Caller {
@@ -10,22 +11,45 @@ type Caller {
   Anyone
 }
 
+// The method of a request. A token HTTP does not name here (`PROPFIND`, a method in lower case: methods are
+// case-sensitive) is Other with the token. The service runs a HEAD request as the GET it stands for and sends no
+// body, so `handle` sees Get; Head is given only by a host that passes HEAD through.
+type Method {
+  Get
+  Head
+  Post
+  Put
+  Patch
+  Delete
+  Options
+  Other(name: View)
+}
+
 // A request as `request(raw)` gives it. `path` is the target before `?`, as sent (percent-encoding is not undone);
 // `query` the raw text after `?` (read one parameter with `form_field(body: q, name: "limit")`); `body` what
 // follows the first line feed; `headers` the request headers the host passed, read with `header_of`.
 //
 //   match request(raw) {
-//     Request(method: "GET", path: "/items/" ++ decimal(id)) -> …
-//     Request(method: "POST", path: "/items", body) -> …
+//     Request(method: Get, path: "/items/" ++ decimal(id)) -> …
+//     Request(method: Post, path: "/items", body) -> …
 //   }
 type Request {
-  Request(method: View, path: View, query: Option[View], body: View, caller: Caller, headers: View)
+  Request(
+    method: Method,
+    path: View,
+    query: Option[View],
+    body: View,
+    caller: Caller,
+    headers: View
+  )
 }
 
 // The request `handle` is given, parsed.
 //
 //   > request(raw: "POST /holds?x=1 public\nqty=1")
-//   Request(method: "POST", path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
+//   Request(method: Post, path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
+//   > request(raw: "PROPFIND /k\n").method
+//   Other(name: "PROPFIND")
 //   > request(raw: "GET /k/a b\n")
 //   Request(path: "/k/a b", caller: Operator)
 //   > request(raw: "GET /items?\n")
@@ -41,7 +65,7 @@ fn request(raw: View) -> Request {
   let open = len(rest) >= 7 and has(v: rest, at: len(rest) - 7, word: " public")
   let target = slice(v: rest, from: 0, to: len(rest) - 7 * opened(open))
   Request(
-    method: until(v: line, byte: 32),
+    method: method_of(token: until(v: line, byte: 32)),
     path: until(v: target, byte: 63),
     query: asked(target),
     body: after(v: raw, byte: 10),
@@ -97,6 +121,20 @@ private fn lower_from(out: Buf, text: View, at: Int) -> Buf {
   }
 }
 
+// The Method a request line's first word names.
+private fn method_of(token: View) -> Method {
+  match token {
+    "GET" -> Get
+    "HEAD" -> Head
+    "POST" -> Post
+    "PUT" -> Put
+    "PATCH" -> Patch
+    "DELETE" -> Delete
+    "OPTIONS" -> Options
+    _ -> Other(name: token)
+  }
+}
+
 // Only the last word, and only `public`, names the caller: a target with a space in it (never sent by
 // the service, which passes the URL's percent-encoded path) is read as before.
 private fn opened(open: Bool) -> Int {
@@ -122,85 +160,12 @@ private fn asked(target: View) -> Option[View] {
   }
 }
 
-// A response: the status, a line feed, then the body written by the caller. It is served as text/plain. The status
-// line is in the Buf, so text to keep (a body to store, a value to compare) starts from `buf()`, not from here.
-//
-//   > freeze(buf: respond(status: 200) |> append(view: "ok"))
-//   "200\nok"
-//   > freeze(buf: buf() |> append(view: "ok"))
-//   "ok"
-fn respond(status: Int) -> Buf {
-  push(buf: write_int(out: buf(), value: status), byte: 10)
-}
-
-// A response header, on an answer begun by respond or respond_as: `respond(status: 302) |> header(name: "location",
-// value: url)`. The status line carries it, after a carriage return: STATUS[ SP TYPE](CR name: value)* LF BODY. A
-// name is 1 to 64 token characters (letters, digits, and !#$%&'*+-.^_`|~) and a value up to 4096 bytes with no CR,
-// LF or NUL; the host refuses any other (the request is answered 500 and says why), and those it sets itself
-// (content-type, which is respond_as's, content-length, set-cookie, the security headers…).
-//
-//   > respond(status: 302) |> header(name: "Location", value: "/links/7") |> freeze
-//   "302\rlocation: /links/7\n"
-//   > respond(status: 200) |> append(view: "hi") |> header(name: "cache-control", value: "no-store") |> freeze
-//   "200\rcache-control: no-store\nhi"
-fn header(out: Buf, name: View, value: View) -> Buf {
-  let all = freeze(buf: out)
-  let line = until(v: all, byte: 10)
-  buf()
-    |> append(view: line)
-    |> push(byte: 13)
-    |> append(view: header_text(name, value))
-    |> append(view: slice(v: all, from: len(line), to: len(all)))
-}
-
-// `name: value`, or, for a name or a value the host would refuse, a part it refuses with the reason.
-private fn header_text(name: View, value: View) -> View {
-  match {
-    len(name) == 0
-      or len(name) > 64
-      or not every_byte(v: name, keep: token_byte) -> "!invalid header name"
-    len(value) > 4096
-      or not every_byte(
-        v: value,
-        keep: value_byte
-      ) -> "!invalid header value for \(lower(text: name))"
-    else -> "\(lower(text: name)): \(value)"
-  }
-}
-
-// A token character (RFC 9110): a letter, a digit, or one of !#$%&'*+-.^_`|~.
-private fn token_byte(b: Int) -> Bool {
-  is_alnum(b) or (b >= 35 and b <= 39) or token_mark(b)
-}
-
-// The marks among the token characters.
-private fn token_mark(b: Int) -> Bool {
-  match b {
-    33 -> True
-    42 -> True
-    43 -> True
-    45 -> True
-    46 -> True
-    94 -> True
-    95 -> True
-    96 -> True
-    124 -> True
-    126 -> True
-    _ -> False
-  }
-}
-
-// A byte a header value may hold.
-private fn value_byte(b: Int) -> Bool {
-  b != 0 and b != 10 and b != 13
-}
-
-// The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and
-// Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the
-// text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as
-// pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy
-// does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page
-// is Html. text/xml is not one: it is obsolete and was sniffed.
+// The content types the service serves: respond_as(body: b, status: 200, content: Html) answers text/html. Atom,
+// Rss and Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three,
+// and the text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these
+// as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's
+// content-security-policy does, and any host that serves these types must send that policy.
+// application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed.
 type Content {
   Html
   Json
@@ -213,24 +178,158 @@ type Content {
   Xml
 }
 
-// A response with a content type: the status, then the body written by the caller. respond_as(status: 200,
-// content: Json) answers application/json; `respond` answers text/plain. Atom is a feed.
+// A response header, as `header` adds one: the name in lower case, and the value as given.
+type Header {
+  Header(name: View, value: View)
+}
+
+// What `handle` answers: a status, the type of the body, the headers set with `header` (the last one set first),
+// and the body. The host writes the status line and the headers from these fields, so no byte of the body, from a
+// request or a row, can become a status or a header. Build one with respond, respond_as, json, empty or redirect.
+// The host refuses (answers 500, and says why) a status outside 200 to 599, a body on 204, 205 or 304, a header
+// it sets itself, and a name or a value it would not send.
+type Response {
+  Response(status: Int, content: Content, headers: List[Header], body: View)
+}
+
+// The body written so far, answered as text/plain with a status: the body is written first, from `buf()`, and the
+// status is attached last.
 //
-//   > respond_as(status: 201, content: Json) |> append(view: "{}") |> freeze
-//   "201 application/json\n{}"
-//   > respond_as(status: 200, content: Atom) |> append(view: "<feed/>") |> freeze
-//   "200 application/atom+xml\n<feed/>"
-fn respond_as(status: Int, content: Content) -> Buf {
-  push(
-    buf: append(
-      buf: push(buf: write_int(out: buf(), value: status), byte: 32),
-      view: content_type(content)
-    ),
-    byte: 10
+//   > buf() |> append(view: "ok") |> respond(status: 200)
+//   Response(status: 200, content: Text, headers: Nil, body: "ok")
+fn respond(body: Buf, status: Int) -> Response {
+  Response(status, content: Text, headers: Nil, body: freeze(buf: body))
+}
+
+// The body written so far, answered with a status and a content type: `buf() |> write_rows(rows: r) |>
+// respond_as(status: 200, content: Json)` answers application/json, `content: Atom` a feed. A value as JSON is
+// `json`, one call.
+//
+//   > buf() |> append(view: "<feed/>") |> respond_as(status: 200, content: Atom)
+//   Response(status: 200, content: Atom, body: "<feed/>")
+fn respond_as(body: Buf, status: Int, content: Content) -> Response {
+  Response(status, content, headers: Nil, body: freeze(buf: body))
+}
+
+// A value as JSON, answered as application/json: `json(status: 201, value: order)` is `buf() |> write_json(value:
+// order) |> respond_as(status: 201, content: Json)`.
+//
+//   > json(status: 201, value: Cons(head: 7, tail: Nil))
+//   Response(status: 201, content: Json, body: "[7]")
+fn json[T](status: Int, value: T) -> Response {
+  buf() |> write_json(value) |> respond_as(status, content: Json)
+}
+
+// A response with no body: `empty(status: 204)` for a delete, `empty(status: 304)` for a fresh cache.
+//
+//   > empty(status: 204)
+//   Response(status: 204, body: "")
+fn empty(status: Int) -> Response {
+  Response(status, content: Text, headers: Nil, body: "")
+}
+
+// A redirect to `to`, a path or a URL: 303 See Other with a location. 303 is the one a browser follows with a GET
+// whatever the request was, which is what answering a form's POST with the page to go to means; 302 lets a client
+// send the POST again. Another status is `empty(status: 308) |> header(name: "location", value: to)`.
+//
+//   > redirect(to: "/links/7")
+//   Response(status: 303, headers: Cons(head: Header(name: "location", value: "/links/7"), tail: Nil))
+fn redirect(to: View) -> Response {
+  empty(status: 303) |> header(name: "location", value: to)
+}
+
+// A response header: `respond(body: b, status: 200) |> header(name: "cache-control", value: "no-store")`. The name
+// is written in lower case. A name is 1 to 64 token characters (letters, digits, and !#$%&'*+-.^_`|~) and a value
+// up to 4096 bytes of printable ASCII, spaces and tabs (no CR, LF, NUL, or byte past ASCII: percent-encode a URL);
+// the host refuses any other (the request is answered 500, and says why), and those it sets itself (content-type,
+// which is respond_as's, content-length, set-cookie, the security headers…), and more than 32. Adding one copies
+// nothing: the body is not touched.
+//
+//   > empty(status: 302) |> header(name: "Location", value: "/links/7")
+//   Response(status: 302, headers: Cons(head: Header(name: "location", value: "/links/7"), tail: Nil))
+fn header(out: Response, name: View, value: View) -> Response {
+  let Response(status, content, headers, body) = out
+  Response(
+    status,
+    content,
+    headers: Cons(head: Header(name: lower(text: name), value), tail: headers),
+    body
   )
 }
 
-// The media type a Content is served as. The host writes the Content-Type header from this token.
+// The answer `handle` gave, as the host reads it (host/run.ts answered, then host.ts responseOf), written by the
+// function the compiler generates around `handle`, and by nothing a program can call. A 0 byte and "tap", the
+// version (1), the status as 8 bytes, the content as one (its constructor's place in Content, Html 0 to Xml 8), the
+// number of headers as 4, then each header in the order it was set: its name's length as 4 bytes, the name, its
+// value's length as 4 bytes and the value; then where the body is, its address and its length as 4 bytes each
+// (answer_body): the body is not copied after the head, the host reads it where it lies. Every number is
+// little-endian and as wide as what it holds, so nothing is cut: a status of 65736 is read as 65736 and refused,
+// not as 200.
+private fn framed(answer: Response) -> Buf {
+  let Response(status, content, headers, body) = answer
+  buf()
+    |> push(byte: 0)
+    |> append(view: "tap")
+    |> push(byte: 1)
+    |> frame_u32(value: status & 4294967295)
+    |> frame_u32(value: (status >> 32) & 4294967295)
+    |> push(byte: content_tag(content))
+    |> frame_u32(value: header_count(headers, n: 0))
+    |> frame_headers(headers)
+    |> answer_body(body)
+}
+
+// The headers in the order they were set: the list holds the last set first, so the rest is written before it.
+private fn frame_headers(out: Buf, headers: List[Header]) -> Buf {
+  match headers {
+    Cons(head, tail) -> frame_headers(out, headers: tail) |> frame_header(given: head)
+    Nil -> out
+  }
+}
+
+// How many headers there are.
+private fn header_count(headers: List[Header], n: Int) -> Int {
+  match headers {
+    Cons(tail) -> header_count(headers: tail, n: n + 1)
+    Nil -> n
+  }
+}
+
+// One header of the frame.
+private fn frame_header(out: Buf, given: Header) -> Buf {
+  let Header(name, value) = given
+  out
+    |> frame_u32(value: len(name))
+    |> append(view: name)
+    |> frame_u32(value: len(value))
+    |> append(view: value)
+}
+
+// A number from 0 to 2^32 - 1 as 4 bytes, the least first.
+private fn frame_u32(out: Buf, value: Int) -> Buf {
+  out
+    |> push(byte: value & 255)
+    |> push(byte: (value >> 8) & 255)
+    |> push(byte: (value >> 16) & 255)
+    |> push(byte: (value >> 24) & 255)
+}
+
+// A Content's place in the type, as the frame holds it.
+private fn content_tag(content: Content) -> Int {
+  match content {
+    Html -> 0
+    Json -> 1
+    Text -> 2
+    Css -> 3
+    Svg -> 4
+    Csv -> 5
+    Atom -> 6
+    Rss -> 7
+    Xml -> 8
+  }
+}
+
+// The media type a Content is served as. The host writes the Content-Type header from it.
 //
 //   > content_type(content: Json)
 //   "application/json"
@@ -253,7 +352,6 @@ fn content_type(content: Content) -> View {
     Xml -> "application/xml"
   }
 }
-
 // One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and
 // %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is a
 // `scan` of `&` and `=`, one step per 16 bytes read, plus a few steps per pair passed. Only the value found is

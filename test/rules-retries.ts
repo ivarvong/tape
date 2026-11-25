@@ -12,7 +12,7 @@ import type { Service } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { portKeys, portJson, portWith } from '../experiments/lang/port-keys.ts';
 import { std } from '../std.ts';
-import { built, finish, moduleOf, same as T } from './harness.ts';
+import { answered, built, finish, moduleOf, same as T } from './harness.ts';
 const NOW = Date.now(); // R-RET-1: a kv op id is <t>_<id>, t the client's clock in ms when it was first sent
 const here = (p: string) => new URL(`../${p}`, import.meta.url).pathname,
   read = (p: string) => readFileSync(here(p), 'utf8');
@@ -23,12 +23,12 @@ const enc = new TextEncoder(),
 
 // ---- 1. each code on the smallest program that shows it
 const count = `type N { N(n: Int) }
-fn done(n: Int) -> Buf {
-  respond(status: 200) |> write_int(value: n)
+fn done(n: Int) -> Response {
+  buf() |> write_int(value: n) |> respond(status: 200)
 }
 `;
 const one = (schema: string, query: string, extra = '', said = '') =>
-  `schema "${schema}"\n${count}${extra}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, ${said}query: "${query}"))\n}\n`;
+  `schema "${schema}"\n${count}${extra}fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, ${said}query: "${query}"))\n}\n`;
 const c = 'CREATE TABLE IF NOT EXISTS c(name TEXT PRIMARY KEY, n INTEGER NOT NULL, state TEXT NOT NULL)';
 T('C54: n = n + 1 from a request is refused', codes(one(c, "UPDATE c SET n = n + 1 WHERE name = 'a'")), ['C54:7']);
 T(
@@ -85,7 +85,7 @@ T(
 const ops =
   'CREATE TABLE IF NOT EXISTS c(name TEXT PRIMARY KEY, n INTEGER NOT NULL); CREATE TABLE IF NOT EXISTS seen(op TEXT NOT NULL, name TEXT NOT NULL, PRIMARY KEY (op, name))';
 const guarded = (guard: string, rec = "INSERT INTO seen VALUES (:op, 'a') ON CONFLICT DO NOTHING") =>
-  `schema "${ops.split('; ')[0]}"\nschema "${ops.split('; ')[1]}"\n${count}fn handle(raw: View, db: Sql) -> Buf {\n  recorded(db, n: sql_exec(db, query: "UPDATE c SET n = n + 1 WHERE name = :name AND ${guard}", op: raw, name: "a"))\n}\nfn recorded(db: Sql, n: Int) -> Buf {\n  done(n: n + sql_exec(db, query: "${rec}", op: "x"))\n}\n`;
+  `schema "${ops.split('; ')[0]}"\nschema "${ops.split('; ')[1]}"\n${count}fn handle(raw: View, db: Sql) -> Response {\n  recorded(db, n: sql_exec(db, query: "UPDATE c SET n = n + 1 WHERE name = :name AND ${guard}", op: raw, name: "a"))\n}\nfn recorded(db: Sql, n: Int) -> Response {\n  done(n: n + sql_exec(db, query: "${rec}", op: "x"))\n}\n`;
 T(
   'C54: an op-id guard over a table the program records op ids in accepts it',
   codes(guarded('NOT EXISTS (SELECT 1 FROM seen WHERE op = :op AND name = :name)')),
@@ -130,14 +130,14 @@ T(
 T(
   'C55: a unique key added by a migration counts',
   codes(
-    `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT NOT NULL)\n}\nmigration 2 "keys" {\n  ALTER TABLE t ADD COLUMN key TEXT;\n  CREATE UNIQUE INDEX t_key ON t(key)\n}\n${count}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "INSERT INTO t(key, body) VALUES ('k', 'x') ON CONFLICT(key) DO NOTHING"))\n}\n`,
+    `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, body TEXT NOT NULL)\n}\nmigration 2 "keys" {\n  ALTER TABLE t ADD COLUMN key TEXT;\n  CREATE UNIQUE INDEX t_key ON t(key)\n}\n${count}fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "INSERT INTO t(key, body) VALUES ('k', 'x') ON CONFLICT(key) DO NOTHING"))\n}\n`,
   ),
   [],
 );
 T(
   'C55: a partial unique index does not count (it is not unique for every row)',
   codes(
-    `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, key TEXT, body TEXT NOT NULL);\n  CREATE UNIQUE INDEX t_key ON t(key) WHERE body <> ''\n}\n${count}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "INSERT INTO t(key, body) VALUES ('k', 'x')"))\n}\n`,
+    `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, key TEXT, body TEXT NOT NULL);\n  CREATE UNIQUE INDEX t_key ON t(key) WHERE body <> ''\n}\n${count}fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "INSERT INTO t(key, body) VALUES ('k', 'x')"))\n}\n`,
   ),
   ['C55:10'],
 );
@@ -157,7 +157,7 @@ T(
 const two =
   'migration 1 "t" {\n  CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL);\n  CREATE TABLE tags(note INTEGER NOT NULL, tag TEXT NOT NULL)\n}\n';
 const q = (s: string) =>
-  `${two}${count}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "${s}"))\n}\n`;
+  `${two}${count}fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "${s}"))\n}\n`;
 T(
   'C52: a bare column in a query over two tables (M1)',
   codes(q('SELECT count(body) FROM notes JOIN tags ON tags.note = notes.id')),
@@ -173,7 +173,7 @@ T(
 );
 T('C52: one table needs no qualifying', codes(q('SELECT count(body) FROM notes')), []);
 const mig = (body: string, contract = '') =>
-  `${two}migration 2 "next"${contract} {\n  ${body}\n}\n${count}fn handle(raw: View, db: Sql) -> Buf {\n  respond(status: 200)\n}\n`;
+  `${two}migration 2 "next"${contract} {\n  ${body}\n}\n${count}fn handle(raw: View, db: Sql) -> Response {\n  empty(status: 200)\n}\n`;
 T(
   'C51: a removal, a rename, an UPDATE, a DELETE outside a contract (M2)',
   [
@@ -209,7 +209,7 @@ T(
 T(
   'C53: schema statements beside migrations (M3)',
   codes(
-    `schema "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY)"\n${two}${count}fn handle(raw: View, db: Sql) -> Buf {\n  respond(status: 200)\n}\n`,
+    `schema "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY)"\n${two}${count}fn handle(raw: View, db: Sql) -> Response {\n  empty(status: 200)\n}\n`,
   ),
   ['C53:1'],
 );
@@ -266,7 +266,7 @@ const app = (file: string, services: Record<string, Service> = {}, name = file) 
   const sql = nodeSql();
   const a = instantiate(moduleOf(r), { sql, name, services });
   const run = async (head: string, body = ''): Promise<string> =>
-    dec.decode((await a.runLogged(enc.encode(`${head}\n${body}`), { transaction: f => sql.transaction(f) })).out);
+    answered((await a.runLogged(enc.encode(`${head}\n${body}`), { transaction: f => sql.transaction(f) })).out);
   /** The one number a count(*) or a single-column query gives. */
   const first = (query: string, column: string): unknown => sql.exec(query).toArray()[0]?.[column];
   return { run, sql, a, r, first };
@@ -581,7 +581,7 @@ for (const file of ['examples/todo.tape', 'examples/todo-decode.tape', 'examples
   CREATE TABLE ops(op TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL)${end}
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let n = sql_exec(
     query: "UPDATE accounts SET balance = balance - :amount WHERE name = :who AND balance >= :amount \\
         AND NOT EXISTS (SELECT 1 FROM ops WHERE op = :op AND name = :who)",
@@ -595,7 +595,7 @@ fn handle(raw: View, db: Sql) -> Buf {
     op: "o1",
     who: "ann"
   )
-  respond(status: 200) |> write_int(value: n + m)
+  buf() |> write_int(value: n + m) |> respond(status: 200)
 }
 `;
   T('the op-id write quoted: nothing refused', codes(opGuarded('\\"from\\"')), []);

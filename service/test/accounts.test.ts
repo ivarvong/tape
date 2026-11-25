@@ -10,7 +10,7 @@ const json = async (path: string, init?: Init): Promise<[number, unknown]> => {
 };
 /** The names an account's record holds. */
 const names = async (a: string): Promise<unknown[]> => list(at((await json(`/_accounts/${a}`))[1], 'names'));
-const echo = 'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_text(text: "ok")\n}\n';
+const echo = 'fn handle(raw: View) -> Response {\n  buf() |> write_text(text: "ok") |> respond(status: 200)\n}\n';
 
 it('records every name an account makes: programs, KV clusters and their shards, faults and tools', async () => {
   const a = 'jepsen-acct1';

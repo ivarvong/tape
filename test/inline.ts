@@ -15,7 +15,7 @@ import { meter } from '../compiler/gen/meter.ts';
 import type { Fn } from '../compiler/gen/inline.ts';
 import { gen as csvGen } from '../bench/csv-gen.ts';
 import { link } from '../host/run.ts';
-import { floatOfBytes } from '../host/memory.ts';
+import { floatOfBytes, frameAt } from '../host/memory.ts';
 import { pack } from '../host/log.ts';
 import type { Observed } from '../host.ts';
 import { program } from '../proof/gen.ts';
@@ -83,8 +83,7 @@ const handled = (r: Run, input: Uint8Array): string =>
     const at = Number(r.fns['alloc']?.(input.length));
     new Uint8Array(r.memory.buffer, at, input.length).set(input);
     const h = Number(r.fns['handle']?.(at, input.length));
-    const d = new DataView(r.memory.buffer);
-    return dec.decode(new Uint8Array(r.memory.buffer, d.getUint32(h, true), d.getUint32(h + 4, true)));
+    return dec.decode(frameAt(r, h));
   });
 const both = (sources: Source[], o: Partial<Options>): [Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>] | null => {
   const a = compile(sources, { ...o, ...OFF }).wasm,

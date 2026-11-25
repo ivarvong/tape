@@ -44,10 +44,10 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, pager: Remote, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, pager: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/requests", body) -> opened(body) |> rendered
-    Request(method: "POST", path: "/requests/" ++ decimal(id) ++ "/approve") -> shown(found: latest(
+    Request(method: Post, path: "/requests", body) -> opened(body) |> rendered
+    Request(method: Post, path: "/requests/" ++ decimal(id) ++ "/approve") -> shown(found: latest(
       id,
       m: sql_move(
         row: Req,
@@ -57,7 +57,7 @@ fn handle(raw: View, db: Sql, pager: Remote, clock: Clock, timer: Timer) -> Buf 
       )
     ))
       |> rendered
-    Request(method: "POST", path: "/requests/" ++ decimal(id) ++ "/deny") -> shown(found: latest(
+    Request(method: Post, path: "/requests/" ++ decimal(id) ++ "/deny") -> shown(found: latest(
       id,
       m: sql_move(
         row: Req,
@@ -67,7 +67,7 @@ fn handle(raw: View, db: Sql, pager: Remote, clock: Clock, timer: Timer) -> Buf 
       )
     ))
       |> rendered
-    Request(method: "GET", path: "/requests/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Get, path: "/requests/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -225,13 +225,14 @@ fn shown(found: Option[Req]) -> Outcome {
   Shown(status: 200, request: r)
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, request) -> write_json(out: respond(status), value: request)
-    Problem(status, reason) -> respond(status)
+    Shown(status, request) -> write_json(out: buf(), value: request) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

@@ -5,24 +5,24 @@
 // stays a `+` in both (form encoding is form_field's).
 import '../node25.ts';
 import { interpret } from '../interp.ts';
-import { instantiate } from '../host.ts';
+import { answerText, instantiate, responseOf } from '../host.ts';
 import { built, finish, moduleOf, ok, same, std } from './harness.ts';
 
 const PROGRAM = {
   name: 'percent.tape',
-  text: `fn handle(raw: View) -> Buf {
+  text: `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/dec", body) -> shown(found: percent_decoded(text: body))
-    Request(method: "GET", path: "/users/" ++ percent_decoded(name) ++ "/tickets") -> respond(status: 200)
-      |> append(view: "[\\(name)]")
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/dec", body) -> shown(found: percent_decoded(text: body))
+    Request(method: Get, path: "/users/" ++ percent_decoded(name) ++ "/tickets") -> buf()
+      |> append(view: "[\\(name)]") |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
-fn shown(found: Option[View]) -> Buf {
+fn shown(found: Option[View]) -> Response {
   match found {
-    Some(value) -> respond(status: 200) |> push(byte: 49) |> append(view: value)
-    None -> respond(status: 200) |> push(byte: 48)
+    Some(value) -> buf() |> push(byte: 49) |> append(view: value) |> respond(status: 200)
+    None -> buf() |> push(byte: 48) |> respond(status: 200)
   }
 }
 `,
@@ -58,7 +58,7 @@ const request = (body: Uint8Array): Uint8Array => {
   return out;
 };
 const payload = (out: Uint8Array): Uint8Array | null => {
-  const rest = out.subarray(out.indexOf(10) + 1);
+  const rest = responseOf(out).body;
   if (rest[0] === 48 && rest.length === 1) return null;
   if (rest[0] === 49) return rest.subarray(1);
   throw new Error(`percent_decoded answered ${new TextDecoder().decode(out)}`);
@@ -169,7 +169,7 @@ for (const [label, h] of handlers) {
 // ---- in a route: the segment is bound on the encoded path, then decoded
 const answer = (h: Handler, line: string): string => {
   const out = h.handle(enc.encode(`${line}\n`));
-  return new TextDecoder().decode(out).replace('\n', ' ');
+  return answerText(responseOf(out)).replace('\n', ' ');
 };
 for (const [label, h] of handlers) {
   same(

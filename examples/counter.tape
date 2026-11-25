@@ -17,9 +17,9 @@ schema "CREATE TABLE IF NOT EXISTS counted(op TEXT NOT NULL, name TEXT NOT NULL,
 type Count { Count(n: Int) }
 type Op = View where len(self) >= 1 and len(self) <= 64
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/" ++ name, query: Some(value: "op=" ++ Op(op))) -> {
+    Request(method: Post, path: "/" ++ name, query: Some(value: "op=" ++ Op(op))) -> {
       // a repeat of the op changes no row, and answers the count as it stands
       let _ = sql_exec(
         query: "INSERT INTO counters(name, n) VALUES (:name, :step) ON CONFLICT(name) \
@@ -31,17 +31,18 @@ fn handle(raw: View, db: Sql) -> Buf {
       )
       add(name, op)
     }
-    Request(method: "POST") -> respond(status: 428)
+    Request(method: Post) -> buf()
       |> append(view: "{\"error\":\"POST /<name>?op=<id>: an op id makes a retry add once\"}")
-    Request(method: "GET", path: "/" ++ name) -> show(
+      |> respond(status: 428)
+    Request(method: Get, path: "/" ++ name) -> show(
       found: sql_first(row: Count, query: "SELECT n FROM counters WHERE name = :name", name)
     )
-    _ -> respond(status: 405) |> append(view: "{\"error\":\"method_not_allowed\"}")
+    _ -> buf() |> append(view: "{\"error\":\"method_not_allowed\"}") |> respond(status: 405)
   }
 }
 
 // The op id is recorded with the name; a repeat added nothing, and answers the count as it stands.
-fn add(name: View, op: View) -> Buf {
+fn add(name: View, op: View) -> Response {
   let _ = sql_exec(
     query: "INSERT INTO counted(op, name) VALUES (:op, :name) ON CONFLICT(op, name) DO NOTHING",
     op,
@@ -50,10 +51,10 @@ fn add(name: View, op: View) -> Buf {
   show(found: sql_first(row: Count, query: "SELECT n FROM counters WHERE name = :name", name))
 }
 
-fn show(found: Option[Count]) -> Buf {
+fn show(found: Option[Count]) -> Response {
   match found {
-    Some(value) -> respond(status: 200) |> append(view: "{\"count\":\(value.n)}")
-    None -> respond(status: 200) |> append(view: "{\"count\":0}")
+    Some(value) -> buf() |> append(view: "{\"count\":\(value.n)}") |> respond(status: 200)
+    None -> buf() |> append(view: "{\"count\":0}") |> respond(status: 200)
   }
 }
 

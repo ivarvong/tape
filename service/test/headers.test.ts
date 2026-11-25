@@ -80,8 +80,8 @@ describe('security headers', () => {
   });
 
   it("keeps a program's own server-timing, and adds the host's entry only on the operator route", async () => {
-    const src = `fn handle(raw: View) -> Buf {
-  respond(status: 200) |> header(name: "server-timing", value: "db;dur=5") |> append(view: raw)
+    const src = `fn handle(raw: View) -> Response {
+  buf() |> append(view: raw) |> respond(status: 200) |> header(name: "server-timing", value: "db;dur=5")
 }
 `;
     expect((await call('/ivar/timed', { method: 'POST', body: src })).status).toBe(201);

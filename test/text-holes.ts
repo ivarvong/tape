@@ -3,9 +3,10 @@
 import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
-import { ok, same, finish, built, moduleOf, bare, handleBare, codes, std } from './harness.ts';
+import { ok, same, finish, built, moduleOf, bare, handleBare, codes, std, answered } from './harness.ts';
 
-const program = (body: string): string => `type P { P(n: Int) }\nfn handle(raw: View) -> Buf {\n  ${body}\n}\n`;
+const program = (body: string): string =>
+  `type P { P(n: Int) }\nfn handle(raw: View) -> Response {\n  ${body} |> respond(status: 200)\n}\n`;
 const answer = (body: string, input = 'ada'): string =>
   handleBare(bare(moduleOf(built(program(body)))), new TextEncoder().encode(input));
 const sizeOf = (body: string): number => built(program(body)).wasm.length;
@@ -32,7 +33,7 @@ const cases: readonly (readonly [string, string, string])[] = [
   ],
   ['a literal with no hole is the text it was', 'buf() |> append(view: "no (holes) here")', 'no (holes) here'],
 ];
-for (const [what, body, want] of cases) same(what, answer(body), want);
+for (const [what, body, want] of cases) same(what, answer(body), `200\n${want}`);
 
 // ---- appended, it goes straight into that Buf: the chain of appends it stands for, with each hole's value held
 // in a local on the way (a few bytes), and no Buf of its own
@@ -50,7 +51,7 @@ for (const [what, body, want] of cases) {
   const said = interpret([...std, { name: 'program.tape', text: program(body) }]).handle(
     new TextEncoder().encode('ada'),
   );
-  same(`interpreted: ${what}`, new TextDecoder().decode(said), want);
+  same(`interpreted: ${what}`, answered(said), `200\n${want}`);
 }
 
 // ---- what is refused
@@ -62,7 +63,7 @@ same('a Buf in a hole', codes(program('buf() |> append(view: "a \\(buf())")')), 
 ok(
   'a query is still a literal: a hole in one is refused',
   codes(
-    'schema "CREATE TABLE IF NOT EXISTS t(k TEXT PRIMARY KEY)"\nfn handle(raw: View, db: Sql) -> Buf {\n  let _ = sql_exec(db, query: "DELETE FROM t WHERE k = \'\\(raw)\'")\n  respond(status: 200)\n}\n',
+    'schema "CREATE TABLE IF NOT EXISTS t(k TEXT PRIMARY KEY)"\nfn handle(raw: View, db: Sql) -> Response {\n  let _ = sql_exec(db, query: "DELETE FROM t WHERE k = \'\\(raw)\'")\n  empty(status: 200)\n}\n',
   ).includes('C32:3'),
 );
 
@@ -73,7 +74,7 @@ const OWN = 'fn write_int(x: Int) -> Int {\n  x + 1\n}\n';
 const holed = (stdExtra: string, body: string): string => {
   const sources = [
     ...std.map(s => (s.name === 'std/json.tape' ? { ...s, text: `${s.text}\n${stdExtra}` } : s)),
-    { name: 'own.tape', text: `${OWN}fn handle(raw: View) -> Buf {\n  ${body}\n}\n` },
+    { name: 'own.tape', text: `${OWN}fn handle(raw: View) -> Response {\n  ${body} |> respond(status: 200)\n}\n` },
   ];
   const b = compile(sources);
   if (!b.wasm) return b.errors.map(e => `${e.code}:${e.line}`).join(' ');
@@ -82,12 +83,12 @@ const holed = (stdExtra: string, body: string): string => {
 same(
   "a program's own write_int, and an Int hole in the program's file",
   holed('', 'buf() |> append(view: "\\(write_int(x: len(raw))) and \\(len(raw))")'),
-  '4 and 3',
+  '200\n4 and 3',
 );
 same(
   "an Int hole in a file of std, beside a program's own write_int",
   holed('fn hole_of(n: Int) -> View {\n  "n=\\(n)"\n}\n', 'buf() |> append(view: json.hole_of(n: len(raw)))'),
-  'n=3',
+  '200\nn=3',
 );
 
 finish();

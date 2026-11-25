@@ -36,17 +36,17 @@ type NewEvent { NewEvent(key: View, venue: Venue, tiers: List[Tier], tags: List[
 type Made { Made(key: View, venue: Venue, tiers: List[Tier], tags: List[View], sizes: List[Int], grid: List[List[Int]], seats: Int) }
 `;
 const program = `${TYPES}
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/events", body) -> made(decoded: decode(json: body, as: NewEvent))
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/events", body) -> made(decoded: decode(json: body, as: NewEvent))
+    _ -> empty(status: 404)
   }
 }
 
-fn made(decoded: Result[NewEvent, View]) -> Buf {
+fn made(decoded: Result[NewEvent, View]) -> Response {
   match decoded {
-    Ok(value: NewEvent(key, venue, tiers, tags, sizes, grid, note, backup, extra)) -> respond_as(status: 201, content: Json) |> write_json(value: Made(key, venue, tiers, tags, sizes, grid, seats: seats(list: tiers, sum: 0) + had(note) + 10 * there(backup) + 100 * more(extra)))
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Ok(value: NewEvent(key, venue, tiers, tags, sizes, grid, note, backup, extra)) -> buf() |> write_json(value: Made(key, venue, tiers, tags, sizes, grid, seats: seats(list: tiers, sum: 0) + had(note) + 10 * there(backup) + 100 * more(extra))) |> respond_as(status: 201, content: Json)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 
@@ -231,7 +231,7 @@ ok(
   'C09: a list of optional values',
   codes(
     build(
-      `type T { T(xs: List[Option[Int]]) }\nfn handle(raw: View) -> Buf {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Buf {\n  match d {\n    Ok(value) -> respond(status: 200)\n    Err(error) -> respond(status: 400)\n  }\n}\n`,
+      `type T { T(xs: List[Option[Int]]) }\nfn handle(raw: View) -> Response {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Response {\n  match d {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 400)\n  }\n}\n`,
     ),
   ) === 'C09',
 );
@@ -239,7 +239,7 @@ ok(
   'C09: a list on its own of something that cannot be JSON',
   codes(
     build(
-      `type T { T(n: Int) }\nfn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_json(value: Cons(head: Some(value: 1), tail: Nil))\n}\n`,
+      `type T { T(n: Int) }\nfn handle(raw: View) -> Response {\n  buf() |> write_json(value: Cons(head: Some(value: 1), tail: Nil)) |> respond(status: 200)\n}\n`,
     ),
   ) === 'C09',
 );
@@ -247,16 +247,16 @@ ok(
   'without std/json there is no nested JSON (C09), and nothing else changes',
   codes(
     compile([
-      ...std.filter(s => s.name !== 'std/json.tape' && s.name !== 'std/http.tape'),
+      ...std.filter(s => s.name !== 'std/json.tape'),
       {
         name: 'program.tape',
-        text: `type V { V(a: Int) }\ntype T { T(v: V) }\nfn handle(raw: View) -> Buf {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Buf {\n  match d {\n    Ok(value) -> buf()\n    Err(error) -> buf()\n  }\n}\n`,
+        text: `type V { V(a: Int) }\ntype T { T(v: V) }\nfn handle(raw: View) -> Response {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Response {\n  match d {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 400)\n  }\n}\n`,
       },
     ]),
   ) === 'C09',
 );
 const flat = build(
-  `type T { T(a: Int, b: View) }\nfn handle(raw: View) -> Buf {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Buf {\n  match d {\n    Ok(value) -> respond(status: 200) |> write_json(value)\n    Err(error) -> respond(status: 400)\n  }\n}\n`,
+  `type T { T(a: Int, b: View) }\nfn handle(raw: View) -> Response {\n  shown(d: decode(json: raw, as: T))\n}\nfn shown(d: Result[T, View]) -> Response {\n  match d {\n    Ok(value) -> buf() |> write_json(value) |> respond(status: 200)\n    Err(error) -> empty(status: 400)\n  }\n}\n`,
 );
 ok(
   'a flat record is decoded in the module, by the decoder written for it, with no import for JSON',
@@ -292,26 +292,26 @@ fn total(items: List[Item], sum: Int) -> Int {
 }
 `;
 const front = `${msg}
-fn handle(raw: View, shop: Remote) -> Buf {
+fn handle(raw: View, shop: Remote) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/quote", body) -> asked(basket: decode(json: body, as: Basket))
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/quote", body) -> asked(basket: decode(json: body, as: Basket))
+    _ -> empty(status: 404)
   }
 }
 
-fn asked(basket: Result[Basket, View]) -> Buf {
+fn asked(basket: Result[Basket, View]) -> Response {
   match basket {
     Ok(value) -> quoted(reply: ask(to: shop, method: "price", send: value, reply: Quote, within: 1000))
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 
-fn quoted(reply: Result[Quote, CallError]) -> Buf {
+fn quoted(reply: Result[Quote, CallError]) -> Response {
   match reply {
-    Ok(value) -> respond_as(status: 200, content: Json) |> write_json(value)
-    Err(error: Rejected(reason)) -> respond(status: 422) |> append(view: reason)
-    Err(error: Skew(reason)) -> respond(status: 502) |> append(view: reason)
-    Err(error) -> respond(status: 504)
+    Ok(value) -> buf() |> write_json(value) |> respond_as(status: 200, content: Json)
+    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 422)
+    Err(error: Skew(reason)) -> buf() |> append(view: reason) |> respond(status: 502)
+    Err(error) -> empty(status: 504)
   }
 }
 `;

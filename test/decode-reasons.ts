@@ -10,7 +10,7 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const PROGRAM = `type Key = View where len(self) >= 1 and len(self) <= 64
 type Qty = Int where self >= 1 and self <= 9
@@ -28,11 +28,11 @@ type Order {
   Order(key: Key, items: List[Line], note: Option[View], slug: Slug, paid: Bool, at: Option[Int], rate: Option[Rate], grid: List[List[Int]], weight: Option[Float], handle: Option[Handle], tag: Option[Tag], tags: Option[List[Tag]], limit: Option[Limit], code: Option[Code], small: Option[Small], codes: Option[List[Code]])
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match decode(json: request(raw).body, as: Order) {
-    Ok(value: Order(at: None, note: None)) -> respond(status: 200) |> append(view: "ok, no at, no note")
-    Ok -> respond(status: 200) |> append(view: "ok")
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Ok(value: Order(at: None, note: None)) -> buf() |> append(view: "ok, no at, no note") |> respond(status: 200)
+    Ok -> buf() |> append(view: "ok") |> respond(status: 200)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 `;
@@ -94,7 +94,7 @@ const enc = new TextEncoder(),
 for (const [what, json, want] of cases) {
   const req = enc.encode(`POST /\n${json}`);
   const got = app ? responseOf(app.handle(req)) : null;
-  const theirs = dec.decode(it.handle(req));
+  const theirs = answered(it.handle(req));
   same(
     `${what}: ${want}`,
     [got ? `${got.status} ${dec.decode(got.body)}` : 'does not compile', theirs.replace('\n', ' ')],

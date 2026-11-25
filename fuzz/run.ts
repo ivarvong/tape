@@ -5,7 +5,8 @@
 //   --count <n>     stop after n cases, whatever the time (the gate's fixed slice)
 //   --only <seed>   run that one seed and print what it made and what each side gave
 import '../node25.ts';
-import { floatOfBytes } from '../host/memory.ts';
+import { floatOfBytes, frameAt } from '../host/memory.ts';
+import { responseOf } from '../host.ts';
 
 export type Cli = {
   seconds: number;
@@ -96,6 +97,16 @@ export function instance(module: WebAssembly.Module): Run {
   };
   return { fns, memory, global };
 }
+/**
+ * What handled() gave for a handle that answers 200 with its bytes as the body (the fuzzers' programs do): the body,
+ * as latin1 text; a trap, an engine's stop, or an answer of another status as it is (the status and the body).
+ */
+export function bodyOf(out: string): string {
+  if (!out.startsWith('\0tap')) return out;
+  const a = responseOf(Buffer.from(out, 'latin1'));
+  const body = Buffer.from(a.body).toString('latin1');
+  return a.status === 200 ? body : `${a.status}\n${body}`;
+}
 /** handle on these bytes: its answer or its trap, then the steps it took and the memory it used. */
 export function handled(r: Run, input: Uint8Array, entry = 'handle'): { out: string; steps: bigint; bytes: bigint } {
   r.fns['reset']?.();
@@ -105,10 +116,13 @@ export function handled(r: Run, input: Uint8Array, entry = 'handle'): { out: str
     const at = Number(r.fns['alloc']?.(input.length));
     new Uint8Array(r.memory.buffer, at, input.length).set(input);
     const h = Number(r.fns[entry]?.(at, input.length));
+    // handle's answer is its head and where its body lies (host/memory.ts frameAt); another export's is its bytes
     const d = new DataView(r.memory.buffer);
-    out = Buffer.from(new Uint8Array(r.memory.buffer, d.getUint32(h, true), d.getUint32(h + 4, true))).toString(
-      'latin1',
-    );
+    const bytes =
+      entry === 'handle'
+        ? frameAt(r, h)
+        : new Uint8Array(r.memory.buffer, d.getUint32(h, true), d.getUint32(h + 4, true));
+    out = Buffer.from(bytes).toString('latin1');
   } catch (e) {
     const why = r.global('why');
     // a trap the module raised has its code; anything else (the engine's own stack) is shown as the engine says

@@ -25,7 +25,11 @@ type Shape {
 }
 type Empty { Empty }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answered(raw) |> respond(status: 200)
+}
+
+fn answered(raw: View) -> Buf {
   match raw {
     "Flat\n" ++ json -> flat(found: decode(json, as: Flat))
     "Box\n" ++ json -> box(found: decode(json, as: Box))

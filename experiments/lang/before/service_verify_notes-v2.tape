@@ -6,17 +6,17 @@ migration 2 "pins" {
   CREATE INDEX notes_pinned ON notes(pinned)
 }
 type Count { Count(n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/notes", body) -> count(found: sql_first(db, row: Count, query: "INSERT INTO notes(body) VALUES (:body) RETURNING id AS n", body))
-    Request(method: "GET", path: "/notes") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes"))
-    Request(method: "GET", path: "/unpinned") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes WHERE pinned = 0"))
-    _ -> append(buf: respond(status: 404), view: "no such route")
+    Request(method: Post, path: "/notes", body) -> count(found: sql_first(db, row: Count, query: "INSERT INTO notes(body) VALUES (:body) RETURNING id AS n", body))
+    Request(method: Get, path: "/notes") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes"))
+    Request(method: Get, path: "/unpinned") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes WHERE pinned = 0"))
+    _ -> append(buf: buf(), view: "no such route") |> respond(status: 404)
   }
 }
-fn count(found: Option[Count]) -> Buf {
+fn count(found: Option[Count]) -> Response {
   match found {
-    Some(value: Count(n)) -> write_int(out: respond(status: 200), value: n)
-    None -> respond(status: 500)
+    Some(value: Count(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }

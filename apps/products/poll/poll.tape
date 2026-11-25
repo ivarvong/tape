@@ -63,18 +63,18 @@ type Outcome {
   Failed(status: Int, error: View)
 }
 
-fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "GET", path: "/") -> home()
-    Request(method: "POST", path: "/polls", body) -> made(body) |> rendered
+    Request(method: Get, path: "/") -> home()
+    Request(method: Post, path: "/polls", body) -> made(body) |> rendered
     Request(
-      method: "GET",
+      method: Get,
       path: "/polls/" ++ decimal(id) ++ ".json"
     ) -> json_results(found: results(id))
-    Request(method: "GET", path: "/polls/" ++ decimal(id)) -> page(found: results(id), note: "")
+    Request(method: Get, path: "/polls/" ++ decimal(id)) -> page(found: results(id), note: "")
     Request(
-      method: "POST",
+      method: Post,
       path: "/polls/" ++ decimal(id) ++ "/votes",
       body
     ) -> voted(id, body, form: is_form(r))
@@ -156,7 +156,7 @@ fn add_options(poll: Int, options: List[Label], idx: Int) -> Done {
 }
 
 // a vote answers JSON; from the page's form it answers 303 to the page, which shows the count
-fn voted(id: Int, body: View, form: Bool) -> Buf {
+fn voted(id: Int, body: View, form: Bool) -> Response {
   let Ok(value: Vote(voter, option)) = vote_of(body, form) else {
     Err(error) -> answer(id, form, outcome: Failed(status: 400, error))
   }
@@ -183,9 +183,9 @@ fn voted(id: Int, body: View, form: Bool) -> Buf {
   answer(id, form, outcome: Voted(status: 201, vote: Counted(poll: id, option, counted: True)))
 }
 
-fn answer(id: Int, form: Bool, outcome: Outcome) -> Buf {
+fn answer(id: Int, form: Bool, outcome: Outcome) -> Response {
   match outcome {
-    Voted if form -> respond(status: 303) |> header(name: "location", value: "../\(id)")
+    Voted if form -> empty(status: 303) |> header(name: "location", value: "../\(id)")
     _ -> rendered(outcome)
   }
 }
@@ -227,30 +227,27 @@ fn listed(rows: Rows[Tally]) -> List[Tally] {
   }
 }
 
-fn json_results(found: Option[Results]) -> Buf {
+fn json_results(found: Option[Results]) -> Response {
   match found {
-    Some(value) -> respond_as(status: 200, content: Json)
-      |> header(name: "cache-control", value: "no-store")
-      |> write_json(value)
+    Some(value) -> json(status: 200, value) |> header(name: "cache-control", value: "no-store")
     None -> rendered(outcome: Failed(status: 404, error: "no such poll"))
   }
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Made(status, poll) -> respond_as(status, content: Json)
+    Made(status, poll) -> json(status, value: poll)
       |> header(name: "location", value: "polls/\(poll.id)")
-      |> write_json(value: poll)
-    Voted(status, vote) -> respond_as(status, content: Json) |> write_json(value: vote)
-    Failed(status, error) -> respond_as(status, content: Json) |> write_json(value: Problem(error))
+    Voted(status, vote) -> json(status, value: vote)
+    Failed(status, error) -> json(status, value: Problem(error))
   }
 }
 
-fn page(found: Option[Results], note: View) -> Buf {
+fn page(found: Option[Results], note: View) -> Response {
   match found {
     Some(value: Results(id, question, total, options)) -> {
       let voter = voter_key(n: random())
-      let out = shell(status: 200, title: question)
+      let out = shell(title: question)
         |> append(view: "<p class=meta>poll \(id) · \(total) ")
         |> append(view: plural(n: total, one: "vote", many: "votes"))
         |> append(view: " · <a href=\"\(id).json\">JSON</a></p><ol class=bars>")
@@ -263,11 +260,11 @@ fn page(found: Option[Results], note: View) -> Buf {
         |> append(view: "<button>Vote</button></fieldset></form>")
         |> append(view: "<p class=meta>Or: <code>curl -H 'content-type: application/json' -d ")
         |> append(view: "'{\"voter\":\"you\",\"option\":0}' …/polls/\(id)/votes</code></p>")
-        |> foot
+        |> foot(status: 200)
     }
-    None -> shell(status: 404, title: "no such poll")
+    None -> shell(title: "no such poll")
       |> append(view: "<p><a href=\"../\">All polls</a></p>")
-      |> foot
+      |> foot(status: 404)
   }
 }
 
@@ -337,8 +334,8 @@ fn letters(out: Buf, n: Int, left: Int) -> Buf {
   }
 }
 
-fn home() -> Buf {
-  let out = shell(status: 200, title: "polls")
+fn home() -> Response {
+  let out = shell(title: "polls")
     |> append(view: "<p>Make a poll with a JSON POST; vote once per voter key. A vote claims its \
         voter's row ")
     |> append(view: "first, so a vote sent twice is counted once.</p>")
@@ -350,7 +347,7 @@ fn home() -> Buf {
     rows: sql_all(row: Poll, query: "SELECT * FROM polls ORDER BY id DESC LIMIT 20")
   )
     |> append(view: "</ul>")
-    |> foot
+    |> foot(status: 200)
 }
 
 fn listed_polls(out: Buf, rows: Rows[Poll]) -> Buf {
@@ -363,9 +360,8 @@ fn listed_polls(out: Buf, rows: Rows[Poll]) -> Buf {
     })
 }
 
-fn shell(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn shell(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
     |> append(view: "<meta name=viewport content=\"width=device-width,initial-scale=1\"><title>")
     |> write_html(text: title)
@@ -400,8 +396,10 @@ fn shell(status: Int, title: View) -> Buf {
     |> append(view: "</h1>")
 }
 
-fn foot(out: Buf) -> Buf {
+fn foot(out: Buf, status: Int) -> Response {
   out
     |> append(view: "<footer>A small program written in <a href=\"/\">Tape</a> · <a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/poll/poll.tape\">source</a></footer></html>")
+    |> respond_as(status, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }

@@ -1,7 +1,12 @@
 // RUNTIME-SPEC R-UPG: a KV cluster made with an older examples/kv.tape moved to the current one. The old programs
-// are the ones production clusters run, built by their own revision's compiler (test/fixtures/kv-<rev>.json; the
-// hashes are those of demo/users, 5f0a10a7..., and demo/after44527, d1ed4b1f...), uploaded the way the router of
-// that revision did, so the data, the old rules and the upgrade are as they would be in production.
+// are the ones production clusters ran (test/fixtures/kv-<rev>.json; built by their own revision's compiler, the
+// hashes were those of demo/users, 5f0a10a7..., and demo/after44527, d1ed4b1f...), uploaded the way the router of
+// that revision did, so the data, the old rules and the upgrade are as they would be in production. Since a
+// program's answer is a Response (25 November 2026), a build of the old compilers answers text the host no longer
+// reads (a 500, and in production, where the compiler differs, the rebuild fails: 503 rebuild_failed until the
+// cluster is upgraded). So each fixture's source is that program with its answers in the new form, its `?N`
+// placeholders named `:pN` and its method a Method, built by today's compiler with the rules off, as the service
+// rebuilds a version today's rules refuse: every route, query and rule of the old program as it was.
 import { exports } from 'cloudflare:workers';
 import { describe, expect, it } from 'vitest';
 import k50 from './fixtures/kv-50e0269.json' with { type: 'json' };
@@ -56,8 +61,8 @@ const state = async (a: string, c: string, keys: readonly string[]): Promise<Rec
 
 describe('upgrade: a cluster made with an older examples/kv.tape', () => {
   const revisions: [string, Fixture, string][] = [
-    ['50e0269', k50, '5f0a10a7'],
-    ['4676e6d', k46, 'd1ed4b1f'],
+    ['50e0269', k50, 'ddc82d7b'],
+    ['4676e6d', k46, '9c4a356b'],
   ];
   for (const [rev, fixture, hash] of revisions) {
     it(`${rev}: keys, values, versions and tombstones are kept; the current rules apply after`, async () => {

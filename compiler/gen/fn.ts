@@ -4,7 +4,7 @@ import type { Arg, At, Call, Expr, FnDecl, Program } from '../ast.ts';
 import { showExpr } from '../../rules/origins.ts';
 import { F64, I32, TRAP, f64, fail, loadOp, sleb, storeOp, uleb } from '../common.ts';
 import type { Problem } from '../common.ts';
-import { shadowedHint } from '../shadow.ts';
+import { shadowedHint, stdName } from '../shadow.ts';
 import { BUILTIN_TYPES, key, same, scaleOf } from '../types.ts';
 import type { Type } from '../types.ts';
 import type { Wire } from '../wire.ts';
@@ -226,8 +226,15 @@ function mismatchHint(c: Ctx, got: Type, want: Type, at: Place): string {
     return `${e === 'it' ? 'The value' : `\`${e}\``} may be None. Take the value out first, with a step that says what happens when it is None: \`let Some(value) = ${e === 'it' ? 'e' : e} else -> …\`, then pass \`value\`. Or match it, with an arm for \`Some(value)\` and one for \`None\`.`;
   if (want.name === 'Option' && want.args[0] && (same(want.args[0], got) || same(want.args[0], c.B.strip(got))))
     return `An Option is wanted: \`Some(value: ${e === 'it' ? '…' : e})\`, or \`None\`.`;
+  const response = stdName(c.B.prog, 'types', 'Response');
+  if (want.name === 'Buf' && got.name === response)
+    return 'A Response is an answer, given last, and a Buf is the body being written before it: write into the Buf, then give it its status: `buf() |> append(view: …) |> respond(status: 200)`; or take the Response where the function is called.';
+  if (want.name === response && got.name === 'Buf')
+    return 'A Buf is not an answer: give it its status last, `… |> respond(status: 200)` (`respond_as(status: 200, content: Html)` for a type), or write `json(status: 200, value: …)` for a value as JSON and `empty(status: 204)` for no body.';
+  if (want.name === response && !BUILTIN_TYPES.has(got.name))
+    return `A Response is an answer (std/http.tape), and ${key(got)} is not: \`json(status: 200, value: …)\` answers a record as JSON, or write a function from ${key(got)} to Response.`;
   if (want.name === 'Buf' && !BUILTIN_TYPES.has(got.name))
-    return `A Buf is an answer's bytes being written (\`respond(status)\`, \`buf()\`), and ${key(got)} is not: write the value into one first (a function from ${key(got)} to Buf, or \`respond(status: 200) |> write_json(value: …)\` for a record).`;
+    return `A Buf is bytes being written (\`buf()\`), and ${key(got)} is not: write the value into one first (a function from ${key(got)} to Buf, or \`write_json(out: buf(), value: …)\` for a record).`;
   if ((got.name === 'Float' && want.name === 'Int') || (got.name === 'Int' && want.name === 'Float')) return MIXED;
   const gs = scaleOf(c.B.strip(got)),
     ws = scaleOf(want);

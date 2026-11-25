@@ -4,9 +4,9 @@
 type Charge { Charge(order: Int) }
 type Charged { Charged(payment: Int) }
 
-fn handle(raw: View, payments: Remote) -> Buf {
+fn handle(raw: View, payments: Remote) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/pay/" ++ decimal(order)) -> paid(reply: call(
+    Request(method: Post, path: "/pay/" ++ decimal(order)) -> paid(reply: call(
       to: payments,
       method: "charge",
       send: Charge(order),
@@ -14,16 +14,16 @@ fn handle(raw: View, payments: Remote) -> Buf {
       within: 1000,
       once: Charge(order)
     ))
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn paid(reply: Result[Charged, CallError]) -> Buf {
+fn paid(reply: Result[Charged, CallError]) -> Response {
   match reply {
-    Ok(value: Charged(payment)) -> respond(status: 201) |> write_int(value: payment)
-    Err(error: Rejected(reason)) -> respond(status: 402) |> append(view: reason)
-    Err(error: Skew(reason)) -> respond(status: 409) |> append(view: reason)
-    Err(error: Timeout) -> respond(status: 504)
-    Err(error) -> respond(status: 503)
+    Ok(value: Charged(payment)) -> buf() |> write_int(value: payment) |> respond(status: 201)
+    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 402)
+    Err(error: Skew(reason)) -> buf() |> append(view: reason) |> respond(status: 409)
+    Err(error: Timeout) -> empty(status: 504)
+    Err(error) -> empty(status: 503)
   }
 }

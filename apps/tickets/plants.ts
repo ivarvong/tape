@@ -119,8 +119,8 @@ export const plants: Plant[] = [
   ),
   P(
     'the page writes the buyer unescaped',
-    '  page_top(status, title: "Hold \\(id)") |> append(view: "<p>\\(qty) seat(s) for ") |> write_html(text: buyer)',
-    '  page_top(status, title: "Hold \\(id)") |> append(view: "<p>\\(qty) seat(s) for \\(buyer)")',
+    '  page_top(title: "Hold \\(id)") |> append(view: "<p>\\(qty) seat(s) for ") |> write_html(text: buyer)',
+    '  page_top(title: "Hold \\(id)") |> append(view: "<p>\\(qty) seat(s) for \\(buyer)")',
   ),
   // the C77 weaknesses (mutant round 1, experiments/c78/mutants.ts): wrong timer keys, timer runs that leave the row, ordering and state reading
   ...mutants.map(([name, ...pairs]) => P(`C78/C79 mutant ${name}`, ...pairs)),

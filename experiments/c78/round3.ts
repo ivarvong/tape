@@ -23,7 +23,7 @@ const FIELD = 'planned(decided: Boxed(plan: again(id, failed: retries), why: why
 const PATTERN = 'planned(decided: unboxed(box: Boxed(plan: again(id, failed: retries), why: why)))';
 const VIAWITH = 'planned(id, decided: again(id, failed: retries))';
 const GIVE = 'failed >= 3 -> Stop';
-const CLOCK: Pair[] = [['shipping: Remote, timer: Timer) -> Buf {', 'shipping: Remote, timer: Timer, clock: Clock) -> Buf {'], ['shipping: Remote, timer: Timer, message: Wake)', 'shipping: Remote, timer: Timer, clock: Clock, message: Wake)']];
+const CLOCK: Pair[] = [['shipping: Remote, timer: Timer) -> Response {', 'shipping: Remote, timer: Timer, clock: Clock) -> Response {'], ['shipping: Remote, timer: Timer, message: Wake)', 'shipping: Remote, timer: Timer, clock: Clock, message: Wake)']];
 const PLANNED_TIMER = 'fn planned(id: Int, decided: Plan) -> View {\n  match decided {\n    Again(after) -> "; again in " ++ decimal_text(value: after) ++ " ms"\n    Stop -> {\n      do wake(timer, after: 60000, key: id)\n      "; stopped, again in 60000 ms"\n    }\n  }\n}';
 export const round3: Mutant[] = [
   // (1) a timer set with a move to a final state is keyed by the row and read back as woken reads it

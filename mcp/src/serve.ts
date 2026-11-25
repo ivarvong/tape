@@ -150,16 +150,16 @@ const refusalFields = { error: { type: 'string' }, reason: { type: 'string' } };
 const DOCS = 'https://github.com/ivarvong/tape/blob/main/docs';
 /**
  * Tape in brief, in compile's and run's descriptions: what an agent reached for first in the usability benchmark
- * and could not find (bench/usability, 2026-11-22: respond_as, Request's fields, the query). Every function named
+ * and could not find (bench/usability, 2026-11-22: respond_as, Request's fields, the query; on 25 November 2026 an answer became a Response). Every function named
  * here is in std/ or a built-in (mcp/test.ts, list).
  */
 export const CHEAT_SHEET = `Tape in brief (every std function: ${DOCS}/std.md; a whole service: ${DOCS}/guide.md#quickstart-a-service-in-one-file; the language: https://github.com/ivarvong/tape/blob/main/LANGUAGE.md):
-- Entry: \`fn handle(raw: View, db: Sql) -> Buf\`, with the capabilities it uses (db: Sql, clock: Clock, timer: Timer). Arguments are named, \`f(a: 1)\`, bar the first, \`f(1, b: 2)\`, and a value named so, \`f(a)\`.
-- Request: \`match request(raw) { Request(method: "GET", path: "/items/" ++ decimal(id)) -> … }\`. Fields: method, path (before \`?\`), query: Option[View] (raw, after \`?\`; one parameter: \`form_field(body: q, name: "limit")\`), body, caller, headers (read one: \`header_of(request: r, name: "accept")\`).
-- Respond: \`respond(status: 404)\` is text/plain; \`respond_as(status: 200, content: Json) |> write_json(value: Item(id, name))\` is JSON (content: Json, Html, Text, Css, Svg, Csv, Atom, Rss or Xml). \`write_rows(rows: sql_all(…))\` writes rows as an array; \`append(view: "text")\` adds text; \`|> header(name: "location", value: url)\` sets a header. write_json writes what decode reads: records, Lists, Option fields (None: no key), several constructors as \`{"Sets": {…}}\`; \`decode(json: body, as: List[Item])\` reads an array.
+- Entry: \`fn handle(raw: View, db: Sql) -> Response\`, with the capabilities it uses (db: Sql, clock: Clock, timer: Timer). Arguments are named, \`f(a: 1)\`, bar the first, \`f(1, b: 2)\`, and a value named so, \`f(a)\`.
+- Request: \`match request(raw) { Request(method: Get, path: "/items/" ++ decimal(id)) -> … }\`. Fields: method, path (before \`?\`), query: Option[View] (raw, after \`?\`; one parameter: \`form_field(body: q, name: "limit")\`), body, caller, headers (read one: \`header_of(request: r, name: "accept")\`).
+- Respond: handle gives a Response, body first, status last: \`buf() |> append(view: "text") |> respond(status: 200)\` (text/plain); \`|> respond_as(status: 200, content: Json)\` names a type (Json, Html, Text, Css, Svg, Csv, Atom, Rss, Xml); \`json(status: 200, value: Item(id, name))\`; \`empty(status: 404)\`; \`|> header(name: "location", value: url)\`. \`write_rows(rows: sql_all(…))\` writes rows as an array; write_json writes what decode reads: records, Lists, Option fields (None: no key), constructors as \`{"Sets": {…}}\`.
 - JSON in (an arm of a block is a line of its own):
     let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
-      Err(error) -> respond(status: 400) |> append(view: error)
+      Err(error) -> buf() |> append(view: error) |> respond(status: 400)
     }
   Its error names the field. Refined types validate: \`type Qty = Int where self >= 1 and self <= 100\`. An Option field may be absent.
 - SQL: \`sql_first(row: Item, query: "SELECT * FROM items WHERE id = :id", id)\` gives Option[Item]; \`sql_all\` gives Rows[Item]; \`sql_exec(query: "UPDATE items SET qty = :qty WHERE id = :id", qty, id)\` the rows changed. Each :name takes the argument of that name. Tables: \`migration 1 "items" { CREATE TABLE … }\` (a TEXT PRIMARY KEY needs NOT NULL). A POST that makes a row takes the client's key: UNIQUE, \`ON CONFLICT(key) DO NOTHING RETURNING *\`.

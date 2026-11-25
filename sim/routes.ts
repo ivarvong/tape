@@ -129,6 +129,19 @@ export function routeText(route: Omit<Route, 'key'>, word: (part: Part) => strin
   return `${route.method ?? '*'} ${shown(route.path)}${route.query ? `?${shown(route.query)}` : ''}`;
 }
 
+/** std/http.tape's Method constructors, by the token each stands for */
+const METHODS: ReadonlyMap<string, string> = new Map(
+  ['Get', 'Head', 'Post', 'Put', 'Patch', 'Delete', 'Options'].map(c => [c, c.toUpperCase()]),
+);
+/** The method a route's pattern names (`method: Post`, `method: Other(name: "PURGE")`), or null for any. */
+function methodOf(p: Pattern | undefined): string | null {
+  if (p?.k !== 'ctor') return null;
+  const name = p.name.startsWith('std.') ? p.name.slice(4) : p.name;
+  if (name !== 'Other') return METHODS.get(name) ?? null;
+  const token = p.subs.find(s => s.field === 'name')?.pat ?? p.subs[0]?.pat;
+  return token?.k === 'str' ? text(token.bytes) : null;
+}
+
 /** The route of one arm; `unread` when it is on a path this cannot turn into requests; null when it names no path. */
 function routeOf(prog: Program, decodes: Decodes, arm: PatArm): Route | 'unread' | null {
   const request = arm.pat.k === 'ctor' && arm.pat.name === 'Request' ? arm.pat : null;
@@ -140,7 +153,7 @@ function routeOf(prog: Program, decodes: Decodes, arm: PatArm): Route | 'unread'
   const method = field('method');
   const asked = field('query');
   const route = {
-    method: method?.k === 'str' ? text(method.bytes) : null,
+    method: methodOf(method),
     path,
     body: bodyType(prog, decodes, arm.body),
     // without the query it asks for, the arm is never reached

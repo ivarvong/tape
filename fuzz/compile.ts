@@ -315,17 +315,17 @@ const SCALES: [string, (n: number) => string][] = [
   [
     'a long SQL statement',
     n =>
-      `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER NOT NULL)\n}\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let n = sql_exec(query: "UPDATE t SET a = a${' + 1'.repeat(n)} WHERE id = 1", repeat: True)\n  buf()\n}\n`,
+      `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER NOT NULL)\n}\n\nfn handle(raw: View, db: Sql) -> Response {\n  let n = sql_exec(query: "UPDATE t SET a = a${' + 1'.repeat(n)} WHERE id = 1", repeat: True)\n  buf()\n}\n`,
   ],
   [
     'many SQL ORs',
     n =>
-      `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER NOT NULL)\n}\n\ntype T { T(id: Int, a: Int) }\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let n = sql_first(row: T, query: "SELECT * FROM t WHERE ${Array.from({ length: n }, (_, i) => `a = ${i}`).join(' OR ')}")\n  buf()\n}\n`,
+      `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER NOT NULL)\n}\n\ntype T { T(id: Int, a: Int) }\n\nfn handle(raw: View, db: Sql) -> Response {\n  let n = sql_first(row: T, query: "SELECT * FROM t WHERE ${Array.from({ length: n }, (_, i) => `a = ${i}`).join(' OR ')}")\n  buf()\n}\n`,
   ],
   [
     'nested SQL parentheses',
     n =>
-      `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER NOT NULL)\n}\n\ntype T { T(id: Int, a: Int) }\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let n = sql_first(row: T, query: "SELECT * FROM t WHERE ${'('.repeat(n)}a = 1${')'.repeat(n)}")\n  buf()\n}\n`,
+      `migration 1 "t" {\n  CREATE TABLE t(id INTEGER PRIMARY KEY, a INTEGER NOT NULL)\n}\n\ntype T { T(id: Int, a: Int) }\n\nfn handle(raw: View, db: Sql) -> Response {\n  let n = sql_first(row: T, query: "SELECT * FROM t WHERE ${'('.repeat(n)}a = 1${')'.repeat(n)}")\n  buf()\n}\n`,
   ],
   [
     'many migrations',

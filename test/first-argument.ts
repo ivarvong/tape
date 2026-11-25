@@ -9,7 +9,7 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const PROGRAM = `type Slug = View where len(self) >= 1 and every_byte(self, keep: is_lower)
 
@@ -21,16 +21,16 @@ fn joined(url: View, slug: View) -> View {
   url ++ "/" ++ slug
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let b = 3
   let s = "ab"
   match request(raw).path {
-    "/sub" -> respond(status: 200) |> write_int(value: sub(10, b: 4))
-    "/expr" -> respond(status: 200) |> write_int(value: sub(2 * 5, b))
-    "/name" -> respond(status: 200) |> write_int(value: sub(b, a: 10))
-    "/join" -> respond(status: 200) |> append(view: joined("u", slug: s))
-    "/slug/" ++ Slug(v) -> respond(status: 200) |> append(view: v)
-    _ -> respond(status: 404)
+    "/sub" -> buf() |> write_int(value: sub(10, b: 4)) |> respond(status: 200)
+    "/expr" -> buf() |> write_int(value: sub(2 * 5, b)) |> respond(status: 200)
+    "/name" -> buf() |> write_int(value: sub(b, a: 10)) |> respond(status: 200)
+    "/join" -> buf() |> append(view: joined("u", slug: s)) |> respond(status: 200)
+    "/slug/" ++ Slug(v) -> buf() |> append(view: v) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 `;
@@ -57,7 +57,7 @@ for (const [request, want] of cases) {
   const got = app ? responseOf(app.handle(req)) : null;
   same(
     `${request}: ${want}`,
-    [got ? `${got.status} ${dec.decode(got.body)}` : 'does not compile', dec.decode(it.handle(req)).replace('\n', ' ')],
+    [got ? `${got.status} ${dec.decode(got.body)}` : 'does not compile', answered(it.handle(req)).replace('\n', ' ')],
     [want, want],
   );
 }
@@ -68,7 +68,7 @@ const said = (body: string): string => {
     ...std,
     {
       name: 't.tape',
-      text: `fn sub(a: Int, b: Int) -> Int {\n  a - b\n}\n\n${body}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`,
+      text: `fn sub(a: Int, b: Int) -> Int {\n  a - b\n}\n\n${body}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`,
     },
   ]).errors;
   return e ? e.code : 'compiled';

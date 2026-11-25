@@ -97,10 +97,10 @@ type Problem { Problem(error: View) }
 type Done { Done(key: View, status: Int, version: Int) }
 type Once { Once(op: View) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "PUT", path: "/placement/" ++ decimal(shard), query: Some(value: "shards=" ++ decimal(shards))) -> place(db, shard, shards)
-    Request(method: "GET", path: "/stats") -> stats(place: placement(db), counts: sql_first(db, row: Counts, query: "SELECT count(*) AS keys, coalesce(sum(live), 0) AS live FROM kv"))
+    Request(method: Put, path: "/placement/" ++ decimal(shard), query: Some(value: "shards=" ++ decimal(shards))) -> place(db, shard, shards)
+    Request(method: Get, path: "/stats") -> stats(place: placement(db), counts: sql_first(db, row: Counts, query: "SELECT count(*) AS keys, coalesce(sum(live), 0) AS live FROM kv"))
     Request(method, path: "/k/" ++ key, query, body) -> checked(db, parsed: parsed(method, key, query, body))
     _ -> problem(status: 404, reason: "no such route; see GET/PUT/DELETE /k/<key>")
   }
@@ -118,7 +118,7 @@ type Asked {
   Refused
 }
 
-fn parsed(method: View, key: View, query: Option[View], body: View) -> Parsed {
+fn parsed(method: Method, key: View, query: Option[View], body: View) -> Parsed {
   match {
     len(key) == 0 or len(key) > 256 -> Invalid(status: 400, reason: "a key is 1 to 256 bytes")
     not key_bytes(v: key, at: 0) -> Invalid(status: 400, reason: "a key is A-Z a-z 0-9 - . _ ~ : and %; percent-encode anything else")
@@ -126,11 +126,11 @@ fn parsed(method: View, key: View, query: Option[View], body: View) -> Parsed {
   }
 }
 
-fn verb(method: View, key: View, asked: Asked, body: View) -> Parsed {
+fn verb(method: Method, key: View, asked: Asked, body: View) -> Parsed {
   match method {
-    "GET" -> plain(op: Read(key), asked)
-    "PUT" -> valued(key, asked, body)
-    "DELETE" -> conditional(asked, op: Remove(key, expect: Any))
+    Get -> plain(op: Read(key), asked)
+    Put -> valued(key, asked, body)
+    Delete -> conditional(asked, op: Remove(key, expect: Any))
     _ -> Invalid(status: 405, reason: "a key takes GET, PUT and DELETE")
   }
 }
@@ -214,14 +214,14 @@ fn placement(db: Sql) -> Option[Placement] {
 }
 
 // Set once: the first placement is kept (the CHECKs refuse an impossible one), and the reply is what is stored.
-fn place(db: Sql, shard: Int, shards: Int) -> Buf {
+fn place(db: Sql, shard: Int, shards: Int) -> Response {
   match {
     shards < 1 or shards > 64 or shard >= shards -> problem(status: 400, reason: "a placement is shard i of n, 0 <= i < n <= 64")
     else -> placed(asked: Placement(shard, shards), now: sql_first(db, row: Placement, query: "INSERT INTO placement(one, shard, shards) VALUES (1, :shard, :shards) ON CONFLICT(one) DO UPDATE SET one = 1 RETURNING shard, shards", shard, shards))
   }
 }
 
-fn placed(asked: Placement, now: Option[Placement]) -> Buf {
+fn placed(asked: Placement, now: Option[Placement]) -> Response {
   let Placement(shard, shards) = asked
   match now {
     Some(value: Placement(shard: s, shards: n)) -> placement_reply(same: s == shard and n == shards, stored: Placement(shard: s, shards: n))
@@ -229,14 +229,14 @@ fn placed(asked: Placement, now: Option[Placement]) -> Buf {
   }
 }
 
-fn placement_reply(same: Bool, stored: Placement) -> Buf {
+fn placement_reply(same: Bool, stored: Placement) -> Response {
   match same {
-    True -> write_json(out: respond(status: 200), value: stored)
-    False -> write_json(out: respond(status: 409), value: stored)
+    True -> write_json(out: buf(), value: stored) |> respond(status: 200)
+    False -> write_json(out: buf(), value: stored) |> respond(status: 409)
   }
 }
 
-fn checked(db: Sql, parsed: Parsed) -> Buf {
+fn checked(db: Sql, parsed: Parsed) -> Response {
   match parsed {
     Valid(op, once) -> owned(db, op, once, place: placement(db))
     Invalid(status, reason) -> problem(status, reason)
@@ -244,14 +244,14 @@ fn checked(db: Sql, parsed: Parsed) -> Buf {
 }
 
 // A key this shard does not own is refused: the router sends each key to fnv1a(key) mod shards.
-fn owned(db: Sql, op: Op, once: View, place: Option[Placement]) -> Buf {
+fn owned(db: Sql, op: Op, once: View, place: Option[Placement]) -> Response {
   match place {
     Some(value: Placement(shard, shards)) -> mine(db, op, once, shard, at: fnv1a(v: key_of(op)) % shards)
     None -> problem(status: 503, reason: "this shard has no placement yet: its cluster is still being created")
   }
 }
 
-fn mine(db: Sql, op: Op, once: View, shard: Int, at: Int) -> Buf {
+fn mine(db: Sql, op: Op, once: View, shard: Int, at: Int) -> Response {
   match {
     at == shard and len(once) == 0 -> run(db, op, once)
     at == shard -> replayed(db, op, once, done: sql_first(db, row: Done, query: "SELECT key, status, version FROM key_ops WHERE op = :once AND key = :key", once, key: key_of(op)))
@@ -268,14 +268,14 @@ fn key_of(op: Op) -> View {
 }
 
 // A write under an op id that was applied to this key before answers what it answered then, and writes nothing.
-fn replayed(db: Sql, op: Op, once: View, done: Option[Done]) -> Buf {
+fn replayed(db: Sql, op: Op, once: View, done: Option[Done]) -> Response {
   match done {
-    Some(value: Done(key, status, version)) -> write_json(out: respond(status), value: Stored(key, version))
+    Some(value: Done(key, status, version)) -> write_json(out: buf(), value: Stored(key, version)) |> respond(status)
     None -> run(db, op, once)
   }
 }
 
-fn run(db: Sql, op: Op, once: View) -> Buf {
+fn run(db: Sql, op: Op, once: View) -> Response {
   match op {
     Read(key) -> read(found: found(key, row: load(db, key)))
     Write(key, value, expect: Any) -> stored(key, once, expect: Any, wrote: sql_first(db, row: Row, query: "INSERT INTO kv(key, value, version, live) VALUES (:key, :value, 1, 1) ON CONFLICT(key) DO UPDATE SET value = excluded.value, version = version + 1, live = 1 RETURNING key, value, version, live", key, value), db)
@@ -306,20 +306,20 @@ fn version_of(f: Found) -> Int {
   }
 }
 
-fn read(found: Found) -> Buf {
+fn read(found: Found) -> Response {
   match found {
-    Live(key, value, version) -> write_json(out: respond(status: 200), value: Value(key, value, version))
+    Live(key, value, version) -> write_json(out: buf(), value: Value(key, value, version)) |> respond(status: 200)
     Deleted(key, version) -> absent(key, version)
     Missing(key) -> absent(key, version: 0)
   }
 }
 
-fn absent(key: View, version: Int) -> Buf {
-  write_json(out: respond(status: 404), value: Absent(error: "no such key", key, version))
+fn absent(key: View, version: Int) -> Response {
+  write_json(out: buf(), value: Absent(error: "no such key", key, version)) |> respond(status: 404)
 }
 
 // A write that happened, or (when its condition failed) the version the key has now.
-fn stored(key: View, once: View, expect: Expect, wrote: Option[Row], db: Sql) -> Buf {
+fn stored(key: View, once: View, expect: Expect, wrote: Option[Row], db: Sql) -> Response {
   match wrote {
     Some(value: Row(version: 1)) -> applied(db, key, once, status: 201, version: 1)
     Some(value: Row(version)) -> applied(db, key, once, status: 200, version)
@@ -328,29 +328,29 @@ fn stored(key: View, once: View, expect: Expect, wrote: Option[Row], db: Sql) ->
 }
 
 // The reply to a write that was applied; under an op id, the reply is stored with the write (one transaction).
-fn applied(db: Sql, key: View, once: View, status: Int, version: Int) -> Buf {
+fn applied(db: Sql, key: View, once: View, status: Int, version: Int) -> Response {
   match {
-    len(once) == 0 -> write_json(out: respond(status), value: Stored(key, version))
+    len(once) == 0 -> write_json(out: buf(), value: Stored(key, version)) |> respond(status)
     else -> remembered(key, status, version, kept: sql_first(db, row: Once, query: "INSERT INTO key_ops(op, key, status, version) VALUES (:once, :key, :status, :version) RETURNING op", once, key, status, version))
   }
 }
 
-fn remembered(key: View, status: Int, version: Int, kept: Option[Once]) -> Buf {
+fn remembered(key: View, status: Int, version: Int, kept: Option[Once]) -> Response {
   match kept {
-    Some(value: Once(op)) -> write_json(out: respond(status), value: Stored(key, version))
+    Some(value: Once(op)) -> write_json(out: buf(), value: Stored(key, version)) |> respond(status)
     None -> problem(status: 500, reason: "the op id was not stored")
   }
 }
 
 // 409 for a condition that failed; an unconditional write always returns its row, so None there is a bug (500)
-fn mismatch(key: View, expect: Expect, now: Int) -> Buf {
+fn mismatch(key: View, expect: Expect, now: Int) -> Response {
   match expect {
-    At(version) -> write_json(out: respond(status: 409), value: Mismatch(error: "version mismatch", key, version: now, expected: version))
+    At(version) -> write_json(out: buf(), value: Mismatch(error: "version mismatch", key, version: now, expected: version)) |> respond(status: 409)
     Any -> problem(status: 500, reason: "an unconditional write returned no row")
   }
 }
 
-fn removed(key: View, once: View, expect: Expect, gone: Option[Row], db: Sql) -> Buf {
+fn removed(key: View, once: View, expect: Expect, gone: Option[Row], db: Sql) -> Response {
   match gone {
     Some(value: Row(version)) -> applied(db, key, once, status: 200, version)
     None -> not_removed(key, expect, found: found(key, row: load(db, key)))
@@ -358,7 +358,7 @@ fn removed(key: View, once: View, expect: Expect, gone: Option[Row], db: Sql) ->
 }
 
 // nothing to delete (404), or a condition that failed (409)
-fn not_removed(key: View, expect: Expect, found: Found) -> Buf {
+fn not_removed(key: View, expect: Expect, found: Found) -> Response {
   match found {
     Live(version) -> mismatch(key, expect, now: version)
     Deleted(version) -> absent(key, version)
@@ -366,22 +366,22 @@ fn not_removed(key: View, expect: Expect, found: Found) -> Buf {
   }
 }
 
-fn stats(place: Option[Placement], counts: Option[Counts]) -> Buf {
+fn stats(place: Option[Placement], counts: Option[Counts]) -> Response {
   match place {
     Some(value: Placement(shard, shards)) -> counted(shard, shards, counts)
     None -> problem(status: 503, reason: "this shard has no placement yet")
   }
 }
 
-fn counted(shard: Int, shards: Int, counts: Option[Counts]) -> Buf {
+fn counted(shard: Int, shards: Int, counts: Option[Counts]) -> Response {
   match counts {
-    Some(value: Counts(keys, live)) -> write_json(out: respond(status: 200), value: Stats(shard, shards, keys, live))
+    Some(value: Counts(keys, live)) -> write_json(out: buf(), value: Stats(shard, shards, keys, live)) |> respond(status: 200)
     None -> problem(status: 500, reason: "count(*) returned no row")
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  write_json(out: respond(status), value: Problem(error: reason))
+fn problem(status: Int, reason: View) -> Response {
+  write_json(out: buf(), value: Problem(error: reason)) |> respond(status)
 }
 
 // FNV-1a, 32 bits, over the key's bytes. The router computes the same (service/src/kv.js) to pick the shard.

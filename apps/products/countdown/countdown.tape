@@ -32,15 +32,15 @@ type Made { Made(id: Int, name: View, at: View, at_ms: Int) }
 type Left { Left(id: Int, name: View, at: View, left_ms: Int, days: Dec[2], done: Bool) }
 type Problem { Problem(error: View) }
 
-fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> home(at: now())
-    Request(method: "POST", path: "/events", body) -> made(body)
+    Request(method: Get, path: "/") -> home(at: now())
+    Request(method: Post, path: "/events", body) -> made(body)
     Request(
-      method: "GET",
+      method: Get,
       path: "/events/" ++ decimal(id) ++ ".json"
     ) -> left(found: load(id), at: now())
-    Request(method: "GET", path: "/events/" ++ decimal(id)) -> page(found: load(id), at: now())
+    Request(method: Get, path: "/events/" ++ decimal(id)) -> page(found: load(id), at: now())
     _ -> problem(status: 404, error: "no such route")
   }
 }
@@ -49,7 +49,7 @@ fn load(id: Int) -> Option[Event] {
   sql_first(row: Event, query: "SELECT * FROM events WHERE id = :id", id)
 }
 
-fn made(body: View) -> Buf {
+fn made(body: View) -> Response {
   let Ok(value: NewEvent(key, name, at)) = decode(json: body, as: NewEvent) else {
     Err(error) -> problem(status: 400, error)
   }
@@ -81,38 +81,38 @@ fn made(body: View) -> Buf {
   }
 }
 
-fn shown_made(status: Int, event: Event) -> Buf {
+fn shown_made(status: Int, event: Event) -> Response {
   let Event(id, name, at, at_ms) = event
-  respond_as(status, content: Json)
-    |> header(name: "location", value: "events/\(id)")
-    |> write_json(value: Made(id, name, at, at_ms))
+  json(status, value: Made(id, name, at, at_ms)) |> header(name: "location", value: "events/\(id)")
 }
 
-fn left(found: Option[Event], at: Int) -> Buf {
+fn left(found: Option[Event], at: Int) -> Response {
   match found {
     Some(value: Event(id, name, at: when, at_ms)) -> {
       let ms = max(a: at_ms - at, b: 0)
-      respond_as(status: 200, content: Json)
-        |> header(name: "cache-control", value: "no-store")
-        |> write_json(value: Left(
+      json(
+        status: 200,
+        value: Left(
           id,
           name,
           at: when,
           left_ms: ms,
           days: div(a: dec(n: ms, scale: 2), by: 86400000, scale: 2, rounding: Down),
           done: ms == 0
-        ))
+        )
+      )
+        |> header(name: "cache-control", value: "no-store")
     }
     None -> problem(status: 404, error: "no such countdown")
   }
 }
 
-fn page(found: Option[Event], at: Int) -> Buf {
+fn page(found: Option[Event], at: Int) -> Response {
   match found {
     Some(value: Event(name, at: when, at_ms, created)) -> {
       let ms = at_ms - at
       let gone = fraction(done: at - created, of: at_ms - created)
-      shell(status: 200, title: name)
+      shell(title: name)
         |> append(view: "<div class=card>")
         |> ring(gone)
         |> append(view: "<div><p class=big>")
@@ -129,11 +129,11 @@ fn page(found: Option[Event], at: Int) -> Buf {
         |> append(view: " · \(percent(gone))% of the wait has gone</p></div></div>")
         |> append(view: "<p class=meta>Counted on the server when this page was loaded; load it \
             again to count again.</p>")
-        |> foot
+        |> foot(status: 200)
     }
-    None -> shell(status: 404, title: "no such countdown")
+    None -> shell(title: "no such countdown")
       |> append(view: "<p><a href=\"../\">All countdowns</a></p>")
-      |> foot
+      |> foot(status: 404)
   }
 }
 
@@ -349,8 +349,8 @@ fn number(v: View) -> Option[Int] {
   }
 }
 
-fn home(at: Int) -> Buf {
-  let out = shell(status: 200, title: "countdowns")
+fn home(at: Int) -> Response {
+  let out = shell(title: "countdowns")
     |> append(
       view: "<p>A page that counts down to an event, computed on the server at each load.</p>"
     )
@@ -369,7 +369,7 @@ fn home(at: Int) -> Buf {
     at
   )
     |> append(view: "</ul>")
-    |> foot
+    |> foot(status: 200)
 }
 
 fn upcoming(out: Buf, rows: Rows[Event], at: Int) -> Buf {
@@ -382,13 +382,12 @@ fn upcoming(out: Buf, rows: Rows[Event], at: Int) -> Buf {
     })
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
-fn shell(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn shell(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
     |> append(view: "<meta name=viewport content=\"width=device-width,initial-scale=1\"><title>")
     |> write_html(text: title)
@@ -418,8 +417,10 @@ fn shell(status: Int, title: View) -> Buf {
     |> append(view: "</h1>")
 }
 
-fn foot(out: Buf) -> Buf {
+fn foot(out: Buf, status: Int) -> Response {
   out
     |> append(view: "<footer>A small program written in <a href=\"/\">Tape</a> · <a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/countdown/countdown.tape\">source</a></footer></html>")
+    |> respond_as(status, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }

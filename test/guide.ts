@@ -12,7 +12,7 @@ import { compile } from '../compiler.ts';
 import { format } from '../fmt.ts';
 import { runAll, startSqlite } from '../mcp/src/runner.ts';
 import type { SqlJsInit } from '../mcp/src/runner.ts';
-import { finish, ok, raw, std } from './harness.ts';
+import { answered, finish, ok, raw, std } from './harness.ts';
 
 const guide = raw('docs/guide.md');
 const block = (lang: string): string | null =>
@@ -70,7 +70,7 @@ if (built.wasm) {
   requests.forEach((request, i) => {
     const r = runs[i],
       [status, ...rest] = (wanted[i] ?? '').split(' ');
-    const body = r?.out ? new TextDecoder().decode(r.out) : '';
+    const body = r?.out ? answered(r.out) : '';
     const head = body.slice(0, body.indexOf('\n')),
       got = body.slice(body.indexOf('\n') + 1);
     ok(

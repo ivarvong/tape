@@ -43,19 +43,19 @@ machine jars.state: JarState {
 type Jar { Jar(id: Int, state: JarState) }
 type Purse { Purse(id: Int, coins: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/set/" ++ decimal(coins) ++ "/" ++ key) -> set(coins, key)
-    Request(method: "POST", path: "/break") -> broken()
-    Request(method: "GET", path: "/jar") -> shown(found: sql_first(row: Jar, query: "SELECT * FROM jars WHERE id = 1"), purse: sql_first(row: Purse, query: "SELECT * FROM purse WHERE id = 1"))
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/set/" ++ decimal(coins) ++ "/" ++ key) -> set(coins, key)
+    Request(method: Post, path: "/break") -> broken()
+    Request(method: Get, path: "/jar") -> shown(found: sql_first(row: Jar, query: "SELECT * FROM jars WHERE id = 1"), purse: sql_first(row: Purse, query: "SELECT * FROM purse WHERE id = 1"))
+    _ -> empty(status: 404)
   }
 }
 
-fn set(coins: Int, key: View) -> Buf {
+fn set(coins: Int, key: View) -> Response {
   let _ = sql_exec(query: "INSERT INTO notes(key, coins) VALUES (:key, :coins) ON CONFLICT(key) DO NOTHING", key, coins)
   do recounted()
-  respond(status: 200) |> append(view: "set")
+  buf() |> append(view: "set") |> respond(status: 200)
 }
 
 fn recounted() -> Done {
@@ -63,16 +63,16 @@ fn recounted() -> Done {
   Done
 }
 
-fn broken() -> Buf {
-  let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> respond(status: 404)
-  respond(status: 200) |> append(view: "broken")
+fn broken() -> Response {
+  let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> empty(status: 404)
+  buf() |> append(view: "broken") |> respond(status: 200)
 }
 
-fn shown(found: Option[Jar], purse: Option[Purse]) -> Buf {
+fn shown(found: Option[Jar], purse: Option[Purse]) -> Response {
   match found {
-    Some(value: Jar(state: Open)) -> respond(status: 200) |> append(view: "open ") |> write_int(value: coins_of(purse))
-    Some(value: Jar(state: Sealed)) -> respond(status: 200) |> append(view: "sealed")
-    None -> respond(status: 404)
+    Some(value: Jar(state: Open)) -> buf() |> append(view: "open ") |> write_int(value: coins_of(purse)) |> respond(status: 200)
+    Some(value: Jar(state: Sealed)) -> buf() |> append(view: "sealed") |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 
@@ -148,7 +148,7 @@ const swap = (a: string, c: string) => {
   if (!jars.includes(a)) throw new Error('not in the program: ' + a);
   return jars.replace(a, c);
 };
-const BREAK = `  let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> respond(status: 404)`;
+const BREAK = `  let 1 = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1") else -> empty(status: 404)`;
 ok(
   'C82: do runs only a Done: an Option must be matched',
   codes(build(swap(BREAK, `  do sql_first(row: Purse, query: "SELECT * FROM purse WHERE id = 1")`))) === 'C82',
@@ -198,8 +198,8 @@ ok(
   codes(build(jars)) === '' &&
     build(
       swap(
-        '    None -> respond(status: 404)\n  }\n}\n\nfn coins_of',
-        '    _ -> respond(status: 404)\n  }\n}\n\nfn coins_of',
+        '    None -> empty(status: 404)\n  }\n}\n\nfn coins_of',
+        '    _ -> empty(status: 404)\n  }\n}\n\nfn coins_of',
       ),
     ).errors[0]?.code === 'C97',
 );
@@ -209,7 +209,7 @@ ok(
   const full = build(all);
   ok('a match that names every state needs no default', !full.errors?.length, codes(full));
   const less = build(
-    all.replace('    Some(value: Jar(state: Sealed)) -> respond(status: 200) |> append(view: "sealed")\n', ''),
+    all.replace('    Some(value: Jar(state: Sealed)) -> buf() |> append(view: "sealed") |> respond(status: 200)\n', ''),
   );
   ok(
     'C24: a state the match misses is named',
@@ -270,17 +270,17 @@ ok(
 
 // tidy
 const untidy = swap(
-  `fn broken() -> Buf {
+  `fn broken() -> Response {
 ${BREAK}
-  respond(status: 200) |> append(view: "broken")
+  buf() |> append(view: "broken") |> respond(status: 200)
 }`,
-  `fn broken() -> Buf {
+  `fn broken() -> Response {
   let wrote = sql_exec(query: "UPDATE purse SET coins = 0 - 1 WHERE id = 1")
   after(done: sql_exec(query: "UPDATE purse SET coins = 0 - 2 WHERE id = 1"))
 }
 
-fn after(done: Int) -> Buf {
-  respond(status: 200 + 0 * sql_exec(query: "UPDATE purse SET coins = 0 - 3 WHERE id = 1")) |> append(view: "broken")
+fn after(done: Int) -> Response {
+  buf() |> append(view: "broken") |> respond(status: 200 + 0 * sql_exec(query: "UPDATE purse SET coins = 0 - 3 WHERE id = 1"))
 }`,
 );
 const t = build(untidy);
@@ -305,9 +305,9 @@ ok(
 // a value `do` cannot drop (C82): C83's hint says what to write instead of `do`, which would only be refused
 const unreadMove = build(
   swap(
-    `fn broken() -> Buf {
+    `fn broken() -> Response {
 ${BREAK}`,
-    `fn broken() -> Buf {
+    `fn broken() -> Response {
   let sealed = sql_move(row: Jar, query: "UPDATE jars SET state = 'sealed' WHERE id = 1 AND state = 'open' RETURNING *")
 ${BREAK}`,
   ),

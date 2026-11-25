@@ -185,10 +185,10 @@ fn decide(n: Int, clock: Clock) -> Verdict {
   }
 }
 
-fn handle(raw: View, clock: Clock) -> Buf {
+fn handle(raw: View, clock: Clock) -> Response {
   match decide(n: 3, clock) {
-    Stop(n) -> push(buf: buf(), byte: n)
-    Go(n) -> push(buf: buf(), byte: n)
+    Stop(n) -> push(buf: buf(), byte: n) |> respond(status: 200)
+    Go(n) -> push(buf: buf(), byte: n) |> respond(status: 200)
   }
 }
 `;
@@ -212,7 +212,7 @@ fn handle(raw: View, clock: Clock) -> Buf {
       return t.replace(a, b);
     }, text);
   const CLOCK = [
-    ['hook: Remote, timer: Timer) -> Buf {', 'hook: Remote, clock: Clock, timer: Timer) -> Buf {'],
+    ['hook: Remote, timer: Timer) -> Response {', 'hook: Remote, clock: Clock, timer: Timer) -> Response {'],
     ['hook: Remote, timer: Timer, message: Wake)', 'hook: Remote, clock: Clock, timer: Timer, message: Wake)'],
     [
       "    note TEXT NOT NULL DEFAULT ''\n",

@@ -55,15 +55,15 @@ fn policy() -> Backoff {
   Backoff(first: 1000, factor: 2, most: 60000, tries: 6)
 }
 
-fn handle(raw: View, db: Sql, bank: Remote, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, bank: Remote, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/transfers", body) -> started(body) |> rendered
+    Request(method: Post, path: "/transfers", body) -> started(body) |> rendered
     Request(
-      method: "POST",
+      method: Post,
       path: "/transfers/" ++ decimal(id) ++ "/resume"
     ) -> resumed(found: load(id))
       |> rendered
-    Request(method: "GET", path: "/transfers/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Get, path: "/transfers/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -259,13 +259,14 @@ fn shown(found: Option[Transfer]) -> Outcome {
   Shown(status: 200, transfer: t)
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, transfer) -> write_json(out: respond(status), value: transfer)
-    Problem(status, reason) -> respond(status)
+    Shown(status, transfer) -> write_json(out: buf(), value: transfer) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

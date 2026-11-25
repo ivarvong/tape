@@ -27,7 +27,7 @@ type Changes {
   Changes(title: Option[View], done: Option[Bool])
 }
 
-fn handle(request: View, db: Sql) -> Buf {
+fn handle(request: View, db: Sql) -> Response {
   let line = until(v: request, byte: 10)
   let target = after(v: line, byte: 32)
   serve(
@@ -55,7 +55,7 @@ fn item(id: Option[Int]) -> Route {
   }
 }
 
-fn serve(method: View, route: Route, query: View, body: View) -> Buf {
+fn serve(method: View, route: Route, query: View, body: View) -> Response {
   match route {
     NoRoute -> error(status: 404)
     List if method == "GET" -> list(query)
@@ -75,7 +75,7 @@ fn serve(method: View, route: Route, query: View, body: View) -> Buf {
   }
 }
 
-fn list(query: View) -> Buf {
+fn list(query: View) -> Response {
   match query {
     "" -> todos(rows: sql_all(row: Todo, query: "SELECT * FROM todos ORDER BY id"))
     "done=true" -> todos(rows: sql_all(
@@ -92,7 +92,7 @@ fn list(query: View) -> Buf {
   }
 }
 
-fn create(body: Result[NewTodo, View]) -> Buf {
+fn create(body: Result[NewTodo, View]) -> Response {
   match body {
     Ok(value: NewTodo(key, title, done: None)) if titled(title)
       and keyed(key) -> insert(key, text: title, done: False)
@@ -111,7 +111,7 @@ fn keyed(key: View) -> Bool {
   len(key) >= 1 and len(key) <= 64
 }
 
-fn insert(key: View, text: View, done: Bool) -> Buf {
+fn insert(key: View, text: View, done: Bool) -> Response {
   made(
     key,
     found: sql_first(
@@ -126,7 +126,7 @@ fn insert(key: View, text: View, done: Bool) -> Buf {
 }
 
 // 201 with the todo this request made, or 200 with the one an earlier request with the same key made.
-fn made(key: View, found: Option[Todo]) -> Buf {
+fn made(key: View, found: Option[Todo]) -> Response {
   match found {
     Some(value) -> one(status: 201, found)
     None -> one(
@@ -136,7 +136,7 @@ fn made(key: View, found: Option[Todo]) -> Buf {
   }
 }
 
-fn update(id: Int, body: Result[Changes, View]) -> Buf {
+fn update(id: Int, body: Result[Changes, View]) -> Response {
   match body {
     Ok(value: Changes(title: Some(value: title), done: None)) if titled(title) -> one(
       status: 200,
@@ -172,33 +172,32 @@ fn update(id: Int, body: Result[Changes, View]) -> Buf {
 
 // ---------- responses ----------
 
-fn error(status: Int) -> Buf {
+fn error(status: Int) -> Response {
   match status {
-    400 -> append(buf: buf(), view: "400\n{\"error\":\"bad_request\"}")
-    404 -> append(buf: buf(), view: "404\n{\"error\":\"not_found\"}")
-    _ -> append(buf: buf(), view: "405\n{\"error\":\"method_not_allowed\"}")
+    400 -> buf() |> append(view: "{\"error\":\"bad_request\"}") |> respond(status: 400)
+    404 -> buf() |> append(view: "{\"error\":\"not_found\"}") |> respond(status: 404)
+    _ -> buf() |> append(view: "{\"error\":\"method_not_allowed\"}") |> respond(status: 405)
   }
 }
 
-fn one(status: Int, found: Option[Todo]) -> Buf {
+fn one(status: Int, found: Option[Todo]) -> Response {
   match found {
-    Some(value) -> write_json(out: push(buf: write_int(out: buf(), value: status), byte: 10), value)
+    Some(value) -> buf() |> write_json(value) |> respond(status)
     None -> error(status: 404)
   }
 }
 
-fn deleted(id: Int, count: Int) -> Buf {
+fn deleted(id: Int, count: Int) -> Response {
   match count {
     0 -> error(status: 404)
-    _ -> push(
-      buf: write_int(out: append(buf: buf(), view: "200\n{\"deleted\":"), value: id),
-      byte: 125
-    )
+    _ -> push(buf: write_int(out: append(buf: buf(), view: "{\"deleted\":"), value: id), byte: 125)
+      |> respond(status: 200)
   }
 }
 
-fn todos(rows: Rows[Todo]) -> Buf {
-  push(buf: write_rows(out: append(buf: buf(), view: "200\n{\"todos\":"), rows), byte: 125)
+fn todos(rows: Rows[Todo]) -> Response {
+  push(buf: write_rows(out: append(buf: buf(), view: "{\"todos\":"), rows), byte: 125)
+    |> respond(status: 200)
 }
 
 invariant "a todo is done or not, and has a title" {

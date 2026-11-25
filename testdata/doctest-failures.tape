@@ -17,6 +17,6 @@ fn double(n: Int) -> Int {
   n * 2
 }
 
-fn handle(raw: View) -> Buf {
-  respond(status: 200)
+fn handle(raw: View) -> Response {
+  empty(status: 200)
 }

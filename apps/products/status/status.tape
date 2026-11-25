@@ -120,21 +120,23 @@ type Line { Line(id: Int, at: Int, title: View, state: View, body: View) }
 type Ended { Ended(component: Int, state: ComponentState) }
 type Problem { Problem(error: View) }
 
-fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> page(at: now())
-    Request(method: "GET", path: "/status.json") -> respond_as(status: 200, content: Json)
+    Request(method: Get, path: "/") -> page(at: now())
+    Request(method: Get, path: "/status.json") -> json(
+      status: 200,
+      value: Status(overall: overall(), components: components(), incidents: open())
+    )
       |> header(name: "cache-control", value: "no-store")
-      |> write_json(value: Status(overall: overall(), components: components(), incidents: open()))
-    Request(method: "GET", path: "/feed.json") -> feed()
-    Request(method: "POST", caller: Anyone) -> problem(
+    Request(method: Get, path: "/feed.json") -> feed()
+    Request(method: Post, caller: Anyone) -> problem(
       status: 403,
       error: "only the operator writes here"
     )
-    Request(method: "POST", path: "/components/" ++ slug, body) -> changed(slug, body)
-    Request(method: "POST", path: "/incidents", body) -> opened(body)
+    Request(method: Post, path: "/components/" ++ slug, body) -> changed(slug, body)
+    Request(method: Post, path: "/incidents", body) -> opened(body)
     Request(
-      method: "POST",
+      method: Post,
       path: "/incidents/" ++ decimal(id) ++ "/updates",
       body
     ) -> updated(id, body)
@@ -158,7 +160,7 @@ export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Ended, View] {
   }
 }
 
-fn changed(slug: View, body: View) -> Buf {
+fn changed(slug: View, body: View) -> Response {
   let Ok(value: Change(state, note, minutes)) = decode(json: body, as: Change) else {
     Err(error) -> problem(status: 400, error)
   }
@@ -216,19 +218,19 @@ fn back(slug: View, text: View, at: Int) -> Move[Component] {
   )
 }
 
-fn maintained(slug: View, minutes: Int, moved: Move[Component]) -> Buf {
+fn maintained(slug: View, minutes: Int, moved: Move[Component]) -> Response {
   match moved {
     Moved(value) -> {
       do wake(after: minutes * 60000, key: value.id)
-      respond_as(status: 200, content: Json) |> write_json(value)
+      json(status: 200, value)
     }
     _ -> shown(moved)
   }
 }
 
-fn shown(moved: Move[Component]) -> Buf {
+fn shown(moved: Move[Component]) -> Response {
   match moved {
-    Moved(value) -> respond_as(status: 200, content: Json) |> write_json(value)
+    Moved(value) -> json(status: 200, value)
     Raced(now) -> problem(
       status: 409,
       error: "\(now.slug) is \(component_text(state: now.state)), and cannot move there from it"
@@ -237,7 +239,7 @@ fn shown(moved: Move[Component]) -> Buf {
   }
 }
 
-fn opened(body: View) -> Buf {
+fn opened(body: View) -> Response {
   let Ok(
     value: NewIncident(key, component, title, impact, body: first)
   ) = decode(json: body, as: NewIncident) else {
@@ -293,7 +295,7 @@ fn opened(body: View) -> Buf {
   incident_shown(status: 201, found: Some(value: incident))
 }
 
-fn updated(id: Int, body: View) -> Buf {
+fn updated(id: Int, body: View) -> Response {
   let Ok(value: NewUpdate(key, state, body: text)) = decode(json: body, as: NewUpdate) else {
     Err(error) -> problem(status: 400, error)
   }
@@ -375,15 +377,15 @@ fn load(id: Int) -> Option[Incident] {
   sql_first(row: Incident, query: "SELECT * FROM incidents WHERE id = :id", id)
 }
 
-fn incident_shown(status: Int, found: Option[Incident]) -> Buf {
+fn incident_shown(status: Int, found: Option[Incident]) -> Response {
   match found {
-    Some(value) -> respond_as(status, content: Json) |> write_json(value)
+    Some(value) -> json(status, value)
     None -> problem(status: 404, error: "no such incident")
   }
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
 fn overall() -> View {
@@ -418,31 +420,36 @@ fn listed[T](rows: Rows[T]) -> List[T] {
   }
 }
 
-fn feed() -> Buf {
+fn feed() -> Response {
   let items = listed(rows: sql_all(
     row: Line,
     query: "SELECT u.id AS id, u.at AS at, i.title AS title, u.state AS state, u.body AS body \
         FROM updates AS u JOIN incidents AS i ON i.id = u.incident ORDER BY u.at DESC, u.id \
         DESC LIMIT 50"
   ))
-  respond_as(status: 200, content: Json)
-    |> header(name: "cache-control", value: "no-store")
-    |> write_json(value: Feed(version: "https://jsonfeed.org/version/1.1", title: "Status", home_page_url: "https://tape.ivar.workers.dev/p/demo/status/", items: map(list: items, by: fn(
-      l: Line
-    ) -> Item {
-      Item(
-        id: "\(l.id)",
-        title: l.title ++ ": " ++ l.state,
-        content_text: l.body,
-        date_published: iso(ms: l.at)
+  json(
+    status: 200,
+    value: Feed(
+      version: "https://jsonfeed.org/version/1.1",
+      title: "Status",
+      home_page_url: "https://tape.ivar.workers.dev/p/demo/status/",
+      items: map(
+        list: items,
+        by: fn(l: Line) -> Item { Item(
+          id: "\(l.id)",
+          title: l.title ++ ": " ++ l.state,
+          content_text: l.body,
+          date_published: iso(ms: l.at)
+        ) }
       )
-    })))
+    )
+  )
+    |> header(name: "cache-control", value: "no-store")
 }
 
-fn page(at: Int) -> Buf {
+fn page(at: Int) -> Response {
   let state = overall()
-  let out = respond_as(status: 200, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+  let out = buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
     |> append(view: "<meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><title>Status</title>")
@@ -492,6 +499,8 @@ fn page(at: Int) -> Buf {
     |> append(view: "<a href=\"feed.json\">feed.json</a> · made-up data: a small program written \
         in <a href=\"/\">Tape</a> · <a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/status/status.tape\">source</a></footer></html>")
+    |> respond_as(status: 200, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
 fn banner(state: View) -> View {

@@ -18,10 +18,10 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Hit, View] {
   // key 13 traps: division by zero
   Ok(value: Hit(n: 1 / (key - 13)))
 }
-fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, timer: Timer) -> Response {
   do wake(after: 0, key: 7)
   do wake(after: 0, key: 13)
-  respond(status: 202)
+  empty(status: 202)
 }
 `;
 const r = compile([...std, { name: 't', text }], { rules: false });

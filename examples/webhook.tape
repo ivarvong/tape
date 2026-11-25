@@ -8,20 +8,20 @@ type Event { Event(id: Int, kind: View) }
 type Note { Note(event: Int, text: View) }
 type Sent { Sent(status: Int) }
 
-fn handle(raw: View, signer: Remote, api: Remote) -> Buf {
+fn handle(raw: View, signer: Remote, api: Remote) -> Response {
   match request(raw) {
     Request(
-      method: "POST",
+      method: Post,
       path: "/hook",
       query: Some(value: "sig=" ++ signature),
       body
     ) -> hook(body, signature)
-    Request(method: "POST", path: "/hook") -> problem(status: 401, reason: "missing signature")
+    Request(method: Post, path: "/hook") -> problem(status: 401, reason: "missing signature")
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn hook(body: View, signature: View) -> Buf {
+fn hook(body: View, signature: View) -> Response {
   let Ok(value: Verdict(valid: True)) = ask(
     to: signer,
     method: "verify",
@@ -52,12 +52,13 @@ fn hook(body: View, signature: View) -> Buf {
     Err(error: Rejected(reason)) -> problem(status: 502, reason)
     _ -> problem(status: 502, reason: "the notification service is unavailable")
   }
-  respond(status: 200) |> append(view: "{\"delivered\":\(status)}")
+  buf() |> append(view: "{\"delivered\":\(status)}") |> respond(status: 200)
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  respond(status)
+fn problem(status: Int, reason: View) -> Response {
+  buf()
     |> append(view: "{\"error\":")
     |> write_json_string(text: reason)
     |> append(view: "}")
+    |> respond(status)
 }

@@ -16,16 +16,16 @@ type NewOrder { NewOrder(item: View) }
 type Reserve { Reserve(item: View) }
 type Reserved { Reserved(item: View, remaining: Int) }
 
-fn handle(raw: View, db: Sql, stock: Remote) -> Buf {
+fn handle(raw: View, db: Sql, stock: Remote) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> place(db, stock, order: decode(json: body, as: NewOrder))
-    Request(method: "POST", path: "/retry/" ++ decimal(id)) -> reserve(db, stock, made: sql_first(db, row: Order, query: "SELECT id, item, state FROM orders WHERE id = :id AND state = 'pending'", id))
-    Request(method: "GET", path: "/orders") -> orders(out: append(buf: respond(status: 200), view: "["), rows: sql_all(db, row: Order, query: "SELECT id, item, state FROM orders ORDER BY id"), first: True)
+    Request(method: Post, path: "/orders", body) -> place(db, stock, order: decode(json: body, as: NewOrder))
+    Request(method: Post, path: "/retry/" ++ decimal(id)) -> reserve(db, stock, made: sql_first(db, row: Order, query: "SELECT id, item, state FROM orders WHERE id = :id AND state = 'pending'", id))
+    Request(method: Get, path: "/orders") -> orders(out: append(buf: buf(), view: "["), rows: sql_all(db, row: Order, query: "SELECT id, item, state FROM orders ORDER BY id"), first: True) |> respond(status: 200)
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn place(db: Sql, stock: Remote, order: Result[NewOrder, View]) -> Buf {
+fn place(db: Sql, stock: Remote, order: Result[NewOrder, View]) -> Response {
   match order {
     Ok(value: NewOrder(item)) -> reserve(db, stock, made: sql_first(db, row: Order, query: "INSERT INTO orders(item, state) VALUES (:item, 'pending') RETURNING id, item, state", item))
     Err(error) -> problem(status: 400, reason: error)
@@ -33,14 +33,14 @@ fn place(db: Sql, stock: Remote, order: Result[NewOrder, View]) -> Buf {
 }
 
 // The insert above is committed before the call below is made: a call is a commit point.
-fn reserve(db: Sql, stock: Remote, made: Option[Order]) -> Buf {
+fn reserve(db: Sql, stock: Remote, made: Option[Order]) -> Response {
   match made {
     Some(value: Order(id, item)) -> settle(db, id, reply: call(to: stock, method: "reserve", send: Reserve(item), reply: Reserved, within: flags.stock_budget_ms, once: id))
     None -> problem(status: 404, reason: "no such pending order")
   }
 }
 
-fn settle(db: Sql, id: Int, reply: Result[Reserved, CallError]) -> Buf {
+fn settle(db: Sql, id: Int, reply: Result[Reserved, CallError]) -> Response {
   match reply {
     Ok(value) -> finish(status: 201, found: sql_first(db, row: Order, query: "UPDATE orders SET state = 'confirmed' WHERE id = :id RETURNING id, item, state", id))
     Err(error: Rejected(reason)) -> refuse(status: 409, reason, count: sql_exec(db, query: "UPDATE orders SET state = 'refused' WHERE id = :id", id))
@@ -50,19 +50,19 @@ fn settle(db: Sql, id: Int, reply: Result[Reserved, CallError]) -> Buf {
   }
 }
 
-fn refuse(status: Int, reason: View, count: Int) -> Buf {
+fn refuse(status: Int, reason: View, count: Int) -> Response {
   problem(status, reason)
 }
 
-fn finish(status: Int, found: Option[Order]) -> Buf {
+fn finish(status: Int, found: Option[Order]) -> Response {
   match found {
-    Some(value) -> write_json(out: respond(status), value)
+    Some(value) -> write_json(out: buf(), value) |> respond(status)
     None -> problem(status: 500, reason: "the order vanished")
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  append(buf: write_json_string(out: append(buf: respond(status), view: "{\"error\":"), text: reason), view: "}")
+fn problem(status: Int, reason: View) -> Response {
+  append(buf: write_json_string(out: append(buf: buf(), view: "{\"error\":"), text: reason), view: "}") |> respond(status)
 }
 
 fn orders(out: Buf, rows: Rows[Order], first: Bool) -> Buf {

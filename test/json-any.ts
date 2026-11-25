@@ -11,7 +11,7 @@
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
 import { finish, ok, same } from './harness.ts';
@@ -167,7 +167,8 @@ const runs: [string, (req: Uint8Array) => Uint8Array][] = Object.entries(BUILDS)
   const b = compile(sources, opts);
   if (!b.wasm) throw new Error(b.errors.map(e => `${e.line} ${e.code} ${e.message}`).join('\n'));
   const app = instantiate(new WebAssembly.Module(b.wasm), { log: false });
-  return [name, (req: Uint8Array) => app.handle(req)];
+  // each answer is a 200 whose body the checks read
+  return [name, (req: Uint8Array) => responseOf(app.handle(req)).body];
 });
 const it = interpret(sources);
 const hex = (b: Uint8Array): string => Buffer.from(b).toString('hex');
@@ -179,7 +180,10 @@ let asked = 0;
 const wrong: string[] = [];
 /** One request on every build (the interpreter only when the document is small): each must answer `want`. */
 function check(what: string, req: Uint8Array, want: (got: Uint8Array) => string | null, interp = true): void {
-  const interpreter: [string, (r: Uint8Array) => Uint8Array] = ['interpreter', (r: Uint8Array) => it.handle(r)];
+  const interpreter: [string, (r: Uint8Array) => Uint8Array] = [
+    'interpreter',
+    (r: Uint8Array) => responseOf(it.handle(r)).body,
+  ];
   const all = interp ? [...runs, interpreter] : runs;
   for (const [name, run] of all) {
     asked++;
@@ -401,7 +405,8 @@ for (const [name, opts] of Object.entries(BUILDS)) {
   const cost = (letter: string): [number, number] => {
     const answer = app.handle(cat(letter, big));
     const steps = app.exports['cost'];
-    if (text(answer) !== '1' || !(steps instanceof WebAssembly.Global)) throw new Error('no answer or no cost');
+    if (text(responseOf(answer).body) !== '1' || !(steps instanceof WebAssembly.Global))
+      throw new Error('no answer or no cost');
     return [Number(steps.value), app.bytesUsed];
   };
   const [s0, b0] = cost('c'),

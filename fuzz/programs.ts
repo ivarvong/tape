@@ -101,7 +101,8 @@ export function check(text: string, inputs: Uint8Array[], extra: Partial<Options
       let want: string | null = null;
       if (!got.some(([, g]) => g.out === 'trap 2' || g.out === 'trap 1'))
         try {
-          const out = it.call(entry, [input]);
+          // handle's answer is a Response, framed as the build's (interp.ts); a part's is its bytes
+          const out = entry === 'handle' ? it.handle(input) : it.call(entry, [input]);
           want = out instanceof Uint8Array ? lat(out) : `not bytes: ${typeof out}`;
         } catch (e) {
           if (e instanceof Trap) want = `trap ${e.code}`;

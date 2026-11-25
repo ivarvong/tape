@@ -83,9 +83,9 @@ const S =
   "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, state TEXT NOT NULL DEFAULT 'pending', note TEXT NOT NULL DEFAULT '')";
 const M = 'machine s.state: SaleState {\n  Pending -> Paid\n  Pending -> Declined\n}\n';
 const prog = (body: string) =>
-  `schema "${S}"\n${M}type N { N(n: Int) }\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n${body}\ntype SaleState { Pending Paid Declined }\n`;
+  `schema "${S}"\n${M}type N { N(n: Int) }\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\n${body}\ntype SaleState { Pending Paid Declined }\n`;
 const ins =
-  'fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:raw) ON CONFLICT(key) DO NOTHING", raw))\n}\n';
+  'fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:raw) ON CONFLICT(key) DO NOTHING", raw))\n}\n';
 T(
   'no way out: rows start in "pending" and no write moves them on (refused at the machine, line 2)',
   c77(prog(ins)),
@@ -105,7 +105,7 @@ T(
   'a state no write puts a row in may have no way out (nothing is ever in it)',
   c77(
     prog(
-      'fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "SELECT count(*) FROM s WHERE state = :raw", raw))\n}\n',
+      'fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "SELECT count(*) FROM s WHERE state = :raw", raw))\n}\n',
     ),
   ),
   [],
@@ -129,7 +129,7 @@ const retried = swap(
   swap(
     bare,
     '    _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))',
-    '    Request(method: "POST", path: "/retry/" ++ decimal(id)) -> again(found: load(id)) |> rendered\n    _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))',
+    '    Request(method: Post, path: "/retry/" ++ decimal(id)) -> again(found: load(id)) |> rendered\n    _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))',
   ),
   'fn load(id: Int)',
   'fn again(found: Option[Order]) -> Outcome {\n  match found {\n    Some(value) -> charge(order: value)\n    None -> Problem(status: 404, reason: "no such order")\n  }\n}\n\nfn load(id: Int)',

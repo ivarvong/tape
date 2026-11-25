@@ -21,24 +21,24 @@ schema "CREATE TABLE IF NOT EXISTS bumps(id INTEGER PRIMARY KEY, find TEXT NOT N
 type Bump { Bump(from: View, to: View) }
 type Intent { Intent(id: Int, find: View, replace: View, expected: View, time: Int) }
 
-fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/version") -> version(file: repo.read_file(send: ReadFile(ref: "main", path: "VERSION"), within: 2000))
-    Request(method: "POST", path: "/bump", body) -> start(db, clock, repo, bump: decode(json: body, as: Bump))
-    Request(method: "POST", path: "/retry/" ++ decimal(id)) -> send_edit(db, repo, intent: sql_first(db, row: Intent, query: "SELECT id, find, replace, expected, time FROM bumps WHERE id = :id AND state = 'pending'", id))
+    Request(method: Get, path: "/version") -> version(file: repo.read_file(send: ReadFile(ref: "main", path: "VERSION"), within: 2000))
+    Request(method: Post, path: "/bump", body) -> start(db, clock, repo, bump: decode(json: body, as: Bump))
+    Request(method: Post, path: "/retry/" ++ decimal(id)) -> send_edit(db, repo, intent: sql_first(db, row: Intent, query: "SELECT id, find, replace, expected, time FROM bumps WHERE id = :id AND state = 'pending'", id))
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn version(file: Result[File, CallError]) -> Buf {
+fn version(file: Result[File, CallError]) -> Response {
   match file {
-    Ok(value: File(content)) -> append(buf: write_json_string(out: append(buf: respond(status: 200), view: "{\"version\":"), text: until(v: content, byte: 10)), view: "}")
+    Ok(value: File(content)) -> append(buf: write_json_string(out: append(buf: buf(), view: "{\"version\":"), text: until(v: content, byte: 10)), view: "}") |> respond(status: 200)
     Err(error: Rejected(reason)) -> problem(status: 502, reason)
     _ -> problem(status: 504, reason: "the repository did not answer")
   }
 }
 
-fn start(db: Sql, clock: Clock, repo: Git, bump: Result[Bump, View]) -> Buf {
+fn start(db: Sql, clock: Clock, repo: Git, bump: Result[Bump, View]) -> Response {
   match bump {
     Ok(value: Bump(from, to)) -> planned(db, clock, repo, from, to, head: repo.head(send: Ref(ref: "main"), within: 2000))
     Err(error) -> problem(status: 400, reason: error)
@@ -46,21 +46,21 @@ fn start(db: Sql, clock: Clock, repo: Git, bump: Result[Bump, View]) -> Buf {
 }
 
 // Write the intent down first: what to change, from which head, stamped with which time.
-fn planned(db: Sql, clock: Clock, repo: Git, from: View, to: View, head: Result[Head, CallError]) -> Buf {
+fn planned(db: Sql, clock: Clock, repo: Git, from: View, to: View, head: Result[Head, CallError]) -> Response {
   match head {
     Ok(value: Head(commit)) -> send_edit(db, repo, intent: sql_first(db, row: Intent, query: "INSERT INTO bumps(find, replace, expected, time, state) VALUES (:from, :to, :commit, :time, 'pending') RETURNING id, find, replace, expected, time", from, to, commit, time: now(clock) / 1000))
     _ -> problem(status: 502, reason: "could not read the branch")
   }
 }
 
-fn send_edit(db: Sql, repo: Git, intent: Option[Intent]) -> Buf {
+fn send_edit(db: Sql, repo: Git, intent: Option[Intent]) -> Response {
   match intent {
     Some(value: Intent(id, find, replace, expected, time)) -> settle(db, id, reply: repo.edit_file(send: Edit(ref: "main", path: "VERSION", find, replace, message: "Bump version", time, expected), within: 3000, once: id))
     None -> problem(status: 404, reason: "no such pending bump")
   }
 }
 
-fn settle(db: Sql, id: Int, reply: Result[Pushed, CallError]) -> Buf {
+fn settle(db: Sql, id: Int, reply: Result[Pushed, CallError]) -> Response {
   match reply {
     Ok(value: Pushed(commit)) -> pushed(commit, count: sql_exec(db, query: "UPDATE bumps SET state = 'pushed' WHERE id = :id", id))
     Err(error: Rejected(reason)) -> refused(reason, count: sql_exec(db, query: "UPDATE bumps SET state = 'refused' WHERE id = :id", id))
@@ -69,14 +69,14 @@ fn settle(db: Sql, id: Int, reply: Result[Pushed, CallError]) -> Buf {
   }
 }
 
-fn pushed(commit: View, count: Int) -> Buf {
-  append(buf: write_json_string(out: append(buf: respond(status: 200), view: "{\"commit\":"), text: commit), view: "}")
+fn pushed(commit: View, count: Int) -> Response {
+  append(buf: write_json_string(out: append(buf: buf(), view: "{\"commit\":"), text: commit), view: "}") |> respond(status: 200)
 }
 
-fn refused(reason: View, count: Int) -> Buf {
+fn refused(reason: View, count: Int) -> Response {
   problem(status: 409, reason)
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  append(buf: write_json_string(out: append(buf: respond(status), view: "{\"error\":"), text: reason), view: "}")
+fn problem(status: Int, reason: View) -> Response {
+  append(buf: write_json_string(out: append(buf: buf(), view: "{\"error\":"), text: reason), view: "}") |> respond(status)
 }

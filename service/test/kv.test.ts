@@ -72,8 +72,12 @@ describe('kv: clusters', () => {
   it('keeps kv- names for shards: no upload or retirement through the program routes', async () => {
     await create('guard', 1);
     expect(
-      (await call('/kvt/kv-guard-0', { method: 'POST', body: 'fn handle(raw: View) -> Buf { respond(status: 200) }' }))
-        .status,
+      (
+        await call('/kvt/kv-guard-0', {
+          method: 'POST',
+          body: 'fn handle(raw: View) -> Response { empty(status: 200) }',
+        })
+      ).status,
     ).toBe(400);
     expect((await call('/kvt/kv-guard-0/v/1', { method: 'DELETE' })).status).toBe(400);
   });

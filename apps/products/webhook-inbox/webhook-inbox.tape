@@ -41,16 +41,16 @@ fn box_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45
 }
 
-fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "GET", path: "/") -> home()
-    Request(method: "GET", path: "/new") -> respond(status: 302)
+    Request(method: Get, path: "/") -> home()
+    Request(method: Get, path: "/new") -> empty(status: 302)
       |> header(name: "location", value: "/p/demo/webhook-inbox/box/\(fresh_box())")
-    Request(method: "POST", path: "/in/" ++ Box(box), body) -> deliver(box, body, r)
-    Request(method: "GET", path: "/box/" ++ Box(box)) -> shown(box, rows: recent(box))
+    Request(method: Post, path: "/in/" ++ Box(box), body) -> deliver(box, body, r)
+    Request(method: Get, path: "/box/" ++ Box(box)) -> shown(box, rows: recent(box))
     Request(
-      method: "GET",
+      method: Get,
       path: "/api/" ++ Box(box) ++ "/" ++ decimal(seq)
     ) -> one(found: sql_first(
       row: Delivery,
@@ -58,7 +58,7 @@ fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Buf {
       box,
       seq
     ))
-    Request(method: "GET", path: "/api/" ++ Box(box)) -> listed(box, rows: recent(box))
+    Request(method: Get, path: "/api/" ++ Box(box)) -> listed(box, rows: recent(box))
     Request(path: "/in/" ++ _) -> problem(status: 400, error: "box: 2 to 32 of a-z, 0-9 and -")
     Request(path: "/box/" ++ _) -> problem(status: 400, error: "box: 2 to 32 of a-z, 0-9 and -")
     _ -> problem(status: 404, error: "no such route")
@@ -142,7 +142,7 @@ fn body_id(raw: Option[View]) -> Option[View] {
   }
 }
 
-fn deliver(box: View, body: View, r: Request) -> Buf {
+fn deliver(box: View, body: View, r: Request) -> Response {
   let True = len(body) > 0 else -> problem(status: 400, error: "empty: send a JSON body")
   let True = len(body) <= 65536 else -> problem(status: 413, error: "the body is over 64 KB")
   let True = is_json(text: body) else -> problem(status: 400, error: "not JSON")
@@ -164,7 +164,7 @@ fn deliver(box: View, body: View, r: Request) -> Buf {
   }
 }
 
-fn keyed(box: View, body: View, k: View) -> Buf {
+fn keyed(box: View, body: View, k: View) -> Response {
   let Some(value: d) = sql_first(
     row: Delivery,
     query: "INSERT INTO deliveries(box, key, at, size, body) \
@@ -186,47 +186,49 @@ fn keyed(box: View, body: View, k: View) -> Buf {
   stored(status: 202, box, d, duplicate: False)
 }
 
-fn repeated(box: View, found: Option[Delivery]) -> Buf {
+fn repeated(box: View, found: Option[Delivery]) -> Response {
   match found {
-    Some(value) -> respond_as(status: 200, content: Json)
-      |> write_json(value: Stored(box, seq: value.seq, key: value.key, duplicate: True))
+    Some(value) -> json(
+      status: 200,
+      value: Stored(box, seq: value.seq, key: value.key, duplicate: True)
+    )
     None -> problem(status: 500, error: "the delivery it repeats is gone")
   }
 }
 
 // A new delivery is kept, and the box is cut back to its newest 50.
-fn stored(status: Int, box: View, d: Delivery, duplicate: Bool) -> Buf {
+fn stored(status: Int, box: View, d: Delivery, duplicate: Bool) -> Response {
   let _ = sql_exec(
     query: "DELETE FROM deliveries WHERE box = :box AND seq NOT IN (SELECT seq FROM deliveries \
         WHERE box = :box ORDER BY seq DESC LIMIT 50)",
     box
   )
-  respond_as(status, content: Json)
-    |> write_json(value: Stored(box, seq: d.seq, key: d.key, duplicate))
+  json(status, value: Stored(box, seq: d.seq, key: d.key, duplicate))
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
 // ---------- the JSON API ----------
 
-fn one(found: Option[Delivery]) -> Buf {
+fn one(found: Option[Delivery]) -> Response {
   match found {
-    Some(value) -> respond_as(status: 200, content: Json) |> append(view: value.body)
+    Some(value) -> buf() |> append(view: value.body) |> respond_as(status: 200, content: Json)
     None -> problem(status: 404, error: "no such delivery")
   }
 }
 
 // {"box": …, "deliveries": [{"seq", "key"?, "at", "size", "body": <the JSON as sent>}, …]}: each body was
 // checked as JSON when it came, so it is written as it is.
-fn listed(box: View, rows: Rows[Delivery]) -> Buf {
-  respond_as(status: 200, content: Json)
+fn listed(box: View, rows: Rows[Delivery]) -> Response {
+  buf()
     |> append(view: "{\"box\":")
     |> write_json_string(text: box)
     |> append(view: ",\"deliveries\":[")
     |> json_items(rows, first: True)
     |> append(view: "]}")
+    |> respond_as(status: 200, content: Json)
 }
 
 fn json_items(out: Buf, rows: Rows[Delivery], first: Bool) -> Buf {
@@ -255,9 +257,8 @@ fn json_key(out: Buf, key: Option[View]) -> Buf {
 
 // ---------- pages ----------
 
-fn page(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn page(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><meta name=robots \
         content=\"noindex,nofollow\"><title>")
@@ -299,14 +300,16 @@ fn page(status: Int, title: View) -> Buf {
     |> append(view: "</h1>")
 }
 
-fn end(out: Buf) -> Buf {
+fn end(out: Buf, status: Int) -> Response {
   out
     |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/webhook-inbox/webhook-inbox.tape\">source</a>). Bodies are shown as text, never run; a box is public to anyone who knows its name.</p></main></html>")
+    |> respond_as(status, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
-fn home() -> Buf {
-  page(status: 200, title: "Webhook inbox")
+fn home() -> Response {
+  page(title: "Webhook inbox")
     |> append(view: "<p>Point a webhook here while you build against it. Every delivery is kept \
         (the last 50 a box) and shown pretty-printed.</p><p><a \
         href=\"/p/demo/webhook-inbox/new\">Open a new box</a>, or use any name of 2 to 32 of a-z, \
@@ -319,11 +322,11 @@ fn home() -> Buf {
         deliveries, newest first</li><li><code>GET api/&lt;box&gt;</code> the same as \
         JSON</li><li><code>GET api/&lt;box&gt;/&lt;seq&gt;</code> one body as it was \
         sent</li></ul>")
-    |> end
+    |> end(status: 200)
 }
 
-fn shown(box: View, rows: Rows[Delivery]) -> Buf {
-  page(status: 200, title: "Box \(box)")
+fn shown(box: View, rows: Rows[Delivery]) -> Response {
+  page(title: "Box \(box)")
     |> append(view: "<p class=mute>POST JSON to \
         <code>https://tape.ivar.workers.dev/p/demo/webhook-inbox/in/")
     |> write_html(text: box)
@@ -331,7 +334,7 @@ fn shown(box: View, rows: Rows[Delivery]) -> Buf {
     |> write_html(text: box)
     |> append(view: "\">JSON</a></p>")
     |> cards(rows, any: False)
-    |> end
+    |> end(status: 200)
 }
 
 fn cards(out: Buf, rows: Rows[Delivery], any: Bool) -> Buf {

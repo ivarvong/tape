@@ -34,34 +34,34 @@ const PROGRAM = `migration 1 "marks" {
 type EventState { Onsale PartlyRefunded Canceled }
 type Mark { Mark(id: Int, state: EventState, was: Option[EventState]) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(path: "/put", body) -> put(body)
     Request(path: "/get/" ++ decimal(id)) -> got(found: sql_first(row: Mark, query: "SELECT id, state, was FROM marks WHERE id = :id", id))
     Request(path: "/list", body) -> listed(body)
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn put(body: View) -> Buf {
+fn put(body: View) -> Response {
   let Ok(value: Mark(id, state, was)) = decode(json: body, as: Mark) else {
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
-  respond(status: 200)
-    |> write_int(value: sql_exec(query: "INSERT INTO marks(id, state, was) VALUES (:id, :state, :was) ON CONFLICT(id) DO NOTHING", id, state, was))
+  buf()
+    |> write_int(value: sql_exec(query: "INSERT INTO marks(id, state, was) VALUES (:id, :state, :was) ON CONFLICT(id) DO NOTHING", id, state, was)) |> respond(status: 200)
 }
 
-fn got(found: Option[Mark]) -> Buf {
+fn got(found: Option[Mark]) -> Response {
   match found {
-    Some(value) -> respond(status: 200) |> write_json(value)
-    None -> respond(status: 404)
+    Some(value) -> buf() |> write_json(value) |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 
-fn listed(body: View) -> Buf {
+fn listed(body: View) -> Response {
   match decode(json: body, as: List[EventState]) {
-    Ok(value) -> respond(status: 200) |> write_json(value)
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Ok(value) -> buf() |> write_json(value) |> respond(status: 200)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 `;

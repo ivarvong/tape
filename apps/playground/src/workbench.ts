@@ -8,7 +8,7 @@
 import { compile } from '../../../compiler.ts';
 import type { Built, Refused, Source } from '../../../compiler.ts';
 import type { Problem } from '../../../compiler/common.ts';
-import { instantiate, isCall, isHead, responseOf, traceOf } from '../../../host.ts';
+import { framed, instantiate, isCall, isHead, responseOf, traceOf } from '../../../host.ts';
 import type { Header } from '../../../host.ts';
 import type { App, Cell, Effect, Flags, Service, ServiceOptions, ServiceReply } from '../../../host.ts';
 import { isEffect } from '../../../host/log.ts';
@@ -387,7 +387,7 @@ export class Workbench {
       const logged = loggedOf(e);
       effects = logged;
       failed = { status: 500, error: messageOf(e), rolled_back: true };
-      out = enc.encode(`500\n${messageOf(e)}`);
+      out = framed({ status: 500, body: messageOf(e) });
     }
     const took = clock() - began;
     return this.#exchange(slot, request, bytes, out, effects, failed, began, took);
@@ -426,7 +426,7 @@ export class Workbench {
         slot,
         request,
         null,
-        enc.encode(`500\n${messageOf(e)}`),
+        framed({ status: 500, body: messageOf(e) }),
         logged,
         { status: 500, error: messageOf(e), rolled_back: true },
         began,

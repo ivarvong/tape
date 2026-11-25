@@ -1,6 +1,6 @@
 // bench/heap.ts: where csv.tape's memory goes. node bench/heap.ts [bytes]
 import '../node25.ts';
-import { heapOf, instantiate } from '../host.ts';
+import { heapOf, instantiate, responseOf } from '../host.ts';
 import { built, moduleOf, read } from '../test/harness.ts';
 import { gen } from './csv-gen.ts';
 
@@ -8,7 +8,7 @@ const sources = [{ name: 'examples/csv.tape', text: read('examples/csv.tape') }]
 const size = Number(process.argv[2] ?? 1_000_000);
 const input = gen(size, 7);
 const app = instantiate(moduleOf(built(sources)));
-const out: unknown = JSON.parse(new TextDecoder().decode(app.handle(input)));
+const out: unknown = JSON.parse(new TextDecoder().decode(responseOf(app.handle(input)).body));
 const h = heapOf(moduleOf(built(sources, { profile: true })), input, app.effects);
 const rows = input.toString().split('\n').length - 2;
 const listed = typeof out === 'object' && out !== null && 'countries' in out ? out.countries : [];

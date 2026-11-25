@@ -23,11 +23,12 @@ export fn label(db: Sql, message: Ship) -> Result[Shipped, View] {
   Ok(value)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/labels") -> respond(status: 200)
+    Request(method: Get, path: "/labels") -> buf()
       |> write_rows(rows: sql_all(row: Label, query: "SELECT * FROM labels ORDER BY id"))
-    _ -> respond(status: 404) |> append(view: "{\"error\":\"no such route\"}")
+      |> respond(status: 200)
+    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
   }
 }
 

@@ -23,9 +23,9 @@ schema "CREATE TABLE IF NOT EXISTS greeted(name TEXT PRIMARY KEY, n INTEGER NOT 
 
 type Count { Count(n: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/hello/" ++ name) if len(name) > 0 -> greet(
+    Request(method: Get, path: "/hello/" ++ name) if len(name) > 0 -> greet(
       name,
       seen: sql_first(
         row: Count,
@@ -35,15 +35,19 @@ fn handle(raw: View, db: Sql) -> Buf {
         name
       )
     )
-    _ -> respond(status: 404) |> append(view: "no such route")
+    _ -> buf() |> append(view: "no such route") |> respond(status: 404)
   }
 }
 
-fn greet(name: View, seen: Option[Count]) -> Buf {
+fn greet(name: View, seen: Option[Count]) -> Response {
   match seen {
-    Some(value: Count(n)) if n == 1 -> respond(status: 200) |> append(view: "Hello, \(name)")
-    Some(value: Count(n)) -> respond(status: 200) |> append(view: "Hello again, \(name) #\(n)!")
-    None -> respond(status: 500)
+    Some(value: Count(n)) if n == 1 -> buf()
+      |> append(view: "Hello, \(name)")
+      |> respond(status: 200)
+    Some(value: Count(n)) -> buf()
+      |> append(view: "Hello again, \(name) #\(n)!")
+      |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 
@@ -62,16 +66,16 @@ $ node tape.ts examples/hello.tape 'GET /hello/ada' 'GET /hello/ada'
 ← 200 ⏎ Hello again, ada #2!
 
   effect log
-    start   build a0276d2155d7c5bb  flags {}  128 bytes of memory, 92 steps, step version 2
+    start   build ea9af81a8654a2ab  flags {}  216 bytes of memory, 91 steps, step version 2
     sql     INSERT INTO greeted(name, n) VALUES (?1, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  …
 
   trace, from that log
   handle
-    ✓   9  Request(method: "GET", path: "/hello/" ++ name) if len(name) > 0 -> greet(
+    ✓   9  Request(method: Get, path: "/hello/" ++ name) if len(name) > 0 -> greet(
         sql ["ada"] -> [[2]]
   greet
-    ✗  25  Some(value: Count(n)) if n == 1 -> respond(status: 200) |> append(view: "Hello, \(name)")
-    ✓  26  Some(value: Count(n)) -> respond(status: 200) |> append(view: "Hello again, \(name) #\(n)!")
+    ✗  25  Some(value: Count(n)) if n == 1 -> buf()
+    ✓  28  Some(value: Count(n)) -> buf()
 ```
 
 (The query names its value, `:name`. The database is given the names numbered, and the log shows what the database
@@ -94,32 +98,34 @@ migration 1 "accounts" {
   CREATE TABLE debits(id TEXT PRIMARY KEY NOT NULL)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/debit/" ++ id) -> debited(id)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/debit/" ++ id) -> debited(id)
+    _ -> empty(status: 404)
   }
 }
 
 // once per debit id: a second run finds the claim and stops there, so the debit needs no `repeat: True`
-fn debited(id: View) -> Buf {
+fn debited(id: View) -> Response {
   let 1 = sql_exec(
     query: "INSERT INTO debits(id) VALUES (:id) ON CONFLICT(id) DO NOTHING",
     id
-  ) else -> respond(status: 200)
+  ) else -> empty(status: 200)
   let 1 = sql_exec(
     query: "UPDATE accounts SET balance = balance - 5 WHERE id = 'ada' AND balance >= 5"
   ) else -> rollback(
-    out: respond(status: 409)
+    out: empty(status: 409)
   )
-  respond(status: 201)
+  empty(status: 201)
 }
 ```
 
 What that shows of the design:
 
-- **One way to do things.** A request is matched, an effect is a call that takes a capability (`db: Sql`), and a
-  response is built with pipes, with values put into text by holes: `"Hello, \(name)"`.
+- **One way to do things.** A request is matched (its method a `Method`, so a misspelt route does not compile), an
+  effect is a call that takes a capability (`db: Sql`), and the answer is a value, a `Response`: its body is built
+  with pipes, with values put into text by holes (`"Hello, \(name)"`), and its status given last. The host writes
+  the status and the headers from that value, so a body, whatever it holds, is only ever a body.
   [`LANGUAGE.md`](LANGUAGE.md) is the whole definition; `node tape.ts fmt` gives the one layout.
 - **Mistakes refused at compile time.** A write that a retry would apply twice is refused, and so are a migration
   that breaks a live version and a status change its machine does not declare. The rules catch the defects they
@@ -163,7 +169,7 @@ From `examples/orders.tape`: an order is in SQLite before stock in another objec
 call can fail is an arm the compiler requires.
 
 ```
-fn reserve(order: Order) -> Buf {
+fn reserve(order: Order) -> Response {
   let Order(id, item) = order
   let Ok(value: Reserved) = call(
     to: stock,

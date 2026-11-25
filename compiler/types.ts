@@ -51,6 +51,8 @@ export const RETIRED: ReadonlyMap<string, string> = new Map([
     'std `write_json_list` went on 23 November 2026: `write_json(value: list)` writes a List, its items as write_json writes each one.',
   ],
 ]);
+/** Built-ins only one file of std may call, like its `private fn`s: in any other file the name is no function. */
+export const PRIVATE_INTRINSICS: ReadonlyMap<string, string> = new Map([['answer_body', 'std/http.tape']]);
 export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map<string, readonly string[] | null>(
   Object.entries({
     len: ['v'],
@@ -58,6 +60,7 @@ export const INTRINSICS: ReadonlyMap<string, readonly string[] | null> = new Map
     buf: [],
     push: ['buf', 'byte'],
     append: ['buf', 'view'],
+    answer_body: ['out', 'body'],
     freeze: ['buf'],
     rollback: ['out'],
     size: ['buf'],

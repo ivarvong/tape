@@ -111,17 +111,17 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/jobs", body) -> add(body) |> rendered
-    Request(method: "POST", path: "/lease", body) -> lease(body) |> rendered
-    Request(method: "POST", path: "/jobs/" ++ decimal(id) ++ "/ack", body) -> ack(id, body)
+    Request(method: Post, path: "/jobs", body) -> add(body) |> rendered
+    Request(method: Post, path: "/lease", body) -> lease(body) |> rendered
+    Request(method: Post, path: "/jobs/" ++ decimal(id) ++ "/ack", body) -> ack(id, body)
       |> rendered
-    Request(method: "POST", path: "/jobs/" ++ decimal(id) ++ "/nack", body) -> nack(id, body)
+    Request(method: Post, path: "/jobs/" ++ decimal(id) ++ "/nack", body) -> nack(id, body)
       |> rendered
-    Request(method: "POST", path: "/jobs/" ++ decimal(id) ++ "/extend", body) -> extend(id, body)
+    Request(method: Post, path: "/jobs/" ++ decimal(id) ++ "/extend", body) -> extend(id, body)
       |> rendered
-    Request(method: "POST", path: "/jobs/" ++ decimal(id) ++ "/retry") -> moved(m: sql_move(
+    Request(method: Post, path: "/jobs/" ++ decimal(id) ++ "/retry") -> moved(m: sql_move(
       row: Job,
       query: "UPDATE jobs SET state = 'ready', most = attempts + 5, run_at = :run_at, error = '' \
           WHERE id = :id AND state = 'dead' RETURNING *",
@@ -129,14 +129,16 @@ fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
       id
     ))
       |> rendered
-    Request(method: "GET", path: "/jobs/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
-    Request(method: "GET", path: "/jobs") -> respond(status: 200)
+    Request(method: Get, path: "/jobs/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Get, path: "/jobs") -> buf()
       |> write_rows(rows: sql_all(row: Job, query: "SELECT * FROM jobs ORDER BY id DESC LIMIT 100"))
-    Request(method: "GET", path: "/stats") -> respond(status: 200)
+      |> respond(status: 200)
+    Request(method: Get, path: "/stats") -> buf()
       |> write_rows(rows: sql_all(
         row: Stat,
         query: "SELECT state, count(*) AS jobs FROM jobs GROUP BY state ORDER BY state"
       ))
+      |> respond(status: 200)
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -330,13 +332,14 @@ fn shown(found: Option[Job]) -> Outcome {
   }
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, job) -> respond(status) |> write_json(value: job)
-    Nothing -> respond(status: 204)
-    Problem(status, reason) -> respond(status)
+    Shown(status, job) -> buf() |> write_json(value: job) |> respond(status)
+    Nothing -> empty(status: 204)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }

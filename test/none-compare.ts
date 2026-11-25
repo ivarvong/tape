@@ -9,18 +9,18 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const PROGRAM = `type Patch { Patch(title: Option[View], done: Option[Bool], at: Option[Int]) }
 
-fn handle(raw: View) -> Buf {
-  let Ok(value: Patch(title, done, at)) = decode(json: request(raw).body, as: Patch) else -> respond(status: 400)
-  let True = title != None or done != None else -> respond(status: 400) |> append(view: "nothing to change")
-  respond(status: 200)
+fn handle(raw: View) -> Response {
+  let Ok(value: Patch(title, done, at)) = decode(json: request(raw).body, as: Patch) else -> empty(status: 400)
+  let True = title != None or done != None else -> buf() |> append(view: "nothing to change") |> respond(status: 400)
+  buf()
     |> append(view: said(b: title == None))
     |> append(view: said(b: None == done))
     |> append(view: said(b: None != at))
-    |> append(view: said(b: missing(x: at)))
+    |> append(view: said(b: missing(x: at))) |> respond(status: 200)
 }
 
 fn said(b: Bool) -> View {
@@ -58,7 +58,7 @@ for (const [json, want] of cases) {
   const got = app ? responseOf(app.handle(req)) : null;
   same(
     `${json}: ${want}`,
-    [got ? `${got.status} ${dec.decode(got.body)}` : 'does not compile', dec.decode(it.handle(req)).replace('\n', ' ')],
+    [got ? `${got.status} ${dec.decode(got.body)}` : 'does not compile', answered(it.handle(req)).replace('\n', ' ')],
     [want, want],
   );
 }
@@ -67,7 +67,7 @@ for (const [json, want] of cases) {
 const said = (body: string): string => {
   const [e] = compile([
     ...std,
-    { name: 't.tape', text: `${body}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n` },
+    { name: 't.tape', text: `${body}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n` },
   ]).errors;
   return e ? `${e.code}: ${e.message}` : 'compiled';
 };

@@ -10,21 +10,21 @@ const SOURCE = `migration 1 "n" {
   CREATE TABLE n(v INTEGER NOT NULL)
 }
 type N { N(v: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "PUT") -> put(db)
-    Request(method: "GET") -> got(found: sql_first(db, row: N, query: "SELECT count(*) AS v FROM n"))
-    _ -> respond(status: 405)
+    Request(method: Put) -> put(db)
+    Request(method: Get) -> got(found: sql_first(db, row: N, query: "SELECT count(*) AS v FROM n"))
+    _ -> empty(status: 405)
   }
 }
-fn put(db: Sql) -> Buf {
+fn put(db: Sql) -> Response {
   let _ = sql_first(db, row: N, repeat: True, query: "INSERT INTO n(v) VALUES (1) RETURNING v")
-  respond(status: 201)
+  empty(status: 201)
 }
-fn got(found: Option[N]) -> Buf {
+fn got(found: Option[N]) -> Response {
   match found {
-    Some(value: N(v)) -> respond(status: 200) |> write_int(value: v)
-    None -> respond(status: 404)
+    Some(value: N(v)) -> buf() |> write_int(value: v) |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 `;
@@ -112,22 +112,22 @@ describe('a storage reset before the log begins', () => {
   CREATE TABLE n(v INTEGER NOT NULL)
 }
 type N { N(v: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST") -> post(db)
-    Request(method: "GET") -> got(found: sql_first(db, row: N, query: "SELECT count(*) AS v FROM n"))
-    _ -> respond(status: 405)
+    Request(method: Post) -> post(db)
+    Request(method: Get) -> got(found: sql_first(db, row: N, query: "SELECT count(*) AS v FROM n"))
+    _ -> empty(status: 405)
   }
 }
-fn post(db: Sql) -> Buf {
+fn post(db: Sql) -> Response {
   let _ = sql_exec(db, query: "INSERT INTO n(v) VALUES (1)", repeat: True)
-  let 1 = sql_exec(db, query: "UPDATE n SET v = 2 WHERE v = 0") else -> rollback(out: respond(status: 200))
-  respond(status: 500)
+  let 1 = sql_exec(db, query: "UPDATE n SET v = 2 WHERE v = 0") else -> rollback(out: empty(status: 200))
+  empty(status: 500)
 }
-fn got(found: Option[N]) -> Buf {
+fn got(found: Option[N]) -> Response {
   match found {
-    Some(value: N(v)) -> respond(status: 200) |> write_int(value: v)
-    None -> respond(status: 404)
+    Some(value: N(v)) -> buf() |> write_int(value: v) |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 `;

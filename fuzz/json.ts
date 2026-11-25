@@ -11,7 +11,7 @@ import { unreachable } from '../compiler/ast.ts';
 import { compile } from '../compiler.ts';
 import { interpret, Trap } from '../interp.ts';
 import { std } from '../std.ts';
-import { cli, handled, instance, seeds } from './run.ts';
+import { bodyOf, cli, handled, instance, seeds } from './run.ts';
 import { rng } from './rng.ts';
 import type { Rng } from './rng.ts';
 import { decText } from './numbers.ts';
@@ -381,7 +381,11 @@ fn ctl(c: Int) -> View {
   freeze(buf: buf() |> push(byte: c))
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   let v = ${value}
   let w = freeze(buf: buf() |> write_json(value: v))
   let again = match decode(json: w, as: ${top}) {
@@ -416,7 +420,7 @@ export function jsonCase(seed: number): JsonVerdict {
   let docs = 0;
   for (let i = 0; i < 16; i++) {
     const doc = sent(r, v);
-    const got = handled(run, enc.encode(doc)).out;
+    const got = bodyOf(handled(run, enc.encode(doc)).out);
     docs++;
     // compared as bytes: a decoder would replace bytes that are not UTF-8 and hide what write_json wrote
     const lines = got.split('\n').map(l => Buffer.from(l, 'latin1').toString('utf8'));
@@ -433,8 +437,7 @@ export function jsonCase(seed: number): JsonVerdict {
     if (read !== w) return { docs, bad: `decode of ${doc}, written: ${read}, wanted ${w}\n${text}` };
     let meant: string;
     try {
-      const out = it.call('handle', [enc.encode(doc)]);
-      meant = out instanceof Uint8Array ? Buffer.from(out).toString('latin1') : 'not bytes';
+      meant = bodyOf(Buffer.from(it.handle(enc.encode(doc))).toString('latin1'));
     } catch (e) {
       meant = e instanceof Trap ? `trap ${e.code}` : `threw ${e instanceof Error ? e.message : String(e)}`;
     }

@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 const WRITES =
   'On a write it also takes `repeat: True`, for a write meant to apply again on each run: a count in SQL (`n = n + 1`) or an INSERT with no unique key (C54, C55; C88 refuses it where the write is safe without it); and `no_floor: True`, for a column it takes from that has no floor (C73).';
 import { compile } from '../compiler.ts';
-import { INTRINSICS } from '../compiler/types.ts';
+import { INTRINSICS, PRIVATE_INTRINSICS } from '../compiler/types.ts';
 import { std } from '../std.ts';
 
 const OUT = new URL('./std.md', import.meta.url);
@@ -128,7 +128,11 @@ const BUILT_INS: BuiltIn[] = [
     sig: 'slice(v: View, from: Int, to: Int) -> View',
     doc: 'The bytes from `from` up to, not including, `to`; no copy. `v[i]` is one byte, as an Int.',
   },
-  { name: 'buf', sig: 'buf() -> Buf', doc: 'A new, empty buffer to write into. A response starts as one: `respond`.' },
+  {
+    name: 'buf',
+    sig: 'buf() -> Buf',
+    doc: 'A new, empty buffer to write into: the body of an answer is written into one, then given its status with `respond`.',
+  },
   ...(['add', 'sub', 'mul'] as const).map((op): BuiltIn => ({
     name: `wrapping_${op}`,
     sig: `wrapping_${op}(a: Int, b: Int) -> Int`,
@@ -322,7 +326,7 @@ const BUILT_INS: BuiltIn[] = [
   },
   {
     name: 'rollback',
-    sig: 'rollback(out: Buf) -> Buf',
+    sig: 'rollback(out: Response) -> Response',
     doc: "Answers `out` and undoes this request's writes since its last call.",
   },
 ];
@@ -333,8 +337,8 @@ type Task = { title: string; uses: string[]; text: string; program: string };
 const TASKS: Task[] = [
   {
     title: 'Respond with JSON',
-    uses: ['fn respond_as', 'type Content', 'builtin write_json', 'fn write_rows', 'fn respond'],
-    text: '`respond(status: …)` answers `text/plain`. `respond_as(status: …, content: Json)` answers `application/json`; then write the body with `write_json` (a record) or `write_rows` (the rows of a query). An error body is a record too.',
+    uses: ['fn json', 'fn respond_as', 'type Content', 'builtin write_json', 'fn write_rows', 'fn empty'],
+    text: '`json(status: …, value: …)` answers a value as `application/json`. For a body written in steps, write it first and give it its type last: `buf() |> write_rows(rows: …) |> respond_as(status: 200, content: Json)`. `empty(status: …)` answers no body. An error body is a record too.',
     program: `type Item {
   Item(id: Int, name: View)
 }
@@ -343,11 +347,10 @@ type Problem {
   Problem(error: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/item") -> respond_as(status: 200, content: Json)
-      |> write_json(value: Item(id: 1, name: "lamp"))
-    _ -> respond_as(status: 404, content: Json) |> write_json(value: Problem(error: "not_found"))
+    Request(method: Get, path: "/item") -> json(status: 200, value: Item(id: 1, name: "lamp"))
+    _ -> json(status: 404, value: Problem(error: "not_found"))
   }
 }
 `,
@@ -355,12 +358,11 @@ fn handle(raw: View) -> Buf {
   {
     title: 'Respond with an Atom feed',
     uses: ['fn respond_as', 'type Content', 'fn respond'],
-    text: "`respond_as(status: 200, content: Atom)` answers `application/atom+xml` (the host adds `charset=utf-8`, which overrides an encoding declaration in the document). `Rss` is `application/rss+xml` and `Xml` is `application/xml`. Chrome renders these as pages; the service's content-security-policy is what stops a script in the document, and a host that serves them must send that policy.",
-    program: `fn handle(raw: View) -> Buf {
+    text: "`buf() |> respond_as(status: 200, content: Atom)` answers `application/atom+xml` (the host adds `charset=utf-8`, which overrides an encoding declaration in the document). `Rss` is `application/rss+xml` and `Xml` is `application/xml`. Chrome renders these as pages; the service's content-security-policy is what stops a script in the document, and a host that serves them must send that policy.",
+    program: `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/feed.xml") -> respond_as(status: 200, content: Atom)
-      |> append(view: "<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/feed.xml") -> buf() |> append(view: "<feed xmlns='http://www.w3.org/2005/Atom'></feed>") |> respond_as(status: 200, content: Atom)
+    _ -> empty(status: 404)
   }
 }
 `,
@@ -369,11 +371,10 @@ fn handle(raw: View) -> Buf {
     title: 'Read query parameters',
     uses: ['type Request', 'fn form_field', 'fn decimal'],
     text: '`Request(query)` is the raw text after `?` (`None` when there is no `?`). A query string is encoded as a form is, so `form_field(body: query, name: "limit")` reads one parameter, decoded (`+` and `%XX`). The path never holds the query.',
-    program: `fn handle(raw: View) -> Buf {
+    program: `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/items", query) -> respond(status: 200)
-      |> append(view: "limit \\(limit_of(query))")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/items", query) -> buf() |> append(view: "limit \\(limit_of(query))") |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -393,12 +394,11 @@ fn limit_of(query: Option[View]) -> Int {
     text: '`decimal(v)` is `Some(n)` for canonical digits (no sign, no leading zero, at most 16 digits). Any function that returns an Option is a pattern, so `"/items/" ++ decimal(id)` routes and parses at once, and a refined type checks the range: `decimal(Id(id))`. `parse_int(text)` takes a number as people write one (a sign, leading zeros). `decimal_text(value)` and holes (`"\\(n)"`) go the other way.',
     program: `type Id = Int where self >= 1 and self <= 9007199254740991
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/items/" ++ decimal(Id(id))) -> respond(status: 200)
-      |> append(view: "item \\(id)")
-    Request(method: "GET", path: "/items/" ++ _) -> respond(status: 400) |> append(view: "bad id")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/items/" ++ decimal(Id(id))) -> buf() |> append(view: "item \\(id)") |> respond(status: 200)
+    Request(method: Get, path: "/items/" ++ _) -> buf() |> append(view: "bad id") |> respond(status: 400)
+    _ -> empty(status: 404)
   }
 }
 `,
@@ -418,18 +418,18 @@ type Problem {
   Problem(error: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/items", body) -> created(body)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/items", body) -> created(body)
+    _ -> empty(status: 404)
   }
 }
 
-fn created(body: View) -> Buf {
+fn created(body: View) -> Response {
   let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
-    Err(error) -> respond_as(status: 400, content: Json) |> write_json(value: Problem(error))
+    Err(error) -> json(status: 400, value: Problem(error))
   }
-  respond(status: 201) |> append(view: "\\(qty) of \\(name)")
+  buf() |> append(view: "\\(qty) of \\(name)") |> respond(status: 201)
 }
 `,
   },
@@ -445,18 +445,17 @@ type Line {
   Line(name: View, double: Int)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", body) -> counted(items: decode(json: body, as: List[Item]))
-    _ -> respond_as(status: 200, content: Json)
-      |> write_json(value: map(list: stock(), by: fn(i: Item) -> Line { Line(name: i.name, double: 2 * i.qty) }))
+    Request(method: Post, body) -> counted(items: decode(json: body, as: List[Item]))
+    _ -> json(status: 200, value: map(list: stock(), by: fn(i: Item) -> Line { Line(name: i.name, double: 2 * i.qty) }))
   }
 }
 
-fn counted(items: Result[List[Item], View]) -> Buf {
+fn counted(items: Result[List[Item], View]) -> Response {
   match items {
-    Ok(value) -> respond(status: 200) |> append(view: "\\(length(list: value)) items")
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Ok(value) -> buf() |> append(view: "\\(length(list: value)) items") |> respond(status: 200)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 
@@ -471,12 +470,12 @@ fn stock() -> List[Item] {
     uses: ['builtin parse_dec', 'builtin mul', 'builtin div', 'type Rounding'],
     text: 'Money is a `Dec[2]`: `12.30` is one, `price * qty` is exact, and a hole or `write_json` writes it with its two digits (JSON as text, `"12.30"`; decode takes a number or text, exactly). What loses a digit names its rounding, once: `mul` for a rate, `div` for a share. In the database a Dec is its count, an INTEGER (12.30 is 1230). A measurement is a Float instead (`1.5f`).',
     program: `// three at the price in the query, with tax at 8.875% rounded once to the cent, half away from zero
-fn handle(raw: View) -> Buf {
-  let Some(value: price) = parse_dec(text: query_of(raw), scale: 2) else -> respond(status: 400)
+fn handle(raw: View) -> Response {
+  let Some(value: price) = parse_dec(text: query_of(raw), scale: 2) else -> empty(status: 400)
   let net = price * 3
   let tax = mul(a: net, by: 0.08875, scale: 2, rounding: HalfUp)
   let each = div(a: net + tax, by: 3, scale: 2, rounding: Down)
-  respond(status: 200) |> append(view: "\\(net) + \\(tax) = \\(net + tax), \\(each) each")
+  buf() |> append(view: "\\(net) + \\(tax) = \\(net + tax), \\(each) each") |> respond(status: 200)
 }
 
 fn query_of(raw: View) -> View {
@@ -498,10 +497,10 @@ fn slug_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/s/" ++ Slug(s)) -> respond(status: 200) |> append(view: s)
-    _ -> respond(status: 400)
+    Request(method: Get, path: "/s/" ++ Slug(s)) -> buf() |> append(view: s) |> respond(status: 200)
+    _ -> empty(status: 400)
   }
 }
 `,
@@ -510,9 +509,9 @@ fn handle(raw: View) -> Buf {
     title: 'Advance to the next byte in a set',
     uses: ['builtin scan', 'builtin slice', 'fn respond'],
     text: "`scan(v:, at:, set:)` is the first position at or after `at` whose byte is one of `set`, a text literal, or `len(v)` when none is. It reads 16 bytes at a time and costs one step per 16 bytes read, rounded up. A CSV separator, the bytes HTML escapes and the bytes a line of Markdown stops on are sets of this form. `scan_plain(v:, at:)` is that scan for the bytes that end a JSON string's plain run.",
-    program: `fn handle(raw: View) -> Buf {
+    program: `fn handle(raw: View) -> Response {
   let at = scan(raw, at: 0, set: "*&<>")
-  respond(status: 200) |> append(view: slice(raw, from: 0, to: at))
+  buf() |> append(view: slice(raw, from: 0, to: at)) |> respond(status: 200)
 }
 `,
   },
@@ -520,15 +519,15 @@ fn handle(raw: View) -> Buf {
     title: 'Read a request header, set a response header',
     uses: ['fn header_of', 'fn header', 'type Request'],
     text: "`header_of(request: r, name: \"if-none-match\")` is the header's value, `None` when it was not sent (the service passes accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, webhook-id, webhook-timestamp, webhook-signature and x-… (but not x-forwarded-… or x-real-ip), never cookie or authorization; and its own `tape-base`, the URL the program's `/` is at, without the last slash, for links and redirects to its other pages). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`'s.",
-    program: `fn handle(raw: View) -> Buf {
+    program: `fn handle(raw: View) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "GET", path: "/old") -> respond(status: 301) |> header(name: "location", value: "/new")
-    Request(method: "GET", path: "/new") -> match header_of(request: r, name: "if-none-match") {
-      Some(value: "v1") -> respond(status: 304)
-      _ -> respond(status: 200) |> header(name: "etag", value: "v1") |> append(view: "new")
+    Request(method: Get, path: "/old") -> empty(status: 301) |> header(name: "location", value: "/new")
+    Request(method: Get, path: "/new") -> match header_of(request: r, name: "if-none-match") {
+      Some(value: "v1") -> empty(status: 304)
+      _ -> buf() |> append(view: "new") |> respond(status: 200) |> header(name: "etag", value: "v1")
     }
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 `,
@@ -537,14 +536,14 @@ fn handle(raw: View) -> Buf {
     title: 'Check a signature',
     uses: ['fn hmac_sha256_verify', 'fn hmac_sha256', 'fn from_base64', 'fn sha256', 'fn hex', 'fn base64url'],
     text: '`hmac_sha256_verify(key:, data:, mac:)` is True when `mac` is the HMAC-SHA-256 of `data` under `key`, and compares every byte whatever they hold; `==` on two Views stops at the first byte that differs, which a caller can see in the time and the steps, so a signature is never checked with `==`. The mac arrives as text: `from_base64` reads it, or `from_base64url` for base64url without padding (each `None` for text that is not exactly an encoding). `sha256(data:)` and `hmac_sha256(key:, data:)` give 32 raw bytes; `hex`, `base64` and `base64url` write bytes as text. All are std code, metered in steps like any other (66 a 64-byte block). Standard Webhooks signs `id.timestamp.body` and sends `v1,<base64>`; the example signs the body alone.',
-    program: `fn handle(raw: View) -> Buf {
+    program: `fn handle(raw: View) -> Response {
   let r = request(raw)
-  let Request(method: "POST", path: "/hook", body) = r else -> respond(status: 404)
-  let Some(value: sent) = header_of(request: r, name: "x-signature") else -> respond(status: 401)
-  let Some(value: mac) = from_base64(text: sent) else -> respond(status: 401)
+  let Request(method: Post, path: "/hook", body) = r else -> empty(status: 404)
+  let Some(value: sent) = header_of(request: r, name: "x-signature") else -> empty(status: 401)
+  let Some(value: mac) = from_base64(text: sent) else -> empty(status: 401)
   match hmac_sha256_verify(key: signing_key(), data: body, mac) {
-    True -> respond(status: 204)
-    False -> respond(status: 401)
+    True -> empty(status: 204)
+    False -> empty(status: 401)
   }
 }
 
@@ -641,7 +640,9 @@ function problems(files: readonly File[], written: string | null, fresh: string)
     for (const d of f.decls)
       if (d.doc.length === 0) out.push(`${f.name}:${d.line}: ${d.kind} ${d.name} has no doc comment`);
   const listed = new Set(BUILT_INS.map(b => b.name));
-  for (const n of INTRINSICS.keys()) if (!listed.has(n)) out.push(`built-in ${n} has no entry in docs/gen-std.ts`);
+  // a built-in private to a file of std is not listed, as its helpers are not
+  for (const n of INTRINSICS.keys())
+    if (!listed.has(n) && !PRIVATE_INTRINSICS.has(n)) out.push(`built-in ${n} has no entry in docs/gen-std.ts`);
   for (const n of listed) if (!INTRINSICS.has(n)) out.push(`docs/gen-std.ts lists ${n}, which is not a built-in`);
   const anchors = new Set([
     ...BUILT_INS.map(b => `builtin-${b.name}`),

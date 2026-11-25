@@ -31,10 +31,10 @@ the trace link, opened with no token:
       supervisor  demo/hello v1  -> 200  4 ms (run 3 ms)
   
   handle
-    ✓   9  Request(method: "GET", path: "/hello/" ++ name) if len(name) > 0 -> greet(
+    ✓   9  Request(method: Get, path: "/hello/" ++ name) if len(name) > 0 -> greet(
         sql 0 ["ada"] → [[1]]
   greet
-    ✓  25  Some(value: Count(n)) if n == 1 -> respond(status: 200) |> append(view: "Hello, \(name)")
+    ✓  25  Some(value: Count(n)) if n == 1 -> buf() |> append(view: "Hello, \(name)") |> respond(status: 200)
 
 GET  /demo/hello with no token       -> 401
 the trace link with one digit changed -> 401

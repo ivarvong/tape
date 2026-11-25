@@ -48,22 +48,22 @@ fn url_byte(b: Int) -> Bool {
   b > 32 and b < 127 and b != 34 and b != 39 and b != 60 and b != 62 and b != 92 and b != 96
 }
 
-fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> home()
-    Request(method: "POST", path: "/links", body) -> create(body)
-    Request(method: "GET", path: "/s/" ++ Slug(slug)) -> visit(found: sql_first(
+    Request(method: Get, path: "/") -> home()
+    Request(method: Post, path: "/links", body) -> create(body)
+    Request(method: Get, path: "/s/" ++ Slug(slug)) -> visit(found: sql_first(
       row: Link,
       repeat: True,
       query: "UPDATE links SET clicks = clicks + 1 WHERE slug = :slug RETURNING *",
       slug
     ))
-    Request(method: "GET", path: "/api/links/" ++ Slug(slug)) -> as_json(found: load(slug))
-    Request(method: "GET", path: "/stats/" ++ Slug(slug)) -> stats_one(found: load(slug))
-    Request(method: "GET", path: "/stats") -> stats_all(
+    Request(method: Get, path: "/api/links/" ++ Slug(slug)) -> as_json(found: load(slug))
+    Request(method: Get, path: "/stats/" ++ Slug(slug)) -> stats_one(found: load(slug))
+    Request(method: Get, path: "/stats") -> stats_all(
       rows: sql_all(row: Link, query: "SELECT * FROM links ORDER BY clicks DESC, slug LIMIT 50")
     )
-    Request(method: "GET", path: "/s/" ++ _) -> visit(found: None)
+    Request(method: Get, path: "/s/" ++ _) -> visit(found: None)
     _ -> problem(status: 404, error: "no such route")
   }
 }
@@ -73,7 +73,7 @@ fn load(slug: View) -> Option[Link] {
 }
 
 // POST /links: the slug is claimed by the INSERT; a second run (a retry) finds it and answers what is there.
-fn create(body: View) -> Buf {
+fn create(body: View) -> Response {
   let Ok(value: NewLink(slug, url)) = decode(json: body, as: NewLink) else {
     Err(error) -> problem(status: 400, error)
   }
@@ -88,7 +88,7 @@ fn create(body: View) -> Buf {
   made(status: 201, link, new: True)
 }
 
-fn again(url: View, found: Option[Link]) -> Buf {
+fn again(url: View, found: Option[Link]) -> Response {
   match found {
     Some(value: link = Link(url: had)) if had == url -> made(status: 200, link, new: False)
     Some(value) -> problem(status: 409, error: "slug \(value.slug) is taken by another URL")
@@ -96,26 +96,25 @@ fn again(url: View, found: Option[Link]) -> Buf {
   }
 }
 
-fn made(status: Int, link: Link, new: Bool) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Made(link, new, short: "/s/\(link.slug)"))
+fn made(status: Int, link: Link, new: Bool) -> Response {
+  json(status, value: Made(link, new, short: "/s/\(link.slug)"))
 }
 
-fn as_json(found: Option[Link]) -> Buf {
+fn as_json(found: Option[Link]) -> Response {
   match found {
-    Some(value) -> respond_as(status: 200, content: Json) |> write_json(value)
+    Some(value) -> json(status: 200, value)
     None -> problem(status: 404, error: "no such link")
   }
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
 // ---------- pages ----------
 
-fn page(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn page(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><meta name=robots \
         content=\"noindex,nofollow\"><title>")
@@ -126,14 +125,16 @@ fn page(status: Int, title: View) -> Buf {
     |> append(view: "</h1>")
 }
 
-fn end(out: Buf) -> Buf {
+fn end(out: Buf, status: Int) -> Response {
   out
     |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/shortlinks/shortlinks.tape\">source</a>). Links go only to https URLs, and every link shows its destination before you follow it.</p></main></html>")
+    |> respond_as(status, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
-fn home() -> Buf {
-  page(status: 200, title: "Short links")
+fn home() -> Response {
+  page(title: "Short links")
     |> append(view: "<p>Give a long https link a short name. Each visit is counted, and every \
         short link shows where it goes before you follow it.</p><h2>Make one</h2><pre>curl -X \
         POST https://tape.ivar.workers.dev/p/demo/shortlinks/links \\\n  -d '{\"slug\": \
@@ -143,29 +144,29 @@ fn home() -> Buf {
         s/&lt;slug&gt;</code> the link, counted</li><li><code>GET stats/&lt;slug&gt;</code> its \
         page of numbers</li><li><code>GET api/links/&lt;slug&gt;</code> the same as \
         JSON</li><li><code>GET stats</code> the 50 most visited</li></ul>")
-    |> end
+    |> end(status: 200)
 }
 
-fn visit(found: Option[Link]) -> Buf {
+fn visit(found: Option[Link]) -> Response {
   match found {
-    Some(value: Link(slug, url, clicks)) -> page(status: 200, title: slug)
+    Some(value: Link(slug, url, clicks)) -> page(title: slug)
       |> append(view: "<div class=card><p class=mute>This short link goes to</p><p><code>")
       |> write_html(text: url)
       |> append(view: "</code></p><a class=go rel=\"nofollow noopener noreferrer\" href=\"")
       |> write_html(text: url)
       |> append(view: "\">Continue</a></div><p class=mute>Visited \(clicks) \(times(n: clicks)). \
           <a href=\"/p/demo/shortlinks/stats/\(slug)\">Stats</a></p>")
-      |> end
-    None -> page(status: 404, title: "No such link")
+      |> end(status: 200)
+    None -> page(title: "No such link")
       |> append(view: "<p>Nothing is called that. <a href=\"/p/demo/shortlinks/stats\">See the \
           links</a>.</p>")
-      |> end
+      |> end(status: 404)
   }
 }
 
-fn stats_one(found: Option[Link]) -> Buf {
+fn stats_one(found: Option[Link]) -> Response {
   match found {
-    Some(value: Link(slug, url, created, clicks)) -> page(status: 200, title: "Stats for \(slug)")
+    Some(value: Link(slug, url, created, clicks)) -> page(title: "Stats for \(slug)")
       |> append(view: "<div class=card><table><tr><th>Destination</th><td><code>")
       |> write_html(text: url)
       |> append(
@@ -174,18 +175,18 @@ fn stats_one(found: Option[Link]) -> Buf {
       |> append(view: date_time(ms: created))
       |> append(view: " UTC</td></tr><tr><th>Short link</th><td><a \
           href=\"/p/demo/shortlinks/s/\(slug)\">s/\(slug)</a></td></tr></table></div>")
-      |> end
-    None -> page(status: 404, title: "No such link") |> end
+      |> end(status: 200)
+    None -> page(title: "No such link") |> end(status: 404)
   }
 }
 
-fn stats_all(rows: Rows[Link]) -> Buf {
-  page(status: 200, title: "The most visited links")
+fn stats_all(rows: Rows[Link]) -> Response {
+  page(title: "The most visited links")
     |> append(view: "<div class=card><table><tr><th>Slug</th><th>Destination</th><th \
         class=n>Visits</th></tr>")
     |> stat_rows(rows)
     |> append(view: "</table></div>")
-    |> end
+    |> end(status: 200)
 }
 
 fn stat_rows(out: Buf, rows: Rows[Link]) -> Buf {

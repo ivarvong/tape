@@ -32,7 +32,7 @@ const enc = new TextEncoder();
 // A host call makes one or two of these per statement, so a fresh DataView each time was measurable (1.9% of ledger).
 type Views = { buffer: ArrayBuffer; d: DataView; u: Uint8Array };
 const seen = new WeakMap<WebAssembly.Memory, Views>();
-function views(m: Mem): Views {
+function views(m: Pick<Mem, 'memory'>): Views {
   const buffer = m.memory.buffer;
   const had = seen.get(m.memory);
   if (had !== undefined && had.buffer === buffer) return had;
@@ -40,7 +40,7 @@ function views(m: Mem): Views {
   seen.set(m.memory, made);
   return made;
 }
-const view = (m: Mem): DataView => views(m).d;
+const view = (m: Pick<Mem, 'memory'>): DataView => views(m).d;
 /** An i64 at `o`, from a whole number within ±2^53. */
 function setInt64(d: DataView, o: number, x: number): void {
   d.setInt32(o, x | 0, true);
@@ -48,7 +48,7 @@ function setInt64(d: DataView, o: number, x: number): void {
 }
 
 /** A copy of `len` bytes of the module's memory. */
-export const copyOut = (m: Mem, ptr: number, len: number): Uint8Array<ArrayBuffer> =>
+export const copyOut = (m: Pick<Mem, 'memory'>, ptr: number, len: number): Uint8Array<ArrayBuffer> =>
   new Uint8Array(m.memory.buffer.slice(ptr, ptr + len));
 export const textAt = (m: Mem, ptr: number, len: number): string => utf8.decode(copyOut(m, ptr, len));
 /** The same text, decoded where it lies: no copy, for a host call made once per value (float_of). */
@@ -97,6 +97,29 @@ export function replyBlock(m: Mem, status: number, reply: Uint8Array): number {
 export function answerAt(m: Mem, h: number): Uint8Array<ArrayBuffer> {
   const d = view(m);
   return copyOut(m, d.getUint32(h, true), d.getUint32(h + 4, true));
+}
+
+/**
+ * The answer `handle` gave (std/http.tape framed): its head, whose last 8 bytes say where the body is (its address
+ * and its length), and the body there. What is given back is the frame host.ts responseOf reads, the head and then
+ * the body, each copied out of the module's memory once: the module wrote no copy of the body after its head.
+ */
+export function frameAt(m: Pick<Mem, 'memory'>, h: number): Uint8Array<ArrayBuffer> {
+  const d = view(m);
+  const at = d.getUint32(h, true),
+    len = d.getUint32(h + 4, true);
+  // not a frame (fewer bytes than its body's place): responseOf says what is wrong
+  if (len < 8) return copyOut(m, at, len);
+  const head = len - 8,
+    body = d.getUint32(at + head, true),
+    size = d.getUint32(at + head + 4, true);
+  const u = views(m).u;
+  if (body + size > u.length)
+    throw new Error(`the answer's body is at ${body}, ${size} bytes, past the module's memory (a compiler bug)`);
+  const out = new Uint8Array(head + size);
+  out.set(u.subarray(at, at + head));
+  out.set(u.subarray(body, body + size), head);
+  return out;
 }
 
 // Flags are written into the module's memory, where a read is one load. They change only between requests.

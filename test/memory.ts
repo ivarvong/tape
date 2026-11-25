@@ -12,7 +12,7 @@ import { instantiate } from '../host.ts';
 import { gen } from '../bench/csv-gen.ts';
 import type { Options, Source } from '../compiler.ts';
 import type { App } from '../host.ts';
-import { built, finish, moduleOf, same as T } from './harness.ts';
+import { built, finish, moduleOf, same as T, answered } from './harness.ts';
 const src = (n: string) => ({ name: n, text: readFileSync(new URL(`../${n}`, import.meta.url), 'utf8') });
 const appOf = (file: Source, options: Partial<Options>, log: boolean): App =>
   instantiate(moduleOf(built([file], options)), { log });
@@ -22,10 +22,9 @@ const three = (file: Source): [App, App, App] => [
   appOf(file, { reuse: false }, false),
   appOf(file, { reuse: true, check: true }, false),
 ];
-const dec = new TextDecoder();
 const run = (app: App, b: Uint8Array): string => {
   try {
-    return dec.decode(app.handle(b));
+    return answered(app.handle(b));
   } catch (e) {
     return `ERROR ${e instanceof Error ? e.message : String(e)}`;
   }
@@ -34,8 +33,8 @@ const run = (app: App, b: Uint8Array): string => {
 const FUZZ: Source = {
   name: 'fuzz.tape',
   text: `type Regs { Regs(a: Map[Int], b: Map[Int], c: Map[Int]) }
-fn handle(raw: View) -> Buf {
-  step(raw, at: 0, regs: Regs(a: Empty, b: Empty, c: Empty), out: buf())
+fn handle(raw: View) -> Response {
+  step(raw, at: 0, regs: Regs(a: Empty, b: Empty, c: Empty), out: buf()) |> respond(status: 200)
 }
 fn step(raw: View, at: Int, regs: Regs, out: Buf) -> Buf {
   match {
@@ -116,7 +115,7 @@ const model = (b: Uint8Array<ArrayBuffer>) => {
           [5, 5, 4, 4, 1, 1, 0],
         ][i % 4] ?? [];
     for (let j = 0; j < n; j++) b.set([mix[rnd(mix.length)] ?? 0, rnd(3), rnd(3), 97 + rnd(keys), rnd(256)], 5 * j);
-    const want = model(b),
+    const want = `200\n${model(b)}`,
       got = [run(fast, b), run(never, b), run(checked, b)];
     scripts++;
     ops += n;

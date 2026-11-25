@@ -25,10 +25,10 @@ type Draft {
   Invalid
 }
 
-fn handle(request: View, db: Sql) -> Buf {
+fn handle(request: View, db: Sql) -> Response {
   let line = until(v: request, byte: 10)
   let target = after(v: line, byte: 32)
-  serve(db, method: until(v: line, byte: 32), route: route(path: until(v: target, byte: 63)), query: after(v: target, byte: 63), body: after(v: request, byte: 10))
+  serve(db, method: until(v: line, byte: 32), route: route(path: until(v: target, byte: 63)), query: after(v: target, byte: 63), body: after(v: request, byte: 10)) |> respond(status: 200)
 }
 
 fn route(path: View) -> Route {

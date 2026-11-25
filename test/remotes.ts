@@ -14,7 +14,7 @@ import { checkQueries } from '../check.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 import type { Built, Options, Source } from '../compiler.ts';
-import { built, finish, moduleOf, problems, read, same as T, sleep } from './harness.ts';
+import { answerBody, answered, built, finish, moduleOf, problems, read, same as T, sleep } from './harness.ts';
 const src = (n: string): Source => ({ name: n, text: read(n) });
 const build = (n: string, options: Partial<Options> = {}): Built => built([src(`examples/${n}.tape`)], options);
 const enc = new TextEncoder(),
@@ -54,7 +54,7 @@ const signed = (message: string): { body: string; signature: string } => {
   const buy = async (section: string, qty: number, card: string, key = `k${++keys}`) => {
     const req = enc.encode(`POST /buy\n{"key":"${key}","section":"${section}","qty":${qty},"card":"${card}"}`),
       ran = await app.runLogged(req);
-    return { req, out: text(ran.out), log: ran.effects };
+    return { req, out: answered(ran.out), log: ran.effects };
   };
   const paid = await buy('floor', 2, 'ann-4242');
   T(
@@ -67,7 +67,7 @@ const signed = (message: string): { body: string; signature: string } => {
     paid.log.slice(1).map(e => (isCall(e) ? 'call' : 'now' in e ? 'now' : 'random' in e ? 'random' : 'sql')),
     ['sql', 'sql', 'random', 'now', 'sql', 'call', 'sql'],
   );
-  T('tickets: replay gives the same bytes, code and all', text(replay(module, paid.req, paid.log)), paid.out);
+  T('tickets: replay gives the same bytes, code and all', answered(replay(module, paid.req, paid.log)), paid.out);
   T(
     'tickets: declined, and the hold undone',
     (await buy('balcony', 2, 'bob-0001')).out,
@@ -87,7 +87,7 @@ const signed = (message: string): { body: string; signature: string } => {
   );
   T(
     'tickets: sales per section',
-    text(await app.run(enc.encode('GET /sales\n'))),
+    answered(await app.run(enc.encode('GET /sales\n'))),
     '200\n{"floor":{"seats":2,"revenue":240}}',
   );
   const charge = logs.find(l => l[0] !== undefined && isHead(l[0]) && l[0].method === 'charge') ?? [],
@@ -122,7 +122,7 @@ const signed = (message: string): { body: string; signature: string } => {
       },
     },
   });
-  const run = async (r: string) => text(await app.run(enc.encode(r)));
+  const run = async (r: string) => answered(await app.run(enc.encode(r)));
   const balance = () => sql.exec("SELECT balance FROM cards WHERE card = 'ann-4242'").toArray()[0]?.balance;
   T(
     'retry: the first attempt times out, the seats stay held',
@@ -150,8 +150,9 @@ const signed = (message: string): { body: string; signature: string } => {
   CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL UNIQUE)
 }
 type Note { Note(id: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   saved(found: sql_first(db, row: Note, query: "INSERT INTO notes(body) VALUES (:raw) RETURNING id", raw))
+    |> respond(status: 200)
 }
 fn saved(found: Option[Note]) -> Buf {
   match found {
@@ -193,9 +194,9 @@ type Note`,
   );
   T(
     'migrations: the data is still there, and the new column is used',
-    [text(a2.handle(enc.encode('second'))), sql.exec('SELECT body, pinned FROM notes ORDER BY id').toArray()],
+    [answered(a2.handle(enc.encode('second'))), sql.exec('SELECT body, pinned FROM notes ORDER BY id').toArray()],
     [
-      '2',
+      '200\n2',
       [
         { body: 'first', pinned: 0 },
         { body: 'second', pinned: 1 },
@@ -204,8 +205,8 @@ type Note`,
   );
   T(
     'migrations: the older program still runs on the expanded table',
-    [instantiate(m(v1), { sql }).migrated.length, text(a1.handle(enc.encode('third')))],
-    [0, '3'],
+    [instantiate(m(v1), { sql }).migrated.length, answered(a1.handle(enc.encode('third')))],
+    [0, '200\n3'],
   );
   T(
     'migrations: each recorded once, with its hash',
@@ -248,7 +249,7 @@ type Note`,
     // compiled as contracts and then marked as expansions: what an older compiler, or a hand-made upload, could send
     const removing = (body: string, contract = false): Built => {
       const r = mk(
-        `${v2src.slice(0, v2src.indexOf('type Note'))}migration 3 "tidy" contract {\n  ${body}\n}\nfn handle(raw: View, db: Sql) -> Buf {\n  buf()\n}\n`,
+        `${v2src.slice(0, v2src.indexOf('type Note'))}migration 3 "tidy" contract {\n  ${body}\n}\nfn handle(raw: View, db: Sql) -> Response {\n  empty(status: 200)\n}\n`,
       );
       return contract ? r : { ...r, migrations: r.migrations.map(x => (x.n === 3 ? { ...x, contract: false } : x)) };
     };
@@ -318,7 +319,7 @@ type Note`,
     [
       out.includes('← 200 ⏎ {"count":2}'),
       out.includes('sql     INSERT INTO counters'),
-      /✓ +\d+  Request\(method: "POST"/.test(out),
+      /✓ +\d+  Request\(method: Post/.test(out),
     ],
     [true, true, true],
   );
@@ -355,7 +356,7 @@ type Note`,
   const hook = async (body: string, sig?: string) => {
     const req = enc.encode(`POST /hook?sig=${sig ?? (await sign(body))}\n${body}`);
     const ran = await app.runLogged(req);
-    return { req, out: text(ran.out), log: ran.effects };
+    return { req, out: answered(ran.out), log: ran.effects };
   };
   const body = '{"id":42,"kind":"invoice.paid"}';
   const ok = await hook(body);
@@ -372,7 +373,7 @@ type Note`,
       ['api', 'notify', 'ok', true],
     ],
   );
-  T('webhook: replay needs no crypto and no network', text(replay(module, ok.req, ok.log)), ok.out);
+  T('webhook: replay needs no crypto and no network', answered(replay(module, ok.req, ok.log)), ok.out);
   T('webhook: delivered twice, notified once', [(await hook(body)).out, sent.length], ['200\n{"delivered":202}', 1]);
   T(
     'webhook: bad signature stops before the api',
@@ -384,7 +385,11 @@ type Note`,
     (await hook('{"id":"x"}')).out,
     '400\n{"error":"id: expected an integer"}',
   );
-  T('webhook: no signature', text(await app.run(enc.encode('POST /hook\n{}'))), '401\n{"error":"missing signature"}');
+  T(
+    'webhook: no signature',
+    answered(await app.run(enc.encode('POST /hook\n{}'))),
+    '401\n{"error":"missing signature"}',
+  );
 }
 
 // ---- git: every object of a real repository, compared with what git says
@@ -413,7 +418,7 @@ type Note`,
     for (const f of readdirSync(join(dir, '.git/objects', d))) {
       const id = d + f,
         raw = inflateSync(readFileSync(join(dir, '.git/objects', d, f))),
-        got: unknown = JSON.parse(text(app.handle(raw))),
+        got: unknown = JSON.parse(answerBody(app.handle(raw))),
         kind = git(`cat-file -t ${id}`).trim();
       kinds[kind] = (kinds[kind] ?? 0) + 1;
       let want: unknown = null;
@@ -454,15 +459,15 @@ type Note`,
     [wrong, (kinds.blob ?? 0) >= 4, (kinds.tree ?? 0) >= 3, kinds.commit],
     [0, true, true, 2],
   );
-  T('git: bad header', text(app.handle(enc.encode('blub 3\0abc'))), '{"error":"not a git object header"}');
+  T('git: bad header', answerBody(app.handle(enc.encode('blub 3\0abc'))), '{"error":"not a git object header"}');
   T(
     'git: wrong size',
-    text(app.handle(enc.encode('blob 4\0abc'))),
+    answerBody(app.handle(enc.encode('blob 4\0abc'))),
     '{"error":"the size in the header is not the payload\'s length"}',
   );
   T(
     'git: truncated tree entry is an error, not a trap',
-    text(app.handle(enc.encode('tree 12\u0000100644 a\u0000abc'))),
+    answerBody(app.handle(enc.encode('tree 12\u0000100644 a\u0000abc'))),
     '{"kind":"tree","entries":[{"error":"truncated entry"}]}',
   );
   console.log(`(webhook.tape and git.tape: ${build('webhook').wasm.length} and ${r.wasm.length} bytes)`);
@@ -475,7 +480,7 @@ type Note`,
     module = new WebAssembly.Module(r.wasm),
     sql = nodeSql(),
     app = instantiate(module, { sql });
-  const go = (s: string) => text(app.handleIn(f => sql.transaction(f), enc.encode(s))),
+  const go = (s: string) => answered(app.handleIn(f => sql.transaction(f), enc.encode(s))),
     balances = () => go('GET /accounts\n');
   T(
     'ledger: a transfer moves money',
@@ -501,7 +506,7 @@ type Note`,
   );
   T(
     'ledger: the undone request replays',
-    text(again(module, enc.encode('POST /transfers\n{"key":"t2","from":"alice","to":"carol","amount":5}'), log)),
+    answered(again(module, enc.encode('POST /transfers\n{"key":"t2","from":"alice","to":"carol","amount":5}'), log)),
     lost,
   );
   T(
@@ -534,7 +539,7 @@ type Note`,
   T(
     'imports: a program whose only JSON is a call reply validates',
     only(
-      `type Ping { Ping(n: Int) }\ntype Pong { Pong(n: Int) }\nfn handle(raw: View, db: Sql, pong: Remote) -> Buf {\n  answer(reply: call(to: pong, method: "ping", send: Ping(n: 1), reply: Pong, within: 5000, once: raw))\n}\nfn answer(reply: Result[Pong, CallError]) -> Buf {\n  match reply {\n    Ok(value) -> respond(status: 200)\n    Err(error) -> respond(status: 504)\n  }\n}\n`,
+      `type Ping { Ping(n: Int) }\ntype Pong { Pong(n: Int) }\nfn handle(raw: View, db: Sql, pong: Remote) -> Response {\n  answer(reply: call(to: pong, method: "ping", send: Ping(n: 1), reply: Pong, within: 5000, once: raw))\n}\nfn answer(reply: Result[Pong, CallError]) -> Response {\n  match reply {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 504)\n  }\n}\n`,
     ),
     'valid',
   );

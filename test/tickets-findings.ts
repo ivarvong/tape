@@ -2,7 +2,7 @@
 // the true positives beside it so the fix is no wider than the finding; and std/http's caller, content types,
 // form fields and HTML escaping.
 import '../node25.ts';
-import { responseOf } from '../host.ts';
+import { framed, responseOf } from '../host.ts';
 import { parse } from '../sql.ts';
 import type { Select } from '../sql/ast.ts';
 import { built, codes as codesOf, finish, moduleOf, read, same as T, sectionText } from './harness.ts';
@@ -13,7 +13,7 @@ const fromOf = (query: string): Select['from'] => {
   return s.k === 'select' ? s.from : [];
 };
 const prog = (tables: string, body: string, machines = '') =>
-  `migration 1 "t" {\n${tables}\n}\n${machines}\ntype Id { Id(id: Int) }\ntype W { W(id: Int, tier: Int, state: View) }\nfn handle(raw: View, db: Sql) -> Buf {\n${body}\n}\ntype HoldState { Held Released }\ntype EventState { Onsale Canceled }\n`;
+  `migration 1 "t" {\n${tables}\n}\n${machines}\ntype Id { Id(id: Int) }\ntype W { W(id: Int, tier: Int, state: View) }\nfn handle(raw: View, db: Sql) -> Response {\n${body}\n}\ntype HoldState { Held Released }\ntype EventState { Onsale Canceled }\n`;
 const H = `CREATE TABLE events(id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT 'onsale' CHECK (state IN ('onsale', 'canceled')));
   CREATE TABLE holds(id INTEGER PRIMARY KEY, client TEXT NOT NULL UNIQUE, tier INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'held');
   CREATE TABLE tiers(id INTEGER PRIMARY KEY, event INTEGER NOT NULL, left INTEGER NOT NULL CHECK (left >= 0))`;
@@ -46,18 +46,14 @@ T(
   codes(
     prog(
       H,
-      `  match sql_first(row: Id, query: "UPDATE tiers SET left = left - 1 WHERE id = :id AND left >= 1 RETURNING id", id: 1) {\n    Some(value: Id(id)) -> respond(status: 200)\n    None -> respond(status: 409)\n  }`,
+      `  match sql_first(row: Id, query: "UPDATE tiers SET left = left - 1 WHERE id = :id AND left >= 1 RETURNING id", id: 1) {\n    Some(value: Id(id)) -> empty(status: 200)\n    None -> empty(status: 409)\n  }`,
     ),
   ),
   ['C54:10'],
 );
 
 // ---- 2. C61 in a migration reads only statements over the machine's table
-T(
-  "C61: another table's CHECK on its own `state` is not the machine's",
-  codes(prog(H, '  respond(status: 200)', M)),
-  [],
-);
+T("C61: another table's CHECK on its own `state` is not the machine's", codes(prog(H, '  empty(status: 200)', M)), []);
 T(
   "C61: the machine table's own CHECK with a state it does not declare still is",
   codes(
@@ -66,7 +62,7 @@ T(
         "state TEXT NOT NULL DEFAULT 'held')",
         "state TEXT NOT NULL DEFAULT 'held' CHECK (state IN ('held', 'released', 'lost')))",
       ),
-      '  respond(status: 200)',
+      '  empty(status: 200)',
       M,
     ),
   ),
@@ -77,7 +73,7 @@ T(
 const J = (q: string) =>
   prog(
     H,
-    `  match sql_first(row: W, query: "${q}", n: 1) {\n    Some(value: W(id)) -> respond(status: 200)\n    None -> respond(status: 404)\n  }`,
+    `  match sql_first(row: W, query: "${q}", n: 1) {\n    Some(value: W(id)) -> empty(status: 200)\n    None -> empty(status: 404)\n  }`,
   );
 T(
   'C75: w.* in a join is the fields of the table it names',
@@ -100,7 +96,7 @@ T(
 }
 
 // ---- 4. C62 is one row's compare-and-set: a set update is not
-const S = (q: string) => prog(H, `  let _ = sql_exec(query: "${q}", n: 1)\n  respond(status: 200)`, M);
+const S = (q: string) => prog(H, `  let _ = sql_exec(query: "${q}", n: 1)\n  empty(status: 200)`, M);
 T(
   'C62: a set update by state (no key) is not a compare-and-set to type',
   codes(
@@ -127,7 +123,7 @@ T(
 );
 
 // ---- 5. C60: INSERT … SELECT that leaves the machine column out starts in its DEFAULT
-const I = (q: string) => prog(H, `  let _ = sql_exec(query: "${q}", n: 1)\n  respond(status: 200)`, M);
+const I = (q: string) => prog(H, `  let _ = sql_exec(query: "${q}", n: 1)\n  empty(status: 200)`, M);
 // (the fragment enters 'held' and nothing leaves it: C77, judged in test/timers-way-out.ts)
 T(
   'C60: INSERT … SELECT without the machine column: its DEFAULT, the start state',
@@ -143,7 +139,7 @@ T(
   codes(
     prog(
       H.replace("DEFAULT 'held')", "DEFAULT 'released')"),
-      `  let _ = sql_exec(query: "INSERT INTO holds(client, tier) SELECT 'k' || id, id FROM tiers WHERE event = :event ON CONFLICT(client) DO NOTHING", event: 1)\n  respond(status: 200)`,
+      `  let _ = sql_exec(query: "INSERT INTO holds(client, tier) SELECT 'k' || id, id FROM tiers WHERE event = :event ON CONFLICT(client) DO NOTHING", event: 1)\n  empty(status: 200)`,
       M,
     ),
   ),
@@ -159,14 +155,14 @@ T(
   ['C60:15'],
 );
 
-// ---- 6. the service's answer head (host.ts responseOf)
-const head = (s: string) => {
-  const r = responseOf(new TextEncoder().encode(s));
+// ---- 6. the service's answer head (host.ts responseOf): a frame's status and content, the type a closed list
+const head = (status: number, content: number) => {
+  const r = responseOf(framed({ status, content }));
   return [r.status, r.type];
 };
 T(
-  'responseOf: STATUS and STATUS SP TYPE',
-  [head('201\n{}'), head('200 text/html\n<p>'), head('404 application/json\n{}')],
+  'responseOf: the status and the content of a frame (Text 2, Html 0, Json 1)',
+  [head(201, 2), head(200, 0), head(404, 1)],
   [
     [201, 'text/plain; charset=utf-8'],
     [200, 'text/html; charset=utf-8'],
@@ -174,20 +170,16 @@ T(
   ],
 );
 T(
-  'responseOf: an unknown type or a header smuggled into the type is all body, 200',
-  [head('200 text/javascript\nx'), head('200 text/html; a=b\nx')],
+  'responseOf: a content Content does not have is a 500, not a type',
+  [head(200, 9), head(200, 255)],
   [
-    [200, 'text/plain; charset=utf-8'],
-    [200, 'text/plain; charset=utf-8'],
+    [500, 'text/plain; charset=utf-8'],
+    [500, 'text/plain; charset=utf-8'],
   ],
 );
 T(
   'responseOf: Atom, RSS and XML are those types, with charset=utf-8',
-  [
-    head('200 application/atom+xml\n<feed/>'),
-    head('200 application/rss+xml\n<rss/>'),
-    head('200 application/xml\n<doc/>'),
-  ],
+  [head(200, 6), head(200, 7), head(200, 8)],
   [
     [200, 'application/atom+xml; charset=utf-8'],
     [200, 'application/rss+xml; charset=utf-8'],
@@ -195,18 +187,32 @@ T(
   ],
 );
 T(
-  'responseOf: a page type and an obsolete XML type are all body, 200',
-  [head('200 application/xhtml+xml\n<html/>'), head('200 text/xml\n<a/>')],
+  'responseOf: the text that named a type before 25 November 2026 is no frame: a 500, never that type',
+  ['200 application/xhtml+xml\n<html/>', '200 text/xml\n<a/>', '200 text/html; a=b\nx'].map(t => {
+    const r = responseOf(new TextEncoder().encode(t));
+    return [r.status, r.type];
+  }),
   [
-    [200, 'text/plain; charset=utf-8'],
-    [200, 'text/plain; charset=utf-8'],
+    [500, 'text/plain; charset=utf-8'],
+    [500, 'text/plain; charset=utf-8'],
+    [500, 'text/plain; charset=utf-8'],
   ],
 );
-// 0.3: a carriage return on the status line opens a header (std/http's header); an empty one is refused, 500
+// 0.3: a carriage return on the status line opened a header; a header is a field of the frame now, and one whose
+// name is empty or whose value holds CR LF is refused, 500
 T(
-  'responseOf: a header that is not `name: value` is refused, 500',
-  [head('200 text/html\r\nx')],
-  [[500, 'text/plain; charset=utf-8']],
+  'responseOf: a header with no name, or a value with CR LF in it, is refused, 500',
+  [
+    { name: '', value: 'x' },
+    { name: 'x-a', value: 'b\r\nset-cookie: c' },
+  ].map(h => {
+    const r = responseOf(framed({ status: 200, content: 0, headers: [h] }));
+    return [r.status, r.type];
+  }),
+  [
+    [500, 'text/plain; charset=utf-8'],
+    [500, 'text/plain; charset=utf-8'],
+  ],
 );
 
 // ---- 7. the tickets app compiles, and its pay program

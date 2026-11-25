@@ -23,7 +23,7 @@ for (let n = 0; n <= 300; n++) {
   if (sha256(b) !== oracle(b)) wrong.push(n);
 }
 same('every length 0..300 agrees with node:crypto', wrong, []);
-const text = new TextEncoder().encode('std/core.tape\nfn handle(raw: View) -> Buf { … }\n'.repeat(2000));
+const text = new TextEncoder().encode('std/core.tape\nfn handle(raw: View) -> Response { … }\n'.repeat(2000));
 same('100 KB of text', sha256(text), oracle(text));
 same('the empty input', sha256(new Uint8Array(0)), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 const abc = new TextEncoder().encode('abc');
@@ -47,7 +47,7 @@ same('a part at a time, and a clone of it: node:crypto', cuts, []);
 
 const formula = (sources: { name: string; text: string }[], pin: unknown): string =>
   oracle(new TextEncoder().encode(JSON.stringify([sources.map(x => [x.name, x.text]), pin]))).slice(0, 16);
-const prog = { name: 'hello.tape', text: 'fn handle(raw: View) -> Buf {\n  "héllo ✓ \\"q\\""\n}\n' };
+const prog = { name: 'hello.tape', text: 'fn handle(raw: View) -> Response {\n  "héllo ✓ \\"q\\""\n}\n' };
 const cases: [string, { name: string; text: string }[], unknown][] = [
   ['std and a program', [...std, prog], {}],
   ['std and a program again (from the kept hash)', [...std, prog], {}],

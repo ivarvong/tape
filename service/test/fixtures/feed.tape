@@ -14,12 +14,17 @@ fn xml_doc() -> View {
   "<?xml version=\"1.0\" encoding=\"utf-8\"?><doc/>"
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(path: "/feed.xml") -> respond_as(status: 200, content: Atom)
+    Request(path: "/feed.xml") -> buf()
       |> append(view: atom_feed())
-    Request(path: "/rss.xml") -> respond_as(status: 200, content: Rss) |> append(view: rss_feed())
-    Request(path: "/doc.xml") -> respond_as(status: 200, content: Xml) |> append(view: xml_doc())
-    _ -> respond(status: 404)
+      |> respond_as(status: 200, content: Atom)
+    Request(path: "/rss.xml") -> buf()
+      |> append(view: rss_feed())
+      |> respond_as(status: 200, content: Rss)
+    Request(path: "/doc.xml") -> buf()
+      |> append(view: xml_doc())
+      |> respond_as(status: 200, content: Xml)
+    _ -> empty(status: 404)
   }
 }

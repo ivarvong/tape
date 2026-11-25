@@ -4,7 +4,7 @@
 
 A code starts with the part of the compiler that gives it: L for the lexer (the characters of a file), P for the parser (its shape), C for the checker and the rules (what it means). A refusal is a code, a file and line, what is wrong there, and what to write instead; the line and the fix name what the program wrote. This page says what each code refuses whatever the program, and where [LANGUAGE.md](../LANGUAGE.md) or [the guide](guide.md) explains it.
 
-105 codes.
+106 codes.
 
 | Code | Refuses | Explained in |
 |---|---|---|
@@ -37,13 +37,13 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C11 | An argument the function, constructor, method or built-in does not take. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C12 | One argument given twice (by name after a pipe already gave the first parameter, too), or a function value called with other than its arguments, in order and unnamed. | [the guide: Pipes and ++](guide.md#pipes-and-) |
 | C13 | A call or a constructor without an argument it needs. Every parameter and every field is given. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
-| C14 | A value of one type where another is expected. It covers two Dec scales, a Dec scale that would pass 18 digits, an Int and a Float mixed, and a capability not passed where a built-in needs it. | [LANGUAGE.md: 3. Types](../LANGUAGE.md#3-types); [the guide: Tooling: fmt and test](guide.md#tooling-fmt-and-test) |
+| C14 | A value of one type where another is expected. It covers two Dec scales, a Dec scale that would pass 18 digits, an Int and a Float mixed, and a capability not passed where a built-in needs it. | [LANGUAGE.md: 3. Types](../LANGUAGE.md#3-types); [the guide: Quickstart: a service in one file](guide.md#quickstart-a-service-in-one-file) |
 | C15 | A name bound again in one function. Names are never reused, so each means one value. |  |
 | C16 | A name that is not a parameter, a `let` or a pattern binding in scope. | [LANGUAGE.md: 5. Patterns](../LANGUAGE.md#5-patterns) |
 | C17 | A dot on a value of a type with several constructors. Only a one-constructor type has fields. |  |
 | C18 | A field the value's type does not have, read with a dot or named in a pattern; or a function pattern given more than one pattern. |  |
 | C19 | An operator its operands do not have: `++` on what is not text, `/` and `%` on a Dec, `%` on a Float, a comparison of Options, a value in a text hole that is not text or a number, a literal pattern for a Dec or a Float. | [LANGUAGE.md: 2. Text](../LANGUAGE.md#2-text) |
-| C20 | A constructor that nothing declares. | [the guide: A machine's states in a match](guide.md#a-machines-states-in-a-match) |
+| C20 | A constructor that nothing declares. | [LANGUAGE.md: 3. Types](../LANGUAGE.md#3-types); [the guide: A machine's states in a match](guide.md#a-machines-states-in-a-match) |
 | C21 | A constructor of a generic type, such as `None`, used where nothing says which type it is (`Option[Int]` or `Option[View]`). | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C22 | A function that nothing defines, called or used as a pattern. |  |
 | C23 | A match the value cannot have: a constructor of another type, a constructor pattern on a type with none, or a match on a Buf or a capability. |  |
@@ -111,6 +111,7 @@ A code starts with the part of the compiler that gives it: L for the lexer (the 
 | C93 | The set of `scan` that is not a text literal. The bytes are fixed when the program is compiled, so the scan reads 16 at a time. | [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C94 | A `private fn` called, passed as a function value or matched as a pattern outside the file that defines it. std's helpers are private: what it reads and writes for decode is reached through decode, is_json and json_member. | [LANGUAGE.md: 4. Functions](../LANGUAGE.md#4-functions) |
 | C95 | An UPDATE a request reaches that takes a row chosen by what it changes (the next job that is ready, by a query or a subquery), with nothing that keys it to the request: sent again, the request takes a second row. Write the client's key into the row and read it back first, or claim an op id. | [LANGUAGE.md: 9. One way to do each job](../LANGUAGE.md#9-one-way-to-do-each-job); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
+| C96 | A status written as a literal that the host refuses: outside 200 to 599, or a 204, 205 or 304 given a body (`empty(status: 204)` has none). A status that is a value is checked when the host answers, which says why in a 500. | [LANGUAGE.md: 6. Effects](../LANGUAGE.md#6-effects) |
 | C97 | A match on a machine's states with an arm that takes the states the arms beside it do not name (`_`, a name, a row pattern that leaves the state out). A state added to the machine would be taken there without a word; each state gets an arm of its own. | [LANGUAGE.md: 5. Patterns](../LANGUAGE.md#5-patterns); [the guide: Rules: writes that survive a retry, migrations that only add](guide.md#rules-writes-that-survive-a-retry-migrations-that-only-add) |
 | C99 | A compiler bug, not a mistake in the program: a type not known where it must be, a function value of no function, a match with no arms, a std type not as the compiler expects. Report it with the program. |  |
 

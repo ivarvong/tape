@@ -9,7 +9,7 @@ import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const SCHEMA = 'CREATE TABLE e(id INTEGER PRIMARY KEY, acct TEXT NOT NULL, amt INTEGER NOT NULL)';
 const QUERY = 'SELECT sum(amt) AS total FROM e WHERE acct = :acct HAVING count(*) > 0';
@@ -17,25 +17,25 @@ const PROGRAM = `schema "${SCHEMA}"
 
 type Total { Total(total: Option[Int]) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let r = request(raw)
   match r.path {
     "/add/" ++ acct -> added(acct, amt: len(r.body))
     "/total/" ++ acct -> shown(found: sql_first(row: Total, query: "${QUERY}", acct))
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn added(acct: View, amt: Int) -> Buf {
+fn added(acct: View, amt: Int) -> Response {
   let _ = sql_exec(query: "INSERT INTO e(acct, amt) VALUES (:acct, :amt)", acct, amt, repeat: True)
-  respond(status: 201)
+  empty(status: 201)
 }
 
-fn shown(found: Option[Total]) -> Buf {
+fn shown(found: Option[Total]) -> Response {
   match found {
-    Some(value: Total(total: Some(value))) -> respond(status: 200) |> write_int(value)
-    Some(value: Total(total: None)) -> respond(status: 200) |> append(view: "null")
-    None -> respond(status: 200) |> append(view: "no row")
+    Some(value: Total(total: Some(value))) -> buf() |> write_int(value) |> respond(status: 200)
+    Some(value: Total(total: None)) -> buf() |> append(view: "null") |> respond(status: 200)
+    None -> buf() |> append(view: "no row") |> respond(status: 200)
   }
 }
 `;
@@ -48,9 +48,8 @@ same(
 
 if (r.wasm) {
   const app = instantiate(new WebAssembly.Module(r.wasm), { sql: nodeSql(), log: false });
-  const dec = new TextDecoder();
   const body = (request: string): string => {
-    const out = dec.decode(app.handle(new TextEncoder().encode(request)));
+    const out = answered(app.handle(new TextEncoder().encode(request)));
     return out.slice(out.indexOf('\n') + 1);
   };
   // the same rows in SQLite itself, asked the same query

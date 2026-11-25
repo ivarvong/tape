@@ -10,42 +10,42 @@
 import '../node25.ts';
 import { createHash, createHmac } from 'node:crypto';
 import { interpret } from '../interp.ts';
-import { instantiate } from '../host.ts';
+import { answerText, instantiate, responseOf } from '../host.ts';
 import { built, finish, moduleOf, ok, same, std } from './harness.ts';
 
 const PROGRAM = {
   name: 'crypto.tape',
-  text: `fn handle(raw: View) -> Buf {
+  text: `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/sha256", body) -> respond(status: 200) |> append(view: sha256(data: body))
-    Request(method: "POST", path: "/hmac", query: Some(value: parse_int(n)), body) -> respond(status: 200)
-      |> append(view: hmac_sha256(key: slice(v: body, from: 0, to: n), data: slice(v: body, from: n, to: len(body))))
-    Request(method: "POST", path: "/verify", query: Some(value: q), body) -> verified(q, body)
-    Request(method: "POST", path: "/hex", body) -> respond(status: 200) |> append(view: hex(bytes: body))
-    Request(method: "POST", path: "/base64", body) -> respond(status: 200) |> append(view: base64(bytes: body))
-    Request(method: "POST", path: "/base64url", body) -> respond(status: 200) |> append(view: base64url(bytes: body))
-    Request(method: "POST", path: "/from_base64", body) -> shown(found: from_base64(text: body))
-    Request(method: "POST", path: "/from_base64url", body) -> shown(found: from_base64url(text: body))
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/sha256", body) -> buf() |> append(view: sha256(data: body)) |> respond(status: 200)
+    Request(method: Post, path: "/hmac", query: Some(value: parse_int(n)), body) -> buf()
+      |> append(view: hmac_sha256(key: slice(v: body, from: 0, to: n), data: slice(v: body, from: n, to: len(body)))) |> respond(status: 200)
+    Request(method: Post, path: "/verify", query: Some(value: q), body) -> verified(q, body)
+    Request(method: Post, path: "/hex", body) -> buf() |> append(view: hex(bytes: body)) |> respond(status: 200)
+    Request(method: Post, path: "/base64", body) -> buf() |> append(view: base64(bytes: body)) |> respond(status: 200)
+    Request(method: Post, path: "/base64url", body) -> buf() |> append(view: base64url(bytes: body)) |> respond(status: 200)
+    Request(method: Post, path: "/from_base64", body) -> shown(found: from_base64(text: body))
+    Request(method: Post, path: "/from_base64url", body) -> shown(found: from_base64url(text: body))
+    _ -> empty(status: 404)
   }
 }
 
 // ?k.m: the body is a key of k bytes, a mac of m bytes and the data
-fn verified(q: View, body: View) -> Buf {
-  let Some(value: k) = parse_int(text: until(v: q, byte: 46)) else -> respond(status: 400)
-  let Some(value: m) = parse_int(text: after(v: q, byte: 46)) else -> respond(status: 400)
+fn verified(q: View, body: View) -> Response {
+  let Some(value: k) = parse_int(text: until(v: q, byte: 46)) else -> empty(status: 400)
+  let Some(value: m) = parse_int(text: after(v: q, byte: 46)) else -> empty(status: 400)
   let key = slice(v: body, from: 0, to: k)
   let mac = slice(v: body, from: k, to: k + m)
   match hmac_sha256_verify(key, data: slice(v: body, from: k + m, to: len(body)), mac) {
-    True -> respond(status: 200) |> push(byte: 49)
-    False -> respond(status: 200) |> push(byte: 48)
+    True -> buf() |> push(byte: 49) |> respond(status: 200)
+    False -> buf() |> push(byte: 48) |> respond(status: 200)
   }
 }
 
-fn shown(found: Option[View]) -> Buf {
+fn shown(found: Option[View]) -> Response {
   match found {
-    Some(value) -> respond(status: 200) |> push(byte: 49) |> append(view: value)
-    None -> respond(status: 200) |> push(byte: 48)
+    Some(value) -> buf() |> push(byte: 49) |> append(view: value) |> respond(status: 200)
+    None -> buf() |> push(byte: 48) |> respond(status: 200)
   }
 }
 `,
@@ -64,9 +64,9 @@ const cat = (...parts: Uint8Array[]): Uint8Array => {
 };
 const request = (line: string, body: Uint8Array): Uint8Array => cat(enc.encode(`${line}\n`), body);
 const bodyOf = (out: Uint8Array): Uint8Array => {
-  const head = new TextDecoder().decode(out.subarray(0, 4));
-  if (head !== '200\n') throw new Error(`answered ${new TextDecoder().decode(out.subarray(0, 80))}`);
-  return out.subarray(4);
+  const answer = responseOf(out);
+  if (answer.status !== 200) throw new Error(`answered ${answerText(answer).slice(0, 80)}`);
+  return answer.body;
 };
 const hexOf = (v: Uint8Array): string => Buffer.from(v).toString('hex');
 const equal = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((x, i) => x === b[i]);

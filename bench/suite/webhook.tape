@@ -17,26 +17,22 @@ type Event { Event(id: Id, kind: View, account: Account, amount: Amount, note: V
 type Delivery { Delivery(source: View, events: List[Event]) }
 type Total { Total(customers: Int, total: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/hooks", body) -> deliver(body)
-    _ -> respond(status: 404) |> append(view: "{\"error\":\"no such route\"}")
+    Request(method: Post, path: "/hooks", body) -> deliver(body)
+    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
   }
 }
 
-fn deliver(body: View) -> Buf {
+fn deliver(body: View) -> Response {
   let Ok(value: Delivery(source, events)) = decode(json: body, as: Delivery) else {
-    Err(error) -> respond(status: 400)
+    Err(error) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: error)
       |> append(view: "}")
+      |> respond(status: 400)
   }
-  let out = route_all(
-    source,
-    events,
-    out: respond(status: 200) |> append(view: "{\"results\":["),
-    first: True
-  )
+  let out = route_all(source, events, out: buf() |> append(view: "{\"results\":["), first: True)
   let Some(
     value: Total(customers, total)
   ) = sql_first(
@@ -44,7 +40,8 @@ fn deliver(body: View) -> Buf {
     query: "SELECT count(*) AS customers, coalesce(sum(total), 0) AS total FROM customers"
   ) else -> out
     |> append(view: "]}")
-  out |> append(view: "],\"customers\":\(customers),\"total\":\(total)}")
+    |> respond(status: 200)
+  out |> append(view: "],\"customers\":\(customers),\"total\":\(total)}") |> respond(status: 200)
 }
 
 fn route_all(source: View, events: List[Event], out: Buf, first: Bool) -> Buf {

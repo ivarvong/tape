@@ -70,10 +70,10 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> placed(body) |> rendered
-    Request(method: "POST", path: "/orders/" ++ decimal(id) ++ "/accept") -> shown(found: latest(
+    Request(method: Post, path: "/orders", body) -> placed(body) |> rendered
+    Request(method: Post, path: "/orders/" ++ decimal(id) ++ "/accept") -> shown(found: latest(
       id,
       m: sql_move(
         row: Order,
@@ -83,7 +83,7 @@ fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> B
       )
     ))
       |> rendered
-    Request(method: "POST", path: "/orders/" ++ decimal(id) ++ "/pickup") -> shown(found: latest(
+    Request(method: Post, path: "/orders/" ++ decimal(id) ++ "/pickup") -> shown(found: latest(
       id,
       m: sql_move(
         row: Order,
@@ -93,7 +93,7 @@ fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> B
       )
     ))
       |> rendered
-    Request(method: "POST", path: "/orders/" ++ decimal(id) ++ "/deliver") -> shown(found: latest(
+    Request(method: Post, path: "/orders/" ++ decimal(id) ++ "/deliver") -> shown(found: latest(
       id,
       m: sql_move(
         row: Order,
@@ -104,11 +104,11 @@ fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> B
     ))
       |> rendered
     Request(
-      method: "POST",
+      method: Post,
       path: "/orders/" ++ decimal(id) ++ "/cancel"
     ) -> cancel(id, why: "canceled by the customer")
       |> rendered
-    Request(method: "GET", path: "/orders/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Get, path: "/orders/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -317,13 +317,14 @@ fn shown(found: Option[Order]) -> Outcome {
   Shown(status: 200, order: o)
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, order) -> write_json(out: respond(status), value: order)
-    Problem(status, reason) -> respond(status)
+    Shown(status, order) -> write_json(out: buf(), value: order) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

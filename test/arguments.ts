@@ -6,7 +6,7 @@ import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
-import { bare, call, finish, same } from './harness.ts';
+import { bare, call, finish, same, answered } from './harness.ts';
 
 const program = `fn fact(n: Int) -> Int {
   match {
@@ -96,11 +96,11 @@ const AMBIENT = `schema "CREATE TABLE t(id INTEGER PRIMARY KEY, n INTEGER NOT NU
 
 type Row { Row(id: Int, n: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let invoice_id = 7
   match load(invoice_id) {
-    Some(value: Row(n)) -> respond(status: 200) |> append(view: "\\(n + total(id: invoice_id, scale: 2))")
-    None -> respond(status: 404)
+    Some(value: Row(n)) -> buf() |> append(view: "\\(n + total(id: invoice_id, scale: 2))") |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 
@@ -127,7 +127,7 @@ same(
   const it = interpret([...std, { name: 't.tape', text: AMBIENT }], { rows: () => [[7, 5]], exec: () => 0 });
   same(
     'the interpreter takes the bare argument too',
-    new TextDecoder().decode(it.handle(new TextEncoder().encode('GET /\n'))),
+    answered(it.handle(new TextEncoder().encode('GET /\n'))),
     '200\n15',
   );
 }

@@ -2,7 +2,7 @@
 // First the same answers on generated carts and on bodies that are not carts, then time per request (median of 15
 // after warm-up) at three sizes. Local numbers, one machine.
 import '../node25.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { built, moduleOf, read } from '../test/harness.ts';
 import { handle as js } from './cart-baseline.ts';
 
@@ -67,7 +67,7 @@ const inputs = [
 ];
 /** Where the two answers differ, or null. */
 const differs = (b: Uint8Array): string | null => {
-  const tape = dec.decode(app.handle(b));
+  const tape = dec.decode(responseOf(app.handle(b)).body);
   const want = dec.decode(js(b));
   return tape === want
     ? null

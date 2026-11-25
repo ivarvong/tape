@@ -122,7 +122,15 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 std defines `Option[T]` (`Some(value)`, `None`), `Result[T, E]` (`Ok(value)`, `Err(error)`), `Rounding`
 (`HalfEven`, `HalfUp`, `Down`, `Up`, `Floor`, `Ceiling`), `Move[T]`
 (`Moved(value)`, `Raced(now)`, `NoRow`), `CallError` (`Timeout`, `Unreachable`, `Rejected(reason)`,
-`Skew(reason)`), `Map[T]`, `List[T]`, `Request`, `Wake`.
+`Skew(reason)`), `Map[T]`, `List[T]`, `Request`, `Wake`, and what a request and its answer are (std/http.tape):
+
+| Type | What it is |
+|---|---|
+| `Request(method: Method, path: View, query: Option[View], body: View, caller: Caller, headers: View)` | a request, as `request(raw)` reads it |
+| `Method` | `Get`, `Head`, `Post`, `Put`, `Patch`, `Delete`, `Options`, and `Other(name)` for any other token: a misspelt route is an unknown constructor (C20), not an arm no request matches. The service runs a HEAD request as the GET it stands for and sends no body, so the program sees `Get` |
+| `Response(status: Int, content: Content, headers: List[Header], body: View)` | what `handle` answers: made by `respond`, `respond_as`, `json`, `empty` or `redirect`, never by writing bytes. The host writes the status and the headers from it, so no byte of a body can become either |
+| `Content` | the body's type, a closed list: `Html`, `Json`, `Text`, `Css`, `Svg`, `Csv`, `Atom`, `Rss`, `Xml` |
+| `Header(name: View, value: View)` | a response header, added with `header` |
 
 `x == None` and `x != None` ask whether an Option `x` is `None`: they compare its constructor, not its value.
 Nothing else compares an Option: not two Options, not `<` (C19). To use what it holds, take it apart (`let
@@ -402,7 +410,18 @@ there (the object is reset, the reply is lost), so whatever must happen afterwar
 call, in the same commit.
 
 `export fn name(db: Sql, message: Record) -> Result[Reply, View]` is a method other programs call. `handle(raw:
-View, …capabilities) -> Buf` serves requests. `woken` serves timers.
+View, …capabilities) -> Response` serves requests (C14 for any other type: a `Buf` is the body being written, not an
+answer). `woken` serves timers.
+
+**An answer is a value.** The body is written first and its status given last, `buf() |> append(view: …) |>
+respond(status: 200)`; `respond_as(status:, content:)` names its type, `json(status:, value:)` answers a value as
+JSON, `empty(status:)` answers no body, and `redirect(to:)` is a 303 to `to` (the status a browser follows with a GET
+whatever the request was; another redirect is `empty(status: 308) |> header(name: "location", value: …)`).
+`header(out, name:, value:)` adds a header to a Response and copies nothing. The function the compiler generates
+around `handle` gives the host the Response; the program writes no byte of the head. A status written as a literal
+outside 200 to 599, or a 204, 205 or 304 given a body, is C96; one computed at run time, and a header the host
+refuses (a name that is not a token, a value that is not printable ASCII, a name the host sets itself, more than 32),
+are answered 500 with the reason.
 
 ## 7. Declarations about rows
 
@@ -460,13 +479,14 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, payments: Remote, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> place(body) |> rendered
-    Request(method: "GET", path: "/orders/" ++ decimal(id)) -> shown(status: 200, found: load(id))
+    Request(method: Post, path: "/orders", body) -> place(body) |> rendered
+    Request(method: Get, path: "/orders/" ++ decimal(id)) -> shown(status: 200, found: load(id))
       |> rendered
-    Request(method: "GET", path: "/orders") -> respond(status: 200)
+    Request(method: Get, path: "/orders") -> buf()
       |> write_rows(rows: sql_all(row: Order, query: "SELECT * FROM orders ORDER BY id"))
+      |> respond_as(status: 200, content: Json)
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -553,13 +573,14 @@ fn shown(status: Int, found: Option[Order]) -> Outcome {
   }
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, order) -> respond(status) |> write_json(value: order)
-    Problem(status, reason) -> respond(status)
+    Shown(status, order) -> json(status, value: order)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond_as(status, content: Json)
   }
 }
 ```
@@ -599,8 +620,9 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Handle its answer | an arm for `Ok`, one for `Rejected` alone (the same key gets the same refusal), one for no answer. An arm that takes both may only answer the client: a write, a call or a timer there acts on an outcome nobody knows | C24, C87 |
 | Make sure it finishes | `do wake(after:, key: <the row's id>)` in the commit before the call, and `woken` carries the row on from its state | C77-C79 |
 | Say what must hold | `invariant`, and `settled` for what must hold in the end | C86 |
-| Answer | functions return a value (`Outcome`); one function turns it into bytes: `respond(status: …)`, or `respond_as(status: …, content: Json)` for a type, then the body | |
-| Set a response header | `respond(status: 302) \|> header(name: "location", value: url)`, anywhere before or after the body. A name is a token, a value has no CR, LF or NUL; the host refuses those it sets itself (content-type, set-cookie, the security headers) and answers 500 with the reason | |
+| Answer | functions return a value (`Outcome`); one function turns it into a `Response`, the body written first and the status given last: `json(status: …, value: …)` for a value as JSON, `buf() \|> … \|> respond(status: …)` for text, `respond_as(status: …, content: Html)` for a type, `empty(status: 204)` for no body, `redirect(to: …)` for a 303. `handle` gives that Response, never bytes: the host writes the status and the headers from it, so no byte of a body can become one | C14, C96 |
+| Set a response header | `json(status: 201, value: v) \|> header(name: "location", value: url)`: `header` takes and gives a Response, and copies nothing. A name is a token, a value printable ASCII; the host refuses those it sets itself (content-type, set-cookie, the security headers) and answers 500 with the reason | |
+| Route a request | `match request(raw) { Request(method: Get, path: "/items/" ++ decimal(id)) -> … }`: the method is a `Method` (`Get`, `Post`, `Put`, `Patch`, `Delete`, `Options`, `Head`, `Other(name)`), so a misspelt one is an unknown constructor | C20 |
 | Read a request header | `header_of(request: r, name: "if-none-match")`, an `Option[View]`; the host passes only those it means a program to see | |
 | Write a date | `rfc3339(ms: now())` for JSON, a feed or a log (`2026-11-25T14:03:07.123Z`), `http_date(ms: …)` for a header (`Wed, 25 Nov 2026 14:03:07 GMT`), `civil(ms: …)` for the parts (`Civil(year, month, day, hour, minute, second, millisecond)`), all in UTC; the instant is an argument, so only the `now()` that reads it needs `Clock` | |
 | Read a path segment | bind it in the route, and decode it there: `path: "/users/" ++ percent_decoded(name) ++ "/tickets"`. `path` is as sent, so the route matches the encoded path and a `%2F` stays inside its segment; `percent_decoded` is `None` for a bad escape or bytes that are not UTF-8, and leaves a `+` a `+` (a query is form-encoded: `form_field`) | |
@@ -669,8 +691,8 @@ made to the program above by `test/definition.ts`; each must be refused with the
 ```
 
 ```diff C72
--fn handle(raw: View, db: Sql, payments: Remote, timer: Timer) -> Buf {
-+fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+-fn handle(raw: View, db: Sql, payments: Remote, timer: Timer) -> Response {
++fn handle(raw: View, db: Sql, payments: Remote) -> Response {
 ```
 
 ```diff C68
@@ -683,10 +705,10 @@ The pattern `json(T(…))` was the second way to read a body. It is refused:
 ```tape refused C35
 type T { T(n: Int) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match raw {
-    json(T(n)) -> respond(status: 200)
-    _ -> respond(status: 400)
+    json(T(n)) -> empty(status: 200)
+    _ -> empty(status: 400)
   }
 }
 ```

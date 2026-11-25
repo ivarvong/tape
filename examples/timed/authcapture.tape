@@ -55,12 +55,12 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, gateway: Remote, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, gateway: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/payments", body) -> made(body) |> rendered
-    Request(method: "POST", path: "/payments/" ++ decimal(id) ++ "/capture") -> capture(id)
+    Request(method: Post, path: "/payments", body) -> made(body) |> rendered
+    Request(method: Post, path: "/payments/" ++ decimal(id) ++ "/capture") -> capture(id)
       |> rendered
-    Request(method: "GET", path: "/payments/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Get, path: "/payments/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -341,13 +341,14 @@ fn shown(found: Option[Payment]) -> Outcome {
   Shown(status: 200, payment: p)
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, payment) -> write_json(out: respond(status), value: payment)
-    Problem(status, reason) -> respond(status)
+    Shown(status, payment) -> write_json(out: buf(), value: payment) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

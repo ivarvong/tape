@@ -14,7 +14,7 @@ import { nodeSql } from '../nodesql.ts';
 import { portKeys, portMachines, portWith } from '../experiments/lang/port-keys.ts';
 import type { Problem } from '../compiler/common.ts';
 import { std } from '../std.ts';
-import { built, finish, same as T, sleep } from './harness.ts';
+import { answerBody, answered, built, finish, same as T, sleep } from './harness.ts';
 const here = (p: string) => new URL(`../${p}`, import.meta.url).pathname,
   read = (p: string) => readFileSync(here(p), 'utf8');
 const build = (text: string) => compile([...std, { name: 'program.tape', text: portMachines(text) }]);
@@ -41,20 +41,20 @@ const codes = (text: string) =>
   build(text)
     .errors.map(e => `${e.code}:${e.line}`)
     .filter(c => !c.startsWith('C62:') && !c.startsWith('C77:'));
-const enc = new TextEncoder(),
-  dec = new TextDecoder();
+const enc = new TextEncoder();
 
 // ---- 1. each code on the smallest program that shows it
 // A sale: pending, then paid or declined. Line 1 is the schema; the machine is lines 2-5; the handler's query is line 11.
 const S =
   "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, state TEXT NOT NULL DEFAULT 'pending', note TEXT NOT NULL DEFAULT '')";
 const M = 'machine s.state {\n  "pending" -> "paid"\n  "pending" -> "declined"\n}\n';
-const tail = 'type N { N(n: Int) }\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n';
+const tail =
+  'type N { N(n: Int) }\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\n';
 const one = (query: string, machine = M, schema = S) =>
-  `schema "${schema}"\n${machine}${tail}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "${query}"${query.includes(':raw') ? ', raw' : ''}))\n}\n`;
+  `schema "${schema}"\n${machine}${tail}fn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "${query}"${query.includes(':raw') ? ', raw' : ''}))\n}\n`;
 // The same program with the write as a sql_move (C62): its query is still line 11.
 const moving = (query: string, machine = M, schema = S) =>
-  `schema "${schema}"\n${machine}type N { N(n: Int) }\nfn done(m: Move[N]) -> Buf {\n  respond(status: 200) |> write_int(value: seen(m))\n}\nfn handle(raw: View, db: Sql) -> Buf {\n  done(m: sql_move(db, row: N, query: "${query}"${query.includes(':raw') ? ', raw' : ''}))\n}\nfn seen(m: Move[N]) -> Int {\n  match m {\n    Moved(value) -> 1\n    Raced(now) -> 2\n    NoRow -> 0\n  }\n}\n`;
+  `schema "${schema}"\n${machine}type N { N(n: Int) }\nfn done(m: Move[N]) -> Response {\n  buf() |> write_int(value: seen(m)) |> respond(status: 200)\n}\nfn handle(raw: View, db: Sql) -> Response {\n  done(m: sql_move(db, row: N, query: "${query}"${query.includes(':raw') ? ', raw' : ''}))\n}\nfn seen(m: Move[N]) -> Int {\n  match m {\n    Moved(value) -> 1\n    Raced(now) -> 2\n    NoRow -> 0\n  }\n}\n`;
 T(
   'a guarded, declared move is accepted',
   codes(one("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending'")),
@@ -239,7 +239,7 @@ T(
 );
 T('a program without a machine is not read', codes(one("UPDATE s SET state = 'x' WHERE id = 1", '')), []);
 const decl = (machine: string, schema = S) =>
-  codes(`schema "${schema}"\n${machine}${tail}fn handle(raw: View, db: Sql) -> Buf {\n  respond(status: 200)\n}\n`);
+  codes(`schema "${schema}"\n${machine}${tail}fn handle(raw: View, db: Sql) -> Response {\n  empty(status: 200)\n}\n`);
 T(
   'C57: no such table, no such column, a second machine for one column',
   [decl('machine t.state {\n  "a" -> "b"\n}\n'), decl('machine s.status {\n  "a" -> "b"\n}\n'), decl(`${M}${M}`)],
@@ -272,7 +272,7 @@ T(
   [
     typed('').length,
     build(
-      `schema "${S}"\nmachine s.state: SaleState {\n  Pending -> Paid\n}\ntype SaleState { Pending Paid Declined }\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`,
+      `schema "${S}"\nmachine s.state: SaleState {\n  Pending -> Paid\n}\ntype SaleState { Pending Paid Declined }\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`,
     ).errors[0]?.message,
   ],
   [
@@ -297,7 +297,7 @@ T(
 
 // values traced through call sites, one path at a time
 const via = (calls: string) =>
-  `schema "${S}"\n${M}${tail}fn handle(raw: View, db: Sql) -> Buf {\n  ${calls}\n}\nfn go(db: Sql, from: View, to: View) -> Int {\n  sql_exec(db, query: "UPDATE s SET state = :to WHERE id = 1 AND state = :from", to, from)\n}\nfn twice(db: Sql, a: Int, b: Int) -> Buf {\n  respond(status: 200) |> write_int(value: a + b)\n}\n`;
+  `schema "${S}"\n${M}${tail}fn handle(raw: View, db: Sql) -> Response {\n  ${calls}\n}\nfn go(db: Sql, from: View, to: View) -> Int {\n  sql_exec(db, query: "UPDATE s SET state = :to WHERE id = 1 AND state = :from", to, from)\n}\nfn twice(db: Sql, a: Int, b: Int) -> Response {\n  buf() |> write_int(value: a + b) |> respond(status: 200)\n}\n`;
 T(
   'values are traced per path: go(pending, paid) and go(pending, declined) are two declared moves',
   codes(via('twice(db, a: go(db, from: "pending", to: "paid"), b: go(db, from: "pending", to: "declined"))')),
@@ -313,7 +313,7 @@ T(
   codes(via('twice(db, a: go(db, from: "pending", to: "paid"), b: go(db, from: "pending", to: raw))')),
   ['C60:14'],
 );
-const pass = `schema "${S}"\n${M}${tail}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: hop(db, to: "paid"))\n}\nfn hop(db: Sql, to: View) -> Int {\n  go(db, to)\n}\nfn go(db: Sql, to: View) -> Int {\n  sql_exec(db, query: "UPDATE s SET state = :to WHERE id = 1 AND state = 'pending'", to)\n}\n`;
+const pass = `schema "${S}"\n${M}${tail}fn handle(raw: View, db: Sql) -> Response {\n  done(n: hop(db, to: "paid"))\n}\nfn hop(db: Sql, to: View) -> Int {\n  go(db, to)\n}\nfn go(db: Sql, to: View) -> Int {\n  sql_exec(db, query: "UPDATE s SET state = :to WHERE id = 1 AND state = 'pending'", to)\n}\n`;
 T(
   'through two calls (a parameter passed on bare)',
   [codes(pass), codes(pass.replace('to: "paid"', 'to: "pending"'))],
@@ -322,7 +322,7 @@ T(
 T('… and refused when the value at the root is undeclared', codes(pass.replace('to: "paid"', 'to: "void"')), [
   'C59:17',
 ]);
-const rec = `schema "${S}"\n${M}${tail}fn handle(raw: View, db: Sql) -> Buf {\n  done(n: loop(db, to: "paid", n: 3))\n}\nfn loop(db: Sql, to: View, n: Int) -> Int {\n  match n {\n    0 -> sql_exec(db, query: "UPDATE s SET state = :to WHERE id = 1 AND state = 'pending'", to)\n    _ -> loop(db, to, n: n - 1)\n  }\n}\n`;
+const rec = `schema "${S}"\n${M}${tail}fn handle(raw: View, db: Sql) -> Response {\n  done(n: loop(db, to: "paid", n: 3))\n}\nfn loop(db: Sql, to: View, n: Int) -> Int {\n  match n {\n    0 -> sql_exec(db, query: "UPDATE s SET state = :to WHERE id = 1 AND state = 'pending'", to)\n    _ -> loop(db, to, n: n - 1)\n  }\n}\n`;
 T(
   'recursion: the values that reach a recursive function are found by fixpoint',
   [
@@ -536,7 +536,7 @@ T(
     },
   });
   const run = (head: string, body = '') =>
-    a.runLogged(enc.encode(`${head}\n${body}`), { transaction: f => sql.transaction(f) }).then(x => dec.decode(x.out));
+    a.runLogged(enc.encode(`${head}\n${body}`), { transaction: f => sql.transaction(f) }).then(x => answered(x.out));
   const buy = JSON.stringify({ key: 'k1', section: 'balcony', qty: 2, card: 'ann-4242' });
   const first = run('POST /buy', buy);
   await sleep(20);
@@ -577,7 +577,7 @@ T(
     },
   });
   const run = (head: string, body = '') =>
-    a.runLogged(enc.encode(`${head}\n${body}`), { transaction: f => sql.transaction(f) }).then(x => dec.decode(x.out));
+    a.runLogged(enc.encode(`${head}\n${body}`), { transaction: f => sql.transaction(f) }).then(x => answered(x.out));
   const first = run('POST /orders', '{"key":"o-1","item":"lamp"}');
   await sleep(20);
   const second = run('POST /retry/1');
@@ -682,7 +682,7 @@ T(
       one("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending'")
         .replace('done(n: sql_exec(db, query:', 'first(found: sql_first(db, row: N, query:')
         .replace("'pending'\"", "'pending' RETURNING id AS n\"") +
-        'fn first(found: Option[N]) -> Buf {\n  match found {\n    Some(value) -> respond(status: 200)\n    None -> respond(status: 404)\n  }\n}\n',
+        'fn first(found: Option[N]) -> Response {\n  match found {\n    Some(value) -> empty(status: 200)\n    None -> empty(status: 404)\n  }\n}\n',
     ),
   ],
   [['C62:11'], ['C62:11'], ['C62:11']],
@@ -744,7 +744,7 @@ T(
 );
 {
   // the three outcomes, run: the re-read is derived from the UPDATE and runs only when it changes nothing
-  const text = `schema "${S}"\nmachine s.state: SState {\n  Pending -> Paid\n  Pending -> Declined\n}\ntype SState { Pending Paid Declined }\ntype Row { Row(id: Int, state: SState) }\nfn handle(raw: View, db: Sql) -> Buf {\n  said(moved: sql_move(db, row: Row, query: "UPDATE s SET state = :state, note = :note WHERE state = 'pending' AND key = :raw RETURNING id, state", state: Paid, note: "n", raw))\n}\nfn said(moved: Move[Row]) -> Buf {\n  match moved {\n    Moved(value: Row(state)) -> append(buf: respond(status: 200), view: "moved ") |> write_json(value: state)\n    Raced(now: Row(state)) -> append(buf: respond(status: 200), view: "raced ") |> write_json(value: state)\n    NoRow -> append(buf: respond(status: 200), view: "none")\n  }\n}\n`;
+  const text = `schema "${S}"\nmachine s.state: SState {\n  Pending -> Paid\n  Pending -> Declined\n}\ntype SState { Pending Paid Declined }\ntype Row { Row(id: Int, state: SState) }\nfn handle(raw: View, db: Sql) -> Response {\n  said(moved: sql_move(db, row: Row, query: "UPDATE s SET state = :state, note = :note WHERE state = 'pending' AND key = :raw RETURNING id, state", state: Paid, note: "n", raw))\n}\nfn said(moved: Move[Row]) -> Response {\n  match moved {\n    Moved(value: Row(state)) -> append(buf: buf(), view: "moved ") |> write_json(value: state) |> respond(status: 200)\n    Raced(now: Row(state)) -> append(buf: buf(), view: "raced ") |> write_json(value: state) |> respond(status: 200)\n    NoRow -> append(buf: buf(), view: "none") |> respond(status: 200)\n  }\n}\n`;
   const r = builtP(text),
     sql = nodeSql(),
     a = instantiate(new WebAssembly.Module(r.wasm), { sql, name: 's', services: {} });
@@ -752,7 +752,7 @@ T(
   const run = (raw: string) =>
     a
       .runLogged(enc.encode(raw), { transaction: f => sql.transaction(f) })
-      .then(x => dec.decode(x.out).split('\n').at(-1));
+      .then(x => answerBody(x.out).split('\n').at(-1));
   T(
     'the derived re-read: the RETURNING columns, by the key alone, its parameters renumbered',
     r.queries.map(q => [q.sql, q.params]),
@@ -778,14 +778,14 @@ T(
 {
   // C54 and sql_move: a dependent write that runs only when this request moved the row runs once per move
   const prog6 = (arm: string) =>
-    `schema "${S}"\nschema "CREATE TABLE IF NOT EXISTS tally(name TEXT PRIMARY KEY, n INTEGER NOT NULL)"\n${M}type N { N(n: Int) }\nfn handle(raw: View, db: Sql) -> Buf {\n  paid(db, moved: sql_move(db, row: N, query: "UPDATE s SET state = 'paid' WHERE key = :raw AND state = 'pending' RETURNING id AS n", raw))\n}\nfn paid(db: Sql, moved: Move[N]) -> Buf {\n  match moved {\n    ${arm === 'Moved' ? 'Moved(value) -> count(db)\n    Raced(now) -> respond(status: 200)' : 'Moved(value) -> respond(status: 200)\n    Raced(now) -> count(db)'}\n    NoRow -> respond(status: 404)\n  }\n}\nfn count(db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "UPDATE tally SET n = n + 1 WHERE name = 'paid'"))\n}\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n`;
+    `schema "${S}"\nschema "CREATE TABLE IF NOT EXISTS tally(name TEXT PRIMARY KEY, n INTEGER NOT NULL)"\n${M}type N { N(n: Int) }\nfn handle(raw: View, db: Sql) -> Response {\n  paid(db, moved: sql_move(db, row: N, query: "UPDATE s SET state = 'paid' WHERE key = :raw AND state = 'pending' RETURNING id AS n", raw))\n}\nfn paid(db: Sql, moved: Move[N]) -> Response {\n  match moved {\n    ${arm === 'Moved' ? 'Moved(value) -> count(db)\n    Raced(now) -> empty(status: 200)' : 'Moved(value) -> empty(status: 200)\n    Raced(now) -> count(db)'}\n    NoRow -> empty(status: 404)\n  }\n}\nfn count(db: Sql) -> Response {\n  done(n: sql_exec(db, query: "UPDATE tally SET n = n + 1 WHERE name = 'paid'"))\n}\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\n`;
   T(
     'C54: a dependent write reached only from the Moved arm is accepted; from the Raced arm, refused',
     [all(prog6('Moved')), all(prog6('Raced'))],
     [[], ['C54:19']],
   );
   // V1: `count` is also std's (map.tape): the rules read the call as the compiler does, the program's own function
-  const v1prog = `schema "CREATE TABLE IF NOT EXISTS tally(name TEXT PRIMARY KEY, n INTEGER NOT NULL)"\nfn handle(raw: View, db: Sql) -> Buf {\n  count(db)\n}\nfn count(db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "UPDATE tally SET n = n + 1 WHERE name = 'paid'"))\n}\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n`;
+  const v1prog = `schema "CREATE TABLE IF NOT EXISTS tally(name TEXT PRIMARY KEY, n INTEGER NOT NULL)"\nfn handle(raw: View, db: Sql) -> Response {\n  count(db)\n}\nfn count(db: Sql) -> Response {\n  done(n: sql_exec(db, query: "UPDATE tally SET n = n + 1 WHERE name = 'paid'"))\n}\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\n`;
   T('V1: a program function that std also names is reached, and its write checked (C54)', all(v1prog), ['C54:6']);
 }
 const fx6 = (f: string) =>
@@ -818,11 +818,11 @@ T(
     [
       two(
         trusted,
-        'fn handle(raw: View) -> Buf {\n  shown(p: proved(why: raw))\n}\nfn shown(p: Proof) -> Buf {\n  match p {\n    Proof(reason) -> append(buf: respond(status: 200), view: reason)\n  }\n}\n',
+        'fn handle(raw: View) -> Response {\n  shown(p: proved(why: raw))\n}\nfn shown(p: Proof) -> Response {\n  match p {\n    Proof(reason) -> append(buf: buf(), view: reason) |> respond(status: 200)\n  }\n}\n',
       ),
       two(
         trusted,
-        'fn handle(raw: View) -> Buf {\n  shown(p: Proof(reason: raw))\n}\nfn shown(p: Proof) -> Buf {\n  respond(status: 200)\n}\n',
+        'fn handle(raw: View) -> Response {\n  shown(p: Proof(reason: raw))\n}\nfn shown(p: Proof) -> Response {\n  empty(status: 200)\n}\n',
       ),
     ],
     [[], ['C66:program.tape:2']],
@@ -830,12 +830,12 @@ T(
   T(
     '`private` is still a name a program may use',
     all(
-      'fn handle(raw: View) -> Buf {\n  ok(private: 1)\n}\nfn ok(private: Int) -> Buf {\n  respond(status: 200)\n}\n',
+      'fn handle(raw: View) -> Response {\n  ok(private: 1)\n}\nfn ok(private: Int) -> Response {\n  empty(status: 200)\n}\n',
     ),
     [],
   );
   const forged =
-    'type M { M(n: Int) }\nfn handle(raw: View) -> Buf {\n  said(r: Err(error: Rejected(reason: "no")))\n}\nfn said(r: Result[M, CallError]) -> Buf {\n  match r {\n    Err(error: Rejected(reason)) -> append(buf: respond(status: 409), view: reason)\n    _ -> respond(status: 200)\n  }\n}\n';
+    'type M { M(n: Int) }\nfn handle(raw: View) -> Response {\n  said(r: Err(error: Rejected(reason: "no")))\n}\nfn said(r: Result[M, CallError]) -> Response {\n  match r {\n    Err(error: Rejected(reason)) -> append(buf: buf(), view: reason) |> respond(status: 409)\n    _ -> empty(status: 200)\n  }\n}\n';
   T(
     'CallError is private to std/core.tape: a program matches on Rejected, and cannot make one (J1 at the program level)',
     all(forged),
@@ -858,7 +858,7 @@ T(
 // number as REAL (5 → 5.0), and neither takes a BigInt, so the host reads each Int/Bool parameter as CAST(?n AS INTEGER)
 {
   const text =
-    'schema "CREATE TABLE t(k TEXT NOT NULL)"\ntype R { R(s: View, h: Int, ty: View) }\nfn handle(raw: View, db: Sql) -> Buf {\n  show(found: sql_first(db, row: R, query: "SELECT \'k\' || :n AS s, :m * 3 AS h, typeof(:m) AS ty", n: 5, m: 5))\n}\nfn show(found: Option[R]) -> Buf {\n  match found {\n    Some(value: R(s, h, ty)) -> append(buf: append(buf: write_int(out: respond(status: 200), value: h), view: s), view: ty)\n    None -> respond(status: 500)\n  }\n}\n';
+    'schema "CREATE TABLE t(k TEXT NOT NULL)"\ntype R { R(s: View, h: Int, ty: View) }\nfn handle(raw: View, db: Sql) -> Response {\n  show(found: sql_first(db, row: R, query: "SELECT \'k\' || :n AS s, :m * 3 AS h, typeof(:m) AS ty", n: 5, m: 5))\n}\nfn show(found: Option[R]) -> Response {\n  match found {\n    Some(value: R(s, h, ty)) -> append(buf: append(buf: write_int(out: buf(), value: h), view: s), view: ty) |> respond(status: 200)\n    None -> empty(status: 500)\n  }\n}\n';
   const r = build(text);
   T(
     'the probe compiles',
@@ -867,7 +867,7 @@ T(
   );
   const sql = nodeSql(),
     a = instantiate(new WebAssembly.Module(r.wasm), { sql, name: 'ints', services: {} });
-  const out = dec.decode((await a.runLogged(enc.encode('GET /\n'), { transaction: f => sql.transaction(f) })).out);
+  const out = answerBody((await a.runLogged(enc.encode('GET /\n'), { transaction: f => sql.transaction(f) })).out);
   T(
     "an Int parameter is an integer in SQL: 'k' || ?1 is k5 (not k5.0), typeof(?2) is integer (not real)",
     out.endsWith('15k5integer'),

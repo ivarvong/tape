@@ -15,20 +15,15 @@ type Table { Table(names: List[View], rows: List[Row]) }
 // What the axes span, and the step between ticks as m * 10^e (so a tick's label is written exactly).
 type Axis { Axis(lo: Float, hi: Float, m: Int, e: Int, from: Int, to: Int) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> home()
-    Request(method: "GET", path: "/demo") -> drawn(
+    Request(method: Get, path: "/") -> home()
+    Request(method: Get, path: "/demo") -> drawn(
       text: sample(),
       title: Some(value: "Monthly visits, 2026")
     )
-    Request(method: "POST", path: "/", query, body) -> drawn(text: body, title: title_of(query))
-    Request(
-      method: "POST",
-      path: "/chart",
-      query,
-      body
-    ) -> drawn(text: body, title: title_of(query))
+    Request(method: Post, path: "/", query, body) -> drawn(text: body, title: title_of(query))
+    Request(method: Post, path: "/chart", query, body) -> drawn(text: body, title: title_of(query))
     _ -> problem(status: 404, error: "no such route: POST a CSV to / or GET /demo")
   }
 }
@@ -41,8 +36,8 @@ fn title_of(query: Option[View]) -> Option[View] {
   }
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
 fn sample() -> View {
@@ -51,7 +46,7 @@ fn sample() -> View {
 
 // ---------- reading the CSV ----------
 
-fn drawn(text: View, title: Option[View]) -> Buf {
+fn drawn(text: View, title: Option[View]) -> Response {
   match table(text) {
     Ok(value: t) -> chart(t, title)
     Err(error) -> problem(status: 400, error)
@@ -355,10 +350,10 @@ fn values_range(rows: List[Row], r: Range) -> Range {
       acc: Range,
       v: Option[Float]
     ) -> Range {
-        match v {
-          Some(value: x) -> widen(r: acc, x)
-          None -> acc
-        }
+      match v {
+        Some(value: x) -> widen(r: acc, x)
+        None -> acc
+      }
     }))
   }
 }
@@ -371,10 +366,11 @@ fn nth(list: List[Option[Float]], i: Int) -> Option[Float] {
   }
 }
 
-fn chart(t: Table, title: Option[View]) -> Buf {
-  respond_as(status: 200, content: Svg)
-    |> header(name: "cache-control", value: "no-store")
+fn chart(t: Table, title: Option[View]) -> Response {
+  buf()
     |> drawing(t, title)
+    |> respond_as(status: 200, content: Svg)
+    |> header(name: "cache-control", value: "no-store")
 }
 
 // The chart as an <svg> element: the whole of an SVG answer, or a figure inside a page.
@@ -387,7 +383,7 @@ fn drawing(out: Buf, t: Table, title: Option[View]) -> Buf {
     hi: 0f,
     any: False
   ), by: fn(acc: Range, v: Float) -> Range {
-      widen(r: acc, x: v)
+    widen(r: acc, x: v)
   })
   let yr = values_range(rows, r: Range(lo: 0f, hi: 0f, any: False))
   let xa = match numbered {
@@ -406,12 +402,12 @@ fn drawing(out: Buf, t: Table, title: Option[View]) -> Buf {
     |> titled(title)
     |> y_ticks(a: ya, k: ya.from)
     |> x_ticks(
-    a: xa,
-    k: xa.from,
-    numbered,
-    rows,
-    every: max(a: 1, b: (length(list: rows) + 9) / 10)
-  )
+      a: xa,
+      k: xa.from,
+      numbered,
+      rows,
+      every: max(a: 1, b: (length(list: rows) + 9) / 10)
+    )
     |> append(view: "<line x1=\"64\" y1=\"340\" x2=\"700\" y2=\"340\" stroke=\"#111\"/><line \
         x1=\"64\" y1=\"48\" x2=\"64\" y2=\"340\" stroke=\"#111\"/>")
     |> lines(rows, x, xa, ya, i: 0, n: series)
@@ -526,17 +522,13 @@ fn path(out: Buf, rows: List[Row], x: List[Float], xa: Axis, ya: Axis, i: Int, p
   match rows {
     Cons(head: Row(values), tail: rest) -> match x {
       Cons(head: xv, tail: xr) -> match nth(list: values, i) {
-        Some(value: y) -> out |> append(view: match pen {
-          True -> "L"
-          False -> "M"
-        }) |> append(view: "\(r1(x: px(a: xa, x: xv))) \(r1(x: py(a: ya, y)))") |> path(
-          rows: rest,
-          x: xr,
-          xa,
-          ya,
-          i,
-          pen: True
-        )
+        Some(value: y) -> out
+          |> append(view: match pen {
+            True -> "L"
+            False -> "M"
+          })
+          |> append(view: "\(r1(x: px(a: xa, x: xv))) \(r1(x: py(a: ya, y)))")
+          |> path(rows: rest, x: xr, xa, ya, i, pen: True)
         None -> path(out, rows: rest, x: xr, xa, ya, i, pen: False)
       }
       Nil -> out
@@ -598,13 +590,14 @@ fn demo_figure(out: Buf) -> Buf {
   }
 }
 
-fn home() -> Buf {
-  respond_as(status: 200, content: Html)
+fn home() -> Response {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><title>csv2chart</title><style>:root{color-scheme:light dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--line:#e3e4e6}@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;--line:#30343a}}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}main{max-width:48rem;margin:0 auto;padding:2rem 1rem}figure{margin:1rem 0}figure svg{width:100%;height:auto;display:block;border:1px solid var(--line);border-radius:8px}pre{font:13px/1.45 ui-monospace,Menlo,monospace;overflow-x:auto;border:1px solid var(--line);border-radius:8px;padding:.75rem}.mute{color:var(--mute)}</style><main><h1>csv2chart</h1><p>POST a CSV, get an SVG line chart: the first column is x, every other column a line (up to 8). An x that is not a number makes the rows evenly spaced and labelled; an empty cell is a gap.</p><figure role=img aria-label=\"a sample chart: monthly visits to docs, playground and api\">")
     |> demo_figure
     |> append(view: "</figure><pre>curl --data-binary @data.csv \
         'https://tape.ivar.workers.dev/p/demo/csv2chart/?title=My+chart' -o chart.svg</pre><p \
-        class=mute>Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/csv2chart/csv2chart.tape\">source</a>): the CSV is read, scaled and drawn in the program; labels are \
-        escaped, so nothing in a CSV becomes markup.</p></main></html>")
+        class=mute>Written in <a href=\"/\">Tape</a> (<a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/csv2chart/csv2chart.tape\">source</a>): the CSV is read, scaled and drawn in the program; labels are escaped, so nothing in a CSV becomes markup.</p></main></html>")
+    |> respond_as(status: 200, content: Html)
 }

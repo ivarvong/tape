@@ -19,16 +19,17 @@ type Transfer { Transfer(key: Key, from: View, to: View, amount: Amount) }
 type Account { Account(name: View, balance: Int) }
 type Done { Done(payer: View, payee: View, amount: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/transfers", body) -> transfer(body)
-    Request(method: "GET", path: "/accounts") -> respond(status: 200)
+    Request(method: Post, path: "/transfers", body) -> transfer(body)
+    Request(method: Get, path: "/accounts") -> buf()
       |> write_rows(rows: sql_all(row: Account, query: "SELECT * FROM accounts ORDER BY name"))
+      |> respond(status: 200)
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn transfer(body: View) -> Buf {
+fn transfer(body: View) -> Response {
   let Ok(value: Transfer(key, from, to, amount)) = decode(json: body, as: Transfer) else {
     Err(error) -> problem(status: 400, reason: error)
   }
@@ -71,15 +72,16 @@ fn transfer(body: View) -> Buf {
   moved()
 }
 
-fn moved() -> Buf {
-  respond(status: 200) |> append(view: "{\"moved\":true}")
+fn moved() -> Response {
+  buf() |> append(view: "{\"moved\":true}") |> respond(status: 200)
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  respond(status)
+fn problem(status: Int, reason: View) -> Response {
+  buf()
     |> append(view: "{\"error\":")
     |> write_json_string(text: reason)
     |> append(view: "}")
+    |> respond(status)
 }
 
 // What must hold after every commit (checked by `tape sim` and by app.invariants() in the host).

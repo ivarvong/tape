@@ -2,7 +2,7 @@
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
-import { instantiate, isCall, isHead, replay, spans, traceOf } from '../host.ts';
+import { answerText, instantiate, isCall, isHead, replay, responseOf, spans, traceOf } from '../host.ts';
 import type { Effect, Head, Service, ServiceOptions, Timers } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
@@ -17,7 +17,11 @@ const pure = (program: string, fn: string, args: bigint[]): number => {
   call(ex.fns, 'reset');
   return Number(call(ex.fns, fn, ...args));
 };
-const text = (b: Uint8Array | undefined): string => new TextDecoder().decode(b),
+// handle's answer as host.ts answerText pictures it, `200\nbody`, and a method's reply as its text; `body` an
+// answer's body alone
+const text = (b: Uint8Array | undefined): string =>
+    b === undefined ? '' : b[0] === 0 ? answerText(responseOf(b)) : new TextDecoder().decode(b),
+  bodyOf = (b: Uint8Array): string => new TextDecoder().decode(responseOf(b).body),
   bytes = (s: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(s);
 
 /** Timers fired by hand: a call's budget runs out when the test says so, never because the machine was slow. */
@@ -234,15 +238,15 @@ T(
 // ---- decode reasons
 const DEC = `type Title = View where len(self) >= 1 and len(self) <= 5
 type New { New(title: Title, done: Option[Bool]) }
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match decode(json: raw, as: New) {
-    Ok(value: New(title)) -> append(buf: buf(), view: title)
-    Err(error) -> append(buf: append(buf: buf(), view: "no: "), view: error)
+    Ok(value: New(title)) -> append(buf: buf(), view: title) |> respond(status: 200)
+    Err(error) -> append(buf: append(buf: buf(), view: "no: "), view: error) |> respond(status: 200)
   }
 }`;
 {
   const app = instantiate(new WebAssembly.Module(build(DEC).wasm), {});
-  const go = (s: string) => text(app.handle(bytes(s)));
+  const go = (s: string) => bodyOf(app.handle(bytes(s)));
   T('decode ok', go('{"title":"milk"}'), 'milk');
   T('decode: not JSON', go('{"title":'), 'no: not JSON');
   T('decode: missing key', go('{"done":true}'), 'no: title: missing');
@@ -643,8 +647,8 @@ console.log(`orders.tape: ${orders.wasm.length} bytes, stock.tape: ${stockBuild.
 
 // ---- time and randomness are capabilities, and logged
 {
-  const SRC = `fn handle(raw: View, clock: Clock, dice: Entropy) -> Buf {
-  stamp(out: write_int(out: buf(), value: now(clock)), roll: random(from: dice) % 6 + 1)
+  const SRC = `fn handle(raw: View, clock: Clock, dice: Entropy) -> Response {
+  stamp(out: write_int(out: buf(), value: now(clock)), roll: random(from: dice) % 6 + 1) |> respond(status: 200)
 }
 fn stamp(out: Buf, roll: Int) -> Buf {
   write_int(out: push(buf: out, byte: 32), value: roll)
@@ -652,7 +656,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
   const m = new WebAssembly.Module(build(SRC).wasm),
     app = instantiate(m, {});
   const before = Date.now(),
-    out = text(app.handle(bytes(''))),
+    out = bodyOf(app.handle(bytes(''))),
     after = Date.now(),
     [t = 0, roll = 0] = out.split(' ').map(Number);
   T('now and random', [before <= t && t <= after, roll >= 1 && roll <= 6], [true, true]);
@@ -661,7 +665,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
     app.effects.slice(1).map(e => Object.keys(e)[0]),
     ['now', 'random'],
   );
-  T('replay gives the same time and roll', text(replay(m, bytes(''), app.effects)), out);
+  T('replay gives the same time and roll', bodyOf(replay(m, bytes(''), app.effects)), out);
   T('now without the capability is rejected', err('fn f(n: Int) -> Int {\n  now(n)\n}'), 'C14');
   // ---- command keys (C64, C65) and the callee's check that a key names one message
   const prog = (key: string) =>
@@ -739,7 +743,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
   // ---- a family of Remotes: remote(of, index) names member <family>-<index>, chosen at run time
   {
     const fam =
-      'type P { P(n: Int) }\ntype Q { Q(n: Int) }\nfn handle(raw: View, shards: Remotes) -> Buf {\n  answer(reply: call(to: remote(of: shards, index: len(raw) % 3), method: "p", send: P(n: len(raw)), reply: Q, within: 500, once: raw))\n}\nfn answer(reply: Result[Q, CallError]) -> Buf {\n  match reply {\n    Ok(value: Q(n)) -> write_int(out: respond(status: 200), value: n)\n    _ -> respond(status: 502)\n  }\n}\n';
+      'type P { P(n: Int) }\ntype Q { Q(n: Int) }\nfn handle(raw: View, shards: Remotes) -> Response {\n  answer(reply: call(to: remote(of: shards, index: len(raw) % 3), method: "p", send: P(n: len(raw)), reply: Q, within: 500, once: raw))\n}\nfn answer(reply: Result[Q, CallError]) -> Response {\n  match reply {\n    Ok(value: Q(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)\n    _ -> empty(status: 502)\n  }\n}\n';
     const r = build(fam),
       hits: [number, string | null][] = [];
     const shard =

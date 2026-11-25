@@ -17,6 +17,7 @@ import type { Options, QueryEntry } from './gen/module.ts';
 import { ownedParameters } from './gen/ownership.ts';
 import { jsonSchema } from './gen/schema.ts';
 import type { JsonSchema } from './gen/schema.ts';
+import { answer, statusLiterals } from './gen/answer.ts';
 import { serve } from './gen/served.ts';
 import type { Served } from './gen/served.ts';
 import { checkInvariants } from './invariants.ts';
@@ -102,15 +103,17 @@ function front(sources: readonly Source[]) {
   rowColumns(prog);
   // the rules, read from the program as written (before the generated functions are added); reported only once the
   // program has type-checked, so a type error is shown first
-  const ruled = [...rules(prog), ...tidy(prog)];
+  const ruled = [...rules(prog), ...tidy(prog), ...statusLiterals(prog)];
   const sqlFound: Problem[] = [];
   const invariants = checkInvariants(prog, sqlFound);
   // an interface's name is a capability type, like Remote, for this build only
   for (const n of prog.interfaces.keys()) addCapability(n);
   const served = serve(prog);
+  // the function the host calls as `handle`: the program's handle, its Response written in the host's frame
+  const entry = answer(prog);
   const WIRE = wireSource(prog);
   if (WIRE.text) parse('wire', WIRE.text, prog);
-  return { prog, ruled, sqlFound, invariants, served, WIRE };
+  return { prog, ruled, sqlFound, invariants, served, entry, WIRE };
 }
 type Front = ReturnType<typeof front>;
 
@@ -379,7 +382,7 @@ function finish(fr: Front, opts: Options, sources: readonly Source[], found: Pro
   if (about.machines.length > 0) custom.push(['machines', about.machines]);
   if (invariants.length > 0) custom.push(['invariants', invariants]);
   const { imports, table, compiled } = done;
-  const wasm = assemble({ imports, opts, tables, table, compiled, flagBytes, custom });
+  const wasm = assemble({ imports, opts, tables, table, compiled, flagBytes, custom, entry: fr.entry });
   return {
     wasm,
     errors: [],
@@ -421,13 +424,12 @@ export function builds(
 ): [Built, ...Built[]] {
   const fr = front(sources);
   const { prog, served } = fr;
-  const opts: Options = {
-    ...opts0,
-    exports: [
-      ...opts0.exports.filter(n => n !== 'handle' || prog.fns.has('handle') || served.length === 0),
-      ...served.map(f => `serve_${f.method}`),
-    ],
-  };
+  // `handle` is exported as the generated function around it (compiler/gen/answer.ts), and every method as its own
+  const exported = (names: readonly string[]): string[] => [
+    ...names.flatMap(n => (n !== 'handle' ? [n] : fr.entry !== null ? [fr.entry] : served.length === 0 ? [n] : [])),
+    ...served.map(f => `serve_${f.method}`),
+  ];
+  const opts: Options = { ...opts0, exports: exported(opts0.exports) };
   const found: Problem[] = [];
   // emitting adds functions to the program (a generic one per type arguments, a lambda, a trampoline), each with
   // its types resolved for that build: each later build starts from the functions as they were written
@@ -446,7 +448,9 @@ export function builds(
   const rest = also.map(o => {
     prog.fns.clear();
     for (const [n, f] of written) prog.fns.set(n, f);
-    const b = finish(fr, { ...opts, ...o }, sources, [...found]);
+    const b = finish(fr, { ...opts, ...o, exports: o.exports ? exported(o.exports) : opts.exports }, sources, [
+      ...found,
+    ]);
     fr.sqlFound.length = sql;
     return b;
   });

@@ -8,11 +8,11 @@ import { compile } from '../compiler.ts';
 import type { Options } from '../compiler.ts';
 import { interpret } from '../interp.ts';
 import { std } from '../std.ts';
-import { bare, finish, handleBare, same } from './harness.ts';
+import { bare, finish, handleBare, same, answered } from './harness.ts';
 
 // every position's answer, then the answers for at = len + 1 and at = -1 (each a trap)
-const program = `fn handle(raw: View) -> Buf {
-  each(v: raw, at: 0, out: buf())
+const program = `fn handle(raw: View) -> Response {
+  each(v: raw, at: 0, out: buf()) |> respond(status: 200)
 }
 
 fn each(v: View, at: Int, out: Buf) -> Buf {
@@ -59,14 +59,13 @@ const builds: [string, Partial<Options>][] = [
   ['tail calls off', { tailCalls: false }],
 ];
 const sources = [...std, { name: 'scan.tape', text: program }];
-const dec = new TextDecoder();
 const it = interpret(sources);
 for (const [label, o] of builds) {
   const r = compile(sources, { ...o, exports: ['handle', 'past', 'at_minus_one'] });
   if (!r.wasm) throw new Error(`${label}: ${r.errors.map(e => e.message).join('; ')}`);
   const b = bare(new WebAssembly.Module(r.wasm));
   let agree = 0;
-  for (const v of texts) if (handleBare(b, v) === oracle(v)) agree++;
+  for (const v of texts) if (handleBare(b, v) === `200\n${oracle(v)}`) agree++;
   same(`${label}: scan_plain at every position of 3,000 texts, as the byte loop`, agree, texts.length);
   const traps = ['past', 'at_minus_one'].map(f => {
     try {
@@ -79,6 +78,6 @@ for (const [label, o] of builds) {
   same(`${label}: at past the end, and at -1, trap 3`, traps, ['trap 3', 'trap 3']);
 }
 let interpAgree = 0;
-for (const v of texts.slice(0, 600)) if (dec.decode(it.handle(v)) === oracle(v)) interpAgree++;
+for (const v of texts.slice(0, 600)) if (answered(it.handle(v)) === `200\n${oracle(v)}`) interpAgree++;
 same('the interpreter: scan_plain at every position of 600 texts, as the byte loop', interpAgree, 600);
 finish();

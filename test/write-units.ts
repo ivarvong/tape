@@ -12,11 +12,11 @@ import { instantiate, responseOf } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { finish, ok, same, std } from './harness.ts';
 
-const program = `fn handle(raw: View) -> Buf {
+const program = `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/old", body) -> each(out: respond(status: 200), rest: body, old: True)
-    Request(method: "POST", path: "/new", body) -> each(out: respond(status: 200), rest: body, old: False)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/old", body) -> each(out: buf(), rest: body, old: True) |> respond(status: 200)
+    Request(method: Post, path: "/new", body) -> each(out: buf(), rest: body, old: False) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 

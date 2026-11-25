@@ -6,22 +6,22 @@
 import '../node25.ts';
 import { interpret } from '../interp.ts';
 import { instantiate } from '../host.ts';
-import { built, finish, moduleOf, ok, same, std } from './harness.ts';
+import { built, finish, moduleOf, ok, same, std, answered } from './harness.ts';
 
 const PROGRAM = {
   name: 'dates.tape',
-  text: `fn handle(raw: View) -> Buf {
+  text: `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/dates", body) -> each(out: respond(status: 200), body)
-    Request(method: "GET", path: "/one", query: Some(value: parse_int(ms))) -> respond(status: 200)
-      |> append(view: rfc3339(ms))
-    Request(method: "GET", path: "/http", query: Some(value: parse_int(ms))) -> respond(status: 200)
-      |> append(view: http_date(ms))
-    Request(method: "GET", path: "/civil", query: Some(value: parse_int(ms))) -> respond(status: 200)
-      |> write_int(value: civil(ms).year)
-    Request(method: "GET", path: "/none", query: Some(value: parse_int(ms))) -> respond(status: 200)
-      |> write_int(value: ms)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/dates", body) -> each(out: buf(), body) |> respond(status: 200)
+    Request(method: Get, path: "/one", query: Some(value: parse_int(ms))) -> buf()
+      |> append(view: rfc3339(ms)) |> respond(status: 200)
+    Request(method: Get, path: "/http", query: Some(value: parse_int(ms))) -> buf()
+      |> append(view: http_date(ms)) |> respond(status: 200)
+    Request(method: Get, path: "/civil", query: Some(value: parse_int(ms))) -> buf()
+      |> write_int(value: civil(ms).year) |> respond(status: 200)
+    Request(method: Get, path: "/none", query: Some(value: parse_int(ms))) -> buf()
+      |> write_int(value: ms) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -48,7 +48,6 @@ fn shown(out: Buf, ms: Int) -> Buf {
 
 type Handler = { handle: (bytes: Uint8Array) => Uint8Array };
 const enc = new TextEncoder();
-const dec = new TextDecoder();
 const stepsOf = (mod: { exports: object }): number => {
   if (!('cost' in mod.exports)) throw new TypeError('the module exports no cost');
   const g = mod.exports.cost;
@@ -177,7 +176,7 @@ for (const [label, h] of handlers) {
   const got: string[] = [];
   for (let i = 0; i < cases.length; i += BATCH) {
     const body = cases.slice(i, i + BATCH).join('\n');
-    const out = dec.decode(h.handle(enc.encode(`POST /dates\n${body}\n`)));
+    const out = answered(h.handle(enc.encode(`POST /dates\n${body}\n`)));
     got.push(
       ...out
         .slice(out.indexOf('\n') + 1)

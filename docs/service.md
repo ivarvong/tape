@@ -107,11 +107,17 @@ The service does not retry a request itself. A storage reset fails the requests 
 
 ### What a program answers
 
-A program answers `STATUS LF BODY` (`respond(status)`, served as `text/plain`) or `STATUS SP TYPE LF BODY`
-(`respond_as(status: …, content: Html)`; `Json`, `Text`, `Css`, `Svg`, `Csv`, `Atom`, `Rss` and `Xml` too). The type
-is from a closed list; other headers follow the status line, each after a carriage return (`header(name:, value:)`:
-`Location`, `cache-control`), and the host refuses those it sets itself (content-type, set-cookie, the security
-headers) with a 500 that says why. A first line that is neither form is all body.
+A program answers a `Response` (std/http.tape), a value, never bytes: `buf() |> … |> respond(status: 200)` is served
+as `text/plain`, `respond_as(status: …, content: Html)` as its type (`Json`, `Text`, `Css`, `Svg`, `Csv`, `Atom`,
+`Rss` and `Xml` too), `json(status:, value:)` as JSON, `empty(status:)` with no body and `redirect(to:)` as a 303
+with a `location`. The type is from a closed list, and headers are added with `header(name:, value:)` (`location`,
+`cache-control`). A program sees only that type: the function the compiler generates around `handle` gives the host
+the head (the status, the type and the headers, each its own field) and where the body lies, and the host reads
+them, so no byte of a body, however it came in, can become a status or a header. The host refuses, with a 500 that
+says why and after nothing more is run: a status outside 200 to 599; a body on 204, 205 or 304; a header it sets
+itself (content-type, content-length, set-cookie, the security headers, `tape-…`), a name that is not a token, a
+value that is not printable ASCII, more than 32 headers or 16 KB of them. (Before 25 November 2026 the host read the
+head out of the answer's first line, so a program that answered what it was sent let the sender choose it.)
 
 A program's HTML or SVG is served sandboxed (`content-security-policy`): no script runs, style is inline, a form
 posts to the service's own origin, and an image is one of this origin's (another route of the program that answers

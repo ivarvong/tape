@@ -11,7 +11,7 @@
 // std's civil, which loops over nothing; before 25 November 2026 it walked years from 1970, and an unpinned run
 // changed steps on New Year's Day. bench/blog.json is that record. The same Wasm bytes are in bench/sizes.json, so
 // a change that moves a module is recorded twice: here, and `node test/wasm-size.ts --write`. The feed is
-// `respond_as(content: Atom)`, application/atom+xml.
+// `buf() |> respond_as(content: Atom)`, application/atom+xml.
 //   node bench/blog.ts           compare
 //   node bench/blog.ts --write   record
 import '../node25.ts';

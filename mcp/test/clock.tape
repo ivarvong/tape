@@ -8,19 +8,21 @@ type Hit { Hit(id: Int, at: Int) }
 type Fired { Fired(key: Int, at: Int) }
 type Count { Count(n: Int) }
 
-fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/hit") -> counted(
+    Request(method: Post, path: "/hit") -> counted(
       n: sql_exec(query: "INSERT INTO hits(at) VALUES (:now)", now: now(), repeat: True)
     )
-    Request(method: "GET", path: "/window") -> in_window(since: now() - 60000)
-    Request(method: "POST", path: "/later/" ++ decimal(key)) -> later(key)
-    Request(method: "GET", path: "/fired") -> respond_as(status: 200, content: Json)
+    Request(method: Get, path: "/window") -> in_window(since: now() - 60000)
+    Request(method: Post, path: "/later/" ++ decimal(key)) -> later(key)
+    Request(method: Get, path: "/fired") -> buf()
       |> write_rows(rows: sql_all(row: Fired, query: "SELECT key, at FROM fired ORDER BY key"))
-    Request(method: "POST", path: "/rows/" ++ decimal(n)) -> counted(n: added(n))
-    Request(method: "GET", path: "/rows") -> respond_as(status: 200, content: Json)
+      |> respond_as(status: 200, content: Json)
+    Request(method: Post, path: "/rows/" ++ decimal(n)) -> counted(n: added(n))
+    Request(method: Get, path: "/rows") -> buf()
       |> write_rows(rows: sql_all(row: Hit, query: "SELECT id, at FROM hits ORDER BY id"))
-    _ -> respond(status: 404)
+      |> respond_as(status: 200, content: Json)
+    _ -> empty(status: 404)
   }
 }
 
@@ -34,18 +36,18 @@ export fn woken(db: Sql, clock: Clock, message: Wake) -> Result[Count, View] {
 }
 
 // the hits within the last 60 s: at > since
-fn in_window(since: Int) -> Buf {
+fn in_window(since: Int) -> Response {
   let Some(value: Count(n)) = sql_first(
     row: Count,
     query: "SELECT count(*) AS n FROM hits WHERE at > :since",
     since
-  ) else -> respond(status: 500)
+  ) else -> empty(status: 500)
   counted(n)
 }
 
-fn later(key: Int) -> Buf {
+fn later(key: Int) -> Response {
   do wake(after: 5000, key)
-  respond(status: 202)
+  empty(status: 202)
 }
 
 fn added(n: Int) -> Int {
@@ -55,6 +57,6 @@ fn added(n: Int) -> Int {
   }
 }
 
-fn counted(n: Int) -> Buf {
-  respond_as(status: 200, content: Json) |> write_json(value: Count(n))
+fn counted(n: Int) -> Response {
+  json(status: 200, value: Count(n))
 }

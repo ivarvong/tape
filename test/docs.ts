@@ -54,7 +54,7 @@ for (const { path, text } of docs) {
     // a block that shows a function alone is compiled as part of a program
     const whole = /^fn handle\(/m.test(p.text)
       ? p.text
-      : `${p.text}\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+      : `${p.text}\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`;
     const e = firstError(whole);
     ok(`${path}:${p.at}: the tape block compiles`, e === '', e);
   }
@@ -90,30 +90,30 @@ const LIFTED: Lifted[] = [
     claim:
       /read a header \(not yet possible\)|sees no request\s+headers|and no headers\b|cannot set (?:any other|response) headers?/i,
     what: 'request headers are read with header_of and response headers set with header (0.3)',
-    program: `fn handle(raw: View) -> Buf {
+    program: `fn handle(raw: View) -> Response {
   let r = request(raw)
-  let Some(value: tag) = header_of(request: r, name: "if-none-match") else -> respond(status: 400)
-  respond(status: 302) |> header(name: "location", value: "/items/\\(len(tag))")
+  let Some(value: tag) = header_of(request: r, name: "if-none-match") else -> empty(status: 400)
+  empty(status: 302) |> header(name: "location", value: "/items/\\(len(tag))")
 }
 `,
   },
   {
     claim: /no parser for negative numbers/i,
     what: 'parse_int reads a sign (0.3)',
-    program: `fn handle(raw: View) -> Buf {
-  let Some(value: n) = parse_int(text: "-12") else -> respond(status: 400)
-  respond(status: 200) |> append(view: "\\(n)")
+    program: `fn handle(raw: View) -> Response {
+  let Some(value: n) = parse_int(text: "-12") else -> empty(status: 400)
+  buf() |> append(view: "\\(n)") |> respond(status: 200)
 }
 `,
   },
   {
     claim: /chain steps with `with`/,
     what: '`with` went on 20 November 2026; steps are `let … else`',
-    program: `fn handle(raw: View) -> Buf {
+    program: `fn handle(raw: View) -> Response {
   let Ok(value: n) = half(n: 4) else {
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
-  respond(status: 200) |> append(view: "\\(n)")
+  buf() |> append(view: "\\(n)") |> respond(status: 200)
 }
 
 fn half(n: Int) -> Result[Int, View] {

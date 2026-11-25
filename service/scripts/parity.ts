@@ -32,7 +32,7 @@ const HELLO = readFileSync(new URL('../../examples/hello.tape', import.meta.url)
 const WITHOUT = HELLO.replace(/^\s*repeat: True,\n/m, '');
 // arithmetic, whose code the compiler's Int rules decide (0.2: exact or a trap)
 const FACT =
-  'fn fact(n: Int) -> Int {\n  match {\n    n <= 1 -> 1\n    else -> n * fact(n: n - 1)\n  }\n}\n\nfn handle(raw: View) -> Buf {\n  let Request(path) = request(raw)\n  respond(status: 200) |> append(view: "\\(fact(n: len(path)))")\n}\n';
+  'fn fact(n: Int) -> Int {\n  match {\n    n <= 1 -> 1\n    else -> n * fact(n: n - 1)\n  }\n}\n\nfn handle(raw: View) -> Response {\n  let Request(path) = request(raw)\n  buf() |> append(view: "\\(fact(n: len(path)))") |> respond(status: 200)\n}\n';
 
 let failed = 0,
   passed = 0;

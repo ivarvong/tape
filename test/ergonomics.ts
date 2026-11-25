@@ -153,8 +153,8 @@ fn count(id: Int) -> Int {
 fn twice(id: Int) -> Int {
   count(id) + count(id)
 }
-fn handle(raw: View, db: Sql) -> Buf {
-  respond(status: 200 + twice(id: len(raw)))
+fn handle(raw: View, db: Sql) -> Response {
+  empty(status: 200 + twice(id: len(raw)))
 }
 `;
 T('ambient: db reaches count through twice', codes(A), []);
@@ -189,7 +189,7 @@ T(
 // ---- 4. C54 accepts writes that settle on their first run
 {
   const one = (q: string): string =>
-    `schema "CREATE TABLE IF NOT EXISTS c(name TEXT PRIMARY KEY, n INTEGER NOT NULL, m INTEGER, state TEXT NOT NULL)"\ntype N { N(n: Int) }\nfn done(n: Int) -> Buf {\n  respond(status: 200)\n}\nfn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "${q}"${q.includes(':by') ? ', by: len(raw)' : ''}))\n}\n`;
+    `schema "CREATE TABLE IF NOT EXISTS c(name TEXT PRIMARY KEY, n INTEGER NOT NULL, m INTEGER, state TEXT NOT NULL)"\ntype N { N(n: Int) }\nfn done(n: Int) -> Response {\n  empty(status: 200)\n}\nfn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "${q}"${q.includes(':by') ? ', by: len(raw)' : ''}))\n}\n`;
   const c54 = (q: string): string[] => codes(one(q)).filter(x => x.startsWith('C54'));
   const C54: readonly (readonly [string, string[]])[] = [
     ["UPDATE c SET n = max(n, :by) WHERE name = 'a'", []],
@@ -210,7 +210,7 @@ T(
 // ---- 5. C73 floors and C74 implied states
 {
   const prog = (schema: string, ...qs: string[]): string =>
-    `schema "${schema}"\ntype N { N(n: Int) }\nfn done(n: Int) -> Buf {\n  respond(status: 200)\n}\nfn handle(raw: View, db: Sql) -> Buf {\n  match raw {\n${qs.map((q, i) => `    "${i}" -> done(n: sql_exec(db, query: "${q}"${q.includes(':by') ? ', by: len(raw)' : ''}))\n`).join('')}    _ -> respond(status: 404)\n  }\n}\n`;
+    `schema "${schema}"\ntype N { N(n: Int) }\nfn done(n: Int) -> Response {\n  empty(status: 200)\n}\nfn handle(raw: View, db: Sql) -> Response {\n  match raw {\n${qs.map((q, i) => `    "${i}" -> done(n: sql_exec(db, query: "${q}"${q.includes(':by') ? ', by: len(raw)' : ''}))\n`).join('')}    _ -> empty(status: 404)\n  }\n}\n`;
   const take = "UPDATE t SET n = n - :by WHERE k = 'a'";
   const only = (cs: string[], ...codesWanted: string[]): string[] =>
     cs.filter(c => codesWanted.some(w => c.startsWith(w)));
@@ -362,7 +362,7 @@ T(
     );
   }
   const mini = (key: string, extra = '') =>
-    `migration 1 "t" {\n  CREATE TABLE runs(id INTEGER PRIMARY KEY, prompt TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0)\n}\ntype Run { Run(id: Int, prompt: View, step: Int) }\ntype Use { Use(prompt: View) }\ntype AtStep { AtStep(run: Int, step: Int) }\ntype Used { Used(n: Int) }\nfn handle(raw: View, db: Sql, tools: Remote) -> Buf {\n  match sql_first(db, row: Run, query: "SELECT id, prompt, step FROM runs WHERE id = :id", id: len(raw)) {\n    Some(value: Run(id, prompt, step)) -> done(r: call(to: tools, method: "tool", send: Use(prompt), reply: Used, within: 50, once: ${key}))\n    None -> respond(status: 404)\n  }\n}\nfn done(r: Result[Used, CallError]) -> Buf {\n  match r {\n    Ok(value) -> respond(status: 200)\n    Err(error) -> respond(status: 502)\n  }\n}\n${extra}`;
+    `migration 1 "t" {\n  CREATE TABLE runs(id INTEGER PRIMARY KEY, prompt TEXT NOT NULL, step INTEGER NOT NULL DEFAULT 0)\n}\ntype Run { Run(id: Int, prompt: View, step: Int) }\ntype Use { Use(prompt: View) }\ntype AtStep { AtStep(run: Int, step: Int) }\ntype Used { Used(n: Int) }\nfn handle(raw: View, db: Sql, tools: Remote) -> Response {\n  match sql_first(db, row: Run, query: "SELECT id, prompt, step FROM runs WHERE id = :id", id: len(raw)) {\n    Some(value: Run(id, prompt, step)) -> done(r: call(to: tools, method: "tool", send: Use(prompt), reply: Used, within: 50, once: ${key}))\n    None -> empty(status: 404)\n  }\n}\nfn done(r: Result[Used, CallError]) -> Response {\n  match r {\n    Ok(value) -> empty(status: 200)\n    Err(error) -> empty(status: 502)\n  }\n}\n${extra}`;
   T('C71 key with the row id and step', codes(mini('AtStep(run: id, step)')), []);
   T('C71 key without the row id', codes(mini('AtStep(run: step, step)')), ['C71:10']);
 }

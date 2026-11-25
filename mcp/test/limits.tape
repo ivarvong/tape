@@ -1,16 +1,18 @@
 // limits.tape: a program for mcp/test.ts that goes past the runner's limits when asked: a loop that never ends
 // (Tape's step budget), a body longer than the runner gives back, memory past the 64 MB arena, a division by zero
 // (a trap that comes at once), and a random draw.
-fn handle(raw: View, dice: Entropy) -> Buf {
+fn handle(raw: View, dice: Entropy) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/spin") -> spin(n: 0)
-    Request(method: "GET", path: "/div/" ++ by) -> respond(status: 200)
+    Request(method: Get, path: "/spin") -> spin(n: 0) |> respond(status: 200)
+    Request(method: Get, path: "/div/" ++ by) -> buf()
       |> append(view: "\(100 / len(by))")
-    Request(method: "GET", path: "/big") -> big(out: respond(status: 200), n: 0)
-    Request(method: "GET", path: "/huge") -> huge(out: respond(status: 200), n: 0)
-    Request(method: "GET", path: "/dice") -> respond(status: 200)
+      |> respond(status: 200)
+    Request(method: Get, path: "/big") -> big(out: buf(), n: 0) |> respond(status: 200)
+    Request(method: Get, path: "/huge") -> huge(out: buf(), n: 0) |> respond(status: 200)
+    Request(method: Get, path: "/dice") -> buf()
       |> append(view: "\(random(from: dice))")
-    _ -> respond(status: 404)
+      |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 

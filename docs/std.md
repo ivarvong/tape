@@ -10,7 +10,7 @@ The examples under a function (`> expression`, then what it gives) are run by `t
 
 ### Respond with JSON
 
-`respond(status: …)` answers `text/plain`. `respond_as(status: …, content: Json)` answers `application/json`; then write the body with `write_json` (a record) or `write_rows` (the rows of a query). An error body is a record too.
+`json(status: …, value: …)` answers a value as `application/json`. For a body written in steps, write it first and give it its type last: `buf() |> write_rows(rows: …) |> respond_as(status: 200, content: Json)`. `empty(status: …)` answers no body. An error body is a record too.
 
 ```tape
 type Item {
@@ -21,27 +21,25 @@ type Problem {
   Problem(error: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/item") -> respond_as(status: 200, content: Json)
-      |> write_json(value: Item(id: 1, name: "lamp"))
-    _ -> respond_as(status: 404, content: Json) |> write_json(value: Problem(error: "not_found"))
+    Request(method: Get, path: "/item") -> json(status: 200, value: Item(id: 1, name: "lamp"))
+    _ -> json(status: 404, value: Problem(error: "not_found"))
   }
 }
 ```
 
-Uses: [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`write_json`](#builtin-write_json), [`write_rows`](#fn-write_rows), [`respond`](#fn-respond).
+Uses: [`json`](#fn-json), [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`write_json`](#builtin-write_json), [`write_rows`](#fn-write_rows), [`empty`](#fn-empty).
 
 ### Respond with an Atom feed
 
-`respond_as(status: 200, content: Atom)` answers `application/atom+xml` (the host adds `charset=utf-8`, which overrides an encoding declaration in the document). `Rss` is `application/rss+xml` and `Xml` is `application/xml`. Chrome renders these as pages; the service's content-security-policy is what stops a script in the document, and a host that serves them must send that policy.
+`buf() |> respond_as(status: 200, content: Atom)` answers `application/atom+xml` (the host adds `charset=utf-8`, which overrides an encoding declaration in the document). `Rss` is `application/rss+xml` and `Xml` is `application/xml`. Chrome renders these as pages; the service's content-security-policy is what stops a script in the document, and a host that serves them must send that policy.
 
 ```tape
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/feed.xml") -> respond_as(status: 200, content: Atom)
-      |> append(view: "<feed xmlns='http://www.w3.org/2005/Atom'></feed>")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/feed.xml") -> buf() |> append(view: "<feed xmlns='http://www.w3.org/2005/Atom'></feed>") |> respond_as(status: 200, content: Atom)
+    _ -> empty(status: 404)
   }
 }
 ```
@@ -53,11 +51,10 @@ Uses: [`respond_as`](#fn-respond_as), [`Content`](#type-content), [`respond`](#f
 `Request(query)` is the raw text after `?` (`None` when there is no `?`). A query string is encoded as a form is, so `form_field(body: query, name: "limit")` reads one parameter, decoded (`+` and `%XX`). The path never holds the query.
 
 ```tape
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/items", query) -> respond(status: 200)
-      |> append(view: "limit \(limit_of(query))")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/items", query) -> buf() |> append(view: "limit \(limit_of(query))") |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -80,12 +77,11 @@ Uses: [`Request`](#type-request), [`form_field`](#fn-form_field), [`decimal`](#f
 ```tape
 type Id = Int where self >= 1 and self <= 9007199254740991
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/items/" ++ decimal(Id(id))) -> respond(status: 200)
-      |> append(view: "item \(id)")
-    Request(method: "GET", path: "/items/" ++ _) -> respond(status: 400) |> append(view: "bad id")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/items/" ++ decimal(Id(id))) -> buf() |> append(view: "item \(id)") |> respond(status: 200)
+    Request(method: Get, path: "/items/" ++ _) -> buf() |> append(view: "bad id") |> respond(status: 400)
+    _ -> empty(status: 404)
   }
 }
 ```
@@ -108,18 +104,18 @@ type Problem {
   Problem(error: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/items", body) -> created(body)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/items", body) -> created(body)
+    _ -> empty(status: 404)
   }
 }
 
-fn created(body: View) -> Buf {
+fn created(body: View) -> Response {
   let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else {
-    Err(error) -> respond_as(status: 400, content: Json) |> write_json(value: Problem(error))
+    Err(error) -> json(status: 400, value: Problem(error))
   }
-  respond(status: 201) |> append(view: "\(qty) of \(name)")
+  buf() |> append(view: "\(qty) of \(name)") |> respond(status: 201)
 }
 ```
 
@@ -138,18 +134,17 @@ type Line {
   Line(name: View, double: Int)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", body) -> counted(items: decode(json: body, as: List[Item]))
-    _ -> respond_as(status: 200, content: Json)
-      |> write_json(value: map(list: stock(), by: fn(i: Item) -> Line { Line(name: i.name, double: 2 * i.qty) }))
+    Request(method: Post, body) -> counted(items: decode(json: body, as: List[Item]))
+    _ -> json(status: 200, value: map(list: stock(), by: fn(i: Item) -> Line { Line(name: i.name, double: 2 * i.qty) }))
   }
 }
 
-fn counted(items: Result[List[Item], View]) -> Buf {
+fn counted(items: Result[List[Item], View]) -> Response {
   match items {
-    Ok(value) -> respond(status: 200) |> append(view: "\(length(list: value)) items")
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Ok(value) -> buf() |> append(view: "\(length(list: value)) items") |> respond(status: 200)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }
 
@@ -167,12 +162,12 @@ Money is a `Dec[2]`: `12.30` is one, `price * qty` is exact, and a hole or `writ
 
 ```tape
 // three at the price in the query, with tax at 8.875% rounded once to the cent, half away from zero
-fn handle(raw: View) -> Buf {
-  let Some(value: price) = parse_dec(text: query_of(raw), scale: 2) else -> respond(status: 400)
+fn handle(raw: View) -> Response {
+  let Some(value: price) = parse_dec(text: query_of(raw), scale: 2) else -> empty(status: 400)
   let net = price * 3
   let tax = mul(a: net, by: 0.08875, scale: 2, rounding: HalfUp)
   let each = div(a: net + tax, by: 3, scale: 2, rounding: Down)
-  respond(status: 200) |> append(view: "\(net) + \(tax) = \(net + tax), \(each) each")
+  buf() |> append(view: "\(net) + \(tax) = \(net + tax), \(each) each") |> respond(status: 200)
 }
 
 fn query_of(raw: View) -> View {
@@ -197,10 +192,10 @@ fn slug_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/s/" ++ Slug(s)) -> respond(status: 200) |> append(view: s)
-    _ -> respond(status: 400)
+    Request(method: Get, path: "/s/" ++ Slug(s)) -> buf() |> append(view: s) |> respond(status: 200)
+    _ -> empty(status: 400)
   }
 }
 ```
@@ -212,9 +207,9 @@ Uses: [`every_byte`](#fn-every_byte), [`is_lower`](#fn-is_lower), [`is_digit`](#
 `scan(v:, at:, set:)` is the first position at or after `at` whose byte is one of `set`, a text literal, or `len(v)` when none is. It reads 16 bytes at a time and costs one step per 16 bytes read, rounded up. A CSV separator, the bytes HTML escapes and the bytes a line of Markdown stops on are sets of this form. `scan_plain(v:, at:)` is that scan for the bytes that end a JSON string's plain run.
 
 ```tape
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let at = scan(raw, at: 0, set: "*&<>")
-  respond(status: 200) |> append(view: slice(raw, from: 0, to: at))
+  buf() |> append(view: slice(raw, from: 0, to: at)) |> respond(status: 200)
 }
 ```
 
@@ -225,15 +220,15 @@ Uses: [`scan`](#builtin-scan), [`slice`](#builtin-slice), [`respond`](#fn-respon
 `header_of(request: r, name: "if-none-match")` is the header's value, `None` when it was not sent (the service passes accept, accept-language, content-type, if-match, if-none-match, if-modified-since, idempotency-key, user-agent, webhook-id, webhook-timestamp, webhook-signature and x-… (but not x-forwarded-… or x-real-ip), never cookie or authorization; and its own `tape-base`, the URL the program's `/` is at, without the last slash, for links and redirects to its other pages). `header(name:, value:)` adds one to an answer, before or after the body; the content type is `respond_as`'s.
 
 ```tape
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "GET", path: "/old") -> respond(status: 301) |> header(name: "location", value: "/new")
-    Request(method: "GET", path: "/new") -> match header_of(request: r, name: "if-none-match") {
-      Some(value: "v1") -> respond(status: 304)
-      _ -> respond(status: 200) |> header(name: "etag", value: "v1") |> append(view: "new")
+    Request(method: Get, path: "/old") -> empty(status: 301) |> header(name: "location", value: "/new")
+    Request(method: Get, path: "/new") -> match header_of(request: r, name: "if-none-match") {
+      Some(value: "v1") -> empty(status: 304)
+      _ -> buf() |> append(view: "new") |> respond(status: 200) |> header(name: "etag", value: "v1")
     }
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 ```
@@ -245,14 +240,14 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 `hmac_sha256_verify(key:, data:, mac:)` is True when `mac` is the HMAC-SHA-256 of `data` under `key`, and compares every byte whatever they hold; `==` on two Views stops at the first byte that differs, which a caller can see in the time and the steps, so a signature is never checked with `==`. The mac arrives as text: `from_base64` reads it, or `from_base64url` for base64url without padding (each `None` for text that is not exactly an encoding). `sha256(data:)` and `hmac_sha256(key:, data:)` give 32 raw bytes; `hex`, `base64` and `base64url` write bytes as text. All are std code, metered in steps like any other (66 a 64-byte block). Standard Webhooks signs `id.timestamp.body` and sends `v1,<base64>`; the example signs the body alone.
 
 ```tape
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let r = request(raw)
-  let Request(method: "POST", path: "/hook", body) = r else -> respond(status: 404)
-  let Some(value: sent) = header_of(request: r, name: "x-signature") else -> respond(status: 401)
-  let Some(value: mac) = from_base64(text: sent) else -> respond(status: 401)
+  let Request(method: Post, path: "/hook", body) = r else -> empty(status: 404)
+  let Some(value: sent) = header_of(request: r, name: "x-signature") else -> empty(status: 401)
+  let Some(value: mac) = from_base64(text: sent) else -> empty(status: 401)
   match hmac_sha256_verify(key: signing_key(), data: body, mac) {
-    True -> respond(status: 204)
-    False -> respond(status: 401)
+    True -> empty(status: 204)
+    False -> empty(status: 401)
   }
 }
 
@@ -270,7 +265,7 @@ Uses: [`hmac_sha256_verify`](#fn-hmac_sha256_verify), [`hmac_sha256`](#fn-hmac_s
 - [std/core.tape](#stdcoretape): [`Option`](#type-option), [`Move`](#type-move), [`Result`](#type-result), [`CallError`](#type-callerror), [`Done`](#type-done), [`Wake`](#type-wake), [`Rounding`](#type-rounding), [`value_or`](#fn-value_or), [`Step`](#type-step), [`same`](#fn-same), [`find_text`](#fn-find_text), [`concat`](#fn-concat)
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at), [`utf8_end`](#fn-utf8_end)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex_value`](#fn-hex_value), [`is_json`](#fn-is_json), [`json_member`](#fn-json_member), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
-- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html)
+- [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Method`](#type-method), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`Content`](#type-content), [`Header`](#type-header), [`Response`](#type-response), [`respond`](#fn-respond), [`respond_as`](#fn-respond_as), [`json`](#fn-json), [`empty`](#fn-empty), [`redirect`](#fn-redirect), [`header`](#fn-header), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`percent_decoded`](#fn-percent_decoded), [`write_html`](#fn-write_html)
 - [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
@@ -304,7 +299,7 @@ The bytes from `from` up to, not including, `to`; no copy. `v[i]` is one byte, a
 buf() -> Buf
 ```
 
-A new, empty buffer to write into. A response starts as one: `respond`.
+A new, empty buffer to write into: the body of an answer is written into one, then given its status with `respond`.
 
 ### builtin wrapping_add
 
@@ -709,7 +704,7 @@ Needs `Timer`. Asks the host to run the program's `export fn woken(…, message:
 ### builtin rollback
 
 ```tape
-rollback(out: Buf) -> Buf
+rollback(out: Response) -> Response
 ```
 
 Answers `out` and undoes this request's writes since its last call.
@@ -1408,7 +1403,7 @@ Every row of a query as a JSON array, each row written as write_json writes it.
 
 ## std/http.tape
 
-A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY. A request that came through a published name's public route (no token: anyone) ends its line with a word, METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. The request headers the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case. `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests.
+A request, parsed. The host passes METHOD SP TARGET LF BODY; the target is PATH or PATH?QUERY. A request that came through a published name's public route (no token: anyone) ends its line with a word, METHOD SP TARGET SP public, and `caller` is Anyone; every other request is the operator's. The request headers the host passes follow on the same line, each after a carriage return, `CR name: value`, names in lower case. `query` is None when the target has no `?`, and Some("") when it ends with one: they are different requests. What `handle` gives back is a Response (below), never bytes: the host writes the status and the headers from it.
 
 ### type Caller
 
@@ -1421,11 +1416,35 @@ type Caller {
 
 Who sent a request: the operator (with the token), or Anyone, through a published name's public route.
 
+### type Method
+
+```tape
+type Method {
+  Get
+  Head
+  Post
+  Put
+  Patch
+  Delete
+  Options
+  Other(name: View)
+}
+```
+
+The method of a request. A token HTTP does not name here (`PROPFIND`, a method in lower case: methods are case-sensitive) is Other with the token. The service runs a HEAD request as the GET it stands for and sends no body, so `handle` sees Get; Head is given only by a host that passes HEAD through.
+
 ### type Request
 
 ```tape
 type Request {
-  Request(method: View, path: View, query: Option[View], body: View, caller: Caller, headers: View)
+  Request(
+    method: Method,
+    path: View,
+    query: Option[View],
+    body: View,
+    caller: Caller,
+    headers: View
+  )
 }
 ```
 
@@ -1433,8 +1452,8 @@ A request as `request(raw)` gives it. `path` is the target before `?`, as sent (
 
 ```
 match request(raw) {
-  Request(method: "GET", path: "/items/" ++ decimal(id)) -> …
-  Request(method: "POST", path: "/items", body) -> …
+  Request(method: Get, path: "/items/" ++ decimal(id)) -> …
+  Request(method: Post, path: "/items", body) -> …
 }
 ```
 
@@ -1448,7 +1467,9 @@ The request `handle` is given, parsed.
 
 ```
 > request(raw: "POST /holds?x=1 public\nqty=1")
-Request(method: "POST", path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
+Request(method: Post, path: "/holds", query: Some(value: "x=1"), body: "qty=1", caller: Anyone)
+> request(raw: "PROPFIND /k\n").method
+Other(name: "PROPFIND")
 > request(raw: "GET /k/a b\n")
 Request(path: "/k/a b", caller: Operator)
 > request(raw: "GET /items?\n")
@@ -1489,36 +1510,6 @@ ASCII letters in lower case; every other byte as it is.
 "content-type"
 ```
 
-### fn respond
-
-```tape
-fn respond(status: Int) -> Buf
-```
-
-A response: the status, a line feed, then the body written by the caller. It is served as text/plain. The status line is in the Buf, so text to keep (a body to store, a value to compare) starts from `buf()`, not from here.
-
-```
-> freeze(buf: respond(status: 200) |> append(view: "ok"))
-"200\nok"
-> freeze(buf: buf() |> append(view: "ok"))
-"ok"
-```
-
-### fn header
-
-```tape
-fn header(out: Buf, name: View, value: View) -> Buf
-```
-
-A response header, on an answer begun by respond or respond_as: `respond(status: 302) |> header(name: "location", value: url)`. The status line carries it, after a carriage return: STATUS[ SP TYPE](CR name: value)* LF BODY. A name is 1 to 64 token characters (letters, digits, and !#$%&'*+-.^_`|~) and a value up to 4096 bytes with no CR, LF or NUL; the host refuses any other (the request is answered 500 and says why), and those it sets itself (content-type, which is respond_as's, content-length, set-cookie, the security headers…).
-
-```
-> respond(status: 302) |> header(name: "Location", value: "/links/7") |> freeze
-"302\rlocation: /links/7\n"
-> respond(status: 200) |> append(view: "hi") |> header(name: "cache-control", value: "no-store") |> freeze
-"200\rcache-control: no-store\nhi"
-```
-
 ### type Content
 
 ```tape
@@ -1535,21 +1526,104 @@ type Content {
 }
 ```
 
-The content types the service serves. respond_as(status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed.
+The content types the service serves: respond_as(body: b, status: 200, content: Html) answers text/html. Atom, Rss and Xml answer application/atom+xml, application/rss+xml and application/xml. The host labels those three, and the text types, charset=utf-8, which overrides an encoding declaration in the document. Chrome renders these as pages: a script in the XHTML namespace runs, and nosniff does not stop it. The service's content-security-policy does, and any host that serves these types must send that policy. application/xhtml+xml is not a Content: a page is Html. text/xml is not one: it is obsolete and was sniffed.
+
+### type Header
+
+```tape
+type Header {
+  Header(name: View, value: View)
+}
+```
+
+A response header, as `header` adds one: the name in lower case, and the value as given.
+
+### type Response
+
+```tape
+type Response {
+  Response(status: Int, content: Content, headers: List[Header], body: View)
+}
+```
+
+What `handle` answers: a status, the type of the body, the headers set with `header` (the last one set first), and the body. The host writes the status line and the headers from these fields, so no byte of the body, from a request or a row, can become a status or a header. Build one with respond, respond_as, json, empty or redirect. The host refuses (answers 500, and says why) a status outside 200 to 599, a body on 204, 205 or 304, a header it sets itself, and a name or a value it would not send.
+
+### fn respond
+
+```tape
+fn respond(body: Buf, status: Int) -> Response
+```
+
+The body written so far, answered as text/plain with a status: the body is written first, from `buf()`, and the status is attached last.
+
+```
+> buf() |> append(view: "ok") |> respond(status: 200)
+Response(status: 200, content: Text, headers: Nil, body: "ok")
+```
 
 ### fn respond_as
 
 ```tape
-fn respond_as(status: Int, content: Content) -> Buf
+fn respond_as(body: Buf, status: Int, content: Content) -> Response
 ```
 
-A response with a content type: the status, then the body written by the caller. respond_as(status: 200, content: Json) answers application/json; `respond` answers text/plain. Atom is a feed.
+The body written so far, answered with a status and a content type: `buf() |> write_rows(rows: r) |> respond_as(status: 200, content: Json)` answers application/json, `content: Atom` a feed. A value as JSON is `json`, one call.
 
 ```
-> respond_as(status: 201, content: Json) |> append(view: "{}") |> freeze
-"201 application/json\n{}"
-> respond_as(status: 200, content: Atom) |> append(view: "<feed/>") |> freeze
-"200 application/atom+xml\n<feed/>"
+> buf() |> append(view: "<feed/>") |> respond_as(status: 200, content: Atom)
+Response(status: 200, content: Atom, body: "<feed/>")
+```
+
+### fn json
+
+```tape
+fn json[T](status: Int, value: T) -> Response
+```
+
+A value as JSON, answered as application/json: `json(status: 201, value: order)` is `buf() |> write_json(value: order) |> respond_as(status: 201, content: Json)`.
+
+```
+> json(status: 201, value: Cons(head: 7, tail: Nil))
+Response(status: 201, content: Json, body: "[7]")
+```
+
+### fn empty
+
+```tape
+fn empty(status: Int) -> Response
+```
+
+A response with no body: `empty(status: 204)` for a delete, `empty(status: 304)` for a fresh cache.
+
+```
+> empty(status: 204)
+Response(status: 204, body: "")
+```
+
+### fn redirect
+
+```tape
+fn redirect(to: View) -> Response
+```
+
+A redirect to `to`, a path or a URL: 303 See Other with a location. 303 is the one a browser follows with a GET whatever the request was, which is what answering a form's POST with the page to go to means; 302 lets a client send the POST again. Another status is `empty(status: 308) |> header(name: "location", value: to)`.
+
+```
+> redirect(to: "/links/7")
+Response(status: 303, headers: Cons(head: Header(name: "location", value: "/links/7"), tail: Nil))
+```
+
+### fn header
+
+```tape
+fn header(out: Response, name: View, value: View) -> Response
+```
+
+A response header: `respond(body: b, status: 200) |> header(name: "cache-control", value: "no-store")`. The name is written in lower case. A name is 1 to 64 token characters (letters, digits, and !#$%&'*+-.^_`|~) and a value up to 4096 bytes of printable ASCII, spaces and tabs (no CR, LF, NUL, or byte past ASCII: percent-encode a URL); the host refuses any other (the request is answered 500, and says why), and those it sets itself (content-type, which is respond_as's, content-length, set-cookie, the security headers…), and more than 32. Adding one copies nothing: the body is not touched.
+
+```
+> empty(status: 302) |> header(name: "Location", value: "/links/7")
+Response(status: 302, headers: Cons(head: Header(name: "location", value: "/links/7"), tail: Nil))
 ```
 
 ### fn content_type
@@ -1558,7 +1632,7 @@ A response with a content type: the status, then the body written by the caller.
 fn content_type(content: Content) -> View
 ```
 
-The media type a Content is served as. The host writes the Content-Type header from this token.
+The media type a Content is served as. The host writes the Content-Type header from it.
 
 ```
 > content_type(content: Json)

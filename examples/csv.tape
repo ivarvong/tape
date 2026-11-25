@@ -4,12 +4,13 @@
 type Stat { Stat(count: Int, total: Int, max: Int) }
 type Tally { Tally(rows: Int, rejected: Int, by: Map[Stat]) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match strip(line: until(v: raw, byte: 10)) {
     "ts,user,amount,country" -> report(
       tally: lines(rest: after(v: raw, byte: 10), tally: Tally(rows: 0, rejected: 0, by: Empty))
     )
-    _ -> append(buf: buf(), view: "{\"error\":\"header\"}")
+      |> respond_as(status: 200, content: Json)
+    _ -> buf() |> append(view: "{\"error\":\"header\"}") |> respond_as(status: 200, content: Json)
   }
 }
 

@@ -33,11 +33,12 @@ export fn release(db: Sql, message: Release) -> Result[Released, View] {
   Ok(value)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/stock") -> respond(status: 200)
+    Request(method: Get, path: "/stock") -> buf()
       |> write_rows(rows: sql_all(row: Item, query: "SELECT * FROM stock ORDER BY sku"))
-    _ -> respond(status: 404) |> append(view: "{\"error\":\"no such route\"}")
+      |> respond(status: 200)
+    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
   }
 }
 

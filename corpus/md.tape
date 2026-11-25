@@ -102,11 +102,12 @@ type Tail {
   Tail(dest: View, title: Option[View], end: Int)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/render", body) -> respond_as(status: 200, content: Html)
+    Request(method: Post, path: "/render", body) -> buf()
       |> write_doc(text: body)
-    _ -> respond(status: 404) |> append(view: "POST /render with Markdown as the body\n")
+      |> respond_as(status: 200, content: Html)
+    _ -> buf() |> append(view: "POST /render with Markdown as the body ") |> respond(status: 404)
   }
 }
 

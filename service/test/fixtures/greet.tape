@@ -2,10 +2,13 @@
 // the host no longer has, so the service must rebuild it from this source before it runs (test/rebuild.test.ts).
 type Hello { Hello(name: View) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let r = request(raw)
   match decode(json: r.body, as: Hello) {
-    Ok(value: Hello(name)) -> respond(status: 200) |> append(view: "hello ") |> append(view: name)
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Ok(value: Hello(name)) -> buf()
+      |> append(view: "hello ")
+      |> append(view: name)
+      |> respond(status: 200)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
 }

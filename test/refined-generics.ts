@@ -4,7 +4,7 @@
 // type is the same type or nothing. The answers are the same on every build and in the interpreter.
 import '../node25.ts';
 import { interpret } from '../interp.ts';
-import { bare, built, codes, finish, handleBare, moduleOf, same, std } from './harness.ts';
+import { bare, built, codes, finish, handleBare, moduleOf, same, std, answered } from './harness.ts';
 
 const DELAY = 'type Delay = Int where self >= 0 and self <= 3600\n\n';
 const prog = (body: string): string => `${DELAY}${body}`;
@@ -57,18 +57,18 @@ fn twice(n: Int) -> Int {
   n * 2
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let Request(body) = request(raw)
   match len(body) {
     Delay(d) -> answer(d, body)
-    _ -> respond(status: 400)
+    _ -> empty(status: 400)
   }
 }
 
-fn answer(d: Delay, body: View) -> Buf {
+fn answer(d: Delay, body: View) -> Response {
   match body {
     Slug(s) -> written(d, s)
-    _ -> respond(status: 400)
+    _ -> empty(status: 400)
   }
 }
 
@@ -96,8 +96,8 @@ fn named(s: Slug) -> List[Slug] {
   Cons(head: s, tail: Nil)
 }
 
-fn written(d: Delay, s: Slug) -> Buf {
-  respond(status: 200)
+fn written(d: Delay, s: Slug) -> Response {
+  buf()
     |> write_int(value: or_int(given: one(d), otherwise: 5))
     |> append(view: " ")
     |> write_int(value: or_int(given: None, otherwise: 5))
@@ -112,7 +112,7 @@ fn written(d: Delay, s: Slug) -> Buf {
     |> append(view: " ")
     |> write_int(value: slugs(xs: named(s)))
     |> append(view: " ")
-    |> write_int(value: apply(f: twice, d))
+    |> write_int(value: apply(f: twice, d)) |> respond(status: 200)
 }
 `);
 same('an Option, a List, a Result of a refined type, and a function of its base, compile', codes(accepted), []);
@@ -128,7 +128,7 @@ for (const [name, options] of [
   same(`${name} answers the same`, handleBare(b, input('abc')), want);
 }
 const interp = interpret([...std, { name: 'program.tape', text: accepted }]);
-same('the interpreter answers the same', new TextDecoder().decode(interp.handle(input('abc'))), want);
+same('the interpreter answers the same', answered(interp.handle(input('abc'))), want);
 
 // ---- a type variable bound by a refined argument and by its base takes the base: value_or(given: Option[Most],
 // otherwise: 5) is an Int with nothing around it to say so (an SQL argument), where it was C14 on `5`
@@ -141,9 +141,9 @@ fn most(n: Int) -> Option[Most] {
   }
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let n = value_or(given: most(n: len(raw)), otherwise: 5)
-  respond(status: 200) |> write_int(value: n)
+  buf() |> write_int(value: n) |> respond(status: 200)
 }
 `);
 same('a refined argument and its base bind the base', codes(widened), []);
@@ -161,8 +161,8 @@ const refused = (sig: string, arg: string, setup = ''): string[] =>
   0
 }
 
-fn handle(raw: View) -> Buf {
-${setup}  respond(status: 200) |> write_int(value: take(${arg}))
+fn handle(raw: View) -> Response {
+${setup}  buf() |> write_int(value: take(${arg})) |> respond(status: 200)
 }
 `),
   ).map(c => c.split(':')[0] ?? '');
@@ -179,8 +179,8 @@ fn apply(f: Fn[Int, Int]) -> Int {
   f(-7)
 }
 
-fn handle(raw: View) -> Buf {
-  respond(status: 200) |> write_int(value: apply(f: half))
+fn handle(raw: View) -> Response {
+  buf() |> write_int(value: apply(f: half)) |> respond(status: 200)
 }
 `),
   ).map(c => c.split(':')[0] ?? ''),
@@ -202,10 +202,10 @@ fn boxed(d: Delay) -> Box[Delay] {
   Box(item: d)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match len(raw) {
-    Delay(d) -> respond(status: 200) |> write_int(value: open(b: boxed(d)))
-    _ -> respond(status: 400)
+    Delay(d) -> buf() |> write_int(value: open(b: boxed(d))) |> respond(status: 200)
+    _ -> empty(status: 400)
   }
 }
 `),

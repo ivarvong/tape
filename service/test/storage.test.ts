@@ -5,7 +5,7 @@ import { anyNumber, at, call, got, num } from './help.ts';
 /** A number in what /storage answered. */
 const size = (storage: unknown, ...path: string[]): number => num(at(storage, ...path));
 it("a name's storage grows by a log row per request, reads included, and the log holds the request bytes", async () => {
-  const src = 'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_text(text: "ok")\n}\n';
+  const src = 'fn handle(raw: View) -> Response {\n  buf() |> write_text(text: "ok") |> respond(status: 200)\n}\n';
   expect((await call('/store/echo', { method: 'POST', body: src })).status).toBe(201);
   expect(await got('/store/none/storage')).toEqual({
     name: { bytes: anyNumber, versions: 0 },

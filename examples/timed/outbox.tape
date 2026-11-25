@@ -40,7 +40,7 @@ type Delivery { Delivery(
   round: Int,
   note: View
 ) }
-type Post { Post(topic: View, body: View) }
+type Publish { Publish(topic: View, body: View) }
 type Posted { Posted(status: Int) }
 // a redelivery is a new command: the round is part of the key
 type Once { Once(delivery: Int, round: Int) }
@@ -50,12 +50,11 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, hook: Remote, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, hook: Remote, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/deliveries", body) -> made(body) |> rendered
-    Request(method: "GET", path: "/deliveries/" ++ decimal(id)) -> shown(found: load(id))
-      |> rendered
-    Request(method: "POST", path: "/deliveries/" ++ decimal(id) ++ "/redeliver") -> redeliver(id)
+    Request(method: Post, path: "/deliveries", body) -> made(body) |> rendered
+    Request(method: Get, path: "/deliveries/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Post, path: "/deliveries/" ++ decimal(id) ++ "/redeliver") -> redeliver(id)
       |> rendered
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
@@ -123,7 +122,7 @@ fn send(found: Option[Delivery]) -> Outcome {
       reply: call(
         to: hook,
         method: "post",
-        send: Post(topic, body),
+        send: Publish(topic, body),
         reply: Posted,
         within: 2000,
         once: Once(delivery: id, round)
@@ -215,13 +214,14 @@ fn shown(found: Option[Delivery]) -> Outcome {
   Shown(status: 200, delivery: d)
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, delivery) -> write_json(out: respond(status), value: delivery)
-    Problem(status, reason) -> respond(status)
+    Shown(status, delivery) -> write_json(out: buf(), value: delivery) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

@@ -5,43 +5,39 @@ migration 1 "visits" {
 
 type Count { Count(n: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/", caller) -> page(
+    Request(method: Get, path: "/", caller) -> page(
       caller,
       found: sql_first(row: Count, query: "SELECT count(*) AS n FROM visits")
     )
-    Request(method: "GET", path: "/n.json") -> counted(
+    Request(method: Get, path: "/n.json") -> counted(
       n: sql_first(row: Count, query: "SELECT count(*) AS n FROM visits")
     )
-    Request(method: "POST", path: "/visit", body) -> {
+    Request(method: Post, path: "/visit", body) -> {
       let _ = sql_exec(repeat: True, query: "INSERT INTO visits(who) VALUES (:body)", body)
       visited()
     }
-    Request(method: "POST", path: "/reset", caller: Operator) -> append(
-      buf: respond(status: 200),
-      view: "reset"
-    )
-    Request(method: "POST", path: "/reset") -> append(
-      buf: respond(status: 403),
-      view: "the operator's"
-    )
-    _ -> append(buf: respond(status: 404), view: "no such page")
+    Request(method: Post, path: "/reset", caller: Operator) -> append(buf: buf(), view: "reset")
+      |> respond(status: 200)
+    Request(method: Post, path: "/reset") -> append(buf: buf(), view: "the operator's")
+      |> respond(status: 403)
+    _ -> append(buf: buf(), view: "no such page") |> respond(status: 404)
   }
 }
 
-fn page(caller: Caller, found: Option[Count]) -> Buf {
-  let Some(value: Count(n)) = found else -> respond(status: 500)
-  respond_as(status: 200, content: Html) |> append(view: "<p>\(who(caller)) \(n)</p>")
+fn page(caller: Caller, found: Option[Count]) -> Response {
+  let Some(value: Count(n)) = found else -> empty(status: 500)
+  buf() |> append(view: "<p>\(who(caller)) \(n)</p>") |> respond_as(status: 200, content: Html)
 }
 
-fn counted(n: Option[Count]) -> Buf {
-  let Some(value: c) = n else -> respond(status: 500)
-  write_json(out: respond_as(status: 200, content: Json), value: c)
+fn counted(n: Option[Count]) -> Response {
+  let Some(value: c) = n else -> empty(status: 500)
+  write_json(out: buf(), value: c) |> respond_as(status: 200, content: Json)
 }
 
-fn visited() -> Buf {
-  append(buf: respond_as(status: 201, content: Text), view: "ok")
+fn visited() -> Response {
+  append(buf: buf(), view: "ok") |> respond_as(status: 201, content: Text)
 }
 
 fn who(caller: Caller) -> View {

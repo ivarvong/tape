@@ -4,10 +4,10 @@
 type Charge { Charge(order: Int) }
 type Charged { Charged(payment: Int) }
 
-fn handle(raw: View, payments: Remote, timer: Timer) -> Buf {
+fn handle(raw: View, payments: Remote, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/pay/" ++ decimal(order)) -> paid(order, reply: charged(order))
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/pay/" ++ decimal(order)) -> paid(order, reply: charged(order))
+    _ -> empty(status: 404)
   }
 }
 
@@ -31,13 +31,13 @@ fn charged(order: Int) -> Result[Charged, CallError] {
   )
 }
 
-fn paid(order: Int, reply: Result[Charged, CallError]) -> Buf {
+fn paid(order: Int, reply: Result[Charged, CallError]) -> Response {
   match reply {
-    Ok(value: Charged(payment)) -> respond(status: 201) |> write_int(value: payment)
+    Ok(value: Charged(payment)) -> buf() |> write_int(value: payment) |> respond(status: 201)
     Err(error: Timeout) -> {
       do wake(after: 1000, key: order)
-      respond(status: 202)
+      empty(status: 202)
     }
-    Err(error) -> respond(status: 503)
+    Err(error) -> empty(status: 503)
   }
 }

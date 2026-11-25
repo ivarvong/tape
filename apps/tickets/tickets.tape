@@ -209,41 +209,42 @@ type Outcome {
   Undo(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, pay: Remote, clock: Clock, timer: Timer, dice: Entropy) -> Buf {
+fn handle(raw: View, db: Sql, pay: Remote, clock: Clock, timer: Timer, dice: Entropy) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/events") -> events(
-      out: push(buf: respond_as(status: 200, content: Json), byte: 91),
+    Request(method: Get, path: "/events") -> events(
+      out: push(buf: buf(), byte: 91),
       rows: sql_all(row: Event, query: "SELECT * FROM events ORDER BY id"),
       first: True
     )
-    Request(method: "GET", path: "/events/" ++ decimal(id)) -> event_page(
+      |> respond_as(status: 200, content: Json)
+    Request(method: Get, path: "/events/" ++ decimal(id)) -> event_page(
       found: sql_first(row: Event, query: "SELECT * FROM events WHERE id = :id", id)
     )
-    Request(
-      method: "GET",
-      path: "/users/" ++ percent_decoded(buyer) ++ "/tickets"
-    ) -> respond_as(status: 200, content: Json)
+    Request(method: Get, path: "/users/" ++ percent_decoded(buyer) ++ "/tickets") -> buf()
       |> write_rows(rows: sql_all(
         row: Ticket,
         query: "SELECT * FROM tickets WHERE owner = :buyer ORDER BY id",
         buyer
       ))
+      |> respond_as(status: 200, content: Json)
     Request(
-      method: "GET",
+      method: Get,
       path: "/holds/" ++ decimal(id)
     ) -> rendered(outcome: shown_hold(found: load_hold(id)))
-    Request(method: "GET", path: "/audit", caller: Operator) -> audit(out: json_head(status: 200))
-    Request(method: "GET", path: "/") -> home(out: page_top(status: 200, title: "Box office"))
-    Request(method: "GET", path: "/hold", query: Some(value: q)) -> hold_page(
+    Request(method: Get, path: "/audit", caller: Operator) -> buf()
+      |> audit
+      |> respond_as(status: 200, content: Json)
+    Request(method: Get, path: "/") -> home(out: page_top(title: "Box office"))
+    Request(method: Get, path: "/hold", query: Some(value: q)) -> hold_page(
       status: 200,
       found: load_hold(id: number(field: form_field(body: q, name: "id")))
     )
-    Request(method: "GET", path: "/me", query: Some(value: q)) -> me_page(
+    Request(method: Get, path: "/me", query: Some(value: q)) -> me_page(
       status: 200,
       buyer: text_of(field: form_field(body: q, name: "buyer"))
     )
     Request(
-      method: "POST",
+      method: Post,
       path: "/" ++ form,
       query,
       body
@@ -252,9 +253,9 @@ fn handle(raw: View, db: Sql, pay: Remote, clock: Clock, timer: Timer, dice: Ent
   }
 }
 
-fn routed(method: View, path: View, body: View, caller: Caller) -> Outcome {
+fn routed(method: Method, path: View, body: View, caller: Caller) -> Outcome {
   match method {
-    "POST" -> posted(path, body, caller)
+    Post -> posted(path, body, caller)
     _ -> Problem(status: 404, reason: "no such route")
   }
 }
@@ -1179,24 +1180,22 @@ fn transfer(id: Int, body: View) -> Outcome {
 
 // ---- rendering (JSON)
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    ShowEvent(status, event) -> event_json(out: json_head(status), event)
-    ShowHold(status, hold) -> write_json(out: json_head(status), value: hold)
-    ShowTicket(status, ticket) -> write_json(out: json_head(status), value: ticket)
-    ShowWait(status, wait) -> write_json(out: json_head(status), value: wait)
-    ShowTier(status, tier) -> write_json(out: json_head(status), value: tier)
-    Problem(status, reason) -> write_json(out: json_head(status), value: Failed(error: reason))
-    Reported(status, what) -> write_json(out: json_head(status), value: Finished(done: what))
-    Undo(status, reason) -> rollback(
-      out: write_json(out: json_head(status), value: Failed(error: reason))
-    )
+    ShowEvent(status, event) -> buf() |> event_json(event) |> respond_as(status, content: Json)
+    ShowHold(status, hold) -> json(status, value: hold)
+    ShowTicket(status, ticket) -> json(status, value: ticket)
+    ShowWait(status, wait) -> json(status, value: wait)
+    ShowTier(status, tier) -> json(status, value: tier)
+    Problem(status, reason) -> json(status, value: Failed(error: reason))
+    Reported(status, what) -> json(status, value: Finished(done: what))
+    Undo(status, reason) -> rollback(out: json(status, value: Failed(error: reason)))
   }
 }
 
-fn event_page(found: Option[Event]) -> Buf {
+fn event_page(found: Option[Event]) -> Response {
   match found {
-    Some(value: event) -> event_json(out: json_head(status: 200), event)
+    Some(value: event) -> buf() |> event_json(event) |> respond_as(status: 200, content: Json)
     None -> rendered(outcome: Problem(status: 404, reason: "no such event"))
   }
 }
@@ -1235,10 +1234,6 @@ fn events(out: Buf, rows: Rows[Event], first: Bool) -> Buf {
   }
 }
 
-fn json_head(status: Int) -> Buf {
-  respond_as(status, content: Json)
-}
-
 // ---- pages (HTML)
 // Forms post application/x-www-form-urlencoded; each form is turned into the JSON body its API route takes, so
 // the checks (refined types, the key) are the API's. A hold form carries a key made when the page was drawn, so
@@ -1262,7 +1257,7 @@ fn is_form(form: View) -> Bool {
   form == "buy" or form == "wait" or form == "pay" or form == "release" or form == "give"
 }
 
-fn form_post(form: View, query: View, body: View) -> Buf {
+fn form_post(form: View, query: View, body: View) -> Response {
   let id = number(field: form_field(body: query, name: "id"))
   match form {
     "buy" -> held_page(outcome: new_hold(body: hold_json(form: body)))
@@ -1304,7 +1299,7 @@ fn hold_json(form: View) -> View {
   ) |> append(view: "}"))
 }
 
-fn held_page(outcome: Outcome) -> Buf {
+fn held_page(outcome: Outcome) -> Response {
   match outcome {
     ShowHold(status, hold) -> hold_page(status, found: Some(value: hold))
     Problem(status, reason) -> message_page(status, title: "No hold", text: reason)
@@ -1313,7 +1308,7 @@ fn held_page(outcome: Outcome) -> Buf {
   }
 }
 
-fn waited_page(outcome: Outcome) -> Buf {
+fn waited_page(outcome: Outcome) -> Response {
   match outcome {
     ShowWait(
       status,
@@ -1331,16 +1326,16 @@ fn waited_page(outcome: Outcome) -> Buf {
   }
 }
 
-fn waiting_page(status: Int, buyer: View) -> Buf {
-  page_top(status, title: "On the waitlist")
+fn waiting_page(status: Int, buyer: View) -> Response {
+  page_top(title: "On the waitlist")
     |> append(view: "<p>You are on the waitlist. When seats come back, the first in line gets a \
         hold of their own: look for it on ")
     |> me_link(buyer)
     |> append(view: ".</p>")
-    |> page_end
+    |> page_end(status)
 }
 
-fn after_page(outcome: Outcome) -> Buf {
+fn after_page(outcome: Outcome) -> Response {
   match outcome {
     ShowHold(status, hold) -> hold_page(status, found: Some(value: hold))
     Problem(status, reason) -> message_page(status, title: "Not done", text: reason)
@@ -1349,7 +1344,7 @@ fn after_page(outcome: Outcome) -> Buf {
   }
 }
 
-fn given_page(outcome: Outcome) -> Buf {
+fn given_page(outcome: Outcome) -> Response {
   match outcome {
     ShowTicket(status, ticket: Ticket(owner)) -> me_page(status, buyer: owner)
     Problem(status, reason) -> message_page(status, title: "Not transferred", text: reason)
@@ -1357,8 +1352,8 @@ fn given_page(outcome: Outcome) -> Buf {
   }
 }
 
-fn page_top(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
+fn page_top(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><title>")
     |> write_html(text: title)
@@ -1369,21 +1364,22 @@ fn page_top(status: Int, title: View) -> Buf {
     |> append(view: "</h1>")
 }
 
-fn page_end(out: Buf) -> Buf {
+fn page_end(out: Buf, status: Int) -> Response {
   append(
     buf: out,
     view: "<p class=note>Served by a tape program. Every request is a transaction with an effect \
         log; holds expire by a timer; payment goes to another program with a once \
         key.</p></body></html>"
   )
+    |> respond_as(status, content: Html)
 }
 
-fn message_page(status: Int, title: View, text: View) -> Buf {
-  page_top(status, title)
+fn message_page(status: Int, title: View, text: View) -> Response {
+  page_top(title)
     |> append(view: "<p class=bad>")
     |> write_html(text)
     |> append(view: "</p><p><a href=\"./\">Back to the events</a></p>")
-    |> page_end
+    |> page_end(status)
 }
 
 fn money(out: Buf, cents: Int) -> Buf {
@@ -1399,8 +1395,9 @@ fn me_link(out: Buf, buyer: View) -> Buf {
     |> append(view: "'s tickets</a>")
 }
 
-fn home(out: Buf) -> Buf {
-  page_events(out, rows: sql_all(row: Event, query: "SELECT * FROM events ORDER BY id")) |> page_end
+fn home(out: Buf) -> Response {
+  page_events(out, rows: sql_all(row: Event, query: "SELECT * FROM events ORDER BY id"))
+    |> page_end(status: 200)
 }
 
 fn page_events(out: Buf, rows: Rows[Event]) -> Buf {
@@ -1471,7 +1468,7 @@ fn tier_form(out: Buf, tier: Int, left: Int, open: Bool) -> Buf {
   }
 }
 
-fn hold_page(status: Int, found: Option[Hold]) -> Buf {
+fn hold_page(status: Int, found: Option[Hold]) -> Response {
   let Some(
     value: hold = Hold(id, tier, buyer, qty, amount, state, expires, note)
   ) = found else -> message_page(
@@ -1479,7 +1476,7 @@ fn hold_page(status: Int, found: Option[Hold]) -> Buf {
     title: "No such hold",
     text: "There is no hold with that id."
   )
-  page_top(status, title: "Hold \(id)")
+  page_top(title: "Hold \(id)")
     |> append(view: "<p>\(qty) seat(s) for ")
     |> write_html(text: buyer)
     |> append(view: ", ")
@@ -1492,7 +1489,7 @@ fn hold_page(status: Int, found: Option[Hold]) -> Buf {
     |> append(view: "<p>")
     |> me_link(buyer)
     |> append(view: "</p>")
-    |> page_end
+    |> page_end(status)
 }
 
 fn hold_note(out: Buf, note: View) -> Buf {
@@ -1547,8 +1544,8 @@ fn ticket_rows(out: Buf, rows: Rows[Ticket]) -> Buf {
 type Mine { Mine(id: Int, seat: Int, state: TicketState, event: View, tier: View) }
 type MyHold { MyHold(id: Int, qty: Int, state: HoldState, tier: View) }
 
-fn me_page(status: Int, buyer: View) -> Buf {
-  page_top(status, title: "Tickets of " ++ buyer)
+fn me_page(status: Int, buyer: View) -> Response {
+  page_top(title: "Tickets of " ++ buyer)
     |> append(
       view: "<table><tr><th>Ticket</th><th>Event</th><th>Tier</th><th>Seat</th><th></th></tr>"
     )
@@ -1570,7 +1567,7 @@ fn me_page(status: Int, buyer: View) -> Buf {
           JOIN tiers AS t ON t.id = h.tier WHERE h.buyer = :buyer ORDER BY h.id DESC LIMIT 20",
       buyer
     ))
-    |> page_end
+    |> page_end(status)
 }
 
 fn my_tickets(out: Buf, buyer: View, rows: Rows[Mine]) -> Buf {

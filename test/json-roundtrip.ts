@@ -8,10 +8,9 @@ import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { interpret } from '../interp.ts';
 import { rng } from '../sim.ts';
-import { finish, ok, std } from './harness.ts';
+import { finish, ok, std, answerBody } from './harness.ts';
 
-const enc = new TextEncoder(),
-  dec = new TextDecoder();
+const enc = new TextEncoder();
 type FT =
   | { k: 'Int' }
   | { k: 'Float' }
@@ -165,7 +164,11 @@ for (let s = 0; s < FAMILIES; s++) {
     T0 = fam[0]?.name ?? '?',
     vals = Array.from({ length: VALUES }, () => value(fam, top));
   const program = `${fam.map(d => declText(fam, d)).join('\n')}
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match raw {
 ${vals.map((v, i) => `    "e${i}" -> buf() |> write_json(value: ${tape(v)})`).join('\n')}
     "l" -> buf() |> write_json(value: ${tape(vals)})
@@ -209,12 +212,12 @@ fn again_list(decoded: Result[List[${T0}], View]) -> Buf {
     const bytes = enc.encode(input);
     let compiled: string, meant: string;
     try {
-      compiled = dec.decode(app.handle(bytes));
+      compiled = answerBody(app.handle(bytes));
     } catch (e) {
       compiled = `threw ${String(e)}`;
     }
     try {
-      meant = dec.decode(it.handle(bytes));
+      meant = answerBody(it.handle(bytes));
     } catch (e) {
       meant = `threw ${String(e)}`;
     }
@@ -267,7 +270,11 @@ ok(
 
 type Day { Day(date: View, found: Found, note: Option[View]) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match raw {
     "a" -> buf() |> write_json(value: Day(date: "d", found: Sets(ms: 5, rounds: 2), note: None))
     "b" -> buf() |> write_json(value: Day(date: "d", found: AlwaysUp, note: Some(value: "hi")))
@@ -304,8 +311,8 @@ fn numbers(d: Result[List[Int], View]) -> Buf {
     const app = instantiate(new WebAssembly.Module(b.wasm), {}),
       it = interpret(sources);
     const answer = (input: string): string => {
-      const c = dec.decode(app.handle(enc.encode(input))),
-        m = dec.decode(it.handle(enc.encode(input)));
+      const c = answerBody(app.handle(enc.encode(input))),
+        m = answerBody(it.handle(enc.encode(input)));
       return c === m ? c : `compiled ${c}, interpreted ${m}`;
     };
     const CASES: readonly (readonly [string, string, string])[] = [

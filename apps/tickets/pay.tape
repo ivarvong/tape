@@ -73,17 +73,20 @@ export fn refund(db: Sql, message: Refund) -> Result[Refunded, View] {
   Ok(value: Refunded(payment: id))
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/cards") -> write_rows(
-      out: respond_as(status: 200, content: Json),
+    Request(method: Get, path: "/cards") -> write_rows(
+      out: buf(),
       rows: sql_all(row: Card, query: "SELECT * FROM cards ORDER BY card")
     )
-    Request(method: "GET", path: "/ledger") -> write_rows(
-      out: respond_as(status: 200, content: Json),
+      |> respond_as(status: 200, content: Json)
+    Request(method: Get, path: "/ledger") -> write_rows(
+      out: buf(),
       rows: sql_all(row: Entry, query: "SELECT * FROM ledger ORDER BY id")
     )
-    _ -> append(buf: respond_as(status: 404, content: Json), view: "{\"error\":\"no such route\"}")
+      |> respond_as(status: 200, content: Json)
+    _ -> append(buf: buf(), view: "{\"error\":\"no such route\"}")
+      |> respond_as(status: 404, content: Json)
   }
 }
 

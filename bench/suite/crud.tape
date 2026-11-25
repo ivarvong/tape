@@ -14,14 +14,14 @@ type Batch { Batch(batch: Key, items: List[NewItem]) }
 type Item { Item(id: Int, key: View, batch: View, name: View, qty: Int, cents: Int) }
 type Sum { Sum(n: Int, units: Int, cents: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/items", body) -> create(body)
+    Request(method: Post, path: "/items", body) -> create(body)
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn create(body: View) -> Buf {
+fn create(body: View) -> Response {
   let Ok(value: Batch(batch, items)) = decode(json: body, as: Batch) else {
     Err(error) -> problem(status: 400, reason: error)
   }
@@ -34,16 +34,17 @@ fn create(body: View) -> Buf {
         AS cents FROM items WHERE batch = :batch",
     batch
   ) else -> problem(status: 500, reason: "no totals")
-  respond(status: 200)
+  buf()
     |> append(
-    view: "{\"created\":\(made),\"n\":\(n),\"units\":\(units),\"cents\":\(cents),\"items\":"
-  )
+      view: "{\"created\":\(made),\"n\":\(n),\"units\":\(units),\"cents\":\(cents),\"items\":"
+    )
     |> write_rows(rows: sql_all(
-    row: Item,
-    query: "SELECT * FROM items WHERE batch = :batch ORDER BY id",
-    batch
-  ))
+      row: Item,
+      query: "SELECT * FROM items WHERE batch = :batch ORDER BY id",
+      batch
+    ))
     |> append(view: "}")
+    |> respond(status: 200)
 }
 
 fn insert_all(batch: Key, items: List[NewItem], made: Int) -> Int {
@@ -65,9 +66,10 @@ fn insert_all(batch: Key, items: List[NewItem], made: Int) -> Int {
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  respond(status)
+fn problem(status: Int, reason: View) -> Response {
+  buf()
     |> append(view: "{\"error\":")
     |> write_json_string(text: reason)
     |> append(view: "}")
+    |> respond(status)
 }

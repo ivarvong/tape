@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { instantiate, isHead } from '../host.ts';
 import type { Effect } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
-import { built, finish, moduleOf, same } from './harness.ts';
+import { built, finish, moduleOf, same, answered } from './harness.ts';
 
 const TABLE = 'CREATE TABLE kv(k TEXT PRIMARY KEY NOT NULL, v INTEGER NOT NULL)';
 const program = `migration 1 "kv" {
@@ -20,32 +20,32 @@ const program = `migration 1 "kv" {
 
 type Kv { Kv(k: View, v: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match raw {
     "upsert " ++ k -> upsert(k)
-    "insert " ++ k -> respond(status: 200)
+    "insert " ++ k -> buf()
       |> write_rows(rows: sql_all(
         row: Kv,
         query: "INSERT INTO kv(k, v) VALUES (:k || '1', 1), (:k || '2', 2) RETURNING *",
         k
-      ))
-    "bump" -> respond(status: 200)
-      |> write_rows(rows: sql_all(row: Kv, query: "UPDATE kv SET v = v + 1 WHERE v < 100 RETURNING *", repeat: True))
-    "exec " ++ k -> respond(status: 200)
-      |> write_int(value: sql_exec(query: "DELETE FROM kv WHERE k = :k", k))
-    "read" -> respond(status: 200) |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv ORDER BY k"))
-    _ -> respond(status: 404)
+      )) |> respond(status: 200)
+    "bump" -> buf()
+      |> write_rows(rows: sql_all(row: Kv, query: "UPDATE kv SET v = v + 1 WHERE v < 100 RETURNING *", repeat: True)) |> respond(status: 200)
+    "exec " ++ k -> buf()
+      |> write_int(value: sql_exec(query: "DELETE FROM kv WHERE k = :k", k)) |> respond(status: 200)
+    "read" -> buf() |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv ORDER BY k")) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
-fn upsert(k: View) -> Buf {
+fn upsert(k: View) -> Response {
   let Some(value: row) = sql_first(
     row: Kv,
     query: "INSERT INTO kv(k, v) VALUES (:k, 1) ON CONFLICT(k) DO UPDATE SET v = v + 1 RETURNING *",
     k,
     repeat: True
-  ) else -> respond(status: 500)
-  respond(status: 200) |> write_json(value: row)
+  ) else -> empty(status: 500)
+  buf() |> write_json(value: row) |> respond(status: 200)
 }
 `;
 
@@ -105,7 +105,7 @@ function counted(hide: boolean): { log: string; answers: string; asked: number }
   const answers: string[] = [];
   const logs: unknown[] = [];
   for (const [request] of steps) {
-    answers.push(new TextDecoder().decode(a.handle(enc.encode(request))));
+    answers.push(answered(a.handle(enc.encode(request))));
     logs.push(a.effects.filter((e: Effect) => !isHead(e)));
   }
   return { log: JSON.stringify(logs), answers: answers.join('\n'), asked };

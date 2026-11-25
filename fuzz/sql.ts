@@ -11,7 +11,7 @@
 import { unreachable } from '../compiler/ast.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { compile } from '../compiler.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 import { cli, seeds } from './run.ts';
@@ -193,7 +193,11 @@ type V {
   V(${all.length > 0 ? all.map(p => `${p.name}: ${ptype(p)}`).join(', ') : 'none: Option[Int]'})
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
+  answer(raw, db) |> respond(status: 200)
+}
+
+fn answer(raw: View, db: Sql) -> Buf {
   let which ++ "\\n" ++ body = raw else -> buf() |> append(view: "bad")
   let Ok(value: v) = decode(json: body, as: V) else {
     Err(error) -> buf() |> append(view: "decode: \\(error)")
@@ -310,7 +314,7 @@ export async function sqlCase(
     const body = `{${all.map(p => `${JSON.stringify(p.name)}:${vals.has(p.name) ? jsonOf(p, vals.get(p.name) ?? null) : jsonOf(p, valueOf(r, p) ?? null)}`).join(',')}}`;
     // a value the body sends for another statement's parameter is not used by this one
     const got = dec.decode(
-      (await app.runLogged(enc.encode(`${k}\n${body}`), { transaction: g => sql.transaction(g) })).out,
+      responseOf((await app.runLogged(enc.encode(`${k}\n${body}`), { transaction: g => sql.transaction(g) })).out).body,
     );
     let want: string;
     try {

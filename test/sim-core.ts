@@ -51,7 +51,7 @@ for (const [words, want] of FOUND) {
 // randomness is the simulator's: a program that answers with what it drew gives the same answer for the same seed
 {
   const lots = builtFor(
-    `fn handle(raw: View, dice: Entropy) -> Buf {\n  respond(status: 200) |> write_int(value: random(from: dice))\n}\n`,
+    `fn handle(raw: View, dice: Entropy) -> Response {\n  buf() |> write_int(value: random(from: dice)) |> respond(status: 200)\n}\n`,
   );
   const draw = {
     modules: { lots: lots.module },

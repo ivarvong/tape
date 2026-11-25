@@ -3,7 +3,7 @@
 // then time per request: the median of 31 batches after warm-up, at three sizes. Local numbers, one machine.
 //   node bench/money.ts
 import '../node25.ts';
-import { instantiate } from '../host.ts';
+import { instantiate, responseOf } from '../host.ts';
 import { built, moduleOf, read } from '../test/harness.ts';
 import { handle as js } from './money-baseline.ts';
 
@@ -29,7 +29,7 @@ const cart = (lines: number, seed: number): Uint8Array => {
 };
 const inputs = Array.from({ length: 200 }, (_, i) => cart([1, 3, 10, 40][i % 4] ?? 1, i + 1));
 const wrong = inputs.flatMap(b => {
-  const t = dec.decode(app.handle(b)),
+  const t = dec.decode(responseOf(app.handle(b)).body),
     w = dec.decode(js(b));
   return t === w ? [] : [`DIFF ${dec.decode(b).slice(0, 100)}\n tape ${t}\n js   ${w}`];
 });

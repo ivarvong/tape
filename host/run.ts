@@ -16,6 +16,7 @@ import { STATUS, begin, clockUs, hex, isCall, isHead, isNow, isRandom, isSql, is
 import type { CallEffect, Cell, Effect, Flags, From, Head, Span, Sql, Status, TraceEvent, WakeEffect } from './log.ts';
 import {
   answerAt,
+  frameAt,
   block,
   copyIn,
   copyOut,
@@ -567,7 +568,8 @@ function finished(L: Linked, bytes: Uint8Array, h: number, floor: number): Uint8
     noteUse(L, head, L.used);
     if (L.undone) head.undone = true;
   }
-  const out = answerAt(L.mem, h);
+  // handle's answer is a Response, given as its head and where its body is; a method's reply is its bytes
+  const out = L.target.name === 'handle' ? frameAt(L.mem, h) : answerAt(L.mem, h);
   const { target, undone } = L;
   L.o.observe?.({
     target: target.name,

@@ -24,6 +24,8 @@ export type Parts = {
   readonly flagBytes: readonly number[];
   /** what the host reads from the module beside its code, each under its section's name */
   readonly custom: readonly (readonly [string, unknown])[];
+  /** the function generated around the program's `handle` (gen/answer.ts), exported as `handle`; null for none */
+  readonly entry: string | null;
 };
 
 // `\0asm`, version 1
@@ -57,7 +59,7 @@ function importList({ imports, opts, tables }: Parts): [string, number][] {
   );
 }
 
-function exportsSection({ imports, opts, tables }: Parts): number[] {
+function exportsSection({ imports, opts, tables, entry }: Parts): number[] {
   const fn = (n: string, index: number): number[] => [...name(n), 0, ...uleb(index)];
   const global = (n: string, g: number): number[] => [...name(n), 3, g];
   return section(
@@ -72,7 +74,7 @@ function exportsSection({ imports, opts, tables }: Parts): number[] {
       global('why', G_WHY),
       global('depth', G_DEPTH),
       global('deepest', G_DEEPEST),
-      ...opts.exports.map(n => fn(n, tables.indexOf.get(n) ?? 0)),
+      ...opts.exports.map(n => fn(n === entry ? 'handle' : n, tables.indexOf.get(n) ?? 0)),
     ]),
   );
 }

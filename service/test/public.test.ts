@@ -1,46 +1,34 @@
-// Runs in workerd: content types from the status line (host.ts responseOf), and a published name's public route
+// Runs in workerd: content types from the program's frame (host.ts responseOf), and a published name's public route
 // (/p/:account/:name/…): no token, the latest live version, `public` on the request line (std/http caller Anyone).
 import { describe, expect, it } from 'vitest';
 import feed from './fixtures/feed.tape?raw';
 import page from './fixtures/page.tape?raw';
 import redirect from './fixtures/redirect.tape?raw';
 import hello from '../../examples/hello.tape?raw';
-import { responseOf } from '../../host.ts';
+import { framed, responseOf } from '../../host.ts';
 import { tapeRequest } from '../src/web.ts';
 import { anyone, at, call, got } from './help.ts';
 
 const enc = new TextEncoder(),
   dec = new TextDecoder();
-const head = (s: string): [number, string | undefined, string] => {
-  const r = responseOf(enc.encode(s));
+const head = (status: number, content: number, body = ''): [number, string | undefined, string] => {
+  const r = responseOf(framed({ status, content, body }));
   return [r.status, r.type, dec.decode(r.body)];
 };
 
 describe('content types', () => {
-  it('reads STATUS, or STATUS SP TYPE from a closed list, from the first line', () => {
-    expect(head('201\n{}')).toEqual([201, 'text/plain; charset=utf-8', '{}']);
-    expect(head('200 text/html\n<p>')).toEqual([200, 'text/html; charset=utf-8', '<p>']);
-    expect(head('404 application/json\n{}')).toEqual([404, 'application/json', '{}']);
-    expect(head('200 application/atom+xml\n<feed/>')).toEqual([200, 'application/atom+xml; charset=utf-8', '<feed/>']);
-    expect(head('200 application/rss+xml\n<rss/>')).toEqual([200, 'application/rss+xml; charset=utf-8', '<rss/>']);
-    expect(head('200 application/xml\n<doc/>')).toEqual([200, 'application/xml; charset=utf-8', '<doc/>']);
-    // anything else is all body, as before: an unknown type, a header smuggled into the type, no status line.
-    // xhtml is a page; text/xml was sniffed; a parameter on the token would let a program write the header itself
-    expect(head('200 text/javascript\nx')).toEqual([200, 'text/plain; charset=utf-8', '200 text/javascript\nx']);
-    expect(head('200 text/html; x: y\nx')).toEqual([200, 'text/plain; charset=utf-8', '200 text/html; x: y\nx']);
-    expect(head('200 application/xhtml+xml\n<html/>')).toEqual([
-      200,
-      'text/plain; charset=utf-8',
-      '200 application/xhtml+xml\n<html/>',
-    ]);
-    expect(head('200 text/xml\n<a/>')).toEqual([200, 'text/plain; charset=utf-8', '200 text/xml\n<a/>']);
-    expect(head('200 application/atom+xml; charset=utf-8\n<feed/>')).toEqual([
-      200,
-      'text/plain; charset=utf-8',
-      '200 application/atom+xml; charset=utf-8\n<feed/>',
-    ]);
-    expect(head('hello')).toEqual([200, 'text/plain; charset=utf-8', 'hello']);
-    expect(head('99\nx')).toEqual([200, 'text/plain; charset=utf-8', '99\nx']);
+  it("reads the status and the type from the program's frame, the type from a closed list", () => {
+    expect(head(201, 2, '{}')).toEqual([201, 'text/plain; charset=utf-8', '{}']);
+    expect(head(200, 0, '<p>')).toEqual([200, 'text/html; charset=utf-8', '<p>']);
+    expect(head(404, 1, '{}')).toEqual([404, 'application/json', '{}']);
+    expect(head(200, 6, '<feed/>')).toEqual([200, 'application/atom+xml; charset=utf-8', '<feed/>']);
+    expect(head(200, 7, '<rss/>')).toEqual([200, 'application/rss+xml; charset=utf-8', '<rss/>']);
+    expect(head(200, 8, '<doc/>')).toEqual([200, 'application/xml; charset=utf-8', '<doc/>']);
+    // a type Content does not have is a 500; the text that named a type before 25 November 2026 is no frame at all,
+    // and a 500 too: there is no "all body" and no first line to read
+    expect(head(200, 9)[0]).toBe(500);
+    for (const t of ['200 text/html; x: y\nx', '200 application/xhtml+xml\n<html/>', 'hello', '99\nx'])
+      expect(responseOf(enc.encode(t)).status).toBe(500);
   });
 
   it('serves the type the program chose', async () => {
@@ -54,7 +42,7 @@ describe('content types', () => {
     ]);
     const j = await call('/ivar/page/v/1/n.json');
     expect([j.headers.get('content-type'), await j.json()]).toEqual(['application/json', { n: 0 }]);
-    // an older program's plain status line is still text/plain
+    // an answer given no type is text/plain
     await call('/ivar/hello', { method: 'POST', body: hello });
     expect((await call('/ivar/hello/v/1/hello/ada')).headers.get('content-type')).toBe('text/plain; charset=utf-8');
   });
@@ -86,23 +74,28 @@ describe('content types', () => {
 });
 
 describe('headers (0.3)', () => {
-  it('reads the headers a program set from the status line, and refuses one it may not set', () => {
-    const all = (s: string) => {
-      const r = responseOf(enc.encode(s));
+  it('reads the headers a program set from the frame, and refuses one it may not set', () => {
+    const all = (headers: { name: string; value: string }[], status = 200) => {
+      const r = responseOf(framed({ status, headers }));
       return [r.status, r.headers, dec.decode(r.body)];
     };
-    expect(all('302\rlocation: /x\n')).toEqual([302, [{ name: 'location', value: '/x' }], '']);
-    expect(all('200 text/html\rx-a: 1\rx-a: 2\n<p>')).toEqual([
+    expect(all([{ name: 'location', value: '/x' }], 302)).toEqual([302, [{ name: 'location', value: '/x' }], '']);
+    expect(
+      all([
+        { name: 'x-a', value: '1' },
+        { name: 'x-a', value: '2' },
+      ]),
+    ).toEqual([
       200,
       [
         { name: 'x-a', value: '1' },
         { name: 'x-a', value: '2' },
       ],
-      '<p>',
+      '',
     ]);
-    expect(all('200\rset-cookie: a=b\nx')[0]).toBe(500);
-    expect(all('200\rcontent-type: text/javascript\nx')[0]).toBe(500);
-    expect(all('200\r!invalid header value for x-bad\nx')).toEqual([
+    expect(all([{ name: 'set-cookie', value: 'a=b' }])[0]).toBe(500);
+    expect(all([{ name: 'content-type', value: 'text/javascript' }])[0]).toBe(500);
+    expect(all([{ name: 'x-bad', value: 'a\r\nb' }])).toEqual([
       500,
       [],
       'the program set a response header the host refuses: invalid header value for x-bad',
@@ -182,13 +175,13 @@ describe('request headers', () => {
 
 describe('where a program is mounted', () => {
   it('says so in tape-base, on the operator route and the public one, whatever the client sends', async () => {
-    const based = `fn handle(raw: View) -> Buf {
+    const based = `fn handle(raw: View) -> Response {
   let r = request(raw)
   let base = match header_of(request: r, name: "tape-base") {
     Some(value) -> value
     None -> "none"
   }
-  respond(status: 200) |> append(view: base) |> append(view: " ") |> append(view: r.path)
+  buf() |> append(view: base) |> append(view: " ") |> append(view: r.path) |> respond(status: 200)
 }
 `;
     expect((await call('/ivar/based', { method: 'POST', body: based })).status).toBe(201);

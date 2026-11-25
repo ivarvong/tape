@@ -36,10 +36,10 @@ type Item { Item(item: View, sold: Int) }
 type Placed { Placed(order: Int, new: Bool) }
 type Problem { Problem(error: View) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/orders", body) -> placed(body)
-    Request(method: "GET", path: "/items/" ++ item) -> shown(
+    Request(method: Post, path: "/orders", body) -> placed(body)
+    Request(method: Get, path: "/items/" ++ item) -> shown(
       found: sql_first(row: Item, query: "SELECT item, sold FROM items WHERE item = :item", item)
     )
     _ -> problem(status: 404, error: "no such route")
@@ -48,7 +48,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 
 // POST /orders: the client's key is claimed first, so a retried POST counts the sale once and answers the
 // order it made (new: False)
-fn placed(body: View) -> Buf {
+fn placed(body: View) -> Response {
   let Ok(value: NewOrder(key, item, amount)) = decode(json: body, as: NewOrder) else {
     Err(error) -> problem(status: 400, error)
   }
@@ -76,23 +76,22 @@ fn by_key(key: View) -> Option[Order] {
   sql_first(row: Order, query: "SELECT * FROM orders WHERE key = :key", key)
 }
 
-fn answered(found: Option[Order], new: Bool) -> Buf {
+fn answered(found: Option[Order], new: Bool) -> Response {
   match found {
-    Some(value: Order(id)) -> respond_as(status: 201, content: Json)
-      |> write_json(value: Placed(order: id, new))
+    Some(value: Order(id)) -> json(status: 201, value: Placed(order: id, new))
     None -> problem(status: 500, error: "the order is gone")
   }
 }
 
-fn shown(found: Option[Item]) -> Buf {
+fn shown(found: Option[Item]) -> Response {
   match found {
-    Some(value) -> respond_as(status: 200, content: Json) |> write_json(value)
+    Some(value) -> json(status: 200, value)
     None -> problem(status: 404, error: "no such item")
   }
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 ```
 
@@ -140,7 +139,10 @@ What to notice:
   claim needs nothing more (C54 sees the claim); `repeat: True` is only for a write meant to apply on every attempt.
   Without the `UNIQUE` key and its `ON CONFLICT` the compiler refuses the INSERT (C55).
 - **`rollback(out:)`** answers and undoes this request's writes: the claim of an order for an unknown item goes too.
-- **JSON out** is `respond_as(status: …, content: Json)` and `write_json(value: …)` of a record.
+- **An answer is a value**, a `Response`, never bytes: `json(status: …, value: …)` answers a record as JSON;
+  `buf() |> append(view: …) |> respond(status: 200)` writes a body and gives its status last; `empty(status: 204)`
+  has no body. The host writes the status and the headers from it, so a body that echoes a request stays a body.
+  `handle` and every function that answers give `-> Response`; `-> Buf` there is C14, with this form as its fix.
 - **A call to another program** (a payment, say) is in [`LANGUAGE.md`](../LANGUAGE.md) section 8, a whole program
   with one: a `once:` key that names the row, a pending state, and a timer (`wake`, `woken`) that sends the call
   again until it is answered. The `run` tool answers such calls from its `remotes` argument ([`mcp.md`](mcp.md)).
@@ -206,8 +208,8 @@ Text patterns capture in the middle too. `P ++ "text"` matches text that ends in
 before it; `P ++ "sep" ++ Q` splits at the first "sep". With a prefix that gives routes such as:
 
 ```
-Request(method: "POST", path: "/runs/" ++ decimal(id) ++ "/advance") -> …
-Request(method: "GET", path: "/runs/" ++ decimal(run) ++ "/steps/" ++ decimal(n)) -> …
+Request(method: Post, path: "/runs/" ++ decimal(id) ++ "/advance") -> …
+Request(method: Get, path: "/runs/" ++ decimal(run) ++ "/steps/" ++ decimal(n)) -> …
 Request(path: "/files/" ++ name ++ ".json") -> …
 ```
 
@@ -222,9 +224,9 @@ nested call. The right side is one call, or a function's name when nothing else 
 
 ```
 // before
-push(buf: write_int(out: append(buf: append(buf: append(buf: respond(status: 200), view: "Hello again, "), view: name), view: " #"), value: n), byte: 33)
+push(buf: write_int(out: append(buf: append(buf: append(buf: buf(), view: "Hello again, "), view: name), view: " #"), value: n), byte: 33) |> respond(status: 200)
 // after
-respond(status: 200) |> append(view: "Hello again, ") |> append(view: name) |> append(view: " #") |> write_int(value: n) |> push(byte: 33)
+buf() |> append(view: "Hello again, ") |> append(view: name) |> append(view: " #") |> write_int(value: n) |> push(byte: 33) |> respond(status: 200)
 ```
 
 So that the rule has something to work with, every function in std, and every built-in, takes the value it works
@@ -342,11 +344,11 @@ another name (`type: kind`), since a reserved word cannot name a variable:
 ```tape
 type Hook { Hook(id: View, type: View) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let Ok(value: Hook(id, type: kind)) = decode(json: request(raw).body, as: Hook) else {
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
-  respond(status: 200) |> append(view: "\(id) is a \(kind)")
+  buf() |> append(view: "\(id) is a \(kind)") |> respond(status: 200)
 }
 ```
 
@@ -407,7 +409,7 @@ it or calls one that does, and passes it at each call. A built-in that takes one
 `clock`, `random`'s `from`, `wake`'s `timer`) is given it when the program names exactly one of that type.
 
 ```
-fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   routed(raw) |> rendered
 }
 

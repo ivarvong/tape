@@ -8,10 +8,10 @@ fn classify(t: Transport) -> Outcome {
   }
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match classify(t: read_reply(bytes: raw)) {
-    Committed(body) -> append(buf: respond(status: 200), view: body)
-    NotRun(refusal) -> append(buf: respond(status: 402), view: reason_of(refusal))
-    Unknown(why) -> append(buf: respond(status: 503), view: why)
+    Committed(body) -> append(buf: buf(), view: body) |> respond(status: 200)
+    NotRun(refusal) -> append(buf: buf(), view: reason_of(refusal)) |> respond(status: 402)
+    Unknown(why) -> append(buf: buf(), view: why) |> respond(status: 503)
   }
 }

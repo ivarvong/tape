@@ -717,8 +717,7 @@ function renderSvg(ex: Exchange): { svg: string; ms: number } | { error: string 
       const raw = trace.app.handle(enc.encode(JSON.stringify(ex.otlp)));
       const took = performance.now() - t0;
       stats.svg.push(took);
-      const text = dec.decode(raw);
-      const svgText = /^\s*(<\?xml|<svg)/.test(text) ? text : dec.decode(responseOf(raw).body);
+      const svgText = dec.decode(responseOf(raw).body);
       // inline, so the page's theme reaches it; its <style> is the page's a/trace.*.css (the policy allows no inline
       // style), and nothing in it can run: the policy allows no inline script or handler either
       made = { svg: splitSvg(svgText).svg, ms: took };
@@ -884,7 +883,7 @@ async function start(): Promise<void> {
   });
   if (hl) {
     stats.highlighter = { ms: hl.build, wasm: hl.wasm };
-    editor.setHighlighter(text => dec.decode(hl.app.handle(enc.encode(text))));
+    editor.setHighlighter(text => dec.decode(responseOf(hl.app.handle(enc.encode(text))).body));
   }
   times['highlighter'] = performance.now();
   await load(location.hash.slice(1) || 'hello');

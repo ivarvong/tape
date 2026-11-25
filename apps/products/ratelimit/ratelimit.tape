@@ -53,15 +53,15 @@ fn key_byte(b: Int) -> Bool {
   is_alnum(b) or b == 45 or b == 95 or b == 46 or b == 58
 }
 
-fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "GET", path: "/") -> dashboard(at: now())
-    Request(method: "POST", path: "/hit/" ++ Key(key), query) -> match rule(query) {
+    Request(method: Get, path: "/") -> dashboard(at: now())
+    Request(method: Post, path: "/hit/" ++ Key(key), query) -> match rule(query) {
       Ok(value: rule) -> hit(key, rule, op: header_of(request: r, name: "idempotency-key"))
       Err(error) -> problem(status: 400, error)
     }
-    Request(method: "GET", path: "/peek/" ++ Key(key), query) -> match rule(query) {
+    Request(method: Get, path: "/peek/" ++ Key(key), query) -> match rule(query) {
       Ok(value: rule) -> peeked(key, rule, n: used(key, rule))
       Err(error) -> problem(status: 400, error)
     }
@@ -110,7 +110,7 @@ fn param(q: View, name: View, absent: Int, most: Int) -> Option[Int] {
 }
 
 // A look: would a hit now be let through?
-fn peeked(key: View, rule: Rule, n: Int) -> Buf {
+fn peeked(key: View, rule: Rule, n: Int) -> Response {
   answered(key, rule, allowed: n < rule.limit, used: n, peek: True)
 }
 
@@ -129,7 +129,7 @@ fn used(key: View, rule: Rule) -> Int {
 
 // ---------- a hit ----------
 
-fn hit(key: View, rule: Rule, op: Option[View]) -> Buf {
+fn hit(key: View, rule: Rule, op: Option[View]) -> Response {
   let _ = sql_exec(
     query: "DELETE FROM windows WHERE key = :key AND slot < :slot - 1",
     key,
@@ -156,7 +156,7 @@ fn hit(key: View, rule: Rule, op: Option[View]) -> Buf {
 
 // A hit with an idempotency key: the key is claimed first, so a second run of the same request finds the claim
 // and answers the verdict the first one stored.
-fn once(key: View, rule: Rule, o: View) -> Buf {
+fn once(key: View, rule: Rule, o: View) -> Response {
   let _ = sql_exec(
     query: "DELETE FROM ops WHERE key = :key AND slot < :slot - 1",
     key,
@@ -199,7 +199,7 @@ fn once(key: View, rule: Rule, o: View) -> Buf {
   answered(key, rule, allowed: taken == 1, used: n, peek: False)
 }
 
-fn replayed(key: View, rule: Rule, found: Option[Claim]) -> Buf {
+fn replayed(key: View, rule: Rule, found: Option[Claim]) -> Response {
   match found {
     Some(value: Claim(allowed, remaining)) -> answered(
       key,
@@ -213,50 +213,50 @@ fn replayed(key: View, rule: Rule, found: Option[Claim]) -> Buf {
 }
 
 // The verdict, with the headers a client reads. A peek is a look, so it is 200 whatever it finds.
-fn answered(key: View, rule: Rule, allowed: Bool, used: Int, peek: Bool) -> Buf {
+fn answered(key: View, rule: Rule, allowed: Bool, used: Int, peek: Bool) -> Response {
   let remaining = max(a: 0, b: rule.limit - used)
   let reset = (rule.resets - rule.at + 999) / 1000
   let status = match {
     allowed or peek -> 200
     else -> 429
   }
-  let out = respond_as(status, content: Json)
+  let verdict = Verdict(key, allowed, limit: rule.limit, remaining, reset, window: rule.span / 1000)
+  let out = json(status, value: verdict)
     |> header(name: "x-ratelimit-limit", value: "\(rule.limit)")
     |> header(name: "x-ratelimit-remaining", value: "\(remaining)")
     |> header(name: "x-ratelimit-reset", value: "\(reset)")
     |> header(name: "cache-control", value: "no-store")
-  let told = match status {
+  match status {
     429 -> out |> header(name: "retry-after", value: "\(reset)")
     _ -> out
   }
-  let verdict = Verdict(key, allowed, limit: rule.limit, remaining, reset, window: rule.span / 1000)
-  told |> write_json(value: verdict)
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
 // ---------- the dashboard ----------
 
-fn dashboard(at: Int) -> Buf {
-  respond_as(status: 200, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn dashboard(at: Int) -> Response {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><meta name=robots \
         content=\"noindex\"><title>ratelimit</title><style>:root{color-scheme:light \
         dark;--fg:#1d1f23;--mute:#626873;--bg:#fbfbfa;--card:#fff;--line:#e3e4e6;--ok:#16a34a;--full:#dc2626}@media(prefers-color-scheme:dark){:root{--fg:#e8e9eb;--mute:#9aa0aa;--bg:#15171a;--card:#1d2024;--line:#30343a;--ok:#4ade80;--full:#f87171}}body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}main{max-width:48rem;margin:0 auto;padding:2rem 1rem}h1{margin:0}.mute{color:var(--mute)}pre{font:13px/1.45 ui-monospace,Menlo,monospace;overflow-x:auto;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:.75rem}table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px}td,th{text-align:left;padding:.45rem .6rem;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums}td.k{overflow-wrap:anywhere}.bar{height:8px;border-radius:4px;background:var(--line);min-width:6rem}.bar i{display:block;height:8px;border-radius:4px;background:var(--ok)}.bar i.full{background:var(--full)}</style><main><h1>ratelimit</h1><p class=mute>Fixed windows, counted in SQLite, one Durable Object. Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/ratelimit/ratelimit.tape\">source</a>). The counts are as of this load.</p><pre>curl -i -X POST 'https://tape.ivar.workers.dev/p/demo/ratelimit/hit/my-api?limit=5&amp;window=10'</pre><p>Each hit answers 200 with <code>X-RateLimit-Remaining</code>, or 429 with <code>Retry-After</code> once the window's budget is spent. <code>GET peek/&lt;key&gt;?…</code> looks without taking. Send <code>Idempotency-Key</code> and a retried hit counts once.</p><h2>Busy keys</h2>")
     |> rows(
-    found: sql_all(
-      row: Window,
-      query: "SELECT * FROM windows WHERE (slot + 1) * span > :since ORDER BY slot * span \
-          DESC, n DESC LIMIT 30",
-      since: at - 300000
-    ),
-    at,
-    any: False
-  )
+      found: sql_all(
+        row: Window,
+        query: "SELECT * FROM windows WHERE (slot + 1) * span > :since ORDER BY slot * span \
+            DESC, n DESC LIMIT 30",
+        since: at - 300000
+      ),
+      at,
+      any: False
+    )
     |> append(view: "</main></html>")
+    |> respond_as(status: 200, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
 fn rows(out: Buf, found: Rows[Window], at: Int, any: Bool) -> Buf {

@@ -5,23 +5,23 @@ import '../node25.ts';
 import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const PROGRAM = `type Name = View where char_count(v: self) >= 1 and char_count(v: self) <= 3
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let r = request(raw)
   match r.path {
-    "/count" -> respond(status: 200) |> write_int(value: char_count(v: r.body))
+    "/count" -> buf() |> write_int(value: char_count(v: r.body)) |> respond(status: 200)
     "/name" -> named(body: r.body)
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn named(body: View) -> Buf {
+fn named(body: View) -> Response {
   match body {
-    Name(n) -> respond(status: 200) |> append(view: n)
-    _ -> respond(status: 400)
+    Name(n) -> buf() |> append(view: n) |> respond(status: 200)
+    _ -> empty(status: 400)
   }
 }
 `;
@@ -33,9 +33,8 @@ same(
 );
 if (r.wasm) {
   const app = instantiate(new WebAssembly.Module(r.wasm), { log: false });
-  const enc = new TextEncoder(),
-    dec = new TextDecoder();
-  const ask = (req: string): string => dec.decode(app.handle(enc.encode(req)));
+  const enc = new TextEncoder();
+  const ask = (req: string): string => answered(app.handle(enc.encode(req)));
   // characters of every UTF-8 length, the edges of each, and a seeded mix of them
   const pool = ['a', '~', 'é', '߿', 'ࠀ', '日', '￿', '\u{10000}', '😀', '\u{10FFFF}'];
   let seed = 7;

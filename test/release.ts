@@ -12,18 +12,18 @@ import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
 import { gen } from '../bench/csv-gen.ts';
 import { load, NAMES } from '../bench/suite/workloads.ts';
-import { finish, same } from './harness.ts';
+import { answered, finish, same } from './harness.ts';
 
 const ROOT = new URL('../', import.meta.url).pathname;
 // the report's program (arena_release.tape), and two ways of keeping a list while it is walked
-const PROGRAM = `fn handle(raw: View) -> Buf {
+const PROGRAM = `fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/std/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: by_std(i: 0, n, acc: 0))
-    Request(method: "GET", path: "/own/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: by_own(i: 0, n, acc: 0))
-    Request(method: "GET", path: "/sum/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: by_sum(i: 0, n, acc: 0))
-    Request(method: "GET", path: "/twice/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: twice(list: build(k: n, acc: Nil)))
-    Request(method: "GET", path: "/held/" ++ decimal(n)) -> respond(status: 200) |> write_int(value: held(list: build(k: n, acc: Nil)))
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/std/" ++ decimal(n)) -> buf() |> write_int(value: by_std(i: 0, n, acc: 0)) |> respond(status: 200)
+    Request(method: Get, path: "/own/" ++ decimal(n)) -> buf() |> write_int(value: by_own(i: 0, n, acc: 0)) |> respond(status: 200)
+    Request(method: Get, path: "/sum/" ++ decimal(n)) -> buf() |> write_int(value: by_sum(i: 0, n, acc: 0)) |> respond(status: 200)
+    Request(method: Get, path: "/twice/" ++ decimal(n)) -> buf() |> write_int(value: twice(list: build(k: n, acc: Nil))) |> respond(status: 200)
+    Request(method: Get, path: "/held/" ++ decimal(n)) -> buf() |> write_int(value: held(list: build(k: n, acc: Nil))) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -78,8 +78,7 @@ fn total(list: List[Int], acc: Int) -> Int {
   }
 }
 `;
-const enc = new TextEncoder(),
-  dec = new TextDecoder();
+const enc = new TextEncoder();
 type Ran = { answer: string; bytes: number };
 /** A program's answers to requests, and the most its arena held in any of them, in one instance. */
 function ran(
@@ -111,7 +110,7 @@ function each(
     let answer: string;
     try {
       const out = db ? app.handleIn(f => db.transaction(f), req) : app.handle(req);
-      answer = dec.decode(out);
+      answer = answered(out);
     } catch (e) {
       answer = e instanceof Error ? e.message : String(e);
     }
@@ -140,9 +139,10 @@ same(
   [true, true, true],
 );
 same(
-  'without the copies they held 24 B * n^2 (the report: 24,008,096 B)',
+  // 88 B over the report's for the head of the answer: its Response and the frame the host reads (#11)
+  'without the copies they held 24 B * n^2 (the report: 24,008,096 B; with the answer a Response, 24,008,184 B)',
   off.slice(0, 3).map(r => r.bytes),
-  [24008096, 24008096, 24008096],
+  [24008184, 24008184, 24008184],
 );
 same(
   'a list walked, then used again, and one another name holds, keep their answers: 1000 + 500500, 2 * 500500',

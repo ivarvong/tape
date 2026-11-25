@@ -9,7 +9,7 @@ import { std } from '../std.ts';
 import { instantiate, responseOf } from '../host.ts';
 import { rng } from '../sim.ts';
 import { nodeSql } from '../nodesql.ts';
-import { call, finish, functionsOf, same as T } from './harness.ts';
+import { call, finish, functionsOf, same as T, answered } from './harness.ts';
 
 /** f(args) compiled and interpreted, as one answer when the two agree. */
 const run = (src: string, fn: string, args: bigint[] = []): unknown => {
@@ -40,7 +40,7 @@ const served = (src: string): ((request: string) => string) => {
   const [no] = r.errors;
   if (r.wasm === null) return () => `ERR ${no?.code} line ${no?.line}: ${no?.message}`;
   const app = instantiate(new WebAssembly.Module(r.wasm), { log: false });
-  return request => new TextDecoder().decode(app.handle(new TextEncoder().encode(request)));
+  return request => answered(app.handle(new TextEncoder().encode(request)));
 };
 const codes = (src: string, exports: string[] = ['f']): string[] =>
   compile([...std, { name: 't.tape', text: src }], { exports }).errors.map(e => `${e.code}:${e.line}`);
@@ -181,8 +181,8 @@ T(
   run(
     `fn f(n: Int) -> Int {
   let out = match {
-    n > 0 -> respond(status: 200)
-    else -> respond(status: 404)
+    n > 0 -> buf() |> append(view: "200\\n")
+    else -> buf() |> append(view: "404\\n")
   }
   len(freeze(buf: out |> append(view: "ab")))
 }
@@ -255,21 +255,21 @@ type Nested {
   Nested(type: View, list: List[Event])
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let r = request(raw)
   match r.path {
     "/flat" -> {
       let Ok(value: e) = decode(json: r.body, as: Event) else {
-        Err(error) -> respond(status: 400) |> append(view: error)
+        Err(error) -> buf() |> append(view: error) |> respond(status: 400)
       }
       let Event(type: kind, match: m) = e
-      respond(status: 200) |> append(view: "\\(e.type) \\(kind) \\(m) ") |> write_json(value: e)
+      buf() |> append(view: "\\(e.type) \\(kind) \\(m) ") |> write_json(value: e) |> respond(status: 200)
     }
     _ -> {
       let Ok(value: n) = decode(json: r.body, as: Nested) else {
-        Err(error) -> respond(status: 400) |> append(view: error)
+        Err(error) -> buf() |> append(view: error) |> respond(status: 400)
       }
-      respond(status: 200) |> write_json(value: n)
+      buf() |> write_json(value: n) |> respond(status: 200)
     }
   }
 }
@@ -440,9 +440,9 @@ fn f(n: Int) -> Int {
   const hint = (src: string): string => fix(src, ['handle']).split(' | ')[1] ?? '';
   T(
     'C14 Option for its base: the fix is the step that takes the value out',
-    hint(`fn handle(raw: View) -> Buf {
+    hint(`fn handle(raw: View) -> Response {
   let r = request(raw)
-  respond(status: 200) |> append(view: r.query)
+  buf() |> append(view: r.query) |> respond(status: 200)
 }
 `),
     '`r.query` may be None. Take the value out first, with a step that says what happens when it is None: `let Some(value) = r.query else -> …`, then pass `value`. Or match it, with an arm for `Some(value)` and one for `None`.',
@@ -451,10 +451,10 @@ fn f(n: Int) -> Int {
   T(
     '…and the step it shows compiles',
     codes(
-      `fn handle(raw: View) -> Buf {
+      `fn handle(raw: View) -> Response {
   let r = request(raw)
-  let Some(value) = r.query else -> respond(status: 400)
-  respond(status: 200) |> append(view: value)
+  let Some(value) = r.query else -> empty(status: 400)
+  buf() |> append(view: value) |> respond(status: 200)
 }
 `,
       ['handle'],
@@ -474,20 +474,20 @@ fn f(n: Int) -> Int {
     'An Option is wanted: `Some(value: n)`, or `None`.',
   );
   T(
-    'C14 a record where a Buf is wanted: write it into one',
+    'C14 a record where a Response is wanted: answer it as JSON',
     (
       fix(
         `type Outcome {
   Outcome(status: Int)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   rollback(out: Outcome(status: 409))
 }
 `,
         ['handle'],
       ).split(' | ')[1] ?? ''
-    ).startsWith("A Buf is an answer's bytes being written"),
+    ).startsWith('A Response is an answer (std/http.tape), and Outcome is not: `json(status: 200, value: …)`'),
     true,
   );
 }
@@ -643,10 +643,10 @@ fn f(p: P) -> Int {
 // ---- 10. std helpers agents wrote by hand: byte classes, every_byte, min/max, parse_int. parse_int is checked
 // against BigInt on generated texts (an independent reading), compiled and interpreted.
 {
-  const P = `fn handle(raw: View) -> Buf {
+  const P = `fn handle(raw: View) -> Response {
   match parse_int(text: request(raw).body) {
-    Some(value) -> respond(status: 200) |> write_int(value)
-    None -> respond(status: 400)
+    Some(value) -> buf() |> write_int(value) |> respond(status: 200)
+    None -> empty(status: 400)
   }
 }
 `;
@@ -760,28 +760,28 @@ type Transfer {
   Transfer(transfer_id: View, from_id: View, amount: Int)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let r = request(raw)
   match r.path {
     "/t/" ++ id -> moved(id, from: r.body, amount: 5)
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn moved(id: View, from: View, amount: Int) -> Buf {
+fn moved(id: View, from: View, amount: Int) -> Response {
   let Some(value: t) = sql_first(
     row: Transfer,
     query: "INSERT INTO transfers(transfer_id, from_id, amount) VALUES (:id, :from, :amount) CLAIM RETURNING *",
     id,
     from,
     amount
-  ) else -> respond(status: 200)
+  ) else -> empty(status: 200)
   let 1 = sql_exec(
     query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount",
     amount,
     from
-  ) else -> rollback(out: respond(status: 409))
-  respond(status: 201) |> append(view: t.transfer_id)
+  ) else -> rollback(out: empty(status: 409))
+  buf() |> append(view: t.transfer_id) |> respond(status: 201)
 }
 `;
   const claimed = LEDGER.replace('CLAIM', 'ON CONFLICT(transfer_id) DO NOTHING');
@@ -794,7 +794,7 @@ fn moved(id: View, from: View, amount: Int) -> Buf {
       const sql = nodeSql();
       const app = instantiate(new WebAssembly.Module(r.wasm), { sql, log: false });
       sql.exec("INSERT INTO accounts VALUES ('a', 100)");
-      const send = (): string => new TextDecoder().decode(app.handle(new TextEncoder().encode('POST /t/x1\na')));
+      const send = (): string => answered(app.handle(new TextEncoder().encode('POST /t/x1\na')));
       return [send(), send(), sql.exec("SELECT balance FROM accounts WHERE id = 'a'").toArray()[0]?.['balance']];
     })(),
     ['201\nx1', '200\n', 95],
@@ -803,8 +803,8 @@ fn moved(id: View, from: View, amount: Int) -> Buf {
     'C54: the debit before the claim is still refused',
     codes(
       claimed.replace(
-        'fn moved(id: View, from: View, amount: Int) -> Buf {\n',
-        'fn moved(id: View, from: View, amount: Int) -> Buf {\n  let _ = sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
+        'fn moved(id: View, from: View, amount: Int) -> Response {\n',
+        'fn moved(id: View, from: View, amount: Int) -> Response {\n  let _ = sql_exec(query: "UPDATE accounts SET balance = balance - :amount WHERE id = :from AND balance >= :amount", amount, from)\n',
       ),
       ['handle'],
     ).map(x => x.split(':')[0]),
@@ -835,12 +835,12 @@ type Invoice {
   Invoice(lines: List[Shown], total: Int, names: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let lines = Cons(head: Line(name: "a", qty: 2, cents: 150), tail: Cons(head: Line(name: "b\\"", qty: 1, cents: 5), tail: Nil))
   let total = fold(list: lines, from: 0, by: fn(sum: Int, l: Line) -> Int { sum + l.qty * l.cents })
   let shown = map(list: lines, by: fn(l: Line) -> Shown { Shown(name: l.name, total: l.qty * l.cents) })
   let names = join(list: map(list: lines, by: fn(l: Line) -> View { l.name }), sep: "+")
-  respond(status: 200) |> write_json(value: Invoice(lines: shown, total, names))
+  buf() |> write_json(value: Invoice(lines: shown, total, names)) |> respond(status: 200)
 }
 `;
   const out = served(INV)('GET /');
@@ -868,22 +868,22 @@ fn handle(raw: View) -> Buf {
 // ---- 2. response headers: std/http's header, on the status line after a carriage return, read by the host
 // (responseOf) for every host alike; and request headers, by header_of. The shortener task needed a Location.
 {
-  const R = `fn handle(raw: View) -> Buf {
+  const R = `fn handle(raw: View) -> Response {
   let r = request(raw)
   match r.path {
-    "/go/" ++ code -> respond(status: 302) |> header(name: "Location", value: "https://example.com/" ++ code)
-    "/twice" -> respond_as(status: 200, content: Json)
+    "/go/" ++ code -> empty(status: 302) |> header(name: "Location", value: "https://example.com/" ++ code)
+    "/twice" -> buf()
+      |> append(view: "{}") |> respond_as(status: 200, content: Json)
       |> header(name: "cache-control", value: "no-store")
-      |> append(view: "{}")
       |> header(name: "x-n", value: "2")
-    "/key" -> respond(status: 200)
+    "/key" -> buf()
       |> append(view: match header_of(request: r, name: "idempotency-key") {
         Some(value) -> value
         None -> "none"
-      })
-    "/cookie" -> respond(status: 200) |> header(name: "set-cookie", value: "a=b")
-    "/split" -> respond(status: 200) |> header(name: "x-v", value: r.body)
-    _ -> respond(status: 200) |> header(name: "bad name", value: "x")
+      }) |> respond(status: 200)
+    "/cookie" -> empty(status: 200) |> header(name: "set-cookie", value: "a=b")
+    "/split" -> empty(status: 200) |> header(name: "x-v", value: r.body)
+    _ -> empty(status: 200) |> header(name: "bad name", value: "x")
   }
 }
 `;
@@ -932,7 +932,7 @@ fn handle(raw: View) -> Buf {
     [
       [500, "the program set a response header the host refuses: set-cookie is the host's to set"],
       [500, 'the program set a response header the host refuses: invalid header value for x-v'],
-      [500, 'the program set a response header the host refuses: invalid header name'],
+      [500, 'the program set a response header the host refuses: invalid header name "bad name"'],
     ],
   );
 }

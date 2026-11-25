@@ -1,7 +1,11 @@
 // git.tape: parse one git object (already inflated): "<kind> <size>\0<payload>". Answers with JSON. Byte layouts
 // need no special syntax: a prefix pattern, `until`, `after` and `slice` cover blobs, trees and commits.
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  parsed(raw) |> respond_as(status: 200, content: Json)
+}
+
+fn parsed(raw: View) -> Buf {
   match until(v: raw, byte: 0) {
     "blob " ++ decimal(size) -> sized(kind: 1, size, payload: after(v: raw, byte: 0))
     "tree " ++ decimal(size) -> sized(kind: 2, size, payload: after(v: raw, byte: 0))

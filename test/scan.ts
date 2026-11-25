@@ -9,7 +9,7 @@ import { JSON_PLAIN, hasByte } from '../compiler/byteset.ts';
 import { lex } from '../compiler/lex.ts';
 import { interpret, Trap } from '../interp.ts';
 import { std } from '../std.ts';
-import { bare, codes, finish, handleBare, same } from './harness.ts';
+import { bare, codes, finish, handleBare, same, answered } from './harness.ts';
 
 const BS = String.fromCodePoint(92);
 const QT = String.fromCodePoint(34);
@@ -84,11 +84,13 @@ fn one${i}(out: Buf, v: View) -> Buf {
 `,
 ).join('\n');
 const program = `${differ}
-fn handle(raw: View) -> Buf {
-  buf() ${SETS.map((_, i) => `|> one${i}(v: raw)`).join(' ')}
+fn handle(raw: View) -> Response {
+  buf() ${SETS.map((_, i) => `|> one${i}(v: raw)`).join(' ')} |> respond(status: 200)
 }
 `;
 
+/** The body of a 200 answer, as answerText pictures it. */
+const bodyOf = (answer: string): string => answer.replace(/^200\n/, '');
 /** What a byte loop answers at every offset, the fast answers separated by |. */
 function expect(v: Uint8Array): string {
   return SETS.map(s => {
@@ -162,7 +164,7 @@ for (const [label, o] of builds) {
   let agree = 0;
   const bad: string[] = [];
   for (const v of texts) {
-    const got = handleBare(b, v);
+    const got = bodyOf(handleBare(b, v));
     if (got !== expect(v)) {
       if (bad.length < 2) bad.push(`${got.slice(0, 80)} wanted ${expect(v).slice(0, 80)}`);
       continue;
@@ -178,23 +180,24 @@ for (const [label, o] of builds) {
   same(`${label}: no property broke`, bad, []);
 }
 const it = interpret(sources);
-const dec = new TextDecoder();
 let interpAgree = 0;
-for (const v of texts.slice(0, 24)) if (dec.decode(it.handle(v)) === expect(v)) interpAgree++;
+for (const v of texts.slice(0, 24)) if (bodyOf(answered(it.handle(v))) === expect(v)) interpAgree++;
 same('the interpreter: scan against the byte loop on 24 texts', interpAgree, 24);
 
 const part = (text: string, name: string): string => text.split('|')[SETS.findIndex(s => s.name === name)] ?? '';
-const sample = handleBare(
-  bare(
-    new WebAssembly.Module(
-      (() => {
-        const r = compile(sources, { exports: ['handle'] });
-        if (!r.wasm) throw new Error(r.errors.map(e => e.message).join('; '));
-        return r.wasm;
-      })(),
+const sample = bodyOf(
+  handleBare(
+    bare(
+      new WebAssembly.Module(
+        (() => {
+          const r = compile(sources, { exports: ['handle'] });
+          if (!r.wasm) throw new Error(r.errors.map(e => e.message).join('; '));
+          return r.wasm;
+        })(),
+      ),
     ),
+    new Uint8Array(24).fill(120),
   ),
-  new Uint8Array(24).fill(120),
 );
 same('a repeated byte is one member', part(sample, 'a'), part(sample, 'aaa'));
 same('the order of a set does not change the answer', part(sample, 'ba'), part(sample, 'ab'));
@@ -352,7 +355,7 @@ for (const c of STEP_CASES) {
 same('the interpreter agrees on the answers, traps included', stepInterp, STEP_CASES.length);
 
 // ---- a set that is not a text literal
-const handle = (body: string): string => `fn handle(raw: View) -> Buf {\n  ${body}\n  respond(status: 200)\n}\n`;
+const handle = (body: string): string => `fn handle(raw: View) -> Response {\n  ${body}\n  empty(status: 200)\n}\n`;
 same('a computed set is C93', codes(handle('let n = scan(raw, at: 0, set: raw)')), ['C93:2']);
 same('a hole in the set is C93', codes(handle(`let n = scan(raw, at: 0, set: "a${BS}(raw)")`)), ['C93:2']);
 same('a joined set is C93', codes(handle('let n = scan(raw, at: 0, set: "ab" ++ raw)')), ['C93:2']);

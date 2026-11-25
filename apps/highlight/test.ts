@@ -15,7 +15,7 @@ import type { Token } from '../../compiler/ast.ts';
 import { CompileError } from '../../compiler/common.ts';
 import { KEYWORDS, lex } from '../../compiler/lex.ts';
 import { format } from '../../fmt.ts';
-import { instantiate } from '../../host.ts';
+import { instantiate, responseOf } from '../../host.ts';
 import { std } from '../../std.ts';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
@@ -35,7 +35,7 @@ function build(text: string): Highlighter | string {
     run: input => {
       const app = instantiate(mod, {}),
         t0 = performance.now(),
-        out = new Uint8Array(app.handle(input)),
+        out = new Uint8Array(responseOf(app.handle(input)).body),
         cost = app.exports['cost'];
       return {
         out,

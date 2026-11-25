@@ -26,15 +26,15 @@ function moduleOf(text: string, name = 'imports.tape'): WebAssembly.Module | str
 const importsOf = (m: WebAssembly.Module | string): string[] =>
   typeof m === 'string' ? [m] : WebAssembly.Module.imports(m).map(i => i.name);
 
-const head = `fn handle(raw: View) -> Buf {
-  let Request(body) = request(raw) else -> respond(status: 400)
+const head = `fn handle(raw: View) -> Response {
+  let Request(body) = request(raw) else -> empty(status: 400)
 `;
 const FLOATS: readonly (readonly [string, string, readonly (readonly [string, string])[]])[] = [
   [
     'parse_float, its Float in a hole',
     `${head}  match parse_float(body) {
-    Some(value: x) -> respond(status: 200) |> append(view: "\\(x)")
-    None -> respond(status: 200) |> append(view: "none")
+    Some(value: x) -> buf() |> append(view: "\\(x)") |> respond(status: 200)
+    None -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 `,
@@ -46,8 +46,8 @@ const FLOATS: readonly (readonly [string, string, readonly (readonly [string, st
   [
     'parse_float, its Float unused',
     `${head}  match parse_float(body) {
-    Some(value: _) -> respond(status: 200) |> append(view: "number")
-    None -> respond(status: 200) |> append(view: "none")
+    Some(value: _) -> buf() |> append(view: "number") |> respond(status: 200)
+    None -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 `,
@@ -59,8 +59,8 @@ const FLOATS: readonly (readonly [string, string, readonly (readonly [string, st
   [
     'parse_float in a function handle calls',
     `${head}  match number(body) {
-    True -> respond(status: 200) |> append(view: "number")
-    False -> respond(status: 200) |> append(view: "none")
+    True -> buf() |> append(view: "number") |> respond(status: 200)
+    False -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 
@@ -79,8 +79,8 @@ fn number(text: View) -> Bool {
   [
     'decode of a Float, its Float in a hole',
     `${head}  match decode(json: body, as: Float) {
-    Ok(value: x) -> respond(status: 200) |> append(view: "\\(x)")
-    Err -> respond(status: 200) |> append(view: "none")
+    Ok(value: x) -> buf() |> append(view: "\\(x)") |> respond(status: 200)
+    Err -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 `,
@@ -92,8 +92,8 @@ fn number(text: View) -> Bool {
   [
     'write_json of a Float decoded',
     `${head}  match decode(json: body, as: Float) {
-    Ok(value: x) -> respond(status: 200) |> write_json(value: x)
-    Err -> respond(status: 200) |> append(view: "none")
+    Ok(value: x) -> buf() |> write_json(value: x) |> respond(status: 200)
+    Err -> buf() |> append(view: "none") |> respond(status: 200)
   }
 }
 `,

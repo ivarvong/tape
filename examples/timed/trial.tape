@@ -41,10 +41,10 @@ type Outcome {
   Problem(status: Int, reason: View)
 }
 
-fn handle(raw: View, db: Sql, mail: Remote, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, mail: Remote, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/trials", body) -> started(body) |> rendered
-    Request(method: "POST", path: "/trials/" ++ decimal(id) ++ "/pay") -> shown(found: latest(
+    Request(method: Post, path: "/trials", body) -> started(body) |> rendered
+    Request(method: Post, path: "/trials/" ++ decimal(id) ++ "/pay") -> shown(found: latest(
       id,
       m: sql_move(
         row: Signup,
@@ -54,7 +54,7 @@ fn handle(raw: View, db: Sql, mail: Remote, clock: Clock, timer: Timer) -> Buf {
       )
     ))
       |> rendered
-    Request(method: "GET", path: "/trials/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
+    Request(method: Get, path: "/trials/" ++ decimal(id)) -> shown(found: load(id)) |> rendered
     _ -> rendered(outcome: Problem(status: 404, reason: "no such route"))
   }
 }
@@ -199,13 +199,14 @@ fn shown(found: Option[Signup]) -> Outcome {
   Shown(status: 200, trial: t)
 }
 
-fn rendered(outcome: Outcome) -> Buf {
+fn rendered(outcome: Outcome) -> Response {
   match outcome {
-    Shown(status, trial) -> write_json(out: respond(status), value: trial)
-    Problem(status, reason) -> respond(status)
+    Shown(status, trial) -> write_json(out: buf(), value: trial) |> respond(status)
+    Problem(status, reason) -> buf()
       |> append(view: "{\"error\":")
       |> write_json_string(text: reason)
       |> append(view: "}")
+      |> respond(status)
   }
 }
 

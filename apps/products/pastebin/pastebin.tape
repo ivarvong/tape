@@ -32,12 +32,12 @@ type Made { Made(id: View, bytes: Int, expires: Int) }
 type Gone { Gone(deleted: Int) }
 type Problem { Problem(error: View) }
 
-fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> home()
-    Request(method: "POST", path: "/", query, body) -> made(body, minutes: minutes_of(query))
-    Request(method: "GET", path: "/" ++ paste_id(id) ++ "/raw") -> raw_text(found: live(id))
-    Request(method: "GET", path: "/" ++ paste_id(id)) -> page(found: live(id))
+    Request(method: Get, path: "/") -> home()
+    Request(method: Post, path: "/", query, body) -> made(body, minutes: minutes_of(query))
+    Request(method: Get, path: "/" ++ paste_id(id) ++ "/raw") -> raw_text(found: live(id))
+    Request(method: Get, path: "/" ++ paste_id(id)) -> page(found: live(id))
     _ -> problem(status: 404, error: "no such paste")
   }
 }
@@ -67,7 +67,7 @@ fn minutes_of(query: Option[View]) -> Option[Int] {
   }
 }
 
-fn made(body: View, minutes: Option[Int]) -> Buf {
+fn made(body: View, minutes: Option[Int]) -> Response {
   let Some(value: m) = minutes else -> problem(status: 400, error: "minutes: 1 to 1440")
   let ttl = m * 60000
   let True = len(body) >= 1 else -> problem(status: 400, error: "empty paste")
@@ -94,7 +94,7 @@ fn made(body: View, minutes: Option[Int]) -> Buf {
 }
 
 // the id was taken: by this text (a retry, or the same text posted again), or by another
-fn again(body: View, found: Option[Paste]) -> Buf {
+fn again(body: View, found: Option[Paste]) -> Response {
   match found {
     Some(value: paste) if paste.body == body -> answered(status: 200, paste)
     Some(value) -> problem(
@@ -108,12 +108,9 @@ fn again(body: View, found: Option[Paste]) -> Buf {
   }
 }
 
-fn answered(status: Int, paste: Paste) -> Buf {
-  respond_as(status, content: Json)
+fn answered(status: Int, paste: Paste) -> Response {
+  json(status, value: Made(id: id_text(paste.id), bytes: len(paste.body), expires: paste.expires))
     |> header(name: "location", value: id_text(paste.id))
-    |> write_json(
-      value: Made(id: id_text(paste.id), bytes: len(paste.body), expires: paste.expires)
-    )
 }
 
 // a paste whose time is up is gone, even before its timer has run
@@ -126,37 +123,38 @@ fn live(id: Int) -> Option[Paste] {
   )
 }
 
-fn raw_text(found: Option[Paste]) -> Buf {
+fn raw_text(found: Option[Paste]) -> Response {
   match found {
-    Some(value: paste) -> respond_as(status: 200, content: Text)
-      |> header(name: "cache-control", value: "no-store")
+    Some(value: paste) -> buf()
       |> append(view: paste.body)
+      |> respond_as(status: 200, content: Text)
+      |> header(name: "cache-control", value: "no-store")
     None -> problem(status: 404, error: "no such paste, or it has expired")
   }
 }
 
-fn page(found: Option[Paste]) -> Buf {
+fn page(found: Option[Paste]) -> Response {
   match found {
     Some(value: paste) -> {
       let id = id_text(paste.id)
-      shell(status: 200, title: "paste \(id)")
+      shell(title: "paste \(id)")
         |> append(view: "<p class=meta><b>\(id)</b> · \(len(paste.body)) bytes · ")
         |> append(view: "expires in \(remaining(ms: paste.expires - now())) · <a \
             href=\"\(id)/raw\">raw</a></p>")
         |> append(view: "<pre>")
         |> write_html(text: paste.body)
         |> append(view: "</pre>")
-        |> foot
+        |> foot(status: 200)
     }
-    None -> shell(status: 404, title: "no such paste")
+    None -> shell(title: "no such paste")
       |> append(view: "<p>There is no paste here, or it has expired. Pastes live for 24 hours.</p>")
       |> append(view: "<p><a href=\"./\">How to make one</a></p>")
-      |> foot
+      |> foot(status: 404)
   }
 }
 
-fn home() -> Buf {
-  shell(status: 200, title: "pastebin")
+fn home() -> Response {
+  shell(title: "pastebin")
     |> append(view: "<p>Post text, get a short link. A paste is deleted 24 hours after it is \
         made, by a timer ")
     |> append(view: "set in the same commit. At most \(flags.max_bytes) bytes; the same text \
@@ -167,12 +165,11 @@ fn home() -> Buf {
     |> append(view: "<p>The answer is <code>{\"id\",\"bytes\",\"expires\"}</code>; the page is at ")
     |> append(view: "<code>/p/demo/pastebin/&lt;id&gt;</code> and the text at \
         <code>&lt;id&gt;/raw</code>.</p>")
-    |> foot
+    |> foot(status: 200)
 }
 
-fn shell(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn shell(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
     |> append(view: "<meta name=viewport content=\"width=device-width,initial-scale=1\"><title>")
     |> write_html(text: title)
@@ -200,14 +197,16 @@ fn shell(status: Int, title: View) -> Buf {
     |> append(view: "</h1>")
 }
 
-fn foot(out: Buf) -> Buf {
+fn foot(out: Buf, status: Int) -> Response {
   out
     |> append(view: "<footer>A small program written in <a href=\"/\">Tape</a> · <a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/pastebin/pastebin.tape\">source</a></footer></html>")
+    |> respond_as(status, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
 // "23 h 59 min", "4 min", "less than a minute"

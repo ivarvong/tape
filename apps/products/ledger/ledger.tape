@@ -90,22 +90,23 @@ fn name_byte(b: Int) -> Bool {
   is_lower(b) or is_digit(b) or b == 45 or b == 95
 }
 
-fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/") -> home()
-    Request(method: "POST", path: "/accounts", body) -> opened(body)
-    Request(method: "GET", path: "/accounts") -> respond_as(status: 200, content: Json)
-      |> header(name: "cache-control", value: "no-store")
+    Request(method: Get, path: "/") -> home()
+    Request(method: Post, path: "/accounts", body) -> opened(body)
+    Request(method: Get, path: "/accounts") -> buf()
       |> write_rows(rows: sql_all(row: Account, query: "SELECT * FROM accounts ORDER BY id"))
-    Request(method: "GET", path: "/accounts.csv") -> balances_csv()
-    Request(method: "GET", path: "/accounts/" ++ Name(id)) -> account(id)
-    Request(method: "POST", path: "/transfers", body) -> sent(body)
-    Request(method: "GET", path: "/transfers.csv") -> transfers_csv()
+      |> respond_as(status: 200, content: Json)
+      |> header(name: "cache-control", value: "no-store")
+    Request(method: Get, path: "/accounts.csv") -> balances_csv()
+    Request(method: Get, path: "/accounts/" ++ Name(id)) -> account(id)
+    Request(method: Post, path: "/transfers", body) -> sent(body)
+    Request(method: Get, path: "/transfers.csv") -> transfers_csv()
     _ -> problem(status: 404, error: "no such route")
   }
 }
 
-fn opened(body: View) -> Buf {
+fn opened(body: View) -> Response {
   let Ok(value: NewAccount(id, external)) = decode(json: body, as: NewAccount) else {
     Err(error) -> problem(status: 400, error)
   }
@@ -120,25 +121,24 @@ fn opened(body: View) -> Buf {
     id,
     outside
   ) {
-    Some(value) -> respond_as(status: 201, content: Json) |> write_json(value)
+    Some(value) -> json(status: 201, value)
     None -> match sql_first(row: Account, query: "SELECT * FROM accounts WHERE id = :id", id) {
-      Some(value: a) if a.external == outside -> respond_as(status: 200, content: Json)
-        |> write_json(value: a)
+      Some(value: a) if a.external == outside -> json(status: 200, value: a)
       Some(value) -> problem(status: 409, error: "account \(id) exists, and is not that kind")
       None -> problem(status: 500, error: "the account is gone")
     }
   }
 }
 
-fn account(id: View) -> Buf {
+fn account(id: View) -> Response {
   let Some(value: Account(external, balance)) = sql_first(
     row: Account,
     query: "SELECT * FROM accounts WHERE id = :id",
     id
   ) else -> problem(status: 404, error: "no account \(id)")
-  respond_as(status: 200, content: Json)
-    |> header(name: "cache-control", value: "no-store")
-    |> write_json(value: Shown(
+  json(
+    status: 200,
+    value: Shown(
       id,
       external,
       balance,
@@ -149,7 +149,9 @@ fn account(id: View) -> Buf {
             ORDER BY e.transfer DESC LIMIT 100",
         id
       ))
-    ))
+    )
+  )
+    |> header(name: "cache-control", value: "no-store")
 }
 
 fn entries(rows: Rows[Entry]) -> List[Entry] {
@@ -159,7 +161,7 @@ fn entries(rows: Rows[Entry]) -> List[Entry] {
   }
 }
 
-fn sent(body: View) -> Buf {
+fn sent(body: View) -> Response {
   let Ok(
     value: NewTransfer(key, from, to, amount, memo)
   ) = decode(json: body, as: NewTransfer) else {
@@ -225,7 +227,7 @@ fn take(from: View, amount: Dec[2]) -> Int {
 }
 
 // the key was claimed: by this transfer (a retry), by another, or nothing was made (an account is missing)
-fn again(key: View, from: View, to: View, amount: Dec[2], note: View) -> Buf {
+fn again(key: View, from: View, to: View, amount: Dec[2], note: View) -> Response {
   match sql_first(row: Transfer, query: "SELECT * FROM transfers WHERE client = :key", key) {
     Some(value: t) if t.src == from
       and t.dst == to
@@ -236,9 +238,10 @@ fn again(key: View, from: View, to: View, amount: Dec[2], note: View) -> Buf {
   }
 }
 
-fn shown_transfer(status: Int, t: Transfer) -> Buf {
-  respond_as(status, content: Json)
-    |> write_json(value: Sent(
+fn shown_transfer(status: Int, t: Transfer) -> Response {
+  json(
+    status,
+    value: Sent(
       id: t.id,
       key: t.client,
       from: t.src,
@@ -246,15 +249,17 @@ fn shown_transfer(status: Int, t: Transfer) -> Buf {
       amount: t.amount,
       memo: t.memo,
       at: iso(ms: t.at)
-    ))
+    )
+  )
 }
 
-fn transfers_csv() -> Buf {
-  respond_as(status: 200, content: Csv)
+fn transfers_csv() -> Response {
+  buf()
+    |> append(view: "id,at,from,to,amount,memo,key\r ")
+    |> csv_rows(rows: sql_all(row: Transfer, query: "SELECT * FROM transfers ORDER BY id"))
+    |> respond_as(status: 200, content: Csv)
     |> header(name: "cache-control", value: "no-store")
     |> header(name: "content-disposition", value: "attachment; filename=transfers.csv")
-    |> append(view: "id,at,from,to,amount,memo,key\r\n")
-    |> csv_rows(rows: sql_all(row: Transfer, query: "SELECT * FROM transfers ORDER BY id"))
 }
 
 fn csv_rows(out: Buf, rows: Rows[Transfer]) -> Buf {
@@ -269,11 +274,12 @@ fn csv_rows(out: Buf, rows: Rows[Transfer]) -> Buf {
     })
 }
 
-fn balances_csv() -> Buf {
-  respond_as(status: 200, content: Csv)
-    |> header(name: "cache-control", value: "no-store")
-    |> append(view: "account,external,balance\r\n")
+fn balances_csv() -> Response {
+  buf()
+    |> append(view: "account,external,balance\r ")
     |> balance_rows(rows: sql_all(row: Account, query: "SELECT * FROM accounts ORDER BY id"))
+    |> respond_as(status: 200, content: Csv)
+    |> header(name: "cache-control", value: "no-store")
 }
 
 fn balance_rows(out: Buf, rows: Rows[Account]) -> Buf {
@@ -366,13 +372,12 @@ fn two(n: Int) -> View {
   }
 }
 
-fn problem(status: Int, error: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Problem(error))
+fn problem(status: Int, error: View) -> Response {
+  json(status, value: Problem(error))
 }
 
-fn home() -> Buf {
-  let out = respond_as(status: 200, content: Html)
-    |> header(name: "cache-control", value: "no-store")
+fn home() -> Response {
+  let out = buf()
     |> append(view: "<!doctype html><html lang=en><meta charset=utf-8>")
     |> append(view: "<meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><title>ledger</title>")
@@ -416,6 +421,8 @@ fn home() -> Buf {
   )
     |> append(view: "</table></div><footer>A small program written in <a href=\"/\">Tape</a> · <a \
         href=\"https://github.com/ivarvong/tape/blob/main/apps/products/ledger/ledger.tape\">source</a></footer></html>")
+    |> respond_as(status: 200, content: Html)
+    |> header(name: "cache-control", value: "no-store")
 }
 
 fn balance_cells(out: Buf, rows: Rows[Account]) -> Buf {

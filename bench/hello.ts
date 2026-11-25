@@ -4,7 +4,7 @@
 // recorded, and the trace computed from that) and with it off. First the same answers, then microseconds per
 // request (median of 15 batches after warm-up). Local numbers, one machine, SQLite in memory.
 import '../node25.ts';
-import { instantiate } from '../host.ts';
+import { framed, instantiate } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { NodeSql } from '../nodesql.ts';
 import { built, moduleOf, read } from '../test/harness.ts';
@@ -13,7 +13,7 @@ const dec = new TextDecoder();
 const enc = new TextEncoder();
 const module = moduleOf(built([{ name: 'examples/hello.tape', text: read('examples/hello.tape') }]));
 
-/** The request by hand: the route, the statement, the answer, as the program writes them. */
+/** The request by hand: the route, the statement, the answer, in the frame the program's answer is in. */
 const byHand =
   (sql: NodeSql) =>
   (bytes: Uint8Array): Uint8Array => {
@@ -22,13 +22,14 @@ const byHand =
     const space = line.indexOf(' ');
     const [method, path] = [line.slice(0, Math.max(space, 0)), line.slice(space + 1)];
     const name = path.slice('/hello/'.length);
-    if (method !== 'GET' || !path.startsWith('/hello/') || name === '') return enc.encode('404\nno such route');
+    if (method !== 'GET' || !path.startsWith('/hello/') || name === '')
+      return framed({ status: 404, body: 'no such route' });
     return sql.transaction(() => {
       const [row] = sql
         .exec('INSERT INTO greeted(name, n) VALUES (?1, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n', name)
         .toArray();
       const n = Number(row?.['n']);
-      return enc.encode(n === 1 ? `200\nHello, ${name}` : `200\nHello again, ${name} #${n}!`);
+      return framed({ status: 200, body: n === 1 ? `Hello, ${name}` : `Hello again, ${name} #${n}!` });
     });
   };
 

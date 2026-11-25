@@ -27,7 +27,7 @@ import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { compile } from '../../compiler.ts';
-import { instantiate, isCall, isHead } from '../../host.ts';
+import { instantiate, isCall, isHead, responseOf } from '../../host.ts';
 import type { Effect } from '../../host.ts';
 import { nodeSql as cliSql } from '../../nodesql.ts';
 import { std } from '../../std.ts';
@@ -347,7 +347,7 @@ const tests: Test[] = [
       ]);
       if (!r.wasm) return ['highlight.tape does not compile'];
       const app = instantiate(new WebAssembly.Module(r.wasm), {});
-      const drawn = new TextDecoder().decode(app.handle(new TextEncoder().encode(src)));
+      const drawn = new TextDecoder().decode(responseOf(app.handle(new TextEncoder().encode(src))).body);
       const lines = src.split('\n').length;
       for (let line = 1; line <= lines; line++) {
         const got = m.editor.withMarks(drawn, [{ line, code: 'C99', message: 'here' }]);
@@ -409,7 +409,7 @@ const tests: Test[] = [
         ...std,
         {
           name: 'w.tape',
-          text: 'schema "CREATE TABLE IF NOT EXISTS t(k TEXT)"\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let w = sql_exec(query: "DELETE FROM t")\n  respond(status: 200) |> append(view: "\\(w)")\n}\n',
+          text: 'schema "CREATE TABLE IF NOT EXISTS t(k TEXT)"\n\nfn handle(raw: View, db: Sql) -> Response {\n  let w = sql_exec(query: "DELETE FROM t")\n  buf() |> append(view: "\\(w)") |> respond(status: 200)\n}\n',
         },
       ]);
       if (!one.wasm) return [...out, `the undone check's program does not compile: ${one.errors[0]?.message}`];
@@ -554,7 +554,9 @@ const tests: Test[] = [
       const p = ex?.presets[2];
       const x = await w.send('fulfillment', `${p?.method} ${p?.path}\n${p?.body ?? ''}`);
       const app = instantiate(new WebAssembly.Module(r.wasm), {});
-      const svg = new TextDecoder().decode(app.handle(new TextEncoder().encode(JSON.stringify(x.otlp))));
+      const svg = new TextDecoder().decode(
+        responseOf(app.handle(new TextEncoder().encode(JSON.stringify(x.otlp)))).body,
+      );
       const out: string[] = [];
       if (!svg.trimStart().startsWith('<svg')) out.push(`trace.tape did not answer with an SVG: ${svg.slice(0, 80)}`);
       const names = x.otlp.resourceSpans.flatMap(rs => rs.scopeSpans[0].spans.map(s => s.name));
@@ -592,7 +594,7 @@ const tests: Test[] = [
       if (!hl.wasm) out.push('highlight.tape does not compile');
       else {
         const drawn = new TextDecoder().decode(
-          instantiate(new WebAssembly.Module(hl.wasm), {}).handle(new TextEncoder().encode(file)),
+          responseOf(instantiate(new WebAssembly.Module(hl.wasm), {}).handle(new TextEncoder().encode(file))).body,
         );
         if (code !== drawn) out.push('the program on the homepage is not highlighted as highlight.tape draws it');
       }

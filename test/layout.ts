@@ -46,13 +46,13 @@ ok(`${files.length} programs checked`, files.length >= 45);
 ok('lines wider than 100 columns that are not comments: at most 41', wide <= 41, `${wide}`);
 
 // ---- the forms, on small programs
-const body = (inside: string): string => `fn handle(raw: View) -> Buf {\n  ${inside}\n}\n`;
+const body = (inside: string): string => `fn handle(raw: View) -> Response {\n  ${inside}\n}\n`;
 const long =
-  'respond(status: 200) |> append(view: "one") |> append(view: "two") |> append(view: "three") |> append(view: "four")';
+  'buf() |> append(view: "one") |> append(view: "two") |> append(view: "three") |> append(view: "four") |> respond(status: 200)';
 same(
   'a line too wide breaks before each |>',
   format(body(long)),
-  'fn handle(raw: View) -> Buf {\n  respond(status: 200)\n    |> append(view: "one")\n    |> append(view: "two")\n    |> append(view: "three")\n    |> append(view: "four")\n}\n',
+  'fn handle(raw: View) -> Response {\n  buf()\n    |> append(view: "one")\n    |> append(view: "two")\n    |> append(view: "three")\n    |> append(view: "four")\n    |> respond(status: 200)\n}\n',
 );
 const call =
   'pick(first: slice(v: raw, from: 0, to: 1), second: slice(v: raw, from: 1, to: 2), third: slice(v: raw, from: 2, to: 3))';
@@ -62,7 +62,7 @@ same(
     .split('\n')
     .slice(3, 9),
   [
-    'fn handle(raw: View) -> Buf {',
+    'fn handle(raw: View) -> Response {',
     '  pick(',
     '    first: slice(v: raw, from: 0, to: 1),',
     '    second: slice(v: raw, from: 1, to: 2),',
@@ -93,20 +93,20 @@ same('a text is not carried inside a hole', lexed(kept), lexed(body(holes)));
 ok('and no line of it ends inside a hole', !/\\\((?:[^)]|\)(?!\)))*\\\n/.test(kept), kept);
 same(
   'a line that fits is left alone',
-  format(body('respond(status: 200) |> append(view: "ok")')),
-  body('respond(status: 200) |> append(view: "ok")'),
+  format(body('buf() |> append(view: "ok") |> respond(status: 200)')),
+  body('buf() |> append(view: "ok") |> respond(status: 200)'),
 );
 same(
   'a break the author put inside brackets is not kept: a step that fits is one line, however it was typed',
-  format(body('respond(\n    status: 200\n  )')),
-  body('respond(status: 200)'),
+  format(body('empty(\n    status: 200\n  )')),
+  body('empty(status: 200)'),
 );
 
 const arg = `"aa ${'a'.repeat(80)}"`;
 same(
   'a call broken after a `|>` has its arguments inside the `|>` line, and its closer where that line stands',
   format(body(`buf() |> append(view: ${arg}) |> append(view: "x")`)),
-  `fn handle(raw: View) -> Buf {\n  buf()\n    |> append(\n      view: ${arg}\n    )\n    |> append(view: "x")\n}\n`,
+  `fn handle(raw: View) -> Response {\n  buf()\n    |> append(\n      view: ${arg}\n    )\n    |> append(view: "x")\n}\n`,
 );
 same(
   'a pipeline with a block in it is broken before each of its `|>`s, though every line fits',
@@ -115,7 +115,7 @@ same(
       'buf() |> append(view: "a") |> append(view: match {\n    n > 0 -> "b"\n    else -> "c"\n  }) |> append(view: "d")',
     ),
   ),
-  'fn handle(raw: View) -> Buf {\n  buf()\n    |> append(view: "a")\n    |> append(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n    |> append(view: "d")\n}\n',
+  'fn handle(raw: View) -> Response {\n  buf()\n    |> append(view: "a")\n    |> append(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n    |> append(view: "d")\n}\n',
 );
 same(
   'and so is one with two blocks, whose middle line closes one and opens the other',
@@ -124,7 +124,7 @@ same(
       'buf() |> f(view: match {\n    n > 0 -> "b"\n    else -> "c"\n  }) |> f(view: match {\n    n > 0 -> "b"\n    else -> "c"\n  })',
     ),
   ),
-  'fn handle(raw: View) -> Buf {\n  buf()\n    |> f(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n    |> f(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n}\n',
+  'fn handle(raw: View) -> Response {\n  buf()\n    |> f(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n    |> f(view: match {\n      n > 0 -> "b"\n      else -> "c"\n    })\n}\n',
 );
 same(
   'and a pipeline inside an argument is not',

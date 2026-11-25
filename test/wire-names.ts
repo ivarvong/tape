@@ -11,7 +11,7 @@ import { SHADOWABLE } from '../compiler/shadow.ts';
 import { INTRINSICS } from '../compiler/types.ts';
 import { wireSource } from '../compiler/wire.ts';
 import { std } from '../std.ts';
-import { finish, ok, same } from './harness.ts';
+import { answerBody, finish, ok, same } from './harness.ts';
 
 const program = `type Name = View where len(self) >= 1 and len(self) <= 8
 type Item { Item(sku: Name, qty: Int, tags: List[View]) }
@@ -22,7 +22,11 @@ type Shape {
   Rect(w: Int, h: Int)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match raw {
     "order " ++ json -> order(found: decode(json, as: Order))
     "maybe " ++ json -> maybe(found: decode(json, as: Maybe))
@@ -81,9 +85,8 @@ ok(
 );
 if (built.wasm) {
   const app = instantiate(new WebAssembly.Module(built.wasm), { log: false });
-  const dec = new TextDecoder(),
-    enc = new TextEncoder();
-  const say = (s: string): string => dec.decode(app.handle(enc.encode(s)));
+  const enc = new TextEncoder();
+  const say = (s: string): string => answerBody(app.handle(enc.encode(s)));
   same(
     'it decodes nested JSON and writes it',
     say(

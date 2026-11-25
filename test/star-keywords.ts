@@ -10,7 +10,7 @@ import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const SCHEMA =
   'CREATE TABLE transfers(id INTEGER PRIMARY KEY, "from" TEXT NOT NULL, "to" TEXT NOT NULL, "order" INTEGER NOT NULL, state TEXT NOT NULL)';
@@ -24,19 +24,19 @@ machine transfers.state: TransferState { Open -> Done }
 
 type Transfer { Transfer(id: Int, from: View, to: View, order: Int, state: TransferState) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw).path {
     "/first" -> shown(found: sql_first(row: Transfer, query: "SELECT * FROM transfers WHERE id = 1"))
-    "/all" -> listed(rows: sql_all(row: Transfer, query: "SELECT t.* FROM transfers AS t ORDER BY t.id"), out: respond(status: 200))
+    "/all" -> listed(rows: sql_all(row: Transfer, query: "SELECT t.* FROM transfers AS t ORDER BY t.id"), out: buf()) |> respond(status: 200)
     "/done" -> match sql_move(
       row: Transfer,
       query: "UPDATE transfers SET state = 'done' WHERE id = 1 AND state = 'open' RETURNING *"
     ) {
       Moved(value) -> shown(found: Some(value))
-      Raced(now) -> respond(status: 409) |> append(view: line(now))
-      NoRow -> respond(status: 404)
+      Raced(now) -> buf() |> append(view: line(now)) |> respond(status: 409)
+      NoRow -> empty(status: 404)
     }
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
@@ -51,10 +51,10 @@ fn state_text(s: TransferState) -> View {
   }
 }
 
-fn shown(found: Option[Transfer]) -> Buf {
+fn shown(found: Option[Transfer]) -> Response {
   match found {
-    Some(value) -> respond(status: 200) |> append(view: line(value))
-    None -> respond(status: 404)
+    Some(value) -> buf() |> append(view: line(value)) |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 
@@ -73,9 +73,8 @@ same(
 );
 if (r.wasm) {
   const app = instantiate(new WebAssembly.Module(r.wasm), { sql: nodeSql(), log: false });
-  const dec = new TextDecoder();
   const body = (request: string): string => {
-    const out = dec.decode(app.handle(new TextEncoder().encode(request)));
+    const out = answered(app.handle(new TextEncoder().encode(request)));
     return out.slice(out.indexOf('\n') + 1);
   };
   // SQLite itself, on the same row

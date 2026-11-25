@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compile } from '../../compiler.ts';
 import { format } from '../../fmt.ts';
-import { instantiate } from '../../host.ts';
+import { instantiate, responseOf } from '../../host.ts';
 import { std } from '../../std.ts';
 
 const HERE = new URL('./', import.meta.url).pathname;
@@ -36,7 +36,7 @@ function build(text: string): Renderer | string {
       let out: Uint8Array | null = null,
         trap: string | null = null;
       try {
-        out = app.handle(input);
+        out = responseOf(app.handle(input)).body;
       } catch (e) {
         trap = e instanceof Error ? e.message : String(e);
       }

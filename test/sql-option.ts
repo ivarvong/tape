@@ -12,7 +12,7 @@ import { compile } from '../compiler.ts';
 import { instantiate } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
-import { finish, same } from './harness.ts';
+import { finish, same, answered } from './harness.ts';
 
 const SCHEMA = [
   'CREATE TABLE items(id INTEGER PRIMARY KEY, name TEXT NOT NULL, region TEXT, qty INTEGER, state TEXT NOT NULL)',
@@ -28,21 +28,21 @@ type Count { Count(n: Int) }
 ${body}`;
 
 const PROGRAM = program(`
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "POST", path: "/items", body) -> added(body)
-    Request(method: "GET", path: "/count/" ++ region) -> counted(found: sql_first(
+    Request(method: Post, path: "/items", body) -> added(body)
+    Request(method: Get, path: "/count/" ++ region) -> counted(found: sql_first(
       row: Count,
       query: "SELECT count(*) AS n FROM items WHERE (:only IS NULL OR region = :only)",
       only: given(region)
     ))
-    Request(method: "GET", path: "/names/" ++ region) -> named(
+    Request(method: Get, path: "/names/" ++ region) -> named(
       rows: sql_all(row: Item, query: "SELECT * FROM items WHERE region IS :only ORDER BY id", only: given(region)),
-      out: respond(status: 200)
-    )
-    Request(method: "POST", path: "/close/" ++ id ++ "/" ++ region) -> closed(id: parse_int(text: id), region)
-    _ -> respond(status: 404)
+      out: buf()
+    ) |> respond(status: 200)
+    Request(method: Post, path: "/close/" ++ id ++ "/" ++ region) -> closed(id: parse_int(text: id), region)
+    _ -> empty(status: 404)
   }
 }
 
@@ -54,9 +54,9 @@ fn given(v: View) -> Option[View] {
   }
 }
 
-fn added(body: View) -> Buf {
+fn added(body: View) -> Response {
   let Ok(value: NewItem(name, region, qty)) = decode(json: body, as: NewItem) else {
-    Err(error) -> respond(status: 400) |> append(view: error)
+    Err(error) -> buf() |> append(view: error) |> respond(status: 400)
   }
   let _ = sql_exec(
     query: "INSERT INTO items(name, region, qty, state) VALUES (:name, :region, :qty, 'open')",
@@ -65,13 +65,13 @@ fn added(body: View) -> Buf {
     qty,
     repeat: True
   )
-  respond(status: 201)
+  empty(status: 201)
 }
 
-fn counted(found: Option[Count]) -> Buf {
+fn counted(found: Option[Count]) -> Response {
   match found {
-    Some(value: Count(n)) -> respond(status: 200) |> write_int(value: n)
-    None -> respond(status: 500)
+    Some(value: Count(n)) -> buf() |> write_int(value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 
@@ -91,17 +91,17 @@ fn cleared(v: View) -> Option[View] {
 }
 
 // the region set as it closes
-fn closed(id: Option[Int], region: View) -> Buf {
-  let Some(value: n) = id else -> respond(status: 400)
+fn closed(id: Option[Int], region: View) -> Response {
+  let Some(value: n) = id else -> empty(status: 400)
   match sql_move(
     row: Item,
     query: "UPDATE items SET state = 'closed', region = :region WHERE id = :id AND state = 'open' RETURNING *",
     id: n,
     region: cleared(region)
   ) {
-    Moved -> respond(status: 200) |> append(view: "moved")
-    Raced -> respond(status: 409)
-    NoRow -> respond(status: 404)
+    Moved -> buf() |> append(view: "moved") |> respond(status: 200)
+    Raced -> empty(status: 409)
+    NoRow -> empty(status: 404)
   }
 }
 `);
@@ -116,9 +116,8 @@ same(
 if (r.wasm) {
   const theirs = nodeSql();
   const app = instantiate(new WebAssembly.Module(r.wasm), { sql: theirs, log: false });
-  const dec = new TextDecoder();
   const answer = (request: string): string => {
-    const out = dec.decode(app.handle(new TextEncoder().encode(request)));
+    const out = answered(app.handle(new TextEncoder().encode(request)));
     const [head = '', ...rest] = out.split('\n');
     return `${head.split(' ')[0]} ${rest.join('\n')}`.trim();
   };
@@ -174,10 +173,10 @@ const said = (body: string): string => {
   return e ? `${e.code}: ${e.message} | ${e.hint ?? ''}` : 'compiled';
 };
 const into = said(`
-fn handle(raw: View, db: Sql) -> Buf {
-  let Ok(value: NewItem(region)) = decode(json: raw, as: NewItem) else -> respond(status: 400)
+fn handle(raw: View, db: Sql) -> Response {
+  let Ok(value: NewItem(region)) = decode(json: raw, as: NewItem) else -> empty(status: 400)
   let _ = sql_exec(query: "INSERT INTO items(name, state) VALUES (:region, 'open')", region, repeat: True)
-  respond(status: 200)
+  empty(status: 200)
 }
 `);
 same(
@@ -186,11 +185,11 @@ same(
   ['C69:', true],
 );
 const eq = said(`
-fn handle(raw: View, db: Sql) -> Buf {
-  let Ok(value: NewItem(region)) = decode(json: raw, as: NewItem) else -> respond(status: 400)
+fn handle(raw: View, db: Sql) -> Response {
+  let Ok(value: NewItem(region)) = decode(json: raw, as: NewItem) else -> empty(status: 400)
   match sql_first(row: Count, query: "SELECT count(*) AS n FROM items WHERE region = :region", region) {
-    Some(value: Count(n)) -> respond(status: 200) |> write_int(value: n)
-    None -> respond(status: 200)
+    Some(value: Count(n)) -> buf() |> write_int(value: n) |> respond(status: 200)
+    None -> empty(status: 200)
   }
 }
 `);

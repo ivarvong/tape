@@ -5,7 +5,7 @@ import { numbered } from '../compiler/sqltext.ts';
 import { instantiate, isSql } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { Transaction } from '../host.ts';
-import { built, finish, moduleOf, problems, same } from './harness.ts';
+import { answered, built, finish, moduleOf, problems, same } from './harness.ts';
 
 // ---- the statement the database is given: each name numbered in the order it first appears
 same(
@@ -32,12 +32,12 @@ const SCHEMA =
   'schema "CREATE TABLE IF NOT EXISTS todos(id INTEGER PRIMARY KEY, title TEXT NOT NULL, n INTEGER NOT NULL)"\n';
 const program = (call: string): string =>
   `${SCHEMA}type Todo { Todo(id: Int, title: View, n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let id = len(raw)
   let _ = sql_exec(db, query: "INSERT INTO todos(id, title, n) VALUES (:id, :title, :id * 10) ON CONFLICT(id) DO NOTHING", title: raw, id)
   match ${call} {
-    Some(value: Todo(title, n)) -> respond(status: 200) |> append(view: "\\(title) \\(n)")
-    None -> respond(status: 404)
+    Some(value: Todo(title, n)) -> buf() |> append(view: "\\(title) \\(n)") |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 `;
@@ -48,11 +48,7 @@ const READ = 'sql_first(db, row: Todo, query: "SELECT * FROM todos WHERE title =
     tx: Transaction = f => sql.transaction(f),
     app = instantiate(moduleOf(b), { sql, name: 'names' });
   const r = await app.runLogged(new TextEncoder().encode('milk'), { transaction: tx });
-  same(
-    'a run binds each value to its name, whatever the order of the arguments',
-    new TextDecoder().decode(r.out),
-    '200\nmilk 40',
-  );
+  same('a run binds each value to its name, whatever the order of the arguments', answered(r.out), '200\nmilk 40');
   same('the stored row is the one the names say', sql.exec('SELECT id, title, n FROM todos').toArray(), [
     { id: 4, title: 'milk', n: 40 },
   ]);

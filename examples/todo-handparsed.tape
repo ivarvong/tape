@@ -28,7 +28,7 @@ type Draft {
   Invalid
 }
 
-fn handle(request: View, db: Sql) -> Buf {
+fn handle(request: View, db: Sql) -> Response {
   let line = until(v: request, byte: 10)
   let target = after(v: line, byte: 32)
   serve(
@@ -56,7 +56,7 @@ fn item(id: Option[Int]) -> Route {
   }
 }
 
-fn serve(method: View, route: Route, query: View, body: View) -> Buf {
+fn serve(method: View, route: Route, query: View, body: View) -> Response {
   match route {
     NoRoute -> error(status: 404)
     List if method == "GET" -> list(query)
@@ -76,7 +76,7 @@ fn serve(method: View, route: Route, query: View, body: View) -> Buf {
   }
 }
 
-fn list(query: View) -> Buf {
+fn list(query: View) -> Response {
   match query {
     "" -> todos(rows: sql_all(row: Todo, query: "SELECT * FROM todos ORDER BY id"))
     "done=true" -> todos(rows: sql_all(
@@ -93,7 +93,7 @@ fn list(query: View) -> Buf {
   }
 }
 
-fn create(draft: Draft) -> Buf {
+fn create(draft: Draft) -> Response {
   match draft {
     Draft(
       key: Set(value: key),
@@ -109,7 +109,7 @@ fn create(draft: Draft) -> Buf {
   }
 }
 
-fn insert(key: View, text: View, done: Bool) -> Buf {
+fn insert(key: View, text: View, done: Bool) -> Response {
   made(
     key,
     found: sql_first(
@@ -124,7 +124,7 @@ fn insert(key: View, text: View, done: Bool) -> Buf {
 }
 
 // 201 with the todo this request made, or 200 with the one an earlier request with the same key made.
-fn made(key: View, found: Option[Todo]) -> Buf {
+fn made(key: View, found: Option[Todo]) -> Response {
   match found {
     Some(value) -> one(status: 201, found)
     None -> one(
@@ -134,7 +134,7 @@ fn made(key: View, found: Option[Todo]) -> Buf {
   }
 }
 
-fn update(id: Int, draft: Draft) -> Buf {
+fn update(id: Int, draft: Draft) -> Response {
   match draft {
     Draft(key: Unset, title: Set(value: text), done: Unset) -> one(
       status: 200,
@@ -232,39 +232,35 @@ fn done_of(value: Json) -> Field[Bool] {
 
 // ---------- responses ----------
 
-fn error(status: Int) -> Buf {
+fn error(status: Int) -> Response {
   match status {
-    400 -> append(buf: buf(), view: "400\n{\"error\":\"bad_request\"}")
-    404 -> append(buf: buf(), view: "404\n{\"error\":\"not_found\"}")
-    _ -> append(buf: buf(), view: "405\n{\"error\":\"method_not_allowed\"}")
+    400 -> buf() |> append(view: "{\"error\":\"bad_request\"}") |> respond(status: 400)
+    404 -> buf() |> append(view: "{\"error\":\"not_found\"}") |> respond(status: 404)
+    _ -> buf() |> append(view: "{\"error\":\"method_not_allowed\"}") |> respond(status: 405)
   }
 }
 
-fn one(status: Int, found: Option[Todo]) -> Buf {
+fn one(status: Int, found: Option[Todo]) -> Response {
   match found {
-    Some(value) -> write_todo(
-      out: push(buf: write_int(out: buf(), value: status), byte: 10),
-      todo: value
-    )
+    Some(value) -> buf() |> write_todo(todo: value) |> respond(status)
     None -> error(status: 404)
   }
 }
 
-fn deleted(id: Int, count: Int) -> Buf {
+fn deleted(id: Int, count: Int) -> Response {
   match count {
     0 -> error(status: 404)
-    _ -> push(
-      buf: write_int(out: append(buf: buf(), view: "200\n{\"deleted\":"), value: id),
-      byte: 125
-    )
+    _ -> push(buf: write_int(out: append(buf: buf(), view: "{\"deleted\":"), value: id), byte: 125)
+      |> respond(status: 200)
   }
 }
 
-fn todos(rows: Rows[Todo]) -> Buf {
+fn todos(rows: Rows[Todo]) -> Response {
   append(
-    buf: each_todo(out: append(buf: buf(), view: "200\n{\"todos\":["), rows, first: True),
+    buf: each_todo(out: append(buf: buf(), view: "{\"todos\":["), rows, first: True),
     view: "]}"
   )
+    |> respond(status: 200)
 }
 
 fn each_todo(out: Buf, rows: Rows[Todo], first: Bool) -> Buf {

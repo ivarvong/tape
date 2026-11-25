@@ -5,7 +5,7 @@
 // recursion it replaced. The example in fold_rows's comment compiles and answers the names. Run in node:sqlite.
 //   node test/fold-rows.ts
 import '../node25.ts';
-import { instantiate, isHead } from '../host.ts';
+import { instantiate, isHead, responseOf } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { built, finish, moduleOf, raw, same } from './harness.ts';
 
@@ -17,17 +17,17 @@ type Item { Item(id: Int, name: View, qty: Int) }
 type NewItem { NewItem(name: View, qty: Int) }
 type Count { Count(n: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", body) -> added(body)
-    _ -> walked(out: respond(status: 200))
+    Request(method: Post, body) -> added(body)
+    _ -> walked(out: buf()) |> respond(status: 200)
   }
 }
 
-fn added(body: View) -> Buf {
-  let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else -> respond(status: 400)
+fn added(body: View) -> Response {
+  let Ok(value: NewItem(name, qty)) = decode(json: body, as: NewItem) else -> empty(status: 400)
   let _ = sql_exec(query: "INSERT INTO items(name, qty) VALUES (:name, :qty)", name, qty, repeat: True)
-  respond(status: 201)
+  empty(status: 201)
 }
 
 fn all() -> Rows[Item] {
@@ -103,11 +103,7 @@ function served(walk: string, rows: number): Served {
   const enc = new TextEncoder(),
     dec = new TextDecoder();
   for (let i = 0; i < rows; i++) app.handle(enc.encode(`POST /\n${JSON.stringify({ name: `n${i}`, qty: i * 3 + 1 })}`));
-  const answer = dec
-    .decode(app.handle(enc.encode('GET /')))
-    .split('\n')
-    .slice(1)
-    .join('\n');
+  const answer = dec.decode(responseOf(app.handle(enc.encode('GET /'))).body);
   const head = app.effects.find(isHead);
   return { answer, steps: head?.steps ?? -1 };
 }

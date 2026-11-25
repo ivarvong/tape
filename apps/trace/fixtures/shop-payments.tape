@@ -16,7 +16,8 @@ export fn charge(db: Sql, message: Charge) -> Result[Charged, View] {
   Ok(value: Charged(payment: paid.id))
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
-  respond(status: 200)
+fn handle(raw: View, db: Sql) -> Response {
+  buf()
     |> write_rows(rows: sql_all(row: Payment, query: "SELECT * FROM payments ORDER BY id"))
+    |> respond(status: 200)
 }

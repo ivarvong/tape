@@ -25,7 +25,7 @@ const GIVES: Readonly<Record<string, string>> = {
   ask: 'a Result',
   random: 'Int',
   now: 'Int',
-  rollback: 'a Buf',
+  rollback: 'a Response',
 };
 const typeText = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(typeText).join(', ')}]` : t.name);
 /** How to run `name` as a step of its own: `do` for a Done, or, for a value `do` does not run, what to do with it. */

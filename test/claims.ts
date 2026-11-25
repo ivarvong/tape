@@ -55,15 +55,15 @@ type Seat { Seat(id: Int, state: View, buyer: View) }
 type Grab { Grab(key: View) }
 type Count { Count(n: Int) }
 
-fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, timer: Timer) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/grab", body) -> {
-      let Ok(value: Grab(key)) = decode(json: body, as: Grab) else -> respond(status: 400)
+    Request(method: Post, path: "/grab", body) -> {
+      let Ok(value: Grab(key)) = decode(json: body, as: Grab) else -> empty(status: 400)
       ${grab}
     }
-    Request(method: "POST", path: "/seats/" ++ decimal(id) ++ "/take") -> respond(status: 200)
-      |> write_int(value: take(id, buyer: "door"))
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/seats/" ++ decimal(id) ++ "/take") -> buf()
+      |> write_int(value: take(id, buyer: "door")) |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 
@@ -80,16 +80,16 @@ fn take(id: Int, buyer: View) -> Int {
   )
 }
 ${extra}`;
-const ONE = `respond(status: 200) |> write_int(value: sql_exec(
+const ONE = `buf() |> write_int(value: sql_exec(
         query: "UPDATE seats SET state = 'taken', buyer = :key WHERE id = (SELECT id FROM seats WHERE state = 'free' ORDER BY id LIMIT 1) AND state = 'free'",
         key
-      ))`;
-const NEXT = `let Some(value: Seat(id)) = sql_first(row: Seat, query: "SELECT * FROM seats WHERE state = 'free' ORDER BY id LIMIT 1") else -> respond(status: 204)`;
-T('the seats program, taking by its key alone: accepted', codes(seats('respond(status: 200)')), []);
+      )) |> respond(status: 200)`;
+const NEXT = `let Some(value: Seat(id)) = sql_first(row: Seat, query: "SELECT * FROM seats WHERE state = 'free' ORDER BY id LIMIT 1") else -> empty(status: 204)`;
+T('the seats program, taking by its key alone: accepted', codes(seats('empty(status: 200)')), []);
 {
   const text = seats(ONE);
   T('a seat taken by one UPDATE whose subquery picks the next free one: C95', codes(text), [
-    `C95:${lineOf(text, 'respond(status: 200) |> write_int(value: sql_exec(')}`,
+    `C95:${lineOf(text, 'buf() |> write_int(value: sql_exec(')}`,
   ]);
   T(
     '…and with `repeat: True` (each request is meant to take another): accepted, and not C88',
@@ -98,7 +98,7 @@ T('the seats program, taking by its key alone: accepted', codes(seats('respond(s
   );
 }
 {
-  const text = seats(`${NEXT}\n      respond(status: 200) |> write_int(value: take(id, buyer: key))`);
+  const text = seats(`${NEXT}\n      buf() |> write_int(value: take(id, buyer: key)) |> respond(status: 200)`);
   T('the next free seat chosen by a query, then taken by its id: C95 at the UPDATE', codes(text), [
     `C95:${lineOf(text, '  sql_exec(\n    query: "UPDATE seats SET state')}`,
   ]);
@@ -107,7 +107,7 @@ T(
   'the same, the buyer read back by the key first: accepted',
   codes(
     seats(
-      `let None = sql_first(row: Seat, query: "SELECT * FROM seats WHERE buyer = :key", key) else -> respond(status: 200)\n      ${NEXT}\n      respond(status: 200) |> write_int(value: take(id, buyer: key))`,
+      `let None = sql_first(row: Seat, query: "SELECT * FROM seats WHERE buyer = :key", key) else -> empty(status: 200)\n      ${NEXT}\n      buf() |> write_int(value: take(id, buyer: key)) |> respond(status: 200)`,
     ),
   ),
   [],
@@ -116,7 +116,7 @@ T(
   "the same, after a claim of the request's key as an op id: accepted",
   codes(
     seats(
-      `let 1 = sql_exec(query: "INSERT INTO ops(op) VALUES (:key) ON CONFLICT(op) DO NOTHING", key) else -> respond(status: 200)\n      ${NEXT}\n      respond(status: 200) |> write_int(value: take(id, buyer: key))`,
+      `let 1 = sql_exec(query: "INSERT INTO ops(op) VALUES (:key) ON CONFLICT(op) DO NOTHING", key) else -> empty(status: 200)\n      ${NEXT}\n      buf() |> write_int(value: take(id, buyer: key)) |> respond(status: 200)`,
     ),
   ),
   [],
@@ -124,7 +124,7 @@ T(
 {
   // an op id made from the row chosen is another op id on another row: a second run chooses another seat
   const text = seats(
-    `${NEXT}\n      let 1 = sql_exec(query: "INSERT INTO ops(op) VALUES (:op) ON CONFLICT(op) DO NOTHING", op: "seat-\\(id)") else -> respond(status: 200)\n      respond(status: 200) |> write_int(value: take(id, buyer: key))`,
+    `${NEXT}\n      let 1 = sql_exec(query: "INSERT INTO ops(op) VALUES (:op) ON CONFLICT(op) DO NOTHING", op: "seat-\\(id)") else -> empty(status: 200)\n      buf() |> write_int(value: take(id, buyer: key)) |> respond(status: 200)`,
   );
   T('the same, after a claim of an op id made from the seat chosen: C95', codes(text), [
     `C95:${lineOf(text, '  sql_exec(\n    query: "UPDATE seats SET state')}`,
@@ -134,7 +134,7 @@ T(
   "the next free seat taken only by a timer's run (a sweep takes the next on each run): accepted",
   codes(
     seats(
-      'respond(status: 200)',
+      'empty(status: 200)',
       `let Some(value: Seat(id)) = sql_first(row: Seat, query: "SELECT * FROM seats WHERE state = 'free' ORDER BY id LIMIT 1") else -> Ok(value: Count(n: 0))\n  Ok(value: Count(n: take(id, buyer: "sweep")))`,
     ),
   ),

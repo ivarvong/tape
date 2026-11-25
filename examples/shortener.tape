@@ -11,10 +11,10 @@ type Url = View where len(self) >= 8 and len(self) <= 2000
 type NewLink { NewLink(key: Key, url: Url) }
 type Link { Link(id: Int, url: View, created: Int) }
 
-fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/links", body) -> create(body)
-    Request(method: "GET", path: "/" ++ decimal(id)) -> one(
+    Request(method: Post, path: "/links", body) -> create(body)
+    Request(method: Get, path: "/" ++ decimal(id)) -> one(
       status: 200,
       found: sql_first(row: Link, query: "SELECT * FROM links WHERE id = :id", id)
     )
@@ -22,7 +22,7 @@ fn handle(raw: View, db: Sql, clock: Clock, dice: Entropy) -> Buf {
   }
 }
 
-fn create(body: View) -> Buf {
+fn create(body: View) -> Response {
   let Ok(value: NewLink(key, url)) = decode(json: body, as: NewLink) else {
     Err(error) -> problem(status: 400, reason: error)
   }
@@ -42,28 +42,29 @@ fn create(body: View) -> Buf {
       url
     ))
   }
-  respond(status: 201) |> write_json(value)
+  buf() |> write_json(value) |> respond(status: 201)
 }
 
-fn again(found: Option[Link]) -> Buf {
+fn again(found: Option[Link]) -> Response {
   match found {
-    Some(value) -> respond(status: 200) |> write_json(value)
+    Some(value) -> buf() |> write_json(value) |> respond(status: 200)
     None -> problem(status: 422, reason: "the key was already used for another link")
   }
 }
 
-fn one(status: Int, found: Option[Link]) -> Buf {
+fn one(status: Int, found: Option[Link]) -> Response {
   match found {
-    Some(value) -> respond(status) |> write_json(value)
+    Some(value) -> buf() |> write_json(value) |> respond(status)
     None -> problem(status: 404, reason: "no such link")
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  respond(status)
+fn problem(status: Int, reason: View) -> Response {
+  buf()
     |> append(view: "{\"error\":")
     |> write_json_string(text: reason)
     |> append(view: "}")
+    |> respond(status)
 }
 
 invariant "a stored link is as long as its type allows" {

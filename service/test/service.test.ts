@@ -129,10 +129,10 @@ describe('tape service', () => {
     // the Worker out of memory (1101). The trace keeps the first 100,000 and the write after them.
     const loop = `schema "CREATE TABLE IF NOT EXISTS seen(n INTEGER NOT NULL)"
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let n = count(v: request(raw).body, at: 0, k: 0)
   let _ = sql_exec(query: "INSERT INTO seen(n) VALUES (:n)", repeat: True, n)
-  respond(status: 200) |> append(view: "\\(n)")
+  buf() |> append(view: "\\(n)") |> respond(status: 200)
 }
 
 fn count(v: View, at: Int, k: Int) -> Int {
@@ -252,17 +252,17 @@ fn count(v: View, at: Int, k: Int) -> Int {
   CREATE TABLE notes(id INTEGER PRIMARY KEY, body TEXT NOT NULL)
 }
 type Count { Count(n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/notes", body) -> count(found: sql_first(db, row: Count, repeat: True, query: "INSERT INTO notes(body) VALUES (:body) RETURNING id AS n", body))
-    Request(method: "GET", path: "/notes") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes"))
-    _ -> append(buf: respond(status: 404), view: "no such route")
+    Request(method: Post, path: "/notes", body) -> count(found: sql_first(db, row: Count, repeat: True, query: "INSERT INTO notes(body) VALUES (:body) RETURNING id AS n", body))
+    Request(method: Get, path: "/notes") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes"))
+    _ -> append(buf: buf(), view: "no such route") |> respond(status: 404)
   }
 }
-fn count(found: Option[Count]) -> Buf {
+fn count(found: Option[Count]) -> Response {
   match found {
-    Some(value: Count(n)) -> write_int(out: respond(status: 200), value: n)
-    None -> respond(status: 500)
+    Some(value: Count(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 `;
@@ -273,7 +273,7 @@ fn count(found: Option[Count]) -> Buf {
       )
       .replace(
         '    _ -> append',
-        '    Request(method: "GET", path: "/unpinned") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes WHERE pinned = 0"))\n    _ -> append',
+        '    Request(method: Get, path: "/unpinned") -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM notes WHERE pinned = 0"))\n    _ -> append',
       );
     const first = await upload('notes', v1);
     expect(await (await opened(at(first, 'migrated'), '&format=text')).text()).toContain('migration 1 "notes"');
@@ -330,13 +330,13 @@ fn count(found: Option[Count]) -> Buf {
   CREATE TABLE tags(note INTEGER NOT NULL, tag TEXT NOT NULL)
 }
 type Count { Count(n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   count(found: sql_first(db, row: Count, repeat: True, query: "INSERT INTO tags VALUES (1, 'x') RETURNING note AS n"))
 }
-fn count(found: Option[Count]) -> Buf {
+fn count(found: Option[Count]) -> Response {
   match found {
-    Some(value: Count(n)) -> write_int(out: respond(status: 200), value: n)
-    None -> respond(status: 500)
+    Some(value: Count(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 `;
@@ -389,16 +389,16 @@ fn count(found: Option[Count]) -> Buf {
   CREATE TABLE people(id INTEGER PRIMARY KEY, email TEXT NOT NULL)
 }
 type Count { Count(n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/people", body) -> count(found: sql_first(db, row: Count, repeat: True, query: "INSERT INTO people(email) VALUES (:body) RETURNING id AS n", body))
+    Request(method: Post, path: "/people", body) -> count(found: sql_first(db, row: Count, repeat: True, query: "INSERT INTO people(email) VALUES (:body) RETURNING id AS n", body))
     _ -> count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM people"))
   }
 }
-fn count(found: Option[Count]) -> Buf {
+fn count(found: Option[Count]) -> Response {
   match found {
-    Some(value: Count(n)) -> write_int(out: respond(status: 200), value: n)
-    None -> respond(status: 500)
+    Some(value: Count(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 `;
@@ -435,13 +435,13 @@ migration 1 "refunds" {
   ALTER TABLE sales ADD COLUMN refunded INTEGER NOT NULL DEFAULT 0
 }
 type Count { Count(n: Int) }
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   count(found: sql_first(db, row: Count, query: "SELECT count(*) AS n FROM sales WHERE refunded = 0"))
 }
-fn count(found: Option[Count]) -> Buf {
+fn count(found: Option[Count]) -> Response {
   match found {
-    Some(value: Count(n)) -> write_int(out: respond(status: 200), value: n)
-    None -> respond(status: 500)
+    Some(value: Count(n)) -> write_int(out: buf(), value: n) |> respond(status: 200)
+    None -> empty(status: 500)
   }
 }
 `;
@@ -482,11 +482,11 @@ fn count(found: Option[Count]) -> Buf {
   });
 
   it('says when a live version would be refused today: the listing (?rules), an upload beside it, and it keeps running', async () => {
-    const ok = 'fn handle(raw: View, db: Sql) -> Buf {\n  respond(status: 200)\n}\n';
+    const ok = 'fn handle(raw: View, db: Sql) -> Response {\n  empty(status: 200)\n}\n';
     expect(at(await upload('stale', ok), 'version')).toBe(1);
     // a version stored before the rules: its source is replaced in place, as a program uploaded before C55 would be
     const old =
-      'schema "CREATE TABLE IF NOT EXISTS n(id INTEGER PRIMARY KEY, x INTEGER)"\nfn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "INSERT INTO n(x) VALUES (1)"))\n}\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n';
+      'schema "CREATE TABLE IF NOT EXISTS n(id INTEGER PRIMARY KEY, x INTEGER)"\nfn handle(raw: View, db: Sql) -> Response {\n  done(n: sql_exec(db, query: "INSERT INTO n(x) VALUES (1)"))\n}\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\n';
     expect((await call('/ivar/stale', { method: 'POST', body: old })).status).toBe(400);
     await runInDurableObject(env.NAMES.get(env.NAMES.idFromName('ivar/stale')), (_, state) =>
       state.storage.sql.exec('UPDATE _tape_versions SET source = ?1 WHERE version = 1', old),
@@ -513,18 +513,18 @@ fn count(found: Option[Count]) -> Buf {
     const M =
       'type SaleState { Pending Paid Declined }\nmachine s.state: SaleState {\n  Pending -> Paid\n  Pending -> Declined\n}\n';
     const routes = (machine: string, lines: readonly string[]): string =>
-      `${S}${machine}fn handle(raw: View, db: Sql) -> Buf {\n  match request(raw) {\n${lines.join('\n')}\n    Request(method: "GET", path: "/triggers") -> respond(status: 200) |> append(view: sql_first(db, row: Text, query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master WHERE type = 'trigger'") |> shown)\n    _ -> respond(status: 404)\n  }\n}\ntype Text { Text(text: View) }\nfn shown(found: Option[Text]) -> View {\n  match found {\n    Some(value: Text(text)) -> text\n    None -> ""\n  }\n}\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\ntype Sold { Sold(id: Int) }\nfn moved(m: Move[Sold]) -> Buf {\n  match m {\n    Moved(value) -> respond(status: 200) |> write_int(value: 1)\n    Raced(now) -> respond(status: 409)\n    NoRow -> respond(status: 404)\n  }\n}\n`;
+      `${S}${machine}fn handle(raw: View, db: Sql) -> Response {\n  match request(raw) {\n${lines.join('\n')}\n    Request(method: Get, path: "/triggers") -> buf() |> append(view: sql_first(db, row: Text, query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master WHERE type = 'trigger'") |> shown) |> respond(status: 200)\n    _ -> empty(status: 404)\n  }\n}\ntype Text { Text(text: View) }\nfn shown(found: Option[Text]) -> View {\n  match found {\n    Some(value: Text(text)) -> text\n    None -> ""\n  }\n}\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\ntype Sold { Sold(id: Int) }\nfn moved(m: Move[Sold]) -> Response {\n  match m {\n    Moved(value) -> buf() |> write_int(value: 1) |> respond(status: 200)\n    Raced(now) -> empty(status: 409)\n    NoRow -> empty(status: 404)\n  }\n}\n`;
     const make =
-      '    Request(method: "POST", path: "/new/" ++ key) -> done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:key) ON CONFLICT(key) DO NOTHING", key))';
+      '    Request(method: Post, path: "/new/" ++ key) -> done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:key) ON CONFLICT(key) DO NOTHING", key))';
     const pay =
-      '    Request(method: "POST", path: "/pay/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\'", key))';
+      '    Request(method: Post, path: "/pay/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\'", key))';
     // with the machine, the compare-and-set is a sql_move (C62): its outcome tells a lost race from a missing row
     const payMove =
-      '    Request(method: "POST", path: "/pay/" ++ key) -> moved(m: sql_move(db, row: Sold, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\' RETURNING id", key))';
+      '    Request(method: Post, path: "/pay/" ++ key) -> moved(m: sql_move(db, row: Sold, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\' RETURNING id", key))';
     const voids =
-      '    Request(method: "POST", path: "/void/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = \'void\' WHERE key = :key AND state = \'paid\'", key))';
+      '    Request(method: Post, path: "/void/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = \'void\' WHERE key = :key AND state = \'paid\'", key))';
     const free =
-      '    Request(method: "POST", path: "/set/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = :state WHERE key = :key AND state = \'paid\'", state: "x" ++ key, key))';
+      '    Request(method: Post, path: "/set/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = :state WHERE key = :key AND state = \'paid\'", state: "x" ++ key, key))';
     const answered = async (path: string, init?: Init): Promise<[number, string]> => {
       const r = await call(`/ivar/mach${path}`, init);
       return [r.status, await r.text()];
@@ -778,7 +778,7 @@ fn count(found: Option[Count]) -> Buf {
   it("woken is run by the program's own timers; another program cannot call it", async () => {
     await call('/timer2/fulfill', { method: 'POST', body: fulfillment });
     const caller =
-      'type Got { Got(id: Int) }\nfn handle(raw: View, fulfill: Remote) -> Buf {\n  match call(to: fulfill, method: "woken", send: Wake(key: 1), reply: Got, within: 2000, once: raw) {\n    Ok(value) -> respond(status: 200)\n    Err(error: Rejected(reason)) -> respond(status: 403) |> append(view: reason)\n    Err(error) -> respond(status: 500)\n  }\n}\n';
+      'type Got { Got(id: Int) }\nfn handle(raw: View, fulfill: Remote) -> Response {\n  match call(to: fulfill, method: "woken", send: Wake(key: 1), reply: Got, within: 2000, once: raw) {\n    Ok(value) -> empty(status: 200)\n    Err(error: Rejected(reason)) -> buf() |> append(view: reason) |> respond(status: 403)\n    Err(error) -> empty(status: 500)\n  }\n}\n';
     expect(at(await got('/timer2/caller', { method: 'POST', body: caller }), 'version')).toBe(1);
     const res = await call('/timer2/caller/v/1/');
     expect([res.status, await res.text()]).toEqual([
@@ -851,9 +851,9 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Hit, View] {
   )
   Ok(value: Hit(n: key))
 }
-fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
+fn handle(raw: View, db: Sql, timer: Timer) -> Response {
   do wake(after: 0, key: 1)
-  respond(status: 202)
+  empty(status: 202)
 }
 `;
       const up = await call(`/${a}/ticker`, { method: 'POST', body: source });
@@ -950,18 +950,18 @@ fn handle(raw: View, db: Sql, timer: Timer) -> Buf {
 
   it('binds an Int parameter as an integer (workerd binds every JavaScript number as REAL)', async () => {
     const ints =
-      'schema "CREATE TABLE IF NOT EXISTS t(k TEXT NOT NULL)"\ntype R { R(s: View, h: Int, ty: View) }\nfn handle(raw: View, db: Sql) -> Buf {\n  show(found: sql_first(db, row: R, query: "SELECT \'k\' || :n AS s, :m * 3 AS h, typeof(:m) AS ty", n: 5, m: 5))\n}\nfn show(found: Option[R]) -> Buf {\n  match found {\n    Some(value: R(s, h, ty)) -> append(buf: append(buf: write_int(out: respond(status: 200), value: h), view: s), view: ty)\n    None -> respond(status: 500)\n  }\n}\n';
+      'schema "CREATE TABLE IF NOT EXISTS t(k TEXT NOT NULL)"\ntype R { R(s: View, h: Int, ty: View) }\nfn handle(raw: View, db: Sql) -> Response {\n  show(found: sql_first(db, row: R, query: "SELECT \'k\' || :n AS s, :m * 3 AS h, typeof(:m) AS ty", n: 5, m: 5))\n}\nfn show(found: Option[R]) -> Response {\n  match found {\n    Some(value: R(s, h, ty)) -> append(buf: append(buf: write_int(out: buf(), value: h), view: s), view: ty) |> respond(status: 200)\n    None -> empty(status: 500)\n  }\n}\n';
     expect(await upload('intparams', ints)).toMatchObject({ version: 1 });
     expect(await (await call('/ivar/intparams/v/1/')).text()).toBe('15k5integer'); // before the host's CAST: 15k5.0real
   });
 
   it('refuses a program that does not compile, and SQL that does not fit its schema', async () => {
     const bad = await (
-      await call('/ivar/bad', { method: 'POST', body: 'fn handle(raw: View) -> Buf {\n  coumt\n}\n' })
+      await call('/ivar/bad', { method: 'POST', body: 'fn handle(raw: View) -> Response {\n  coumt\n}\n' })
     ).json();
     expect(at(bad, 'errors', 0, 'code')).toBe('C16');
     const sql =
-      'schema "CREATE TABLE t(a INTEGER)"\ntype A { A(b: Int) }\nfn handle(raw: View, db: Sql) -> Buf {\n  f(found: sql_first(db, row: A, query: "SELECT b FROM nope"))\n}\nfn f(found: Option[A]) -> Buf {\n  buf()\n}\n';
+      'schema "CREATE TABLE t(a INTEGER)"\ntype A { A(b: Int) }\nfn handle(raw: View, db: Sql) -> Response {\n  f(found: sql_first(db, row: A, query: "SELECT b FROM nope"))\n}\nfn f(found: Option[A]) -> Response {\n  empty(status: 200)\n}\n';
     const res = await call('/ivar/badsql', { method: 'POST', body: sql });
     expect(res.status).toBe(400);
     const e = at(await json(res), 'errors', 0); // the compiler's, now: the table does not exist in the schema

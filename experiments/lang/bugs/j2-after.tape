@@ -25,18 +25,18 @@ type Section { Section(name: View, price: Int, seats: Int) }
 type Charge { Charge(card: View, amount: Int) }
 type Charged { Charged(balance: Int) }
 
-fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, dice: Entropy) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, dice: Entropy) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/buy", body) -> buy(db, payments, clock, dice, order: decode(json: body, as: Buy))
-    Request(method: "POST", path: "/retry/" ++ decimal(id)) -> retry(db, payments, found: sql_first(db, row: Pending, query: "SELECT id, section, qty, amount, card FROM sales WHERE id = :id AND state = 'pending'", id))
-    Request(method: "GET", path: "/sales/" ++ decimal(id)) -> sale(found: sql_first(db, row: Sale, query: "SELECT id, section, qty, amount, state, card FROM sales WHERE id = :id", id))
-    Request(method: "GET", path: "/sections") -> sections(out: push(buf: respond(status: 200), byte: 91), rows: sql_all(db, row: Section, query: "SELECT name, price, seats FROM sections ORDER BY name"), first: True)
-    Request(method: "GET", path: "/sales") -> report(totals: tally(rows: sql_all(db, row: Line, query: "SELECT section, qty, amount FROM sales WHERE state = 'paid' ORDER BY id"), totals: Empty))
+    Request(method: Post, path: "/buy", body) -> buy(db, payments, clock, dice, order: decode(json: body, as: Buy))
+    Request(method: Post, path: "/retry/" ++ decimal(id)) -> retry(db, payments, found: sql_first(db, row: Pending, query: "SELECT id, section, qty, amount, card FROM sales WHERE id = :id AND state = 'pending'", id))
+    Request(method: Get, path: "/sales/" ++ decimal(id)) -> sale(found: sql_first(db, row: Sale, query: "SELECT id, section, qty, amount, state, card FROM sales WHERE id = :id", id))
+    Request(method: Get, path: "/sections") -> sections(out: push(buf: buf(), byte: 91), rows: sql_all(db, row: Section, query: "SELECT name, price, seats FROM sections ORDER BY name"), first: True) |> respond(status: 200)
+    Request(method: Get, path: "/sales") -> report(totals: tally(rows: sql_all(db, row: Line, query: "SELECT section, qty, amount FROM sales WHERE state = 'paid' ORDER BY id"), totals: Empty))
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn buy(db: Sql, payments: Remote, clock: Clock, dice: Entropy, order: Result[Buy, View]) -> Buf {
+fn buy(db: Sql, payments: Remote, clock: Clock, dice: Entropy, order: Result[Buy, View]) -> Response {
   match order {
     Ok(value: Buy(section, qty, card)) -> hold(db, payments, clock, dice, section, qty, card)
     Err(error) -> problem(status: 400, reason: error)
@@ -44,7 +44,7 @@ fn buy(db: Sql, payments: Remote, clock: Clock, dice: Entropy, order: Result[Buy
 }
 
 // Take the seats, then record a pending sale. Either step can fail; the first failure takes `else`.
-fn hold(db: Sql, payments: Remote, clock: Clock, dice: Entropy, section: View, qty: Qty, card: View) -> Buf {
+fn hold(db: Sql, payments: Remote, clock: Clock, dice: Entropy, section: View, qty: Qty, card: View) -> Response {
   with {
     Some(value: Price(price)) <- sql_first(db, row: Price, query: "UPDATE sections SET seats = seats - :qty WHERE name = :section AND seats >= :qty RETURNING price", qty, section)
     Some(value: Held(id, amount)) <- sql_first(db, row: Held, query: "INSERT INTO sales(section, qty, amount, code, at, state, card) VALUES (:section, :qty, :amount, :code, :at, 'pending', :card) RETURNING id, amount", section, qty, amount: price * qty, code: random(from: dice) % 1000000, at: now(clock), card)
@@ -54,7 +54,7 @@ fn hold(db: Sql, payments: Remote, clock: Clock, dice: Entropy, section: View, q
 }
 
 // The same command as the first attempt (same key), with more time: payments repeats what it answered then.
-fn retry(db: Sql, payments: Remote, found: Option[Pending]) -> Buf {
+fn retry(db: Sql, payments: Remote, found: Option[Pending]) -> Response {
   match found {
     Some(value: Pending(id, section, qty, amount, card)) -> settle(db, id, section, qty, reply: call(to: payments, method: "charge", send: Charge(card, amount), reply: Charged, within: 2000, once: id))
     None -> problem(status: 404, reason: "no such pending sale")
@@ -62,7 +62,7 @@ fn retry(db: Sql, payments: Remote, found: Option[Pending]) -> Buf {
 }
 
 // The hold above is committed before the charge is sent: a call is a commit point.
-fn settle(db: Sql, id: Int, section: View, qty: Int, reply: Result[Charged, CallError]) -> Buf {
+fn settle(db: Sql, id: Int, section: View, qty: Int, reply: Result[Charged, CallError]) -> Response {
   match reply {
     Ok(value) -> ticket(found: sql_first(db, row: Ticket, query: "UPDATE sales SET state = 'paid' WHERE id = :id RETURNING id, section, qty, amount, code", id))
     Err(error: Rejected(reason)) -> declined(reason, freed: free(db, section, qty, voided: sql_exec(db, query: "UPDATE sales SET state = 'declined' WHERE id = :id AND state = 'pending'", id)))
@@ -73,9 +73,9 @@ fn settle(db: Sql, id: Int, section: View, qty: Int, reply: Result[Charged, Call
 }
 
 // One sale, in any state, and the seats left in each section: what a checker reads to reconcile seats and money.
-fn sale(found: Option[Sale]) -> Buf {
+fn sale(found: Option[Sale]) -> Response {
   match found {
-    Some(value) -> write_json(out: respond(status: 200), value)
+    Some(value) -> write_json(out: buf(), value) |> respond(status: 200)
     None -> problem(status: 404, reason: "no such sale")
   }
 }
@@ -91,13 +91,13 @@ fn sections(out: Buf, rows: Rows[Section], first: Bool) -> Buf {
 fn free(db: Sql, section: View, qty: Int, voided: Int) -> Int {
   sql_exec(db, query: "UPDATE sections SET seats = seats + :qty WHERE name = :section AND :voided = 1", qty, section, voided)
 }
-fn declined(reason: View, freed: Int) -> Buf {
+fn declined(reason: View, freed: Int) -> Response {
   problem(status: 402, reason)
 }
 
-fn ticket(found: Option[Ticket]) -> Buf {
+fn ticket(found: Option[Ticket]) -> Response {
   match found {
-    Some(value) -> write_json(out: respond(status: 201), value)
+    Some(value) -> write_json(out: buf(), value) |> respond(status: 201)
     None -> problem(status: 500, reason: "the sale vanished")
   }
 }
@@ -117,8 +117,8 @@ fn add(was: Option[Tally], qty: Int, amount: Int) -> Tally {
   }
 }
 
-fn report(totals: Map[Tally]) -> Buf {
-  push(buf: entries(out: push(buf: respond(status: 200), byte: 123), totals, first: True), byte: 125)
+fn report(totals: Map[Tally]) -> Response {
+  push(buf: entries(out: push(buf: buf(), byte: 123), totals, first: True), byte: 125) |> respond(status: 200)
 }
 
 // In order: left subtree, this entry, right subtree. `first` is whether nothing has been written yet.
@@ -136,8 +136,8 @@ fn entry(out: Buf, key: View, value: Tally, first: Bool) -> Buf {
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  append(buf: write_json_string(out: append(buf: respond(status), view: "{\"error\":"), text: reason), view: "}")
+fn problem(status: Int, reason: View) -> Response {
+  append(buf: write_json_string(out: append(buf: buf(), view: "{\"error\":"), text: reason), view: "}") |> respond(status)
 }
 // added for rule RM: the states of the table and the moves between them
 machine sales.state {

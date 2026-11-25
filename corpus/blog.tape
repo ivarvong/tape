@@ -44,8 +44,8 @@ type Title = View where title_ok(self) else "1-200 bytes, no CR LF NUL"
 type Day = View where day_ok(self) else "YYYY-MM-DD"
 type ClientKey = View where key_ok(self) else "1-128 visible bytes"
 
-type Post {
-  Post(
+type Story {
+  Story(
     slug: View,
     title: View,
     published: View,
@@ -67,29 +67,29 @@ type Check {
 }
 
 type Outcome {
-  Created(post: Post)
-  Written(post: Post)
-  Shown(post: Post, html: View)
+  Created(post: Story)
+  Written(post: Story)
+  Shown(post: Story, html: View)
   Article(html: View, hash: View)
-  Home(rows: Rows[Post], page: Int, total: Int, updated_ms: Int)
-  Feed(rows: Rows[Post], total: Int, updated_ms: Int)
+  Home(rows: Rows[Story], page: Int, total: Int, updated_ms: Int)
+  Feed(rows: Rows[Story], total: Int, updated_ms: Int)
   Removed(slug: View)
   NotModified(etag: View)
   Problem(status: Int, reason: View)
 }
 
 // clock is the grant now() reads. The compiler passes it into now by that name.
-fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   answered(r: request(raw), db)
 }
 
-fn answered(r: Request, db: Sql) -> Buf {
+fn answered(r: Request, db: Sql) -> Response {
   match r {
-    Request(method: "GET", path: "/", query) -> listed(query, r, db)
-    Request(method: "GET", path: "/feed.xml") -> fed(r, db)
-    Request(method: "GET", path: "/posts/" ++ slug ++ "/body") -> article(slug, r, db)
-    Request(method: "GET", path: "/posts/" ++ slug) -> shown(slug, r, db)
-    Request(method: "PUT", path: "/posts/" ++ slug, body, caller: Operator) -> put(
+    Request(method: Get, path: "/", query) -> listed(query, r, db)
+    Request(method: Get, path: "/feed.xml") -> fed(r, db)
+    Request(method: Get, path: "/posts/" ++ slug ++ "/body") -> article(slug, r, db)
+    Request(method: Get, path: "/posts/" ++ slug) -> shown(slug, r, db)
+    Request(method: Put, path: "/posts/" ++ slug, body, caller: Operator) -> put(
       slug,
       title: header_of(request: r, name: "x-title"),
       published: header_of(request: r, name: "x-date"),
@@ -98,7 +98,7 @@ fn answered(r: Request, db: Sql) -> Buf {
       r,
       db
     )
-    Request(method: "POST", path: "/posts/" ++ slug, body, caller: Operator) -> post(
+    Request(method: Post, path: "/posts/" ++ slug, body, caller: Operator) -> post(
       slug,
       title: header_of(request: r, name: "x-title"),
       published: header_of(request: r, name: "x-date"),
@@ -107,23 +107,23 @@ fn answered(r: Request, db: Sql) -> Buf {
       r,
       db
     )
-    Request(method: "DELETE", path: "/posts/" ++ slug, caller: Operator) -> deleted(
+    Request(method: Delete, path: "/posts/" ++ slug, caller: Operator) -> deleted(
       slug,
       key: header_of(request: r, name: "idempotency-key"),
       r,
       db
     )
-    Request(method: "PUT", path: "/posts/" ++ slug) -> render(
+    Request(method: Put, path: "/posts/" ++ slug) -> render(
       o: Problem(status: 403, reason: "writes are operator-only"),
       r,
       db
     )
-    Request(method: "POST", path: "/posts/" ++ slug) -> render(
+    Request(method: Post, path: "/posts/" ++ slug) -> render(
       o: Problem(status: 403, reason: "writes are operator-only"),
       r,
       db
     )
-    Request(method: "DELETE", path: "/posts/" ++ slug) -> render(
+    Request(method: Delete, path: "/posts/" ++ slug) -> render(
       o: Problem(status: 403, reason: "writes are operator-only"),
       r,
       db
@@ -132,7 +132,7 @@ fn answered(r: Request, db: Sql) -> Buf {
   }
 }
 
-fn listed(query: Option[View], r: Request, db: Sql) -> Buf {
+fn listed(query: Option[View], r: Request, db: Sql) -> Response {
   match page_of(query) {
     None -> render(o: Problem(status: 400, reason: "page must be an integer >= 1"), r, db)
     Some(value: page) -> {
@@ -144,7 +144,7 @@ fn listed(query: Option[View], r: Request, db: Sql) -> Buf {
           o: Home(
             rows: sql_all(
               db,
-              row: Post,
+              row: Story,
               query: "SELECT * FROM posts ORDER BY published DESC, slug DESC LIMIT :lim \
                   OFFSET :off",
               lim: flags.page_size,
@@ -162,7 +162,7 @@ fn listed(query: Option[View], r: Request, db: Sql) -> Buf {
   }
 }
 
-fn fed(r: Request, db: Sql) -> Buf {
+fn fed(r: Request, db: Sql) -> Response {
   let Stamp(n: total, updated_ms) = stamp(db)
   let tag = "f:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms)
   match if_match(r, tag) {
@@ -171,7 +171,7 @@ fn fed(r: Request, db: Sql) -> Buf {
       o: Feed(
         rows: sql_all(
           db,
-          row: Post,
+          row: Story,
           query: "SELECT * FROM posts ORDER BY published DESC, slug DESC LIMIT :lim",
           lim: flags.feed_size
         ),
@@ -184,7 +184,7 @@ fn fed(r: Request, db: Sql) -> Buf {
   }
 }
 
-fn shown(slug: View, r: Request, db: Sql) -> Buf {
+fn shown(slug: View, r: Request, db: Sql) -> Response {
   match load(slug, db) {
     None -> render(o: Problem(status: 404, reason: "no such post"), r, db)
     Some(value: post) -> {
@@ -201,7 +201,7 @@ fn shown(slug: View, r: Request, db: Sql) -> Buf {
   }
 }
 
-fn article(slug: View, r: Request, db: Sql) -> Buf {
+fn article(slug: View, r: Request, db: Sql) -> Response {
   match load(slug, db) {
     None -> render(o: Problem(status: 404, reason: "no such post"), r, db)
     Some(value: post) -> match if_match(r, tag: post.hash) {
@@ -223,7 +223,7 @@ fn put(
   key: Option[View],
   r: Request,
   db: Sql
-) -> Buf {
+) -> Response {
   match fields(slug, title, published, key) {
     Bad(status, reason) -> render(o: Problem(status, reason), r, db)
     Fine(slug: s, title: t, published: d, key: k) -> saved(
@@ -246,7 +246,7 @@ fn post(
   key: Option[View],
   r: Request,
   db: Sql
-) -> Buf {
+) -> Response {
   match fields(slug, title, published, key) {
     Bad(status, reason) -> render(o: Problem(status, reason), r, db)
     Fine(slug: s, title: t, published: d, key: k) -> created(
@@ -285,7 +285,7 @@ fn created(
   key: View,
   r: Request,
   db: Sql
-) -> Buf {
+) -> Response {
   let req_hash = digest(
     text: "POST\n" ++ slug ++ "\n" ++ title ++ "\n" ++ published ++ "\n" ++ markdown
   )
@@ -310,7 +310,7 @@ fn saved(
   key: View,
   r: Request,
   db: Sql
-) -> Buf {
+) -> Response {
   let req_hash = digest(
     text: "PUT\n" ++ slug ++ "\n" ++ title ++ "\n" ++ published ++ "\n" ++ markdown
   )
@@ -332,7 +332,7 @@ fn saved(
   }
 }
 
-fn deleted(slug: View, key: Option[View], r: Request, db: Sql) -> Buf {
+fn deleted(slug: View, key: Option[View], r: Request, db: Sql) -> Response {
   match slug {
     Slug(s) -> match key {
       Some(value: ClientKey(k)) -> removed(s, key: k, r, db)
@@ -346,7 +346,7 @@ fn deleted(slug: View, key: Option[View], r: Request, db: Sql) -> Buf {
   }
 }
 
-fn removed(slug: View, key: View, r: Request, db: Sql) -> Buf {
+fn removed(slug: View, key: View, r: Request, db: Sql) -> Response {
   let req_hash = digest(text: "DELETE\n" ++ slug)
   match claimed(key, method: "DELETE", slug, req_hash, status: 204, db) {
     Some(value: op) -> replayed(op, req_hash, r, db)
@@ -396,7 +396,7 @@ fn claimed(
   }
 }
 
-fn replayed(op: Op, req_hash: View, r: Request, db: Sql) -> Buf {
+fn replayed(op: Op, req_hash: View, r: Request, db: Sql) -> Response {
   let Op(key, method, slug, status, req_hash: stored) = op
   match {
     stored != req_hash -> render(
@@ -425,7 +425,7 @@ fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> 
   let t = now()
   match sql_first(
     db,
-    row: Post,
+    row: Story,
     query: "INSERT INTO posts(slug, title, published, markdown, hash, updated_ms, created_ms) \
         VALUES (:slug, :title, :published, :markdown, :h, :t, :t) RETURNING *",
     slug,
@@ -441,14 +441,14 @@ fn insert(slug: View, title: View, published: View, markdown: View, db: Sql) -> 
   }
 }
 
-fn update(was: Post, title: View, published: View, markdown: View, db: Sql) -> Outcome {
+fn update(was: Story, title: View, published: View, markdown: View, db: Sql) -> Outcome {
   let h = digest(markdown)
   // the render is cached for the page that shows the post
   let _ = cached(hash: h, markdown, db)
   let t = now()
   match sql_first(
     db,
-    row: Post,
+    row: Story,
     query: "UPDATE posts SET title = :title, published = :published, markdown = :markdown, hash = \
         :h, updated_ms = :t WHERE slug = :slug RETURNING *",
     title,
@@ -483,8 +483,8 @@ fn html_of(hash: View, markdown: View, db: Sql) -> View {
   cached(hash, markdown, db)
 }
 
-fn load(slug: View, db: Sql) -> Option[Post] {
-  sql_first(db, row: Post, query: "SELECT * FROM posts WHERE slug = :slug", slug)
+fn load(slug: View, db: Sql) -> Option[Story] {
+  sql_first(db, row: Story, query: "SELECT * FROM posts WHERE slug = :slug", slug)
 }
 
 fn stamp(db: Sql) -> Stamp {
@@ -562,7 +562,7 @@ fn skip_ws(t: View, at: Int) -> Int {
   }
 }
 
-fn page_tag(post: Post) -> View {
+fn page_tag(post: Story) -> View {
   post.hash ++ ":" ++ decimal_text(value: post.updated_ms)
 }
 
@@ -578,14 +578,14 @@ fn place(r: Request, path: View) -> View {
   }
 }
 
-fn render(o: Outcome, r: Request, db: Sql) -> Buf {
+fn render(o: Outcome, r: Request, db: Sql) -> Response {
   match o {
     Created(post) -> post_headers(out: json_ok(status: 201, post), tag: post.hash, store: False)
       |> header(name: "location", value: place(r, path: "/posts/" ++ post.slug))
     Written(post) -> post_headers(out: json_ok(status: 200, post), tag: post.hash, store: False)
     Shown(post, html) -> post_headers(out: page_post(post, html), tag: page_tag(post), store: True)
     Article(html, hash) -> post_headers(
-      out: respond_as(status: 200, content: Html) |> append(view: html),
+      out: buf() |> append(view: html) |> respond_as(status: 200, content: Html),
       tag: hash,
       store: True
     )
@@ -599,8 +599,8 @@ fn render(o: Outcome, r: Request, db: Sql) -> Buf {
       tag: "f:" ++ decimal_text(value: total) ++ ":" ++ decimal_text(value: updated_ms),
       store: True
     )
-    Removed(slug) -> respond(status: 204) |> header(name: "cache-control", value: "no-store")
-    NotModified(etag) -> respond(status: 304)
+    Removed(slug) -> empty(status: 204) |> header(name: "cache-control", value: "no-store")
+    NotModified(etag) -> empty(status: 304)
       |> header(name: "etag", value: quoted(etag))
       |> header(name: "cache-control", value: "public, max-age=60")
     Problem(status: 404, reason) -> post_headers(
@@ -613,7 +613,7 @@ fn render(o: Outcome, r: Request, db: Sql) -> Buf {
   }
 }
 
-fn post_headers(out: Buf, tag: View, store: Bool) -> Buf {
+fn post_headers(out: Response, tag: View, store: Bool) -> Response {
   let etag = quoted(tag)
   match store {
     True -> out
@@ -629,24 +629,26 @@ type ShownPost {
   ShownPost(slug: View, title: View, published: View, hash: View, updated_ms: Int, created_ms: Int)
 }
 
-fn json_ok(status: Int, post: Post) -> Buf {
-  respond_as(status, content: Json)
-    |> write_json(value: ShownPost(
+fn json_ok(status: Int, post: Story) -> Response {
+  json(
+    status,
+    value: ShownPost(
       slug: post.slug,
       title: post.title,
       published: post.published,
       hash: post.hash,
       updated_ms: post.updated_ms,
       created_ms: post.created_ms
-    ))
+    )
+  )
 }
 
-fn json_error(status: Int, reason: View) -> Buf {
-  respond_as(status, content: Json) |> write_json(value: Issue(error: reason))
+fn json_error(status: Int, reason: View) -> Response {
+  json(status, value: Issue(error: reason))
 }
 
-fn page_shell(status: Int, title: View) -> Buf {
-  respond_as(status, content: Html)
+fn page_shell(title: View) -> Buf {
+  buf()
     |> append(view: "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport \
         content=\"width=device-width,initial-scale=1\"><title>")
     |> write_html(text: title)
@@ -655,8 +657,8 @@ fn page_shell(status: Int, title: View) -> Buf {
         1rem;color:#1d1d1f}h1{font-size:1.6rem}p.meta,.note{color:#666}nav{margin-bottom:1rem}ol{padding-left:1.2rem}li{margin:.35rem 0}a{color:#0b57d0}article :first-child{margin-top:0}</style></head><body>")
 }
 
-fn page_end(out: Buf) -> Buf {
-  append(buf: out, view: "</body></html>")
+fn page_end(out: Buf, status: Int) -> Response {
+  append(buf: out, view: "</body></html>") |> respond_as(status, content: Html)
 }
 
 fn posts_word(total: Int) -> View {
@@ -666,9 +668,9 @@ fn posts_word(total: Int) -> View {
   }
 }
 
-fn page_home(rows: Rows[Post], page: Int, total: Int) -> Buf {
+fn page_home(rows: Rows[Story], page: Int, total: Int) -> Response {
   let pages = pages_of(total)
-  page_shell(status: 200, title: "Blog")
+  page_shell(title: "Blog")
     |> append(view: "<nav><a href=\"./\">Blog</a> &middot; <a \
         href=\"./feed.xml\">Atom</a></nav><h1>Blog</h1><p class=note>")
     |> append(view: decimal_text(value: total))
@@ -680,14 +682,14 @@ fn page_home(rows: Rows[Post], page: Int, total: Int) -> Buf {
     |> write_index(rows)
     |> append(view: "</ol>")
     |> write_pager(page, pages)
-    |> page_end
+    |> page_end(status: 200)
 }
 
-fn write_index(out: Buf, rows: Rows[Post]) -> Buf {
+fn write_index(out: Buf, rows: Rows[Story]) -> Buf {
   match next(rows) {
     End -> out
     Next(
-      value: Post(slug, title, published, markdown, hash, updated_ms, created_ms),
+      value: Story(slug, title, published, markdown, hash, updated_ms, created_ms),
       rest
     ) -> write_index(
       out: out
@@ -730,9 +732,9 @@ fn next_link(out: Buf, page: Int, pages: Int) -> Buf {
   }
 }
 
-fn page_post(post: Post, html: View) -> Buf {
-  let Post(slug, title, published, markdown, hash, updated_ms, created_ms) = post
-  page_shell(status: 200, title)
+fn page_post(post: Story, html: View) -> Response {
+  let Story(slug, title, published, markdown, hash, updated_ms, created_ms) = post
+  page_shell(title)
     |> append(
       view: "<nav><a href=\"../\">Blog</a> &middot; <a href=\"../feed.xml\">Atom</a></nav><h1>"
     )
@@ -744,30 +746,31 @@ fn page_post(post: Post, html: View) -> Buf {
     |> append(view: "</p><article>")
     |> append(view: html)
     |> append(view: "</article>")
-    |> page_end
+    |> page_end(status: 200)
 }
 
-fn html_error(status: Int, title: View, reason: View) -> Buf {
-  page_shell(status, title)
+fn html_error(status: Int, title: View, reason: View) -> Response {
+  page_shell(title)
     |> append(view: "<nav><a href=\"./../\">Blog</a></nav><h1>")
     |> write_html(text: title)
     |> append(view: "</h1><p>")
     |> write_html(text: reason)
     |> append(view: "</p>")
-    |> page_end
+    |> page_end(status)
 }
 
-fn atom(rows: Rows[Post], updated_ms: Int, db: Sql) -> Buf {
-  respond_as(status: 200, content: Atom)
+fn atom(rows: Rows[Story], updated_ms: Int, db: Sql) -> Response {
+  buf()
     |> append(view: "<?xml version=\"1.0\" encoding=\"utf-8\"?><feed \
         xmlns=\"http://www.w3.org/2005/Atom\"><title>Blog</title><id>tag:tape.blog,2026:feed</id><updated>")
     |> append(view: iso_utc(updated_ms))
     |> append(view: "</updated>")
     |> write_atom_entries(rows, db)
     |> append(view: "</feed>")
+    |> respond_as(status: 200, content: Atom)
 }
 
-fn write_atom_entries(out: Buf, rows: Rows[Post], db: Sql) -> Buf {
+fn write_atom_entries(out: Buf, rows: Rows[Story], db: Sql) -> Buf {
   match next(rows) {
     End -> out
     Next(value: post, rest) -> write_atom_entries(
@@ -778,8 +781,8 @@ fn write_atom_entries(out: Buf, rows: Rows[Post], db: Sql) -> Buf {
   }
 }
 
-fn write_atom_entry(out: Buf, post: Post, db: Sql) -> Buf {
-  let Post(slug, title, published, markdown, hash, updated_ms, created_ms) = post
+fn write_atom_entry(out: Buf, post: Story, db: Sql) -> Buf {
+  let Story(slug, title, published, markdown, hash, updated_ms, created_ms) = post
   out
     |> append(view: "<entry><title>")
     |> write_html(text: title)

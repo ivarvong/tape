@@ -9,22 +9,22 @@ type Amount = Int where self >= 1 and self <= 1000000
 type Transfer { Transfer(from: View, to: View, amount: Amount) }
 type Account { Account(name: View, balance: Int) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/transfers", body) -> transfer(db, order: decode(json: body, as: Transfer))
-    Request(method: "GET", path: "/accounts") -> accounts(out: append(buf: respond(status: 200), view: "["), rows: sql_all(db, row: Account, query: "SELECT name, balance FROM accounts ORDER BY name"), first: True)
+    Request(method: Post, path: "/transfers", body) -> transfer(db, order: decode(json: body, as: Transfer))
+    Request(method: Get, path: "/accounts") -> accounts(out: append(buf: buf(), view: "["), rows: sql_all(db, row: Account, query: "SELECT name, balance FROM accounts ORDER BY name"), first: True) |> respond(status: 200)
     _ -> problem(status: 404, reason: "no such route")
   }
 }
 
-fn transfer(db: Sql, order: Result[Transfer, View]) -> Buf {
+fn transfer(db: Sql, order: Result[Transfer, View]) -> Response {
   match order {
     Ok(value: Transfer(from, to, amount)) -> debit(db, to, amount, taken: sql_exec(db, query: "UPDATE accounts SET balance = balance - :amount WHERE name = :from AND balance >= :amount", amount, from))
     Err(error) -> problem(status: 400, reason: error)
   }
 }
 
-fn debit(db: Sql, to: View, amount: Amount, taken: Int) -> Buf {
+fn debit(db: Sql, to: View, amount: Amount, taken: Int) -> Response {
   match taken {
     1 -> credit(given: sql_exec(db, query: "UPDATE accounts SET balance = balance + :amount WHERE name = :to", amount, to))
     _ -> problem(status: 409, reason: "insufficient funds, or no such payer")
@@ -32,9 +32,9 @@ fn debit(db: Sql, to: View, amount: Amount, taken: Int) -> Buf {
 }
 
 // The debit has already been written. If there is no one to credit, undo it and say why.
-fn credit(given: Int) -> Buf {
+fn credit(given: Int) -> Response {
   match given {
-    1 -> append(buf: respond(status: 200), view: "{\"moved\":true}")
+    1 -> append(buf: buf(), view: "{\"moved\":true}") |> respond(status: 200)
     _ -> rollback(out: problem(status: 404, reason: "no such payee"))
   }
 }
@@ -47,6 +47,6 @@ fn accounts(out: Buf, rows: Rows[Account], first: Bool) -> Buf {
   }
 }
 
-fn problem(status: Int, reason: View) -> Buf {
-  append(buf: write_json_string(out: append(buf: respond(status), view: "{\"error\":"), text: reason), view: "}")
+fn problem(status: Int, reason: View) -> Response {
+  append(buf: write_json_string(out: append(buf: buf(), view: "{\"error\":"), text: reason), view: "}") |> respond(status)
 }

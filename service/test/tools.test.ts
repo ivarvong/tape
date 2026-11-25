@@ -190,7 +190,10 @@ describe('tools', () => {
 
   it('refuses a tool with a handle function, and one whose schema statements need Sql', async () => {
     const res = await json(
-      await operator('/tools/agents2/h', { method: 'POST', body: 'fn handle(raw: View) -> Buf {\n  buf()\n}\n' }),
+      await operator('/tools/agents2/h', {
+        method: 'POST',
+        body: 'fn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n',
+      }),
     );
     expect(res).toEqual({
       status: 400,

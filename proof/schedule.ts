@@ -9,7 +9,7 @@
 // explore({ keys: false }) removes the idempotency keys; the explorer must then find a violation.
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
-import { NO_TIMERS, TimedOut, instantiate, replay } from '../host.ts';
+import { NO_TIMERS, TimedOut, answerText, instantiate, replay, responseOf } from '../host.ts';
 import type { Effect, Service, ServiceOptions, Served } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
@@ -71,7 +71,7 @@ async function run(
     const req = enc.encode(text),
       r = await orders.runLogged(req, { transaction: f => sql.transaction(f) });
     ran.push({ req, out: r.out, log: r.effects });
-    return dec.decode(r.out);
+    return answerText(responseOf(r.out));
   };
   const states = async (): Promise<Order[]> => ordersIn(await send('GET /orders\n'));
   await send('POST /orders\n{"key":"first","item":"lamp"}');

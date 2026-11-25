@@ -21,9 +21,9 @@ type Priced { Priced(
 
 type Refused { Refused(error: View) }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   let Ok(value: Cart(customer, lines, coupon)) = decode(json: raw, as: Cart) else {
-    Err(error) -> buf() |> write_json(value: Refused(error: "not a cart"))
+    Err(error) -> json(status: 200, value: Refused(error: "not a cart"))
   }
   let subtotal = fold(
     list: lines,
@@ -31,15 +31,17 @@ fn handle(raw: View) -> Buf {
     by: fn(sum: Int, line: Line) -> Int { sum + line.qty * line.cents }
   )
   let discount = off(coupon, subtotal)
-  buf()
-    |> write_json(value: Priced(
+  json(
+    status: 200,
+    value: Priced(
       customer,
       lines: length(list: lines),
       items: fold(list: lines, from: 0, by: fn(sum: Int, line: Line) -> Int { sum + line.qty }),
       subtotal,
       discount,
       total: subtotal - discount
-    ))
+    )
+  )
 }
 
 // What a coupon takes off: a tenth with TEN, five dollars with FIVE on fifty or more, nothing otherwise.

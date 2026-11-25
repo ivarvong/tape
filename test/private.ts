@@ -8,7 +8,9 @@ import { compile, parseProgram } from '../compiler.ts';
 import { CompileError } from '../compiler/common.ts';
 import { finish, ok, problems, same, std } from './harness.ts';
 
-const handle = (body: string, more = ''): string => `${more}fn handle(raw: View) -> Buf {\n  ${body}\n}\n`;
+// the body is a Buf, answered as its handle's 200; on the lines it was on before handle gave a Response
+const handle = (body: string, more = ''): string =>
+  `${more}fn answer(raw: View) -> Buf {\n  ${body}\n}\nfn handle(raw: View) -> Response {\n  answer(raw) |> respond(status: 200)\n}\n`;
 const c94 = (program: string | { name: string; text: string }[]): string[] =>
   problems(program)
     .filter(p => p.code === 'C94')
@@ -25,17 +27,17 @@ same('by its qualified name', c94(handle('buf() |> write_int(value: json.json_ws
 ]);
 same(
   'a helper passed as a function value',
-  c94(handle('match every_byte(v: raw, keep: token_byte) {\n    True -> buf()\n    False -> buf()\n  }')),
+  c94(
+    handle('match fold(list: Cons(head: 1, tail: Nil), from: 0, by: ten_power) {\n    0 -> buf()\n    _ -> buf()\n  }'),
+  ),
   ['C94:program.tape:2'],
 );
 same('a helper as a function pattern', c94(handle('match raw {\n    json_tree(t) -> buf()\n    _ -> buf()\n  }')), [
   'C94:program.tape:3',
 ]);
-same(
-  "a helper in a refined type's condition",
-  c94(handle('buf()', 'type Token = View where every_byte(v: self, keep: token_byte)\n')),
-  ['C94:program.tape:1'],
-);
+same("a helper in a refined type's condition", c94(handle('buf()', 'type Token = View where cont(v: self, at: 0)\n')), [
+  'C94:program.tape:1',
+]);
 const [hint] = problems(handle('buf() |> write_int(value: json_ws(v: raw, at: 0))'));
 ok(
   'the hint of a JSON helper names decode, is_json and json_member',
@@ -87,7 +89,7 @@ type Shape {
 }
 type Row { Row(n: Int) }
 schema "CREATE TABLE t(n INTEGER NOT NULL)"
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let total = fold(list: range(from: 1, to: 3), from: 0, by: fn(a: Int, i: Int) -> Int { a + i })
   let out = buf() |> append(view: "\\(total) \\(1.5f) \\(1.25)") |> write_bool(value: is_json(text: raw))
   let out2 = match decode(json: raw, as: Item) {
@@ -102,7 +104,7 @@ fn handle(raw: View, db: Sql) -> Buf {
     Ok(value) -> write_json(out: out3, value)
     Err -> out3
   }
-  write_rows(out: out4, rows: sql_all(db, row: Row, query: "SELECT n FROM t"))
+  write_rows(out: out4, rows: sql_all(db, row: Row, query: "SELECT n FROM t")) |> respond(status: 200)
 }
 `,
 );

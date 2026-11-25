@@ -5,16 +5,17 @@ import '../node25.ts';
 import { execFileSync } from 'node:child_process';
 import { compile } from '../compiler.ts';
 import { interpret } from '../interp.ts';
-import { instantiate, isEffect, replay } from '../host.ts';
+import { instantiate, isEffect, replay, responseOf } from '../host.ts';
 import { pack, unpack } from '../host/log.ts';
 import { nodeSql } from '../nodesql.ts';
 import { format } from '../fmt.ts';
 import { DEEP } from '../fuzz/deep.ts';
-import { handled, instance } from '../fuzz/run.ts';
-import { bare, finish, handleBare, same, std } from './harness.ts';
+import { bodyOf as fuzzBody, handled, instance } from '../fuzz/run.ts';
+import { answerBody, bare, finish, handleBare, same, std } from './harness.ts';
 
-const enc = new TextEncoder(),
-  dec = new TextDecoder();
+const enc = new TextEncoder();
+/** The body of a 200 answer, as handleBare pictures it. */
+const bodyOf = (answer: string): string => answer.replace(/^200\n/, '');
 /** handle on each input, compiled and in the interpreter: [compiled, interpreted] answers, or the refusal. */
 function both(text: string, inputs: string[]): string[][] | string {
   const sources = [...std, { name: 'found.tape', text }];
@@ -23,8 +24,7 @@ function both(text: string, inputs: string[]): string[][] | string {
   const ex = bare(new WebAssembly.Module(b.wasm)),
     it = interpret(sources);
   return inputs.map(i => {
-    const meant = it.call('handle', [enc.encode(i)]);
-    return [handleBare(ex, enc.encode(i)), meant instanceof Uint8Array ? dec.decode(meant) : 'not bytes'];
+    return [bodyOf(handleBare(ex, enc.encode(i))), answerBody(it.handle(enc.encode(i)))];
   });
 }
 
@@ -38,7 +38,11 @@ same(
   R(a: Int, l: List[Int])
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   let n = length(list: R(a: 1, l: Cons(head: 7, tail: Nil)).l)
   let m = length(list: match len(raw) {
     0 -> Nil
@@ -64,7 +68,11 @@ fn handle(raw: View) -> Buf {
 same(
   'write_float in the interpreter, as compiled: the shortest digits that read back',
   both(
-    `fn handle(raw: View) -> Buf {
+    `fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   buf()
     |> write_float(value: 0.1f + 0.2f)
     |> append(view: " ")
@@ -86,7 +94,11 @@ same(
   same(
     'parse_float of text that is not a number in JSON syntax is None, compiled and interpreted',
     both(
-      `fn handle(raw: View) -> Buf {
+      `fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match parse_float(raw) {
     Some(value: x) -> buf() |> write_float(value: x)
     None -> buf() |> append(view: "none")
@@ -112,7 +124,11 @@ type Note {
   Note(id: Int, body: View)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
+  answer(raw, db) |> respond(status: 200)
+}
+
+fn answer(raw: View, db: Sql) -> Buf {
   let Some(value: n) = sql_first(
     row: Note,
     query: "INSERT INTO notes(body) VALUES (:raw) RETURNING *",
@@ -131,14 +147,16 @@ fn handle(raw: View, db: Sql) -> Buf {
   const ran = await Promise.all(sent.map(s => app.runLogged(s, { transaction: f => sql.transaction(f) })));
   same(
     'a View that starts with U+FEFF is stored and read back whole',
-    ran.map(r => [...r.out]),
+    ran.map(r => [...responseOf(r.out).body]),
     sent.map(s => [...s]),
   );
   same(
     'and its log, through JSON as the service stores it, replays to the same bytes',
     ran.map((r, i): number[] => {
       const effects: unknown = JSON.parse(JSON.stringify(r.effects));
-      return Array.isArray(effects) ? [...replay(module, sent[i] ?? null, effects.filter(isEffect))] : [];
+      return Array.isArray(effects)
+        ? [...responseOf(replay(module, sent[i] ?? null, effects.filter(isEffect))).body]
+        : [];
     }),
     sent.map(s => [...s]),
   );
@@ -146,7 +164,11 @@ fn handle(raw: View, db: Sql) -> Buf {
   same(
     'parse_dec of a text that starts with U+FEFF is None, compiled and interpreted',
     both(
-      `fn handle(raw: View) -> Buf {
+      `fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match parse_dec(text: raw, scale: 1) {
     Some(value: d) -> buf() |> write_dec(value: d)
     None -> buf() |> append(view: "none")
@@ -176,21 +198,16 @@ type ${name} {
   ${name}(id: Int, region: Option[View])
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
-  let 1 = sql_exec(query: "INSERT INTO t(region) VALUES (:raw)", raw, repeat: True) else -> respond(status: 500)
-  respond(status: 200) |> write_rows(rows: sql_all(row: ${name}, query: "SELECT * FROM t ORDER BY id"))
+fn handle(raw: View, db: Sql) -> Response {
+  let 1 = sql_exec(query: "INSERT INTO t(region) VALUES (:raw)", raw, repeat: True) else -> empty(status: 500)
+  buf() |> write_rows(rows: sql_all(row: ${name}, query: "SELECT * FROM t ORDER BY id")) |> respond(status: 200)
 }
 `;
   const answers = ['T', 'Note'].map(name => {
     const b = compile([...std, { name: 'row.tape', text: rowProgram(name) }]);
     if (b.wasm === null) return `refused: ${b.errors[0]?.code} ${b.errors[0]?.message}`;
     const app = instantiate(new WebAssembly.Module(b.wasm), { sql: nodeSql() });
-    return (
-      dec
-        .decode(app.handle(enc.encode('x')))
-        .split('\n')
-        .at(-1) ?? ''
-    );
+    return answerBody(app.handle(enc.encode('x')));
   });
   same('a row type named T reads its rows as one named Note does', answers, [
     '[{"id":1,"region":"x"}]',
@@ -203,7 +220,11 @@ fn handle(raw: View, db: Sql) -> Buf {
 // TextDecoder, which threw a TypeError out of the host call. The interpreter said None. Bytes of 128 or more are not
 // a number in JSON's syntax, and float_of says so without decoding them.
 {
-  const text = `fn handle(raw: View) -> Buf {
+  const text = `fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match parse_float(raw) {
     Some(value: x) -> buf() |> write_float(value: x)
     None -> buf() |> append(view: "none")
@@ -219,8 +240,7 @@ fn handle(raw: View, db: Sql) -> Buf {
   same(
     'parse_float of bytes that are not UTF-8 is None, compiled and interpreted',
     inputs.map(i => {
-      const meant = it.call('handle', [i]);
-      return [handleBare(ex, i), meant instanceof Uint8Array ? dec.decode(meant) : 'not bytes'];
+      return [bodyOf(handleBare(ex, i)), answerBody(it.handle(i))];
     }),
     [
       ['none', 'none'],
@@ -243,8 +263,8 @@ type Kv {
   Kv(k: View, v: Int)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
-  respond(status: 200) |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv WHERE v ^ 1 {"))
+fn handle(raw: View, db: Sql) -> Response {
+  buf() |> write_rows(rows: sql_all(row: Kv, query: "SELECT * FROM kv WHERE v ^ 1 {")) |> respond(status: 200)
 }
 `;
   let got: string;
@@ -344,7 +364,11 @@ fn f(n: Int) -> Int {
   R(b: View)
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   let w = freeze(buf: buf() |> write_json(value: R(b: raw)))
   match decode(json: w, as: R) {
     Ok(value) -> buf() |> append(view: w) |> push(byte: 10) |> append(view: value.b)
@@ -383,8 +407,7 @@ fn handle(raw: View) -> Buf {
   same(
     'write_json of bytes that are not UTF-8 writes U+FFFD for each bad part, and decode reads it back',
     inputs.map(i => {
-      const meant = it.call('handle', [i]);
-      return [handled(run, i).out, meant instanceof Uint8Array ? latin(meant) : 'not bytes'];
+      return [fuzzBody(handled(run, i).out), latin(responseOf(it.handle(i)).body)];
     }),
     want.map(w => [w, w]),
   );

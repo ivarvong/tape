@@ -574,7 +574,8 @@ const tests: Test[] = [
         for (const said of [
           'docs/std.md',
           'docs/guide.md#quickstart-a-service-in-one-file',
-          'respond_as(status: 200, content: Json)',
+          '|> respond_as(status: 200, content: Json)',
+          '|> respond(status: 200)',
           'query: Option[View]',
           'form_field(body: q, name: "limit")',
           'decode(json: body, as: NewItem)',
@@ -738,7 +739,7 @@ const tests: Test[] = [
       if (http.status !== 200 || seen(F(http.body)) !== JSON.stringify(want))
         out.push(`/v1/test: ${http.status} ${http.text.slice(0, 200)}`);
       // every example holds: ok
-      const good = `// Add one.\n//\n//   > next(n: 41)\n//   42\nfn next(n: Int) -> Int {\n  n + 1\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+      const good = `// Add one.\n//\n//   > next(n: 41)\n//   42\nfn next(n: Int) -> Int {\n  n + 1\n}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`;
       const g = await tool(m, 'test', { files: [{ name: 'next.tape', text: good }] });
       if (g.out['ok'] !== true || seen(g.out) !== '[[3,true,null,null]]')
         out.push(`next.tape: ${JSON.stringify(g.out)}`);
@@ -751,7 +752,7 @@ const tests: Test[] = [
         out.push(`lib.tape: ${JSON.stringify(l.out).slice(0, 400)}`);
       // a program that does not compile: its diagnostics, as compile gives them, and no examples run
       const bad = await tool(m, 'test', {
-        files: [{ name: 'bad.tape', text: good.replace('respond(status: 200)', 'respond(status: "200")') }],
+        files: [{ name: 'bad.tape', text: good.replace('empty(status: 200)', 'empty(status: "200")') }],
       });
       if (bad.out['ok'] !== false || L(bad.out['diagnostics']).length === 0 || L(bad.out['examples']).length > 0)
         out.push(`bad.tape: ${JSON.stringify(bad.out).slice(0, 300)}`);
@@ -1007,10 +1008,10 @@ const tests: Test[] = [
     run: async m => {
       const out: string[] = [];
       // a 302's Location is the redirect; written here as std/http.tape documents header(), not from tools.ts
-      const text = `fn handle(raw: View) -> Buf {
+      const text = `fn handle(raw: View) -> Response {
   match request(raw).path {
-    "/go/" ++ code -> respond(status: 302) |> header(name: "Location", value: "https://example.com/" ++ code)
-    _ -> respond(status: 200) |> append(view: "plain")
+    "/go/" ++ code -> empty(status: 302) |> header(name: "Location", value: "https://example.com/" ++ code)
+    _ -> buf() |> append(view: "plain") |> respond(status: 200)
   }
 }
 `;
@@ -1580,11 +1581,11 @@ const tests: Test[] = [
         b = String(second).split('\n');
       const at = (ls: string[], s: string): number => ls.findIndex(l => l.includes(s));
       // the first greeting takes line 25 (n == 1); the second tries 25, then takes 26
-      if (at(a, '✓ hello.tape:25') < 0 || at(a, 'hello.tape:26') >= 0) out.push(`first: ${a.join(' | ')}`);
+      if (at(a, '✓ hello.tape:25') < 0 || at(a, 'hello.tape:28') >= 0) out.push(`first: ${a.join(' | ')}`);
       if (
         at(b, '✗ hello.tape:25') < 0 ||
-        at(b, '✓ hello.tape:26') < 0 ||
-        at(b, '✗ hello.tape:25') > at(b, '✓ hello.tape:26')
+        at(b, '✓ hello.tape:28') < 0 ||
+        at(b, '✗ hello.tape:25') > at(b, '✓ hello.tape:28')
       )
         out.push(`second: ${b.join(' | ')}`);
       // the INSERT, in the program's words with its :name, under the arm of line 9 that made it, before greet
@@ -1600,7 +1601,7 @@ const tests: Test[] = [
       const div = String(RESULTS(r)[0]?.['trace']).split('\n');
       const last = div.at(-1) ?? '';
       if (
-        !/^ {2}✗ trap \d+: division by zero at limits\.tape:7 {2}Request\(method: "GET", path: "\/div\/" \+\+ by\)/.test(
+        !/^ {2}✗ trap \d+: division by zero at limits\.tape:7 {2}Request\(method: Get, path: "\/div\/" \+\+ by\)/.test(
           last,
         )
       )
@@ -1629,7 +1630,7 @@ const tests: Test[] = [
       // a long trace is cut: at most 200 lines, then how many were left out (300 calls of count: 601 lines and
       // more); a run of more steps than a line trace is made for says so
       const COUNT =
-        'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> append(view: "\\(count(n: 0))")\n}\n\nfn count(n: Int) -> Int {\n  match {\n    n >= 300 -> n\n    else -> count(n: n + 1)\n  }\n}\n';
+        'fn handle(raw: View) -> Response {\n  buf() |> append(view: "\\(count(n: 0))") |> respond(status: 200)\n}\n\nfn count(n: Int) -> Int {\n  match {\n    n >= 300 -> n\n    else -> count(n: n + 1)\n  }\n}\n';
       const { out: loop } = await tool(m, 'run', { files: [{ name: 'count.tape', text: COUNT }], requests: ['GET /'] });
       const long = String(RESULTS(loop)[0]?.['trace']).split('\n');
       if (long.length !== 201 || !/^… \d+ more lines$/.test(long.at(-1) ?? ''))

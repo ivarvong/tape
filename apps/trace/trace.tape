@@ -98,7 +98,11 @@ type Summary { Summary(spans: Int, services: Int, errors: Int, traces: Int, trac
 
 // ---------- the entry point ----------
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  traced(raw) |> respond_as(status: 200, content: Svg)
+}
+
+fn traced(raw: View) -> Buf {
   match checked(v: raw) {
     Fine -> document(v: raw, at: json_ws(v: raw, at: 0))
     Broken(at) -> problem(

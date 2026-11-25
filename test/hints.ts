@@ -30,12 +30,12 @@ type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
 type ForAmount { ForAmount(amount: Int) }
 
-fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
-  let Some(value: order) = sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") else -> respond(status: 404)
+fn handle(raw: View, db: Sql, payments: Remote) -> Response {
+  let Some(value: order) = sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") else -> empty(status: 404)
   let Ok(value: _) = call(to: payments, method: "charge", send: Charge(order_id: order.id, amount: order.amount), reply: Charged, within: 100, once: @KEY) else {
-    Err(error) -> respond(status: 502)
+    Err(error) -> empty(status: 502)
   }
-  respond(status: 200)
+  empty(status: 200)
 }
 `;
   const keyed = (k: string): string => ORDERS.replace('@KEY', k);
@@ -54,17 +54,17 @@ type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
 type ForAmount { ForAmount(amount: Int) }
 
-fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   match sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") {
     Some(value: Order(id, amount)) -> charged(reply: call(to: payments, method: "charge", send: Charge(order_id: id, amount), reply: Charged, within: 100, once: @KEY))
-    None -> respond(status: 404)
+    None -> empty(status: 404)
   }
 }
 
-fn charged(reply: Result[Charged, CallError]) -> Buf {
+fn charged(reply: Result[Charged, CallError]) -> Response {
   match reply {
-    Ok(value) -> respond(status: 201)
-    Err(error) -> respond(status: 502)
+    Ok(value) -> empty(status: 201)
+    Err(error) -> empty(status: 502)
   }
 }
 `;
@@ -82,13 +82,13 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // host grants capabilities to an entry point, so the diagnostic is at the call and names the parameter to add.
 {
   const cases: readonly (readonly [string, string, string])[] = [
-    ['respond(status: 200) |> write_int(value: now())', 'clock: Clock', 'now'],
-    ['respond(status: 200) |> write_int(value: now(clock))', 'clock: Clock', 'now'],
-    ['respond(status: 200) |> write_int(value: random(from))', 'from: Entropy', 'random'],
-    ['respond(status: 200) |> write_int(value: answered())', 'db: Sql', 'sql_first'],
+    ['buf() |> write_int(value: now()) |> respond(status: 200)', 'clock: Clock', 'now'],
+    ['buf() |> write_int(value: now(clock)) |> respond(status: 200)', 'clock: Clock', 'now'],
+    ['buf() |> write_int(value: random(from)) |> respond(status: 200)', 'from: Entropy', 'random'],
+    ['buf() |> write_int(value: answered()) |> respond(status: 200)', 'db: Sql', 'sql_first'],
   ];
   const program = (body: string, params: string): string =>
-    `type N { N(n: Int) }\n\nfn handle(raw: View${params}) -> Buf {\n  ${body}\n}\n\nfn answered() -> Int {\n  match sql_first(row: N, query: "SELECT 1 AS n") {\n    Some(value: N(n)) -> n\n    None -> 0\n  }\n}\n`;
+    `type N { N(n: Int) }\n\nfn handle(raw: View${params}) -> Response {\n  ${body}\n}\n\nfn answered() -> Int {\n  match sql_first(row: N, query: "SELECT 1 AS n") {\n    Some(value: N(n)) -> n\n    None -> 0\n  }\n}\n`;
   for (const [body, param, fn] of cases) {
     const s = said(program(body, body.includes('answered') ? '' : ', db: Sql'));
     same(
@@ -112,8 +112,8 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // `push(stack, item)` made every call of the built-in push(buf, byte) a C11 at the call, naming neither the
 // definition nor the built-in: the diagnostic now says both, and the rename it asks for compiles.
 {
-  const SHADOW = `fn handle(raw: View) -> Buf {
-  respond(status: 200) |> push(byte: 65)
+  const SHADOW = `fn handle(raw: View) -> Response {
+  buf() |> push(byte: 65) |> respond(status: 200)
 }
 
 fn push(stack: Int, item: Int) -> Int {
@@ -148,8 +148,8 @@ fn depth(stack: ${field}, r: R) -> Int {
   }
 }
 
-fn handle(raw: View) -> Buf {
-  respond(status: 200)
+fn handle(raw: View) -> Response {
+  empty(status: 200)
 }
 `;
   const s = said(C15);
@@ -168,7 +168,7 @@ fn handle(raw: View) -> Buf {
 }
 same(
   'a name bound twice by let keeps the plain C15',
-  said('fn f(n: Int) -> Int {\n  let n = 2\n  n\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n'),
+  said('fn f(n: Int) -> Int {\n  let n = 2\n  n\n}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n'),
   {
     code: 'C15',
     line: 2,
@@ -183,7 +183,7 @@ same(
 // after its arrow, carry the expression on: test/continuation.ts.)
 {
   const fn = (body: string): string =>
-    `fn f(a: Int, b: Int, o: Option[Int]) -> Int {\n${body}\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+    `fn f(a: Int, b: Int, o: Option[Int]) -> Int {\n${body}\n}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`;
   const s2 = said(fn('  a +\n    b'));
   same(
     'an operator at the end of a line',
@@ -197,7 +197,7 @@ same(
   );
   same('a negative number arm is still a pattern', said(fn('  match a {\n    -1 -> 1\n    _ -> 0\n  }')), 'compiled');
   const s4 = said(
-    'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    "*"[0] -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
+    'fn handle(raw: View) -> Response {\n  match raw[0] {\n    "*"[0] -> empty(status: 200)\n    _ -> empty(status: 404)\n  }\n}\n',
   );
   same(
     'a computed byte as a pattern: P01, and the fix names the byte literal',
@@ -208,13 +208,13 @@ same(
     '…and the byte literal, the number, or a guard, compiles',
     [
       said(
-        "fn handle(raw: View) -> Buf {\n  match raw[0] {\n    '*' -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n",
+        "fn handle(raw: View) -> Response {\n  match raw[0] {\n    '*' -> empty(status: 200)\n    _ -> empty(status: 404)\n  }\n}\n",
       ),
       said(
-        'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    42 -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
+        'fn handle(raw: View) -> Response {\n  match raw[0] {\n    42 -> empty(status: 200)\n    _ -> empty(status: 404)\n  }\n}\n',
       ),
       said(
-        'fn handle(raw: View) -> Buf {\n  match raw[0] {\n    b if b == "*"[0] -> respond(status: 200)\n    _ -> respond(status: 404)\n  }\n}\n',
+        'fn handle(raw: View) -> Response {\n  match raw[0] {\n    b if b == "*"[0] -> empty(status: 200)\n    _ -> empty(status: 404)\n  }\n}\n',
       ),
     ],
     ['compiled', 'compiled', 'compiled'],
@@ -242,10 +242,10 @@ same(
 
 type Tr { Tr(from: View, to: View) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match sql_first(row: Tr, query: "SELECT src AS from, dst AS to FROM tr WHERE id = 1") {
-    Some(value) -> respond(status: 200) |> append(view: value.from)
-    None -> respond(status: 404)
+    Some(value) -> buf() |> append(view: value.from) |> respond(status: 200)
+    None -> empty(status: 404)
   }
 }
 `;
@@ -274,24 +274,24 @@ fn handle(raw: View, db: Sql) -> Buf {
   CREATE TABLE k(key TEXT PRIMARY KEY NOT NULL, used INTEGER NOT NULL)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(path: "/t/" ++ id) -> moved(id)
     Request(path: "/k/" ++ key) -> counted(key, used: len(key))
-    _ -> respond(status: 404)
+    _ -> empty(status: 404)
   }
 }
 
-fn moved(id: View) -> Buf {
-  let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> respond(status: 200)
-  let 1 = sql_exec(query: "UPDATE a SET balance = balance - 5 WHERE id = :id AND balance >= 5", id@DEBIT) else -> rollback(out: respond(status: 409))
-  respond(status: 201)
+fn moved(id: View) -> Response {
+  let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> empty(status: 200)
+  let 1 = sql_exec(query: "UPDATE a SET balance = balance - 5 WHERE id = :id AND balance >= 5", id@DEBIT) else -> rollback(out: empty(status: 409))
+  empty(status: 201)
 }
 
-fn counted(key: View, used: Int) -> Buf {
+fn counted(key: View, used: Int) -> Response {
   let _ = sql_exec(query: "UPDATE k SET used = :used WHERE key = :key", key, used@SET)
   let _ = sql_exec(query: "INSERT INTO k(key, used) VALUES (:key, 0) ON CONFLICT(key) DO NOTHING", key@INSERT)
-  respond(status: 200)
+  empty(status: 200)
 }
 `;
   const at = (mark: string): string =>
@@ -320,10 +320,10 @@ fn counted(key: View, used: Int) -> Buf {
 
 type Todo { Todo(id: Int, title: View) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match sql_first(row: Todo, query: "INSERT INTO todos(title) VALUES (:title) RETURNING *", title: request(raw).path@R) {
-    Some(value) -> respond(status: 201) |> write_json(value)
-    None -> respond(status: 500)
+    Some(value) -> buf() |> write_json(value) |> respond(status: 201)
+    None -> empty(status: 500)
   }
 }
 `;
@@ -347,7 +347,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 // write_esc?". Each replacement the fix names compiles.
 {
   const ROUTE =
-    'fn handle(raw: View) -> Buf {\n  match request(raw).path {\n    "/n/" ++ @F(n) -> respond(status: 200) |> write_int(value: n)\n    _ -> respond(status: 404)\n  }\n}\n';
+    'fn handle(raw: View) -> Response {\n  match request(raw).path {\n    "/n/" ++ @F(n) -> buf() |> write_int(value: n) |> respond(status: 200)\n    _ -> empty(status: 404)\n  }\n}\n';
   const s1 = said(ROUTE.replace('@F', 'digits'));
   same(
     'digits in a pattern: C22 that says it went',
@@ -357,7 +357,7 @@ fn handle(raw: View, db: Sql) -> Buf {
   same('…and `decimal(n)`, which it names, compiles', said(ROUTE.replace('@F', 'decimal')), 'compiled');
   const BY = 'by: fn(out: Buf, item: Int) -> Buf { out |> write_int(value: item) }';
   const s2 = said(
-    `fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_each(list: Cons(head: 1, tail: Nil), ${BY})\n}\n`,
+    `fn handle(raw: View) -> Response {\n  buf() |> write_each(list: Cons(head: 1, tail: Nil), ${BY}) |> respond(status: 200)\n}\n`,
   );
   same(
     'write_each in a call: C22 that says it went',
@@ -367,7 +367,7 @@ fn handle(raw: View, db: Sql) -> Buf {
   same(
     '…and the fold it names compiles',
     said(
-      `fn handle(raw: View) -> Buf {\n  fold(list: Cons(head: 1, tail: Nil), from: respond(status: 200), ${BY})\n}\n`,
+      `fn handle(raw: View) -> Response {\n  fold(list: Cons(head: 1, tail: Nil), from: buf(), ${BY}) |> respond(status: 200)\n}\n`,
     ),
     'compiled',
   );
@@ -383,15 +383,15 @@ fn handle(raw: View, db: Sql) -> Buf {
   CREATE TABLE tr(id TEXT PRIMARY KEY NOT NULL)
 }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let id = request(raw).path
   @CLAIM
   let _ = sql_exec(query: "UPDATE a SET balance = balance + 5 WHERE id = :id", id@R)
-  respond(status: 200)
+  empty(status: 200)
 }
 `;
   const CLAIM =
-    'let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> respond(status: 200)';
+    'let 1 = sql_exec(query: "INSERT INTO tr(id) VALUES (:id) ON CONFLICT(id) DO NOTHING", id) else -> empty(status: 200)';
   const s = said(CREDIT.replace('@CLAIM', '').replace('@R', ''));
   same('C54 on the credit with no claim', code(s), 'C54:9');
   same(
@@ -411,7 +411,7 @@ fn handle(raw: View, db: Sql) -> Buf {
 // "expected an expression but found `flag`" (the P01 that names the reserved word comes only at the definition).
 {
   const FLAG =
-    'fn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_int(value: schema(b: True))\n}\n\nfn schema_(b: Bool) -> Int {\n  1\n}\n';
+    'fn handle(raw: View) -> Response {\n  buf() |> write_int(value: schema(b: True)) |> respond(status: 200)\n}\n\nfn schema_(b: Bool) -> Int {\n  1\n}\n';
   const s1 = said(FLAG);
   same(
     'a reserved word called: P02 that says so',
@@ -440,21 +440,21 @@ type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
 type ForAmount { ForAmount(amount: Int) }
 
-fn handle(raw: View, db: Sql, payments: Remote) -> Buf {
+fn handle(raw: View, db: Sql, payments: Remote) -> Response {
   match sql_first(row: Order, query: "SELECT * FROM orders WHERE id = 1") {
     Some(value) -> charge(order: value)
-    None -> respond(status: 404)
+    None -> empty(status: 404)
   }
 }
 
-fn charge(order: Order) -> Buf {
+fn charge(order: Order) -> Response {
   @BODY
 }
 
-fn charged(reply: Result[Charged, CallError]) -> Buf {
+fn charged(reply: Result[Charged, CallError]) -> Response {
   match reply {
-    Ok(value) -> respond(status: 201)
-    Err(error) -> respond(status: 502)
+    Ok(value) -> empty(status: 201)
+    Err(error) -> empty(status: 502)
   }
 }
 `;
@@ -487,15 +487,15 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
   same(
     'flag as a function, a parameter, a let and a pattern binder compiles',
     said(
-      'fn flag(flag: Bool) -> Int {\n  match flag {\n    True -> 1\n    False -> 0\n  }\n}\n\nfn g(o: Option[Bool]) -> Int {\n  let n = match o {\n    Some(value: flag) if flag -> 1\n    _ -> 0\n  }\n  n\n}\n\nfn handle(raw: View) -> Buf {\n  let flag = True\n  respond(status: 200) |> write_int(value: flag(flag))\n}\n',
+      'fn flag(flag: Bool) -> Int {\n  match flag {\n    True -> 1\n    False -> 0\n  }\n}\n\nfn g(o: Option[Bool]) -> Int {\n  let n = match o {\n    Some(value: flag) if flag -> 1\n    _ -> 0\n  }\n  n\n}\n\nfn handle(raw: View) -> Response {\n  let flag = True\n  buf() |> write_int(value: flag(flag)) |> respond(status: 200)\n}\n',
     ),
     'compiled',
   );
   const FLAGGED =
-    'flag limit: Int = 7\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200) |> write_int(value: flags.limit)\n}\n';
+    'flag limit: Int = 7\n\nfn handle(raw: View) -> Response {\n  buf() |> write_int(value: flags.limit) |> respond(status: 200)\n}\n';
   same('a flag declaration still declares one', said(FLAGGED), 'compiled');
   const s = said(
-    'fn f(o: Option[Int]) -> Int {\n  match o {\n    Some(value: match) -> 1\n    _ -> 0\n  }\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n',
+    'fn f(o: Option[Int]) -> Int {\n  match o {\n    Some(value: match) -> 1\n    _ -> 0\n  }\n}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n',
   );
   same(
     'a reserved word as a pattern: P04 that names it',
@@ -510,7 +510,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // written back with them, and that line compiles.
 {
   const fn = (body: string): string =>
-    `fn f(a: Int, b: Bool) -> Int {\n${body}\n}\n\nfn g(on: Bool) -> Bool {\n  on\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+    `fn f(a: Int, b: Bool) -> Int {\n${body}\n}\n\nfn g(on: Bool) -> Bool {\n  on\n}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`;
   const cases: readonly (readonly [string, string, string])[] = [
     ['a step', '  let true = a > 1 else -> 0\n  a', '  let True = a > 1 else -> 0\n  a'],
     [
@@ -537,7 +537,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // parameter name, then the value". The fix now writes the call out with each name, and that call compiles.
 {
   const SLUG =
-    'type Slug = View where len(self) >= 1 and every_byte(self, fn(b: Int) -> Bool { is_lower(b) or b == 45 })\n\nfn handle(raw: View) -> Buf {\n  match request(raw).path {\n    "/s/" ++ Slug(s) -> respond(status: 200) |> append(view: s)\n    _ -> respond(status: 404)\n  }\n}\n';
+    'type Slug = View where len(self) >= 1 and every_byte(self, fn(b: Int) -> Bool { is_lower(b) or b == 45 })\n\nfn handle(raw: View) -> Response {\n  match request(raw).path {\n    "/s/" ++ Slug(s) -> buf() |> append(view: s) |> respond(status: 200)\n    _ -> empty(status: 404)\n  }\n}\n';
   const s = said(SLUG);
   // the first argument may go without its name now (`self` is `v`); the second still names its parameter
   same('every_byte(self, fn …): C10 at the second argument', code(s), 'C10:1');
@@ -556,7 +556,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 {
   const inner = 'SELECT region, SUM(amount) AS total FROM sales GROUP BY region';
   const prog = (query: string): string =>
-    `migration 1 "sales" {\n  CREATE TABLE sales(id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL)\n}\n\ntype Top { Top(region: View, total: Int) }\n\nfn handle(raw: View, db: Sql) -> Buf {\n  let rows = sql_all(row: Top, query: "${query}")\n  respond_as(status: 200, content: Json) |> write_rows(rows)\n}\n`;
+    `migration 1 "sales" {\n  CREATE TABLE sales(id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount INTEGER NOT NULL)\n}\n\ntype Top { Top(region: View, total: Int) }\n\nfn handle(raw: View, db: Sql) -> Response {\n  let rows = sql_all(row: Top, query: "${query}")\n  buf() |> write_rows(rows) |> respond_as(status: 200, content: Json)\n}\n`;
   const s = said(prog(`SELECT region, total FROM (${inner}) ORDER BY total DESC`));
   const fixed = `SELECT region, total FROM (${inner}) AS t ORDER BY total DESC`;
   same('FROM (SELECT …) with no alias: C67', code(s), 'C67:8');
@@ -570,7 +570,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // value apart, and each, written in, compiles.
 {
   const prog = (body: string): string =>
-    `fn wants(title: Option[View], other: Option[View]) -> Bool {\n${body}\n}\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`;
+    `fn wants(title: Option[View], other: Option[View]) -> Bool {\n${body}\n}\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n`;
   same('title != None compiles', said(prog('  title != None')), 'compiled');
   const two = said(prog('  title == other'));
   same(
@@ -585,7 +585,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // ---- a refined type's message is one text with no holes: anything else after `else` says the form
 {
   const s = said(
-    'type Slug = View where len(self) >= 1 else slug_text\n\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n',
+    'type Slug = View where len(self) >= 1 else slug_text\n\nfn handle(raw: View) -> Response {\n  empty(status: 200)\n}\n',
   );
   same(
     'a message that is not a text: P01 with the form',
@@ -599,7 +599,7 @@ fn charged(reply: Result[Charged, CallError]) -> Buf {
 // when the call was piped. It now writes the call as it stands after the pipe, and that call compiles.
 {
   const prog = (call: string): string =>
-    `fn write_lines(out: Buf, lines: Int, places: Int) -> Buf {\n  out |> write_int(value: lines + places)\n}\n\nfn handle(raw: View) -> Buf {\n  let priced = 2\n  let places = 3\n  respond(status: 200)\n    |> ${call}\n}\n`;
+    `fn write_lines(out: Buf, lines: Int, places: Int) -> Buf {\n  out |> write_int(value: lines + places)\n}\n\nfn handle(raw: View) -> Response {\n  let priced = 2\n  let places = 3\n  buf()\n    |> ${call}\n    |> respond(status: 200)\n}\n`;
   const s = said(prog('write_lines(priced, places)'));
   same(
     'a piped call: C11 whose fix writes the call after the pipe',

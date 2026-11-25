@@ -1,7 +1,11 @@
 // stats.tape: numbers in, a summary out, with immutable lists and functions as values (map, filter, fold from
 // the standard library, which is written in Tape).
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  stats(raw) |> respond_as(status: 200, content: Json)
+}
+
+fn stats(raw: View) -> Buf {
   summary(numbers: parse(rest: raw, acc: Nil))
 }
 

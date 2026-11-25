@@ -9,9 +9,9 @@ schema "CREATE TABLE IF NOT EXISTS hits(who TEXT NOT NULL, slot INTEGER NOT NULL
 
 type Hits { Hits(n: Int) }
 
-fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
+fn handle(raw: View, db: Sql, clock: Clock) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/check/" ++ who) -> verdict(seen: sql_first(
+    Request(method: Post, path: "/check/" ++ who) -> verdict(seen: sql_first(
       row: Hits,
       repeat: True,
       query: "INSERT INTO hits(who, slot, n) VALUES (:who, :slot, 1) ON CONFLICT(who, slot) \
@@ -19,17 +19,19 @@ fn handle(raw: View, db: Sql, clock: Clock) -> Buf {
       who,
       slot: now(clock) / 10000
     ))
-    _ -> respond(status: 404) |> append(view: "{\"error\":\"no such route\"}")
+    _ -> buf() |> append(view: "{\"error\":\"no such route\"}") |> respond(status: 404)
   }
 }
 
-fn verdict(seen: Option[Hits]) -> Buf {
+fn verdict(seen: Option[Hits]) -> Response {
   match seen {
-    Some(value: Hits(n)) if n <= flags.limit -> respond(status: 200)
+    Some(value: Hits(n)) if n <= flags.limit -> buf()
       |> append(view: "{\"allowed\":true,\"used\":\(n)}")
-    Some(value: Hits(n)) -> respond(status: 429)
+      |> respond(status: 200)
+    Some(value: Hits(n)) -> buf()
       |> append(view: "{\"allowed\":false,\"used\":\(n)}")
-    None -> respond(status: 500) |> append(view: "{\"error\":\"no row\"}")
+      |> respond(status: 429)
+    None -> buf() |> append(view: "{\"error\":\"no row\"}") |> respond(status: 500)
   }
 }
 

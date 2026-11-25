@@ -119,27 +119,27 @@ machine jobs.state: JobState {
 type Change { Change(state: View) }
 type Job { Job(id: Int, state: JobState) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/jobs/" ++ decimal(id), body) -> changed(id, body)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/jobs/" ++ decimal(id), body) -> changed(id, body)
+    _ -> empty(status: 404)
   }
 }
 
-fn changed(id: Int, body: View) -> Buf {
-  let Ok(value: Change(state)) = decode(json: body, as: Change) else -> respond(status: 400)
+fn changed(id: Int, body: View) -> Response {
+  let Ok(value: Change(state)) = decode(json: body, as: Change) else -> empty(status: 400)
   match state {
     "running" -> shown(m: sql_move(row: Job, query: "UPDATE jobs SET state = 'running' WHERE id = :id AND state = 'queued' RETURNING *", id))
     "done" -> shown(m: sql_move(row: Job, query: "UPDATE jobs SET state = 'done' WHERE id = :id AND state = 'running' RETURNING *", id))
-    _ -> respond(status: 400)
+    _ -> empty(status: 400)
   }
 }
 
-fn shown(m: Move[Job]) -> Buf {
+fn shown(m: Move[Job]) -> Response {
   match m {
-    Moved(value) -> respond(status: 200) |> write_json(value)
-    Raced(now) -> respond(status: 409)
-    NoRow -> respond(status: 404)
+    Moved(value) -> buf() |> write_json(value) |> respond(status: 200)
+    Raced(now) -> empty(status: 409)
+    NoRow -> empty(status: 404)
   }
 }
 `;
@@ -167,31 +167,31 @@ type Key = View where len(self) >= 1 and len(self) <= 64
 type Amount = Dec[2] where self >= 0.01 and self <= 9.99
 type Take { Take(key: Key, amount: Amount) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/takes", body) -> taken(body)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/takes", body) -> taken(body)
+    _ -> empty(status: 404)
   }
 }
 
-fn taken(body: View) -> Buf {
-  let Ok(value: Take(key, amount)) = decode(json: body, as: Take) else -> respond(status: 400)
+fn taken(body: View) -> Response {
+  let Ok(value: Take(key, amount)) = decode(json: body, as: Take) else -> empty(status: 400)
   let 1 = sql_exec(
     query: "INSERT INTO takes(key, amount) VALUES (:key, :amount) ON CONFLICT(key) DO NOTHING",
     key,
     amount
-  ) else -> respond(status: 200)
+  ) else -> empty(status: 200)
   let 1 = sql_exec(
     query: "UPDATE pots SET cents = cents - :amount WHERE id = 1 AND cents >= :amount",
     amount
   ) else -> ${refused}
-  respond(status: 201)
+  empty(status: 201)
 }
 `;
-  const right = await search(autoOf([{ name: 'pot', text: pot('rollback(out: respond(status: 409))') }]).model, {
+  const right = await search(autoOf([{ name: 'pot', text: pot('rollback(out: empty(status: 409))') }]).model, {
     runs: 200,
   });
-  const wrong = await search(autoOf([{ name: 'pot', text: pot('respond(status: 409)') }]).model, { runs: 200 });
+  const wrong = await search(autoOf([{ name: 'pot', text: pot('empty(status: 409)') }]).model, { runs: 200 });
   ok(
     'a pot taken from by Dec amounts: nothing wrong with the rollback; without it, the invariant breaks',
     right.ok && !wrong.ok && /what was taken from it/.test(wrongIn(wrong)),
@@ -311,16 +311,16 @@ ok(
 schema "CREATE TABLE IF NOT EXISTS links(id INTEGER PRIMARY KEY, url TEXT NOT NULL)"
 type NewLink { NewLink(url: View) }
 type Link { Link(id: Int, url: View) }
-fn handle(raw: View, db: Sql, dice: Entropy) -> Buf {
+fn handle(raw: View, db: Sql, dice: Entropy) -> Response {
   match request(raw) {
-    Request(method: "POST", path: "/links", body) -> create(body)
-    _ -> respond(status: 404)
+    Request(method: Post, path: "/links", body) -> create(body)
+    _ -> empty(status: 404)
   }
 }
-fn create(body: View) -> Buf {
-  let Ok(value: NewLink(url)) = decode(json: body, as: NewLink) else -> respond(status: 400)
-  let Some(value) = sql_first(row: Link, query: "INSERT INTO links(id, url) VALUES (:id, :url) RETURNING *", id: random() % 1000000000, url) else -> respond(status: 500)
-  respond(status: 201) |> write_json(value)
+fn create(body: View) -> Response {
+  let Ok(value: NewLink(url)) = decode(json: body, as: NewLink) else -> empty(status: 400)
+  let Some(value) = sql_first(row: Link, query: "INSERT INTO links(id, url) VALUES (:id, :url) RETURNING *", id: random() % 1000000000, url) else -> empty(status: 500)
+  buf() |> write_json(value) |> respond(status: 201)
 }`;
   const made = autoOf([{ name: 'links', text: keyless }], { clients: 4, ops: 10 });
   const twice = await search(made.model, { runs: 40 });
@@ -408,11 +408,11 @@ fn create(body: View) -> Buf {
       text: `type Slug = View where len(self) >= 2 and len(self) <= 32
 type Box = View where len(self) >= 1
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
   match request(raw) {
-    Request(method: "GET", path: "/s/" ++ Slug(slug)) -> respond(status: 200) |> append(view: slug)
-    Request(method: "GET", path: "/api/" ++ Box(box) ++ "/" ++ decimal(seq)) -> respond(status: 200) |> append(view: "\\(box) \\(seq)")
-    _ -> respond(status: 404)
+    Request(method: Get, path: "/s/" ++ Slug(slug)) -> buf() |> append(view: slug) |> respond(status: 200)
+    Request(method: Get, path: "/api/" ++ Box(box) ++ "/" ++ decimal(seq)) -> buf() |> append(view: "\\(box) \\(seq)") |> respond(status: 200)
+    _ -> empty(status: 404)
   }
 }
 `,

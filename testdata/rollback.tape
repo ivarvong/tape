@@ -7,26 +7,27 @@ migration 1 "t" {
 
 type Claim { Claim(key: View) }
 
-fn handle(raw: View, db: Sql) -> Buf {
+fn handle(raw: View, db: Sql) -> Response {
   let r = request(raw)
   match r {
-    Request(method: "POST", path: "/" ++ key) -> claimed(key)
-    Request(method: "GET", path: "/type") -> match header_of(request: r, name: "content-type") {
-      Some(value) -> respond(status: 200) |> append(view: value)
-      None -> respond(status: 404)
+    Request(method: Post, path: "/" ++ key) -> claimed(key)
+    Request(method: Get, path: "/type") -> match header_of(request: r, name: "content-type") {
+      Some(value) -> buf() |> append(view: value) |> respond(status: 200)
+      None -> empty(status: 404)
     }
-    _ -> respond(status: 200)
+    _ -> buf()
       |> write_rows(rows: sql_all(row: Claim, query: "SELECT key FROM claims"))
+      |> respond(status: 200)
   }
 }
 
-fn claimed(key: View) -> Buf {
+fn claimed(key: View) -> Response {
   let 1 = sql_exec(
     query: "INSERT INTO claims(key) VALUES (:key) ON CONFLICT(key) DO NOTHING",
     key
-  ) else -> respond(status: 200)
+  ) else -> empty(status: 200)
   let 1 = sql_exec(query: "UPDATE stock SET n = n - 1 WHERE id = 1 AND n >= 1") else -> rollback(
-    out: respond(status: 409)
+    out: empty(status: 409)
   )
-  respond(status: 201)
+  empty(status: 201)
 }

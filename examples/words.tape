@@ -1,7 +1,11 @@
 // words.tape: count the words in a text with the immutable Map. Each step replaces one entry (put_with: one walk
 // down the tree); because nothing else can see the old map, its memory is reused and the loop allocates almost nothing.
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  counted(raw) |> respond_as(status: 200, content: Json)
+}
+
+fn counted(raw: View) -> Buf {
   report(counts: words(rest: raw, counts: Empty))
 }
 

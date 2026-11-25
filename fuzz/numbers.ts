@@ -8,7 +8,7 @@
 import { unreachable } from '../compiler/ast.ts';
 import { compile } from '../compiler.ts';
 import { std } from '../std.ts';
-import { cli, handled, instance, seeds } from './run.ts';
+import { bodyOf, cli, handled, instance, seeds } from './run.ts';
 import type { Run } from './run.ts';
 import { rng } from './rng.ts';
 import type { Rng } from './rng.ts';
@@ -305,7 +305,11 @@ fn bool_text(b: Bool) -> View {
   }
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   let x ++ " " ++ rest = raw else -> buf() |> append(view: "bad")
   let y ++ " " ++ how = rest else -> buf() |> append(view: "bad")
   let Some(value: a) = parse_dec(text: x, scale: ${op.sa}) else -> buf() |> append(view: "a?")
@@ -402,7 +406,7 @@ export function decCase(seed: number, n = 200): NumVerdict {
     // the texts are read by the reference too: one that is not exactly a Dec of its scale is the program's "a?"
     const want =
         parseDec(ta, op.sa) !== a ? 'a?' : op.sb !== 'Int' && parseDec(tb, op.sb) !== b ? 'b?' : op.want(a, b, how),
-      got = handled(run, enc.encode(input)).out;
+      got = bodyOf(handled(run, enc.encode(input)).out);
     if (got !== want)
       return {
         cases: i + 1,
@@ -413,7 +417,11 @@ export function decCase(seed: number, n = 200): NumVerdict {
 }
 
 // ---- parse_dec on any text
-const PARSE = (s: number): string => `fn handle(raw: View) -> Buf {
+const PARSE = (s: number): string => `fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   match parse_dec(text: raw, scale: ${s}) {
     Some(value: d) -> buf() |> write_dec(value: d)
     None -> buf() |> append(view: "none")
@@ -453,7 +461,7 @@ export function parseCase(seed: number, n = 300): NumVerdict {
     const t = numberText(r);
     const want = parseDec(t, s);
     const t0 = performance.now();
-    const got = handled(run, enc.encode(t)).out;
+    const got = bodyOf(handled(run, enc.encode(t)).out);
     const ms = performance.now() - t0;
     const w = want === null ? 'none' : decText(want, s);
     if (got !== w) return { cases: i + 1, bad: `parse_dec(${JSON.stringify(t)}, scale: ${s}): want ${w}, got ${got}` };
@@ -473,7 +481,11 @@ fn f(t: View) -> Float {
   }
 }
 
-fn handle(raw: View) -> Buf {
+fn handle(raw: View) -> Response {
+  answer(raw) |> respond(status: 200)
+}
+
+fn answer(raw: View) -> Buf {
   let op ++ " " ++ rest = raw else -> buf() |> append(view: "bad")
   let x ++ " " ++ y = rest else -> buf() |> append(view: "bad")
   match op {
@@ -699,7 +711,7 @@ export function floatCase(seed: number, n = 300): NumVerdict {
       }
     }
     const input = `${op} ${x} ${y}`;
-    const got = handled(run, enc.encode(input)).out;
+    const got = bodyOf(handled(run, enc.encode(input)).out);
     if (got !== want) return { cases: i + 1, bad: `${input}: want ${want}, got ${got}` };
   }
   return { cases: n, bad: null };
