@@ -131,8 +131,8 @@ export function peek(c: Ctx, e: CExpr): Type | null {
   }
   if (e.k === 'lambda')
     return fnType(
-      e.params.map(pm => B.resolve(pm.typeAst)),
-      B.resolve(e.retAst),
+      e.params.map(pm => B.resolve(pm.typeAst, c.f.typeArgs)),
+      B.resolve(e.retAst, c.f.typeArgs),
     );
   if (e.k === 'held') return e.held.type;
   if (e.k === 'field') {
@@ -191,6 +191,7 @@ export function instance(
     name,
     tparams: [],
     base: g.name,
+    typeArgs: bind,
     params: g.params.map(pm => ({ name: pm.name, typeAst: pm.typeAst, type: B.resolve(pm.typeAst, bind) })),
     ret: B.resolve(g.retAst, bind),
   };
@@ -395,13 +396,14 @@ export function emitLambda(c: Ctx, e: Lambda): Type {
     line: e.line,
     file: e.file,
     body: e.body,
-    ret: B.resolve(e.retAst),
+    ret: B.resolve(e.retAst, c.f.typeArgs),
     retAst: e.retAst,
     exported: false,
     params: [
       ...captured.map(v => ({ name: v.name, type: v.type, typeAst: asAst(v.type, e) })),
-      ...e.params.map(pm => ({ name: pm.name, type: B.resolve(pm.typeAst), typeAst: pm.typeAst })),
+      ...e.params.map(pm => ({ name: pm.name, type: B.resolve(pm.typeAst, c.f.typeArgs), typeAst: pm.typeAst })),
     ],
+    ...(c.f.typeArgs ? { typeArgs: c.f.typeArgs } : {}),
   };
   B.fns.set(name, made);
   const calls = new Set<string>();

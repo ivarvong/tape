@@ -24,9 +24,9 @@ type Url = View where len(self) >= 12
   and len(self) <= 2000
   and starts_with(v: self, prefix: "https://")
   and every_byte(
-  v: self,
-  keep: url_byte
-) else "an https:// URL, 12 to 2000 bytes, without spaces, quotes or angle brackets"
+    v: self,
+    keep: url_byte
+  ) else "an https:// URL, 12 to 2000 bytes, without spaces, quotes or angle brackets"
 
 type NewLink { NewLink(slug: Slug, url: Url) }
 type Link { Link(slug: View, url: View, created: Int, clicks: Int) }
@@ -128,8 +128,8 @@ fn page(status: Int, title: View) -> Buf {
 
 fn end(out: Buf) -> Buf {
   out
-    |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a href=\"https://github.com/ivarvong/tape/blob/main/apps/products/shortlinks/shortlinks.tape\">source</a>). Links go only to https URLs, and every link \
-        shows its destination before you follow it.</p></main></html>")
+    |> append(view: "<p class=mute>Written in <a href=\"/\">Tape</a> (<a \
+        href=\"https://github.com/ivarvong/tape/blob/main/apps/products/shortlinks/shortlinks.tape\">source</a>). Links go only to https URLs, and every link shows its destination before you follow it.</p></main></html>")
 }
 
 fn home() -> Buf {
@@ -169,8 +169,8 @@ fn stats_one(found: Option[Link]) -> Buf {
       |> append(view: "<div class=card><table><tr><th>Destination</th><td><code>")
       |> write_html(text: url)
       |> append(
-      view: "</code></td></tr><tr><th>Visits</th><td>\(clicks)</td></tr><tr><th>Made</th><td>"
-    )
+        view: "</code></td></tr><tr><th>Visits</th><td>\(clicks)</td></tr><tr><th>Made</th><td>"
+      )
       |> append(view: date_time(ms: created))
       |> append(view: " UTC</td></tr><tr><th>Short link</th><td><a \
           href=\"/p/demo/shortlinks/s/\(slug)\">s/\(slug)</a></td></tr></table></div>")
@@ -189,16 +189,16 @@ fn stats_all(rows: Rows[Link]) -> Buf {
 }
 
 fn stat_rows(out: Buf, rows: Rows[Link]) -> Buf {
-  match next(rows) {
-    Next(value: Link(slug, url, clicks), rest) -> out
-      |> append(
-      view: "<tr><td><a href=\"/p/demo/shortlinks/stats/\(slug)\">\(slug)</a></td><td><code>"
-    )
-      |> write_html(text: url)
-      |> append(view: "</code></td><td class=n>\(clicks)</td></tr>")
-      |> stat_rows(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, link: Link) -> Buf {
+      let Link(slug, url, clicks) = link
+      o
+        |> append(
+          view: "<tr><td><a href=\"/p/demo/shortlinks/stats/\(slug)\">\(slug)</a></td><td><code>"
+        )
+        |> write_html(text: url)
+        |> append(view: "</code></td><td class=n>\(clicks)</td></tr>")
+    })
 }
 
 fn times(n: Int) -> View {

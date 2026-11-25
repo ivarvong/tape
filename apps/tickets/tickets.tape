@@ -1427,18 +1427,16 @@ fn hold_actions(out: Buf, hold: Hold) -> Buf {
 }
 
 fn ticket_rows(out: Buf, rows: Rows[Ticket]) -> Buf {
-  match next(rows) {
-    Next(value: Ticket(id, seat, owner, state), rest) -> ticket_rows(
-      out: out
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, ticket: Ticket) -> Buf {
+      let Ticket(id, seat, owner, state) = ticket
+      o
         |> append(view: "<p>Ticket \(id), seat \(seat), held by ")
         |> write_html(text: owner)
         |> append(view: " (")
         |> write_html(text: state)
-        |> append(view: ")</p>"),
-      rows: rest
-    )
-    End -> out
-  }
+        |> append(view: ")</p>")
+    })
 }
 
 type Mine { Mine(id: Int, seat: Int, state: View, event: View, tier: View) }
@@ -1471,21 +1469,18 @@ fn me_page(status: Int, buyer: View) -> Buf {
 }
 
 fn my_tickets(out: Buf, buyer: View, rows: Rows[Mine]) -> Buf {
-  match next(rows) {
-    Next(value: Mine(id, seat, state, event, tier), rest) -> my_tickets(
-      out: out
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, mine: Mine) -> Buf {
+      let Mine(id, seat, state, event, tier) = mine
+      o
         |> append(view: "<tr><td>\(id)</td><td>")
         |> write_html(text: event)
         |> append(view: "</td><td>")
         |> write_html(text: tier)
         |> append(view: "</td><td>\(seat)</td><td>")
         |> give_form(id, buyer, state)
-        |> append(view: "</td></tr>"),
-      buyer,
-      rows: rest
-    )
-    End -> out
-  }
+        |> append(view: "</td></tr>")
+    })
 }
 
 fn give_form(out: Buf, id: Int, buyer: View, state: View) -> Buf {
@@ -1505,18 +1500,16 @@ fn give_form(out: Buf, id: Int, buyer: View, state: View) -> Buf {
 }
 
 fn my_holds(out: Buf, rows: Rows[MyHold]) -> Buf {
-  match next(rows) {
-    Next(value: MyHold(id, qty, state, tier), rest) -> my_holds(
-      out: out
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, hold: MyHold) -> Buf {
+      let MyHold(id, qty, state, tier) = hold
+      o
         |> append(view: "<p><a href=\"hold?id=\(id)\">Hold \(id)</a>: \(qty) &times; ")
         |> write_html(text: tier)
         |> append(view: ", ")
         |> write_html(text: state)
-        |> append(view: "</p>"),
-      rows: rest
-    )
-    End -> out
-  }
+        |> append(view: "</p>")
+    })
 }
 
 // ---- audit (the operator's): every row a checker needs, as {"tiers":[…],"holds":[…],"tickets":[…],"waitlist":[…]}

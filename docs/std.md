@@ -247,7 +247,7 @@ Uses: [`header_of`](#fn-header_of), [`header`](#fn-header), [`Request`](#type-re
 - [std/text.tape](#stdtexttape): [`until`](#fn-until), [`after`](#fn-after), [`find`](#fn-find), [`starts_with`](#fn-starts_with), [`has`](#fn-has), [`is_digit`](#fn-is_digit), [`is_lower`](#fn-is_lower), [`is_upper`](#fn-is_upper), [`is_alpha`](#fn-is_alpha), [`is_alnum`](#fn-is_alnum), [`is_space`](#fn-is_space), [`every_byte`](#fn-every_byte), [`char_count`](#fn-char_count), [`isqrt`](#fn-isqrt), [`digits_end`](#fn-digits_end), [`decimal`](#fn-decimal), [`parse_int`](#fn-parse_int), [`decimal_text`](#fn-decimal_text), [`write_int`](#fn-write_int), [`write_text`](#fn-write_text), [`write_code`](#fn-write_code), [`Utf8`](#type-utf8), [`utf8_at`](#fn-utf8_at)
 - [std/json.tape](#stdjsontape): [`Json`](#type-json), [`JsonStep`](#type-jsonstep), [`json_first`](#fn-json_first), [`json_next`](#fn-json_next), [`json_end`](#fn-json_end), [`json_value`](#fn-json_value), [`number_end`](#fn-number_end), [`skip`](#fn-skip), [`json_text`](#fn-json_text), [`is_hex`](#fn-is_hex), [`hex`](#fn-hex), [`write_json_string`](#fn-write_json_string), [`write_bool`](#fn-write_bool), [`json_int`](#fn-json_int), [`write_rows`](#fn-write_rows)
 - [std/http.tape](#stdhttptape): [`Caller`](#type-caller), [`Request`](#type-request), [`request`](#fn-request), [`header_of`](#fn-header_of), [`lower`](#fn-lower), [`respond`](#fn-respond), [`header`](#fn-header), [`Content`](#type-content), [`respond_as`](#fn-respond_as), [`content_type`](#fn-content_type), [`form_field`](#fn-form_field), [`write_html`](#fn-write_html)
-- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`join`](#fn-join)
+- [std/list.tape](#stdlisttape): [`List`](#type-list), [`length`](#fn-length), [`reverse`](#fn-reverse), [`map`](#fn-map), [`filter`](#fn-filter), [`fold`](#fn-fold), [`range`](#fn-range), [`fold_rows`](#fn-fold_rows), [`join`](#fn-join)
 - [std/map.tape](#stdmaptape): [`Map`](#type-map), [`before`](#fn-before), [`compare`](#fn-compare), [`get`](#fn-get), [`put`](#fn-put), [`put_with`](#fn-put_with), [`count`](#fn-count)
 - [std/retry.tape](#stdretrytape): [`Backoff`](#type-backoff), [`Retry`](#type-retry), [`backoff`](#fn-backoff), [`grown`](#fn-grown), [`capped`](#fn-capped), [`retry_later`](#fn-retry_later)
 
@@ -573,7 +573,7 @@ Reads a JSON object into the record type `T`, or an array into `List[T]` (`as: L
 next(rows: Rows[T]) -> Step[T]
 ```
 
-One step through the rows of `sql_all`: `Next(value, rest)` or `End`.
+One step through the rows of `sql_all`: `Next(value, rest)` or `End`. To go through all of them, `fold_rows`.
 
 ### builtin sql_first
 
@@ -589,7 +589,7 @@ Needs `Sql`. The first row the query returns, as `T` (its fields name the column
 sql_all(row: T, query: "…", …) -> Rows[T]
 ```
 
-Needs `Sql`. Every row, to walk with `next` or write with `write_rows`. On a write it also takes `repeat: True`, for a write meant to apply again on each run: a count in SQL (`n = n + 1`) or an INSERT with no unique key (C54, C55; C88 refuses it where the write is safe without it); and `no_floor: True`, for a column it takes from that has no floor (C73).
+Needs `Sql`. Every row, to fold with `fold_rows`, write as JSON with `write_rows`, or take one at a time with `next`. On a write it also takes `repeat: True`, for a write meant to apply again on each run: a count in SQL (`n = n + 1`) or an INSERT with no unique key (C54, C55; C88 refuses it where the write is safe without it); and `no_floor: True`, for a column it takes from that has no floor (C73).
 
 ### builtin sql_exec
 
@@ -1581,6 +1581,23 @@ Cons(head: -1, tail: Cons(head: 0, tail: Cons(head: 1, tail: Nil)))
 > range(from: 1, to: 5) |> fold(from: 0, by: fn(acc: Int, n: Int) -> Int { acc + n })
 10
 ```
+
+### fn fold_rows
+
+```tape
+fn fold_rows[A, B](rows: Rows[A], from: B, by: Fn2[B, A, B]) -> B
+```
+
+Combine the rows of a query in their order, starting from `from`, as `fold` combines a list's items: one step a row and one more, and no list is made. `from` may be a Buf, handed from row to row, to write each row into it:
+
+```
+fn names(out: Buf) -> Buf {
+  sql_all(row: Item, query: "SELECT * FROM items ORDER BY id")
+    |> fold_rows(from: out, by: fn(o: Buf, item: Item) -> Buf { o |> append(view: item.name) })
+}
+```
+
+(An example in a comment runs without a database, so test/fold-rows.ts runs this one.) A list of the rows is a fold into Cons, then `reverse`. A function value cannot use a capability (C44): a row that needs a query, the clock or entropy of its own is read with `next`, in a function that calls itself.
 
 ### fn join
 

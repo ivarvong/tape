@@ -255,7 +255,7 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'next',
     sig: 'next(rows: Rows[T]) -> Step[T]',
-    doc: 'One step through the rows of `sql_all`: `Next(value, rest)` or `End`.',
+    doc: 'One step through the rows of `sql_all`: `Next(value, rest)` or `End`. To go through all of them, `fold_rows`.',
   },
   {
     name: 'sql_first',
@@ -267,7 +267,7 @@ const BUILT_INS: BuiltIn[] = [
     name: 'sql_all',
     sig: 'sql_all(row: T, query: "…", …) -> Rows[T]',
     needs: 'Sql',
-    doc: `Every row, to walk with \`next\` or write with \`write_rows\`. ${WRITES}`,
+    doc: `Every row, to fold with \`fold_rows\`, write as JSON with \`write_rows\`, or take one at a time with \`next\`. ${WRITES}`,
   },
   {
     name: 'sql_exec',

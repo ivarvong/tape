@@ -250,16 +250,15 @@ fn transfers_csv() -> Buf {
 }
 
 fn csv_rows(out: Buf, rows: Rows[Transfer]) -> Buf {
-  match next(rows) {
-    Next(value: t, rest) -> out
-      |> append(view: "\(t.id),\(iso(ms: t.at)),\(t.src),\(t.dst),\(t.amount),")
-      |> csv_field(text: t.memo)
-      |> append(view: ",")
-      |> csv_field(text: t.client)
-      |> append(view: "\r\n")
-      |> csv_rows(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, t: Transfer) -> Buf {
+      o
+        |> append(view: "\(t.id),\(iso(ms: t.at)),\(t.src),\(t.dst),\(t.amount),")
+        |> csv_field(text: t.memo)
+        |> append(view: ",")
+        |> csv_field(text: t.client)
+        |> append(view: "\r\n")
+    })
 }
 
 fn balances_csv() -> Buf {
@@ -270,12 +269,10 @@ fn balances_csv() -> Buf {
 }
 
 fn balance_rows(out: Buf, rows: Rows[Account]) -> Buf {
-  match next(rows) {
-    Next(value: Account(id, external, balance), rest) -> out
-      |> append(view: "\(id),\(yes_no(external)),\(balance)\r\n")
-      |> balance_rows(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, a: Account) -> Buf {
+      o |> append(view: "\(a.id),\(yes_no(a.external)),\(a.balance)\r\n")
+    })
 }
 
 fn yes_no(b: Bool) -> View {
@@ -414,31 +411,29 @@ fn home() -> Buf {
 }
 
 fn balance_cells(out: Buf, rows: Rows[Account]) -> Buf {
-  match next(rows) {
-    Next(value: Account(id, external, balance), rest) -> out
-      |> append(view: "<tr><td>")
-      |> write_html(text: id)
-      |> append(view: match external {
-        True -> " <span class=meta>external</span>"
-        False -> ""
-      })
-      |> append(view: "<td class=n>\(balance)</tr>")
-      |> balance_cells(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, a: Account) -> Buf {
+      o
+        |> append(view: "<tr><td>")
+        |> write_html(text: a.id)
+        |> append(view: match a.external {
+          True -> " <span class=meta>external</span>"
+          False -> ""
+        })
+        |> append(view: "<td class=n>\(a.balance)</tr>")
+    })
 }
 
 fn transfer_cells(out: Buf, rows: Rows[Transfer]) -> Buf {
-  match next(rows) {
-    Next(value: t, rest) -> out
-      |> append(view: "<tr><td>\(t.id)<td class=meta>\(iso(ms: t.at))<td>")
-      |> write_html(text: t.src)
-      |> append(view: "<td>")
-      |> write_html(text: t.dst)
-      |> append(view: "<td class=n>\(t.amount)<td>")
-      |> write_html(text: t.memo)
-      |> append(view: "</tr>")
-      |> transfer_cells(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, t: Transfer) -> Buf {
+      o
+        |> append(view: "<tr><td>\(t.id)<td class=meta>\(iso(ms: t.at))<td>")
+        |> write_html(text: t.src)
+        |> append(view: "<td>")
+        |> write_html(text: t.dst)
+        |> append(view: "<td class=n>\(t.amount)<td>")
+        |> write_html(text: t.memo)
+        |> append(view: "</tr>")
+    })
 }

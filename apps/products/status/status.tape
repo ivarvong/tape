@@ -530,14 +530,13 @@ fn incidents_html(out: Buf, rows: Rows[Incident]) -> Buf {
 }
 
 fn timeline(out: Buf, rows: Rows[Update]) -> Buf {
-  match next(rows) {
-    Next(value: u, rest) -> out
-      |> append(view: "<p><span class=meta>\(iso(ms: u.at)) · \(u.state)</span><br>")
-      |> write_html(text: u.body)
-      |> append(view: "</p>")
-      |> timeline(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, u: Update) -> Buf {
+      o
+        |> append(view: "<p><span class=meta>\(iso(ms: u.at)) · \(u.state)</span><br>")
+        |> write_html(text: u.body)
+        |> append(view: "</p>")
+    })
 }
 
 // milliseconds since 1970 as an RFC 3339 time in UTC, to the second (H. Hinnant's civil_from_days)

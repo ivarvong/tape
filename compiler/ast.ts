@@ -240,6 +240,9 @@ export type FnDecl = At & {
   /** set by the build: the result type; for a generic function made for one set of type arguments, its `base` */
   ret?: Resolved;
   base?: string;
+  /** set by the build on that copy, and on each function value written in it: what each type parameter is, so a
+   *  function value's parameters may name them (`fn(o: Buf, value: T) -> Buf` in std's write_rows) */
+  typeArgs?: ReadonlyMap<string, Resolved>;
   /**
    * set by the build on a function's owning copy (compiler/gen/call.ts owning): the parameters it takes over from
    * its caller, so the cells it takes apart go to the next values of their size

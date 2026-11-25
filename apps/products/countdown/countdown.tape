@@ -373,14 +373,13 @@ fn home(at: Int) -> Buf {
 }
 
 fn upcoming(out: Buf, rows: Rows[Event], at: Int) -> Buf {
-  match next(rows) {
-    Next(value: Event(id, name, at_ms), rest) -> out
-      |> append(view: "<li><a href=\"events/\(id)\">")
-      |> write_html(text: name)
-      |> append(view: "</a> <span class=meta>in \(spelled(ms: at_ms - at))</span></li>")
-      |> upcoming(rows: rest, at)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, event: Event) -> Buf {
+      o
+        |> append(view: "<li><a href=\"events/\(event.id)\">")
+        |> write_html(text: event.name)
+        |> append(view: "</a> <span class=meta>in \(spelled(ms: event.at_ms - at))</span></li>")
+    })
 }
 
 fn problem(status: Int, error: View) -> Buf {

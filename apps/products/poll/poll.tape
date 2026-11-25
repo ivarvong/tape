@@ -355,14 +355,13 @@ fn home() -> Buf {
 }
 
 fn listed_polls(out: Buf, rows: Rows[Poll]) -> Buf {
-  match next(rows) {
-    Next(value: Poll(id, question), rest) -> out
-      |> append(view: "<li><a href=\"polls/\(id)\">")
-      |> write_html(text: question)
-      |> append(view: "</a></li>")
-      |> listed_polls(rows: rest)
-    End -> out
-  }
+  rows
+    |> fold_rows(from: out, by: fn(o: Buf, poll: Poll) -> Buf {
+      o
+        |> append(view: "<li><a href=\"polls/\(poll.id)\">")
+        |> write_html(text: poll.question)
+        |> append(view: "</a></li>")
+    })
 }
 
 fn shell(status: Int, title: View) -> Buf {

@@ -475,4 +475,33 @@ T(
   ),
   5,
 );
+// a function value written in a generic function names its type parameter, and each copy reads it as its own type
+// (std's write_rows hands fold_rows one); before, that parameter was C06, unknown type T
+const PAIRS = `fn count_if[T](list: List[T], keep: Fn[T, Bool]) -> Int {
+  list |> fold(from: 0, by: fn(n: Int, item: T) -> Int {
+    match {
+      keep(item) -> n + 1
+      else -> n
+    }
+  })
+}
+fn ints() -> List[Int] {
+  Cons(head: 1, tail: Cons(head: 4, tail: Cons(head: 6, tail: Nil)))
+}
+fn texts() -> List[View] {
+  Cons(head: "a", tail: Cons(head: "bcd", tail: Nil))
+}
+`;
+T(
+  'a function value in a generic function names its type parameter, at two types',
+  run(
+    PAIRS +
+      `fn f(n: Int) -> Int {
+  count_if(list: ints(), keep: fn(x: Int) -> Bool { x > n }) * 10
+    + count_if(list: texts(), keep: fn(t: View) -> Bool { len(t) > n })
+}`,
+    [2n],
+  ),
+  21,
+);
 finish();

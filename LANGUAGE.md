@@ -113,7 +113,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | `Bool` | `True` or `False` |
 | `View` | read-only bytes (text is UTF-8 bytes) |
 | `Buf` | bytes being written. It has one owner: a function that is handed a `Buf` uses it once (C25) |
-| `Rows[T]` | the rows of a query, read with `next` |
+| `Rows[T]` | the rows of a query, folded with `fold_rows`, or read one at a time with `next`. Not a `List`: no list of the rows is made |
 | `Sql` `Remote` `Clock` `Entropy` `Timer` | capabilities: only ever parameters, never stored or returned |
 | `type T { A(x: Int)  B }` | a sum of constructors, each with named fields. `type T[P] { … }` takes type parameters |
 | `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition. It stands wherever its base type is asked, and so does an `Option`, `List` or `Result` of it (`Option[Delay]` where `Option[Int]` is asked); a function goes the other way in what it takes (`Fn[Int, X]` is an `Fn[Delay, X]`), and any other type of it is only itself. `… else "lowercase letters, digits and -"` is what decode's 400 says of a value for which the condition does not hold (section 6) |
@@ -187,7 +187,8 @@ first parameter (`every_byte(self, keep: is_lower)`, `fact(n - 1)`, `pow(b * 2, 
 the first is named or such a name (C10, C11). `a |> f(b: 1)` is `f(<first parameter>: a, b: 1)`, so after a pipe
 the first written argument is named too. `fmt` writes an argument as it was written.
 Every function is checked, whether anything calls it or not: a type error in one nothing calls yet is the
-program's error, at its line. A generic function is checked where it is called, for the types it is called with.
+program's error, at its line. A generic function is checked where it is called, for the types it is called with,
+and a function value written in it may name its type parameters (`fn(out: Buf, value: T) -> Buf`).
 A name is the first file's. Another file may define it again (C04 refuses a second definition in one file); that
 one is `file.name`, and in that file the bare name is its own. `handle` is the entry the host calls, so the
 first file that defines it serves requests and a later file's is `file.handle`.
@@ -561,6 +562,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Run something for what it does | `do f(…)` | C83-C85 |
 | Count, or do something n times | `fold` over `range(from:, to:)` | |
 | Write each item of a list | `fold(list, from: out, by: fn(out: Buf, item: T) -> Buf { … })` | |
+| List the rows of a query | `sql_all(row: T, query: …) \|> fold_rows(from: out, by: fn(out: Buf, row: T) -> Buf { … })`, or a total in `from`; `write_rows(rows: …)` for JSON. A list of the rows is a fold into `Cons`, then `reverse` | |
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made; a create meant to make a new row on each call (no client key) says so with `repeat: True` | C55 |
 | Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
@@ -703,7 +705,8 @@ or a function made recursive by a call added elsewhere. In a program with two `G
 `GET` arm on top added 4 steps to every request below it, and a path 12 bytes longer cost 59 more. `fold` over
 `range(from:, to:)` takes one step a number and one more, as over a list that long, and none to make the list, which
 is never made: summing `range(from: 0, to: 1000)` takes 1001 steps and no memory, where the same fold of a list made
-first takes 2002 and 24 bytes a number. Steps are a count of reductions, as in Erlang, not a time. They are the cost
+first takes 2002 and 24 bytes a number. `fold_rows` over a query's rows is the same: one step a row and one more,
+and `write_rows` is that fold. Steps are a count of reductions, as in Erlang, not a time. They are the cost
 measure all the same: on Workers a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's
 duration) can time its work.
 

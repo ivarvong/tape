@@ -113,6 +113,24 @@ fn fold_range[B](from: Int, to: Int, acc: B, by: Fn2[B, Int, B]) -> B {
   }
 }
 
+// Combine the rows of a query in their order, starting from `from`, as `fold` combines a list's items: one step a
+// row and one more, and no list is made. `from` may be a Buf, handed from row to row, to write each row into it:
+//
+//   fn names(out: Buf) -> Buf {
+//     sql_all(row: Item, query: "SELECT * FROM items ORDER BY id")
+//       |> fold_rows(from: out, by: fn(o: Buf, item: Item) -> Buf { o |> append(view: item.name) })
+//   }
+//
+// (An example in a comment runs without a database, so test/fold-rows.ts runs this one.) A list of the rows is a
+// fold into Cons, then `reverse`. A function value cannot use a capability (C44): a row that needs a query, the
+// clock or entropy of its own is read with `next`, in a function that calls itself.
+fn fold_rows[A, B](rows: Rows[A], from: B, by: Fn2[B, A, B]) -> B {
+  match next(rows) {
+    Next(value, rest) -> fold_rows(rows: rest, from: by(from, value), by)
+    End -> from
+  }
+}
+
 // The texts with `sep` between each two.
 //
 //   > join(list: Cons(head: "a", tail: Cons(head: "b", tail: Cons(head: "c", tail: Nil))), sep: ", ")

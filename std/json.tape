@@ -1453,22 +1453,14 @@ fn in_range(value: Int, neg: Bool) -> Option[Int] {
 
 // Every row of a query as a JSON array, each row written as write_json writes it.
 fn write_rows[T](out: Buf, rows: Rows[T]) -> Buf {
-  write_rows_from(out: push(buf: out, byte: 91), rows, first: True)
-}
-
-// Internal: the loop of write_rows.
-fn write_rows_from[T](out: Buf, rows: Rows[T], first: Bool) -> Buf {
-  match next(rows) {
-    Next(value, rest) if first -> write_rows_from(
-      out: write_json(out, value),
-      rows: rest,
-      first: False
-    )
-    Next(value, rest) -> write_rows_from(
-      out: write_json(out: push(buf: out, byte: 44), value),
-      rows: rest,
-      first: False
-    )
-    End -> push(buf: out, byte: 93)
-  }
+  let open = push(buf: out, byte: 91)
+  let first = size(buf: open)
+  rows
+    |> fold_rows(from: open, by: fn(o: Buf, value: T) -> Buf {
+      match {
+        size(buf: o) == first -> write_json(out: o, value)
+        else -> write_json(out: push(buf: o, byte: 44), value)
+      }
+    })
+    |> push(byte: 93)
 }
