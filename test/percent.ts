@@ -43,7 +43,7 @@ const stepsOf = (mod: { exports: object }): number => {
  * bytes, and a raw byte is one already decoded.
  */
 function oracle(input: Uint8Array): Uint8Array | null {
-  const text = [...input].map(b => (b < 128 ? String.fromCharCode(b) : `%${b.toString(16)}`)).join('');
+  const text = [...input].map(b => (b < 128 ? String.fromCodePoint(b) : `%${b.toString(16)}`)).join('');
   try {
     return enc.encode(decodeURIComponent(text));
   } catch {
@@ -82,7 +82,7 @@ const esc = (b: number): string => {
   const h = b.toString(16).padStart(2, '0');
   return `%${rand(2) === 0 ? h : h.toUpperCase()}`;
 };
-const CHARS = ['é', 'ö', '日', '€', '😀', '\u{10ffff}', '\u{7f}'];
+const CHARS = ['é', 'ö', '日', '€', '😀', '\u{10FFFF}', '\u{7F}'];
 function piece(): number[] {
   const k = rand(14);
   const ascii = (s: string): number[] => [...enc.encode(s)];

@@ -64,7 +64,7 @@ fn civil(ms: Int) -> Civil {
 // `Z`, so every one is 24 bytes from 0000 to 9999 and they sort as text in the order of time. For JSON, Atom feeds
 // and logs. RFC 3339 has years 0000 to 9999 only, from -62167219200000 to 253402300799999; outside them the year is
 // ISO 8601's expanded one, a sign and at least six digits (`+010000-01-01T00:00:00.000Z`), as JavaScript's
-// toISOString writes it. Its steps are its numbers' digits, one each as a hole writes them: 20 for 2026.
+// toISOString writes it. Its steps are its numbers' digits, one each as decimal_text writes them: 20 for 2026.
 //
 //   > rfc3339(ms: 1795615387123)
 //   "2026-11-25T14:03:07.123Z"
@@ -92,7 +92,7 @@ fn rfc3339(ms: Int) -> View {
 // date, last-modified, expires and retry-after headers. The milliseconds are dropped: the second it falls in. The
 // same text as JavaScript's toUTCString. An HTTP date has years 0000 to 9999 only; outside them the year is written
 // as toUTCString writes it, its digits after a `-` for a year before 0 (`-0001`), and a header should not be sent
-// with one. Its steps are its numbers' digits, one each as a hole writes them: 16 for 2026.
+// with one. Its steps are its numbers' digits, one each as decimal_text writes them: 16 for 2026.
 //
 //   > http_date(ms: 1795615387123)
 //   "Wed, 25 Nov 2026 14:03:07 GMT"
@@ -173,30 +173,31 @@ fn http_year(year: Int) -> View {
   }
 }
 
-// Internal: n, 0 or more, in at least two digits.
+// Internal: n, 0 or more, in at least two digits. These write n with decimal_text, not a hole: a hole's Int is
+// written by a call of write_int, which a program may define for itself (test/wire-names.ts).
 fn two_digit(n: Int) -> View {
   match {
-    n < 10 -> "0\(n)"
-    else -> "\(n)"
+    n < 10 -> "0" ++ decimal_text(value: n)
+    else -> decimal_text(value: n)
   }
 }
 
 // Internal: n, 0 or more, in at least three digits.
 fn three_digit(n: Int) -> View {
   match {
-    n < 10 -> "00\(n)"
-    n < 100 -> "0\(n)"
-    else -> "\(n)"
+    n < 10 -> "00" ++ decimal_text(value: n)
+    n < 100 -> "0" ++ decimal_text(value: n)
+    else -> decimal_text(value: n)
   }
 }
 
 // Internal: n, 0 or more, in at least four digits.
 fn four_digit(n: Int) -> View {
   match {
-    n < 10 -> "000\(n)"
-    n < 100 -> "00\(n)"
-    n < 1000 -> "0\(n)"
-    else -> "\(n)"
+    n < 10 -> "000" ++ decimal_text(value: n)
+    n < 100 -> "00" ++ decimal_text(value: n)
+    n < 1000 -> "0" ++ decimal_text(value: n)
+    else -> decimal_text(value: n)
   }
 }
 
@@ -204,7 +205,7 @@ fn four_digit(n: Int) -> View {
 fn six_digit(n: Int) -> View {
   match {
     n < 10000 -> "00" ++ four_digit(n)
-    n < 100000 -> "0\(n)"
-    else -> "\(n)"
+    n < 100000 -> "0" ++ decimal_text(value: n)
+    else -> decimal_text(value: n)
   }
 }

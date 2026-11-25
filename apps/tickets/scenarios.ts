@@ -351,7 +351,7 @@ const sleep = (ms: number): Promise<void> =>
   const spaced = await w.req('GET /users/ada%20l/tickets'),
     bad = await w.req('GET /users/ada%2/tickets');
   T(
-    'a buyer named in the path is percent-decoded after the match: /users/ada%20l/tickets lists ada l\'s; a bad escape is 404',
+    "a buyer named in the path is percent-decoded after the match: /users/ada%20l/tickets lists ada l's; a bad escape is 404",
     [
       Array.isArray(spaced.json) ? spaced.json.map((x: unknown) => fieldsIn(x).owner) : null,
       Array.isArray(spaced.json) ? spaced.json.length : null,

@@ -1878,7 +1878,7 @@ Civil(year: 1969, month: 12, day: 31, hour: 23, minute: 59, second: 59, millisec
 fn rfc3339(ms: Int) -> View
 ```
 
-An instant as RFC 3339 text in UTC, `2026-11-25T14:03:07.123Z`: always the three digits of its milliseconds and `Z`, so every one is 24 bytes from 0000 to 9999 and they sort as text in the order of time. For JSON, Atom feeds and logs. RFC 3339 has years 0000 to 9999 only, from -62167219200000 to 253402300799999; outside them the year is ISO 8601's expanded one, a sign and at least six digits (`+010000-01-01T00:00:00.000Z`), as JavaScript's toISOString writes it. Its steps are its numbers' digits, one each as a hole writes them: 20 for 2026.
+An instant as RFC 3339 text in UTC, `2026-11-25T14:03:07.123Z`: always the three digits of its milliseconds and `Z`, so every one is 24 bytes from 0000 to 9999 and they sort as text in the order of time. For JSON, Atom feeds and logs. RFC 3339 has years 0000 to 9999 only, from -62167219200000 to 253402300799999; outside them the year is ISO 8601's expanded one, a sign and at least six digits (`+010000-01-01T00:00:00.000Z`), as JavaScript's toISOString writes it. Its steps are its numbers' digits, one each as decimal_text writes them: 20 for 2026.
 
 ```
 > rfc3339(ms: 1795615387123)
@@ -1899,7 +1899,7 @@ An instant as RFC 3339 text in UTC, `2026-11-25T14:03:07.123Z`: always the three
 fn http_date(ms: Int) -> View
 ```
 
-An instant as an HTTP date (RFC 9110 section 5.6.7, IMF-fixdate), `Wed, 25 Nov 2026 14:03:07 GMT`: for the date, last-modified, expires and retry-after headers. The milliseconds are dropped: the second it falls in. The same text as JavaScript's toUTCString. An HTTP date has years 0000 to 9999 only; outside them the year is written as toUTCString writes it, its digits after a `-` for a year before 0 (`-0001`), and a header should not be sent with one. Its steps are its numbers' digits, one each as a hole writes them: 16 for 2026.
+An instant as an HTTP date (RFC 9110 section 5.6.7, IMF-fixdate), `Wed, 25 Nov 2026 14:03:07 GMT`: for the date, last-modified, expires and retry-after headers. The milliseconds are dropped: the second it falls in. The same text as JavaScript's toUTCString. An HTTP date has years 0000 to 9999 only; outside them the year is written as toUTCString writes it, its digits after a `-` for a year before 0 (`-0001`), and a header should not be sent with one. Its steps are its numbers' digits, one each as decimal_text writes them: 16 for 2026.
 
 ```
 > http_date(ms: 1795615387123)

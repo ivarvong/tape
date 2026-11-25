@@ -198,7 +198,7 @@ ok(
   years.some(y => y < 1970) && years.some(y => y < 0) && years.some(y => y > 9999) && years.some(y => y > 275760),
 );
 
-// ---- the cost: civil loops over nothing; the two texts write their numbers through holes, whose Int digits are
+// ---- the cost: civil loops over nothing; the two texts write their numbers with decimal_text, whose Int digits are
 // written by a recursive function, a step a digit
 const COST = `fn m_civil(ms: Int) -> Int {
   civil(ms).year
@@ -227,7 +227,7 @@ for (const ms of [0n, -1n, INT_MIN, INT_MAX, at('2026-11-25T14:03:07.123Z')])
   }
 // at 0, -1, the least Int, the largest and 2026-11-25T14:03:07.123Z: civil, rfc3339, http_date
 same(
-  'civil costs no steps; rfc3339 and http_date about one a digit they write (the holes): 20 and 16 for today',
+  'civil costs no steps; rfc3339 and http_date about one a digit they write (decimal_text): 20 and 16 for today',
   steps,
   [0, 10, 8, 0, 17, 12, 0, 20, 16, 0, 20, 16, 0, 15, 10],
 );
