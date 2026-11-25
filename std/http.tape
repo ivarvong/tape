@@ -175,7 +175,7 @@ private fn caller_of(open: Bool, held: Bool, lines: View) -> Caller {
 private fn session_id(lines: View) -> View {
   match {
     len(lines) < 15 or not has(v: lines, at: 0, word: "\rtape-session: ") -> ""
-    else -> until(v: slice(v: lines, from: 15, to: len(lines)), byte: 13)
+    else -> until(v: slice(v: lines, from: 15, to: len(lines)), byte: '\r')
   }
 }
 
