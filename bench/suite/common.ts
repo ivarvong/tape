@@ -39,6 +39,8 @@ export type Workload = {
   now?: number;
   /** false: no JS twin. The tape/js table skips it; profile it with tape-nolog */
   twin?: boolean;
+  /** compile each file under its basename, the name test/wasm-size.ts uses, so a profile is that module */
+  baseNames?: boolean;
   /** uses SQL */
   sql: boolean;
   /** called once on each fresh database, after the Tape schema has run (the JS twin's schema is its own) */
@@ -72,14 +74,12 @@ export function sourcesOf(w: { tape: string; more?: readonly string[] }): readon
   return [w.tape, ...(w.more ?? [])];
 }
 
-const GATE = new Set(['corpus/md.tape', 'corpus/blog.tape']);
-/** How a workload is compiled. The six keep the path the suite has always passed. The renderer and the blog are
- * named by their basename, which is what test/wasm-size.ts passes, so a profile is of the module the size gate
- * measures. */
-export function programFiles(paths: readonly string[]): { name: string; text: string }[] {
-  const gate = paths.some(p => GATE.has(p));
+/** How a workload is compiled. The six keep the path the suite has always passed. A workload with `baseNames` is
+ * named by each file's basename, which is what test/wasm-size.ts passes, so a profile is of the module the size
+ * gate measures. */
+export function programFiles(paths: readonly string[], baseNames = false): { name: string; text: string }[] {
   return paths.map(p => ({
-    name: gate ? p.slice(p.lastIndexOf('/') + 1) : p,
+    name: baseNames ? p.slice(p.lastIndexOf('/') + 1) : p,
     text: readFileSync(`${ROOT}${p}`, 'utf8'),
   }));
 }

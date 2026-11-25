@@ -124,7 +124,7 @@ fn split_lines(text: View, at: Int, acc: List[View]) -> List[View] {
   match {
     at >= len(text) -> acc
     else -> {
-      let end = find(v: text, byte: 10, at)
+      let end = find(v: text, byte: '\n', at)
       split_lines(
         text,
         at: end + 1,
@@ -136,23 +136,23 @@ fn split_lines(text: View, at: Int, acc: List[View]) -> List[View] {
 
 fn chomp(line: View) -> View {
   match {
-    len(line) > 0 and line[len(line) - 1] == 13 -> slice(v: line, from: 0, to: len(line) - 1)
+    len(line) > 0 and line[len(line) - 1] == '\r' -> slice(v: line, from: 0, to: len(line) - 1)
     else -> line
   }
 }
 
 fn is_ws(b: Int) -> Bool {
-  b == 32 or b == 9 or b == 10 or b == 13 or b == 12 or b == 11
+  b == ' ' or b == '\t' or b == '\n' or b == '\r' or b == '\f' or b == 11
 }
 
 fn is_punct(b: Int) -> Bool {
-  b >= 33 and b <= 47 or b >= 58 and b <= 64 or b >= 91 and b <= 96 or b >= 123 and b <= 126
+  b >= '!' and b <= '/' or b >= ':' and b <= '@' or b >= '[' and b <= '`' or b >= '{' and b <= '~'
 }
 
 // the first position at or after `at` that is not a space or a tab
 fn skip_ws(v: View, at: Int) -> Int {
   match {
-    at < len(v) and (v[at] == 32 or v[at] == 9) -> skip_ws(v, at: at + 1)
+    at < len(v) and (v[at] == ' ' or v[at] == '\t') -> skip_ws(v, at: at + 1)
     else -> at
   }
 }
@@ -160,8 +160,8 @@ fn skip_ws(v: View, at: Int) -> Int {
 // the column the leading spaces and tabs reach (a tab goes to the next multiple of 4)
 fn cols(v: View, at: Int, col: Int) -> Int {
   match {
-    at < len(v) and v[at] == 32 -> cols(v, at: at + 1, col: col + 1)
-    at < len(v) and v[at] == 9 -> cols(v, at: at + 1, col: col + 4 - col % 4)
+    at < len(v) and v[at] == ' ' -> cols(v, at: at + 1, col: col + 1)
+    at < len(v) and v[at] == '\t' -> cols(v, at: at + 1, col: col + 4 - col % 4)
     else -> col
   }
 }
@@ -175,10 +175,10 @@ fn strip_cols(line: View, n: Int) -> View {
 fn strip_at(line: View, at: Int, col: Int, n: Int) -> View {
   match {
     col >= n or at >= len(line) -> slice(v: line, from: at, to: len(line))
-    line[at] == 32 -> strip_at(line, at: at + 1, col: col + 1, n)
-    line[at] == 9
+    line[at] == ' ' -> strip_at(line, at: at + 1, col: col + 1, n)
+    line[at] == '\t'
       and col + 4 - col % 4 <= n -> strip_at(line, at: at + 1, col: col + 4 - col % 4, n)
-    line[at] == 9 -> freeze(buf: spaces(out: buf(), n: col + 4 - col % 4 - n) |> append(
+    line[at] == '\t' -> freeze(buf: spaces(out: buf(), n: col + 4 - col % 4 - n) |> append(
       view: slice(v: line, from: at + 1, to: len(line))
     ))
     else -> slice(v: line, from: at, to: len(line))
@@ -188,7 +188,7 @@ fn strip_at(line: View, at: Int, col: Int, n: Int) -> View {
 fn spaces(out: Buf, n: Int) -> Buf {
   match {
     n <= 0 -> out
-    else -> spaces(out: push(buf: out, byte: 32), n: n - 1)
+    else -> spaces(out: push(buf: out, byte: ' '), n: n - 1)
   }
 }
 
@@ -229,7 +229,7 @@ fn run_end(v: View, at: Int, b: Int) -> Int {
 fn byte_at(v: View, at: Int) -> Int {
   match {
     at >= 0 and at < len(v) -> v[at]
-    else -> 10
+    else -> '\n'
   }
 }
 
@@ -248,11 +248,11 @@ fn classify(line: View) -> Line {
 fn start_at(line: View, at: Int, col: Int) -> Start {
   let b = line[at]
   match {
-    b == 62 -> QuoteLine(rest: quote_rest(line, at: at + 1))
-    b == 35 -> atx(line, at)
-    (b == 96 or b == 126) and run_len(v: line, at, b) >= 3 -> fence(line, at, col)
-    (b == 42 or b == 45 or b == 95) and is_hr(v: line, at, mark: b, count: 0) -> Hr
-    (b == 42 or b == 45 or b == 43) and byte_at(v: line, at: at + 1)
+    b == '>' -> QuoteLine(rest: quote_rest(line, at: at + 1))
+    b == '#' -> atx(line, at)
+    (b == '`' or b == '~') and run_len(v: line, at, b) >= 3 -> fence(line, at, col)
+    (b == '*' or b == '-' or b == '_') and is_hr(v: line, at, mark: b, count: 0) -> Hr
+    (b == '*' or b == '-' or b == '+') and byte_at(v: line, at: at + 1)
       |> is_ws -> marker(line, after: at + 1, kind: Bullet(mark: b))
     is_digit(b) -> ordered(line, at, end: at)
     else -> Plain
@@ -262,7 +262,7 @@ fn start_at(line: View, at: Int, col: Int) -> Start {
 fn quote_rest(line: View, at: Int) -> View {
   match {
     at < len(line)
-      and (line[at] == 32 or line[at] == 9) -> slice(v: line, from: at + 1, to: len(line))
+      and (line[at] == ' ' or line[at] == '\t') -> slice(v: line, from: at + 1, to: len(line))
     else -> slice(v: line, from: at, to: len(line))
   }
 }
@@ -271,7 +271,7 @@ fn atx(line: View, at: Int) -> Start {
   let n = run_len(v: line, at, b: 35)
   match {
     n <= 6
-      and (at + n >= len(line) or line[at + n] == 32 or line[at + n] == 9) -> Atx(
+      and (at + n >= len(line) or line[at + n] == ' ' or line[at + n] == '\t') -> Atx(
         level: n,
         text: atx_text(trim(slice(v: line, from: at + n, to: len(line))))
       )
@@ -285,14 +285,14 @@ fn atx_text(s: View) -> View {
   match {
     k == len(s) -> s
     k == 0 -> ""
-    s[k - 1] == 32 or s[k - 1] == 9 -> rtrim(slice(v: s, from: 0, to: k))
+    s[k - 1] == ' ' or s[k - 1] == '\t' -> rtrim(slice(v: s, from: 0, to: k))
     else -> s
   }
 }
 
 fn hashes_from(s: View, end: Int) -> Int {
   match {
-    end > 0 and s[end - 1] == 35 -> hashes_from(s, end: end - 1)
+    end > 0 and s[end - 1] == '#' -> hashes_from(s, end: end - 1)
     else -> end
   }
 }
@@ -302,7 +302,7 @@ fn fence(line: View, at: Int, col: Int) -> Start {
   let n = run_len(v: line, at, b: mark)
   let info = trim(slice(v: line, from: at + n, to: len(line)))
   match {
-    mark == 96 and find(v: info, byte: 96, at: 0) < len(info) -> Plain
+    mark == '`' and find(v: info, byte: '`', at: 0) < len(info) -> Plain
     else -> Fence(mark, n, indent: col, info)
   }
 }
@@ -311,7 +311,7 @@ fn is_hr(v: View, at: Int, mark: Int, count: Int) -> Bool {
   match {
     at >= len(v) -> count >= 3
     v[at] == mark -> is_hr(v, at: at + 1, mark, count: count + 1)
-    v[at] == 32 or v[at] == 9 -> is_hr(v, at: at + 1, mark, count)
+    v[at] == ' ' or v[at] == '\t' -> is_hr(v, at: at + 1, mark, count)
     else -> False
   }
 }
@@ -319,7 +319,7 @@ fn is_hr(v: View, at: Int, mark: Int, count: Int) -> Bool {
 fn ordered(line: View, at: Int, end: Int) -> Start {
   match {
     end < len(line) and is_digit(line[end]) and end - at < 9 -> ordered(line, at, end: end + 1)
-    end < len(line) and (line[end] == 46 or line[end] == 41) and byte_at(v: line, at: end + 1)
+    end < len(line) and (line[end] == '.' or line[end] == ')') and byte_at(v: line, at: end + 1)
       |> is_ws -> marker(
         line,
         after: end + 1,
@@ -414,9 +414,9 @@ fn setext(line: View) -> Int {
   let b = byte_at(v: line, at)
   let n = run_len(v: line, at, b)
   match {
-    cols(v: line, at: 0, col: 0) >= 4 or b != 61 and b != 45 -> 0
+    cols(v: line, at: 0, col: 0) >= 4 or b != '=' and b != '-' -> 0
     skip_ws(v: line, at: at + n) < len(line) -> 0
-    b == 61 -> 1
+    b == '=' -> 1
     else -> 2
   }
 }
@@ -468,7 +468,7 @@ fn take(start: Start, line: View, rest: List[View], depth: Int) -> Took {
     Hr -> Took(block: Rule, rest)
     Fence(mark, n, indent, info) -> {
       let Taken(lines, rest: after) = fence_body(lines: rest, mark, n, indent, acc: Nil)
-      Took(block: CodeBlock(info: until(v: info, byte: 32), text: joined(lines)), rest: after)
+      Took(block: CodeBlock(info: until(v: info, byte: ' '), text: joined(lines)), rest: after)
     }
     Indented -> {
       let Taken(lines, rest: after) = code_body(lines: Cons(head: line, tail: rest), acc: Nil)
@@ -526,7 +526,7 @@ fn joined(lines: List[View]) -> View {
   freeze(buf: fold(
     list: lines,
     from: buf(),
-    by: fn(out: Buf, line: View) -> Buf { out |> append(view: line) |> push(byte: 10) }
+    by: fn(out: Buf, line: View) -> Buf { out |> append(view: line) |> push(byte: '\n') }
   ))
 }
 
@@ -721,7 +721,7 @@ fn inline(text: View) -> List[Inline] {
 }
 
 fn tick_runs(t: View, at: Int, acc: List[Tick]) -> List[Tick] {
-  let j = find(v: t, byte: 96, at)
+  let j = find(v: t, byte: '`', at)
   match {
     j >= len(t) -> reverse(list: acc)
     else -> tick_runs(
@@ -762,8 +762,8 @@ fn brackets(t: View, at: Int, runs: List[Tick], acc: List[Bracket]) -> List[Brac
   let next = next_special(t, at)
   match {
     next >= len(t) -> acc
-    t[next] == 92 -> brackets(t, at: next + 2, runs, acc)
-    t[next] == 96 -> {
+    t[next] == '\\' -> brackets(t, at: next + 2, runs, acc)
+    t[next] == '`' -> {
       let here = runs_from(runs, at: next)
       let k = closing_run(runs: here, n: run_len(v: t, at: next, b: 96))
       match {
@@ -771,15 +771,15 @@ fn brackets(t: View, at: Int, runs: List[Tick], acc: List[Bracket]) -> List[Brac
         else -> brackets(t, at: run_end(v: t, at: k, b: 96), runs: here, acc)
       }
     }
-    t[next] == 60
+    t[next] == '<'
       and autolink_end(t, at: next) > next -> brackets(
         t,
         at: autolink_end(t, at: next) + 1,
         runs,
         acc
       )
-    t[next] == 60 -> brackets(t, at: next + 1, runs, acc)
-    t[next] == 91 -> brackets(t, at: next + 1, runs, acc: Cons(head: Opens(at: next), tail: acc))
+    t[next] == '<' -> brackets(t, at: next + 1, runs, acc)
+    t[next] == '[' -> brackets(t, at: next + 1, runs, acc: Cons(head: Opens(at: next), tail: acc))
     else -> brackets(t, at: next + 1, runs, acc: Cons(head: Closes(at: next), tail: acc))
   }
 }
@@ -787,7 +787,7 @@ fn brackets(t: View, at: Int, runs: List[Tick], acc: List[Bracket]) -> List[Brac
 fn next_special(t: View, at: Int) -> Int {
   match {
     at >= len(t) -> len(t)
-    t[at] == 92 or t[at] == 96 or t[at] == 60 or t[at] == 91 or t[at] == 93 -> at
+    t[at] == '\\' or t[at] == '`' or t[at] == '<' or t[at] == '[' or t[at] == ']' -> at
     else -> next_special(t, at: at + 1)
   }
 }
@@ -827,14 +827,14 @@ fn scan(t: View, at: Int, from: Int, stack: Stack, ix: Index) -> List[Inline] {
   match {
     at >= len(t) -> to_inlines(t, pieces: flush(t, from, to: at, stack).pieces, acc: Nil)
     else -> match t[at] {
-      92 -> escape_at(t, at, from, stack, ix)
-      96 -> code_at(t, at, from, stack, ix)
-      42 -> run_at(t, at, from, stack, ix)
-      95 -> run_at(t, at, from, stack, ix)
-      91 -> bracket_at(t, at, b: at, from, stack, ix)
-      33 if byte_at(v: t, at: at + 1) == 91 -> bracket_at(t, at, b: at + 1, from, stack, ix)
-      60 -> angle_at(t, at, from, stack, ix)
-      10 -> break_at(t, at, from, stack, ix)
+      '\\' -> escape_at(t, at, from, stack, ix)
+      '`' -> code_at(t, at, from, stack, ix)
+      '*' -> run_at(t, at, from, stack, ix)
+      '_' -> run_at(t, at, from, stack, ix)
+      '[' -> bracket_at(t, at, b: at, from, stack, ix)
+      '!' if byte_at(v: t, at: at + 1) == '[' -> bracket_at(t, at, b: at + 1, from, stack, ix)
+      '<' -> angle_at(t, at, from, stack, ix)
+      '\n' -> break_at(t, at, from, stack, ix)
       _ -> scan(t, at: at + 1, from, stack, ix)
     }
   }
@@ -898,7 +898,7 @@ fn break_at(t: View, at: Int, from: Int, stack: Stack, ix: Index) -> List[Inline
 
 fn rtrim_spaces(t: View, end: Int) -> Int {
   match {
-    end > 0 and t[end - 1] == 32 -> rtrim_spaces(t, end: end - 1)
+    end > 0 and t[end - 1] == ' ' -> rtrim_spaces(t, end: end - 1)
     else -> end
   }
 }
@@ -920,7 +920,7 @@ fn escape_at(t: View, at: Int, from: Int, stack: Stack, ix: Index) -> List[Inlin
         ),
         ix
       )
-    at + 1 < len(t) and b == 10 -> {
+    at + 1 < len(t) and b == '\n' -> {
       let next = skip_ws(v: t, at: at + 2)
       scan(t, at: next, from: next, stack: push_node(t, from, to: at, stack, node: Hard), ix)
     }
@@ -964,7 +964,7 @@ fn code_text(v: View) -> View {
 fn all_ws(v: View, at: Int) -> Bool {
   match {
     at >= len(v) -> True
-    v[at] == 32 or v[at] == 10 -> all_ws(v, at: at + 1)
+    v[at] == ' ' or v[at] == '\n' -> all_ws(v, at: at + 1)
     else -> False
   }
 }
@@ -979,11 +979,11 @@ fn run_at(t: View, at: Int, from: Int, stack: Stack, ix: Index) -> List[Inline] 
   let left = not is_ws(after) and (not is_punct(after) or is_ws(before) or is_punct(before))
   let right = not is_ws(before) and (not is_punct(before) or is_ws(after) or is_punct(after))
   let open = match mark {
-    42 -> left
+    '*' -> left
     _ -> left and (not right or is_punct(before))
   }
   let close = match mark {
-    42 -> right
+    '*' -> right
     _ -> right and (not left or is_punct(after))
   }
   let run = Delim(at, n, orig: n, mark, open, close)
@@ -1001,7 +1001,7 @@ fn run_at(t: View, at: Int, from: Int, stack: Stack, ix: Index) -> List[Inline] 
 // and 1,024 of each ran out of the 64 MB (sweep openers_then_closers in results/sweep-v0.json)
 fn close_run(t: View, stack: Stack, run: Delim) -> Stack {
   let k = match {
-    run.mark == 42 and stack.stars == 0 or run.mark == 95 and stack.unders == 0 -> -1
+    run.mark == '*' and stack.stars == 0 or run.mark == '_' and stack.unders == 0 -> -1
     else -> seek(pieces: stack.pieces, closer: run, k: 0)
   }
   match {
@@ -1153,9 +1153,9 @@ fn has_link(list: List[Inline]) -> Bool {
 fn link_tail(t: View, at: Int) -> Option[Tail] {
   let p = skip_nl(t, at: at + 1)
   match {
-    byte_at(v: t, at) != 40 -> None
-    byte_at(v: t, at: p) == 41 -> Some(value: Tail(dest: "", title: None, end: p + 1))
-    byte_at(v: t, at: p) == 60 -> {
+    byte_at(v: t, at) != '(' -> None
+    byte_at(v: t, at: p) == ')' -> Some(value: Tail(dest: "", title: None, end: p + 1))
+    byte_at(v: t, at: p) == '<' -> {
       let q = angle_end(t, at: p + 1)
       match {
         q < 0 -> None
@@ -1176,27 +1176,27 @@ fn link_tail(t: View, at: Int) -> Option[Tail] {
 fn skip_nl(t: View, at: Int) -> Int {
   let p = skip_ws(v: t, at)
   match {
-    byte_at(v: t, at: p) == 10 and p < len(t) -> skip_ws(v: t, at: p + 1)
+    byte_at(v: t, at: p) == '\n' and p < len(t) -> skip_ws(v: t, at: p + 1)
     else -> p
   }
 }
 
 fn angle_end(t: View, at: Int) -> Int {
   match {
-    at >= len(t) or t[at] == 10 or t[at] == 60 -> -1
-    t[at] == 62 -> at
-    t[at] == 92 and at + 1 < len(t) -> angle_end(t, at: at + 2)
+    at >= len(t) or t[at] == '\n' or t[at] == '<' -> -1
+    t[at] == '>' -> at
+    t[at] == '\\' and at + 1 < len(t) -> angle_end(t, at: at + 2)
     else -> angle_end(t, at: at + 1)
   }
 }
 
 fn dest_end(t: View, at: Int, depth: Int) -> Int {
   match {
-    at >= len(t) or t[at] <= 32 -> at
-    t[at] == 92 and at + 1 < len(t) and is_punct(t[at + 1]) -> dest_end(t, at: at + 2, depth)
-    t[at] == 40 -> dest_end(t, at: at + 1, depth: depth + 1)
-    t[at] == 41 and depth == 0 -> at
-    t[at] == 41 -> dest_end(t, at: at + 1, depth: depth - 1)
+    at >= len(t) or t[at] <= ' ' -> at
+    t[at] == '\\' and at + 1 < len(t) and is_punct(t[at + 1]) -> dest_end(t, at: at + 2, depth)
+    t[at] == '(' -> dest_end(t, at: at + 1, depth: depth + 1)
+    t[at] == ')' and depth == 0 -> at
+    t[at] == ')' -> dest_end(t, at: at + 1, depth: depth - 1)
     else -> dest_end(t, at: at + 1, depth)
   }
 }
@@ -1205,15 +1205,15 @@ fn title_part(t: View, dest: View, at: Int) -> Option[Tail] {
   let p = skip_nl(t, at)
   let b = byte_at(v: t, at: p)
   match {
-    b == 41 -> Some(value: Tail(dest, title: None, end: p + 1))
-    p > at and (b == 34 or b == 39 or b == 40) -> {
+    b == ')' -> Some(value: Tail(dest, title: None, end: p + 1))
+    p > at and (b == '"' or b == '\'' or b == '(') -> {
       let q = title_end(t, at: p + 1, close: match b {
-        40 -> 41
+        '(' -> ')'
         _ -> b
       })
       let r = skip_nl(t, at: q + 1)
       match {
-        q < 0 or byte_at(v: t, at: r) != 41 -> None
+        q < 0 or byte_at(v: t, at: r) != ')' -> None
         else -> Some(value: Tail(
           dest,
           title: Some(value: unescape(slice(v: t, from: p + 1, to: q))),
@@ -1229,14 +1229,14 @@ fn title_end(t: View, at: Int, close: Int) -> Int {
   match {
     at >= len(t) -> -1
     t[at] == close -> at
-    t[at] == 92 and at + 1 < len(t) -> title_end(t, at: at + 2, close)
+    t[at] == '\\' and at + 1 < len(t) -> title_end(t, at: at + 2, close)
     else -> title_end(t, at: at + 1, close)
   }
 }
 
 fn unescape(v: View) -> View {
   match {
-    find(v, byte: 92, at: 0) >= len(v) -> v
+    find(v, byte: '\\', at: 0) >= len(v) -> v
     else -> freeze(buf: unescape_from(out: buf(), v, at: 0))
   }
 }
@@ -1244,7 +1244,7 @@ fn unescape(v: View) -> View {
 fn unescape_from(out: Buf, v: View, at: Int) -> Buf {
   match {
     at >= len(v) -> out
-    v[at] == 92
+    v[at] == '\\'
       and at + 1 < len(v)
       and is_punct(v[at + 1]) -> unescape_from(out: push(buf: out, byte: v[at + 1]), v, at: at + 2)
     else -> unescape_from(out: push(buf: out, byte: v[at]), v, at: at + 1)
@@ -1291,31 +1291,31 @@ fn angle_at(t: View, at: Int, from: Int, stack: Stack, ix: Index) -> List[Inline
 
 fn auto_end(t: View, at: Int) -> Int {
   match {
-    at >= len(t) or t[at] <= 32 or t[at] == 60 -> -1
-    t[at] == 62 -> at
+    at >= len(t) or t[at] <= ' ' or t[at] == '<' -> -1
+    t[at] == '>' -> at
     else -> auto_end(t, at: at + 1)
   }
 }
 
 fn is_uri(v: View) -> Bool {
-  let c = find(v, byte: 58, at: 0)
+  let c = find(v, byte: ':', at: 0)
   c >= 2
     and c <= 32
     and c < len(v)
     and is_alpha(v[0])
     and every_byte(
       v: slice(v, from: 1, to: c),
-      keep: fn(b: Int) -> Bool { is_alnum(b) or b == 43 or b == 46 or b == 45 }
+      keep: fn(b: Int) -> Bool { is_alnum(b) or b == '+' or b == '.' or b == '-' }
     )
 }
 
 fn is_email(v: View) -> Bool {
-  let a = find(v, byte: 64, at: 0)
+  let a = find(v, byte: '@', at: 0)
   a >= 1
     and a + 1 < len(v)
     and every_byte(
       v: slice(v, from: 0, to: a),
-      keep: fn(b: Int) -> Bool { is_alnum(b) or b > 32 and b < 127 and find(
+      keep: fn(b: Int) -> Bool { is_alnum(b) or b > ' ' and b < 127 and find(
         v: ".!#$%&'*+/=?^_`{|}~-",
         byte: b,
         at: 0
@@ -1323,7 +1323,7 @@ fn is_email(v: View) -> Bool {
     )
     and every_byte(
       v: slice(v, from: a + 1, to: len(v)),
-      keep: fn(b: Int) -> Bool { is_alnum(b) or b == 45 or b == 46 }
+      keep: fn(b: Int) -> Bool { is_alnum(b) or b == '-' or b == '.' }
     )
     and is_alnum(v[a + 1])
     and is_alnum(v[len(v) - 1])
@@ -1411,7 +1411,7 @@ fn write_item(out: Buf, blocks: List[Block], tight: Bool, nl: Bool) -> Buf {
     Cons(head, tail) -> {
       let fed = match nl {
         True -> out
-        False -> push(buf: out, byte: 10)
+        False -> push(buf: out, byte: '\n')
       }
       write_item(out: write_block(out: fed, block: head), blocks: tail, tight, nl: True)
     }
@@ -1428,7 +1428,7 @@ fn write_inlines(out: Buf, list: List[Inline]) -> Buf {
 fn write_inline(out: Buf, node: Inline) -> Buf {
   match node {
     Str(text) -> write_esc(out, text)
-    Soft -> push(buf: out, byte: 10)
+    Soft -> push(buf: out, byte: '\n')
     Hard -> append(buf: out, view: "<br />\n")
     CodeSpan(text) -> out |> append(view: "<code>") |> write_esc(text) |> append(view: "</code>")
     Emph(inlines) -> out
@@ -1472,8 +1472,8 @@ fn write_alt(out: Buf, list: List[Inline]) -> Buf {
     Cons(head, tail) -> write_alt(out: match head {
       Str(text) -> write_esc(out, text)
       CodeSpan(text) -> write_esc(out, text)
-      Soft -> push(buf: out, byte: 10)
-      Hard -> push(buf: out, byte: 10)
+      Soft -> push(buf: out, byte: '\n')
+      Hard -> push(buf: out, byte: '\n')
       Emph(inlines) -> write_alt(out, list: inlines)
       Strong(inlines) -> write_alt(out, list: inlines)
       Link(inlines) -> write_alt(out, list: inlines)
@@ -1491,25 +1491,25 @@ fn esc_from(out: Buf, text: View, from: Int, at: Int) -> Buf {
   match {
     at >= len(text) -> append(buf: out, view: slice(v: text, from, to: at))
     else -> match text[at] {
-      38 -> esc_from(
+      '&' -> esc_from(
         out: out |> append(view: slice(v: text, from, to: at)) |> append(view: "&amp;"),
         text,
         from: at + 1,
         at: at + 1
       )
-      60 -> esc_from(
+      '<' -> esc_from(
         out: out |> append(view: slice(v: text, from, to: at)) |> append(view: "&lt;"),
         text,
         from: at + 1,
         at: at + 1
       )
-      62 -> esc_from(
+      '>' -> esc_from(
         out: out |> append(view: slice(v: text, from, to: at)) |> append(view: "&gt;"),
         text,
         from: at + 1,
         at: at + 1
       )
-      34 -> esc_from(
+      '"' -> esc_from(
         out: out |> append(view: slice(v: text, from, to: at)) |> append(view: "&quot;"),
         text,
         from: at + 1,
@@ -1556,19 +1556,20 @@ fn url_from(out: Buf, v: View, at: Int) -> Buf {
 fn url_byte(out: Buf, v: View, at: Int) -> Buf {
   let b = v[at]
   match {
-    b == 38 -> append(buf: out, view: "&amp;")
+    b == '&' -> append(buf: out, view: "&amp;")
     is_alnum(b) or find(v: ";/?:@=+$,-_.!~*'()#", byte: b, at: 0) < 19 -> push(buf: out, byte: b)
-    b == 37
+    b == '%'
       and at + 2 < len(v)
       and is_hex(v[at + 1])
       and is_hex(v[at + 2]) -> push(buf: out, byte: b)
-    else -> out |> push(byte: 37) |> push(byte: hex_digit(b >> 4)) |> push(byte: hex_digit(b & 15))
+    else -> out |> push(byte: '%') |> push(byte: hex_digit(b >> 4)) |> push(byte: hex_digit(b & 15))
   }
 }
 
+// '0' and '7': A is ten past '7', so A-F is '7' plus the nibble
 fn hex_digit(n: Int) -> Int {
   match {
-    n < 10 -> 48 + n
-    else -> 55 + n
+    n < 10 -> '0' + n
+    else -> '7' + n
   }
 }

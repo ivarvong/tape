@@ -88,8 +88,8 @@ fulfillment workflow charged twice, the ledger moved money twice and the KV writ
 
 ## A byte literal, and not a vector
 
-Measured 24 November 2026 from a CommonMark renderer (`md.tape`, not in this repository: 1,574 lines, 114
-functions) and locked in `test/bytes.ts`. The renderer classifies bytes as decimal integers: 89 comparisons
+Measured 24 November 2026 from a CommonMark renderer (`corpus/md.tape`: 1,574 lines, 114 functions) and locked in
+`test/bytes.ts`. The renderer classifies bytes as decimal integers: 89 comparisons
 `== n` with `n` in 0..255, 16 pattern arms that are a byte, and 14 `byte:` arguments. It never writes `"*"[0]`.
 That form shows up as a pattern, where it is P01, because a pattern is a value and an index is an expression.
 

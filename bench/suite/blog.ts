@@ -32,6 +32,14 @@ export const getRequest = (): Uint8Array => request('GET', `/posts/${SLUG}`);
 export const bodyRequest = (): Uint8Array => request('GET', `/posts/${SLUG}/body`);
 export const indexRequest = (): Uint8Array => request('GET', '/');
 export const feedRequest = (): Uint8Array => request('GET', '/feed.xml');
+export const pageRequest = (page: string): Uint8Array => request('GET', `/?page=${page}`);
+export const getIf = (etag: string): Uint8Array => request('GET', `/posts/${SLUG}`, `if-none-match: ${etag}`);
+export const missingRequest = (): Uint8Array => request('GET', '/posts/no-such');
+/** A write of the same post under another title. `extra` is more headers, each started by a carriage return. */
+export const putTitled = (k: number, title: string, extra = ''): Uint8Array =>
+  request('PUT', `/posts/${SLUG}`, `x-title: ${title}\rx-date: ${DAY}\ridempotency-key: sunset-${k}${extra}`, MARKDOWN);
+export const putDated = (k: number, day: string): Uint8Array =>
+  request('PUT', `/posts/${SLUG}`, `x-title: ${TITLE}\rx-date: ${day}\ridempotency-key: sunset-${k}`, MARKDOWN);
 
 const blog = {
   tape: 'corpus/blog.tape',
@@ -39,6 +47,7 @@ const blog = {
   sql: true,
   now: NOW,
   twin: false,
+  baseNames: true,
 } as const;
 
 function noTwin(name: string): Workload['js'] {
@@ -67,6 +76,7 @@ export const workloads: Readonly<Record<string, Workload>> = {
     sql: false,
     now: NOW,
     twin: false,
+    baseNames: true,
     js: noTwin('md'),
     inputs: () => [],
     request: () => renderRequest(),
