@@ -107,11 +107,16 @@ export function section(module: WebAssembly.Module, n: string): unknown {
   const [s] = WebAssembly.Module.customSections(module, n);
   return s ? JSON.parse(new TextDecoder().decode(s)) : [];
 }
-/** The step accounting a module was built for, or null when the module predates the tag. A positive integer, read
- * as the section wrote it: the host does not import the compiler's list, so a later accounting still reports. */
+/** The step accounting a module was built for, or null when the section is absent, not JSON, or not a positive safe
+ * integer. A later accounting's integer still reports: the host does not import the compiler's list. A section that
+ * does not parse does not throw. */
 export function stepVersionOf(module: WebAssembly.Module): number | null {
-  const v = section(module, 'step_version');
-  return typeof v === 'number' && Number.isInteger(v) && v > 0 ? v : null;
+  try {
+    const v = section(module, 'step_version');
+    return typeof v === 'number' && Number.isSafeInteger(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
 }
 /**
  * A custom section that is a list. The compiler wrote it (compiler/gen/assemble.ts), and the host takes its

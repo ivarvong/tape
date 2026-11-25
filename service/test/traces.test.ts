@@ -176,19 +176,18 @@ describe('traces: a routed request is one tree', () => {
       headers: { 'content-type': 'application/json', 'cf-connecting-ip': '198.51.100.9' },
       body: JSON.stringify({ files: [{ name: 'hi.tape', text: hello }], requests: ['GET /x'] }),
     });
-    const [ran] = list(at(await json(hosted), 'results')),
+    const hostedBody = await json(hosted);
+    const [ran] = list(at(hostedBody, 'results')),
       steps = Number(at(ran, 'steps')),
       bytes = Number(at(ran, 'memory_bytes')) + 40;
     expect(steps).toBeGreaterThan(0);
     expect('\rtape-base: http://tape/trc/hi/v/1'.length).toBe(34);
-    const stepVersion = at(ran, 'step_version');
+    const stepVersion = at(hostedBody, 'step_version');
     expect([attr(run, 'tape.steps'), attr(run, 'tape.memory_bytes'), attr(run, 'tape.step_version')]).toEqual([
       steps,
       bytes,
       stepVersion,
     ]);
-    expect(String(stepVersion)).toBe(r.headers.get('tape-step-version'));
-    expect(hosted.headers.get('tape-step-version')).toBe(r.headers.get('tape-step-version'));
     const id = r.headers.get('tape-request-id') ?? '';
     expect(at(await got(`/trc/hi/log/1/${id}`), 'effects', 0, 'steps')).toBe(steps);
     expect(at(await got(`/trc/hi/log/1/${id}`), 'effects', 0, 'step_version')).toBe(stepVersion);

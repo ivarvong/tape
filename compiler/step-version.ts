@@ -12,6 +12,6 @@ if (latest === undefined) throw new TypeError('no step definition');
 export const STEP_DEFINITION: StepDefinition = latest;
 export const STEP_VERSION: StepVersion = STEP_DEFINITION.version;
 
-/** A number read from a module or a log is a step version this compiler names. */
+/** A number read from a module or a log is a step version this compiler names. A later compiler's integer is not. */
 export const isStepVersion = (v: unknown): v is StepVersion =>
-  typeof v === 'number' && STEP_DEFINITIONS.some(d => d.version === v);
+  typeof v === 'number' && Number.isSafeInteger(v) && STEP_DEFINITIONS.some(d => d.version === v);

@@ -105,14 +105,14 @@ mode.
 The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"`:
 
 ```json
-{ "ok": true, "diagnostics": [],
+{ "ok": true, "diagnostics": [], "step_version": 1,
   "results": [{
     "request": "GET /hello/ada", "status": 200, "content_type": "text/plain; charset=utf-8",
     "body": "Hello again, ada #2!", "body_bytes": 20, "truncated": false, "error": null,
     "effects": [{ "kind": "sql",
                   "query": "INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n",
                   "params": { ":name": "ada" }, "rows_returned": 1, "rows": [[2]] }],
-    "replayed": true, "steps": 77, "step_version": 1, "memory_bytes": 128,
+    "replayed": true, "steps": 77, "memory_bytes": 128,
     "trace": "handle\n  ✓ hello.tape:9  Request(method: \"GET\", path: \"/hello/\" ++ name) if len(name) > 0 -> greet(\n      sql INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  :name=\"ada\" -> [[2]]\ngreet\n  ✗ hello.tape:25  Some(value: Count(n)) if n == 1 -> …\n  ✓ hello.tape:26  Some(value: Count(n)) -> …" }] }
 ```
 
@@ -159,8 +159,8 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive
   function (each call, and each call of itself as its result), std's included: the byte scans behind `request()` take
   a few a byte, so an arm added above a route, or a longer path, changes its count. A call of a non-recursive function
-  is free. `step_version` names which accounting produced `steps` (the same number on `test` and `compile`, and the
-  `tape-step-version` header). It changes only when what a step counts changes, so two counts are comparable only
+  is free. `step_version` is on the answer, one for the call (the same number on `test` and `compile`, and on a
+  run that did not compile). It changes only when what a step counts changes, so two counts are comparable only
   when their versions are equal. Steps are the only cost measure here: on Workers the clock moves only across I/O,
   so wall time cannot be measured inside a run, and every span's duration in a trace is 0.
   [LANGUAGE.md section 10](../LANGUAGE.md#10-when-a-program-stops) says more.
@@ -304,7 +304,7 @@ and `/v1/feedback` ([`service/src/index.ts`](../service/src/index.ts) calls `mcp
 before any token check). It uses no Durable Objects and one private R2 bucket, `tape-feedback`, which only the feedback
 tool writes. (Until 2026-11-22 it was a Worker of its own, `tape-mcp`, behind a service binding; that Worker is
 retired.) Every answer names the `tape` Worker version that gave it (`tape-mcp-version`, the same id as
-`tape-worker-version`) and the step accounting (`tape-step-version`).
+`tape-worker-version`). The step accounting is `step_version` on the answer, beside the counts it produced.
 
 - `src/serve.ts`: the routes, the checks before a tool runs, the log line. MCP is the service's transport,
   [`service/src/mcp.ts`](../service/src/mcp.ts).

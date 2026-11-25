@@ -11,7 +11,7 @@ went](#what-went), below, has the forms each replaced.
 
 | When | Change |
 |---|---|
-| 24 November 2026 | a step count names the accounting that produced it (`step_version` 1: one entry into a recursive function, after inlining). It is on a run's JSON, its log, `tape.step_version`, the `tape-step-version` header and the module. The number changes only when that accounting changes (`test/step-version.ts`) |
+| 24 November 2026 | a step count names the accounting that produced it (`step_version` 1: one entry into a recursive function, after inlining). It is on a run's JSON, its log, `tape.step_version` and the module. The number changes only when that accounting changes (`test/step-version.ts`) |
 | 24 November 2026 | the definition says a name is the first file's, and a later file's is `file.name`: `handle` is that name, so the first file's serves requests and a later file's is `file.handle`. It was already so (`compiler/parse/decl.ts`) and unwritten, which is why a program of two files had to say that the first file's `handle` wins |
 | 24 November 2026 | a byte literal is the Int that byte is: `'*'` is 42, `' '` is 32, `'\n'` is 10, `'\''` is 39. One source character whose code is 0 to 127, or one text escape (`\' \" \\ \/ \n \r \t \b \f`); empty, two characters, a character past ASCII or an unknown escape is L07, and 128 to 255 stay decimal. The compiled code is that Int's, so a comparison or a pattern arm costs nothing the digits did not. A pattern `"*"[0] ->` is still P01, and the fix writes `'*' ->` |
 | 23 November 2026 | a refined type may say what decode's 400 says of a value that fails it: `type Slug = View where … else "lowercase letters, digits and -"` is `slug: lowercase letters, digits and -`, where it was `slug: not a valid Slug` |
