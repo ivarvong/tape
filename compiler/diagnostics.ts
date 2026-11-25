@@ -342,7 +342,7 @@ export const DIAGNOSTICS = {
   },
   C87: {
     meaning:
-      'A match on a reply where one arm takes a refusal together with no answer and sets a timer: the same key gets the same refusal, so it asks for ever.',
+      'A match on a reply where one arm takes a refusal together with no answer and acts on the outcome: a timer asks for ever (the same key gets the same refusal), and a write or another call treats no answer as a refusal or a refusal as an answer. Such an arm may only answer the client.',
   },
   C88: {
     meaning:

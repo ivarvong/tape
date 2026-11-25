@@ -18,13 +18,16 @@ const callsAny = (body: Expr, names: ReadonlySet<string>): boolean => {
   return hit;
 };
 
-// ---- C87: a refusal is the callee's answer; no answer is not. An arm that takes both and sets a timer asks again
-// with the same key after a refusal, and a key seen before gets the reply it got before: it asks for ever.
-// (Found by the simulator standing in for a Remote: tickets' refund and four of the seven timer examples.)
+// ---- C87: a refusal is the callee's answer; no answer is not. An arm that takes both acts on an outcome it does
+// not know. If it sets a timer, it asks again with the same key after a refusal, and a key seen before gets the
+// reply it got before: it asks for ever (found by the simulator standing in for a Remote: tickets' refund and four
+// of the seven timer examples). If it writes to the database or makes another call, it treats no answer as a
+// refusal, or a refusal as no answer: J1 (docs/defects.md), a transport exception taken for a refusal and
+// compensated for. Answering the client is what such an arm may do: the client sends again with the same key.
 
-/** The functions that set a timer, themselves or through what they call. */
-function timerSetters(prog: Program): Set<string> {
-  const reach = new Set(['wake']);
+/** The functions that do something, themselves or through what they call: `does` says it of a body's own nodes. */
+function doers(prog: Program, does: (body: Expr) => boolean): Set<string> {
+  const reach = new Set([...prog.fns.values()].filter(f => does(f.body)).map(f => f.name));
   for (let grew = true; grew;) {
     grew = false;
     for (const f of prog.fns.values()) {
@@ -35,6 +38,43 @@ function timerSetters(prog: Program): Set<string> {
   }
   return reach;
 }
+const holds = (body: Expr, hit: (n: Expr) => boolean): boolean => {
+  let found = false;
+  eachExpr(body, n => {
+    if (hit(n)) found = true;
+  });
+  return found;
+};
+/** What an arm may not do when it takes a refusal together with no answer, and how each is found in a body. */
+type Act = { readonly what: string; readonly why: string; readonly in: (body: Expr) => boolean };
+function actsOf(r: Reading): Act[] {
+  const writes = new Set<Expr>(r.queries.filter(q => writeOf(q.ast) !== null).map(q => q.at));
+  const direct = {
+    timer: (n: Expr) => n.k === 'call' && n.name === 'wake',
+    write: (n: Expr) => writes.has(n),
+    // a command: `call`, or an interface's method given a once key (an `ask` is a read, and asking what happened
+    // is what an unknown outcome calls for)
+    call: (n: Expr) =>
+      n.k === 'call' && (n.name === 'call' || (n.name.includes('.') && n.args.some(a => a.label === 'once'))),
+  };
+  const act = (hit: (n: Expr) => boolean, what: string, why: string): Act => {
+    const reach = doers(r.prog, b => holds(b, hit));
+    return { what, why, in: body => holds(body, hit) || callsAny(body, reach) };
+  };
+  return [
+    act(direct.timer, 'sets a timer', 'after a refusal the same key gets the same refusal, so it asks for ever'),
+    act(
+      direct.write,
+      'writes to the database',
+      'with no answer the call may have run, so a write made as if it was refused (a refund, a release, a state of failure) undoes what happened, and one made as if it ran records what may not have',
+    ),
+    act(
+      direct.call,
+      'makes another call',
+      'with no answer the call may have run, so a command sent as if it was refused (a refund, a compensation) undoes what happened, and one sent as if it ran builds on what may not have',
+    ),
+  ];
+}
 
 /** Is the value matched a call's reply: the call itself, or a parameter of type Result[_, CallError]? */
 function isReply(f: FnDecl, subject: Expr | null): boolean {
@@ -44,34 +84,41 @@ function isReply(f: FnDecl, subject: Expr | null): boolean {
   return t?.name === 'Result' && t.args[1]?.name === 'CallError';
 }
 
-/** What an arm's pattern takes of a reply: a refusal alone, a refusal together with no answer, or neither. */
-function takes(pat: Pattern): 'refusal' | 'both' | 'other' {
+/** The CallErrors that are no answer: the call may have run. */
+const NO_ANSWER = ['Timeout', 'Unreachable'];
+/** What a catch-all takes: every CallError the arms above it left (no constructor is named `*`). */
+const ALL = '*';
+/** What an arm's pattern takes of a reply's errors: one CallError by name, every one left (ALL), or none. */
+function takes(pat: Pattern): string | null {
   const p = bare(pat);
-  if (p.k !== 'ctor' || p.name !== 'Err') return catchAll(p) ? 'both' : 'other';
+  if (p.k !== 'ctor' || p.name !== 'Err') return catchAll(p) ? ALL : null;
   const named = p.subs.find(s => s.field === 'error')?.pat;
   const e = named && bare(named);
-  if (e?.k === 'ctor' && e.name === 'Rejected') return 'refusal';
-  return catchAll(e) ? 'both' : 'other';
+  if (e?.k === 'ctor') return e.name;
+  return catchAll(e) ? ALL : null;
 }
 
-function refusalsAsked({ prog, bad }: Reading): void {
-  const setters = timerSetters(prog);
+function refusalsAsked(r: Reading): void {
+  const acts = actsOf(r);
   const check = (m: Match): void => {
     if (!m.subject) return;
-    let refused = false;
+    // the errors taken by an arm above (one with a guard takes nothing for certain)
+    const taken = new Set<string>();
     for (const arm of m.arms) {
       const took = takes(arm.pat);
-      if (took === 'refusal') refused = true;
-      if (took !== 'both' || refused || arm.guard || !callsAny(arm.body, setters)) continue;
-      bad(
+      if (took !== null && took !== ALL && !arm.guard) taken.add(took);
+      const both = took === ALL && !taken.has('Rejected') && NO_ANSWER.some(n => !taken.has(n));
+      const act = both && !arm.guard ? acts.find(a => a.in(arm.body)) : undefined;
+      if (!act) continue;
+      r.bad(
         'C87',
         arm.pat.line ? arm.pat : m,
-        'this arm takes a refusal together with no answer, and sets a timer: after a refusal the same key gets the same refusal, so it asks for ever',
-        'Give the refusal its own arm above this one, `Err(error: Rejected(reason)) -> …`, and say there what a refused call means: a state to move to, not a timer.',
+        `this arm takes a refusal together with no answer, and ${act.what}: ${act.why}`,
+        'Give the refusal its own arm above this one, `Err(error: Rejected(reason)) -> …`, and do there what a refused call means: a state to move to. This arm then takes only no answer, where the call may have run: answer the client (it sends again with the same key), or set a timer to ask again.',
       );
     }
   };
-  for (const f of prog.fns.values())
+  for (const f of r.prog.fns.values())
     if (own(f))
       eachExpr(f.body, m => {
         if (m.k === 'match' && isReply(f, m.subject)) check(m);

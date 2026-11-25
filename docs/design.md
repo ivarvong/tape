@@ -51,7 +51,7 @@ Seven rules were prototyped as a checker pass and run, each alone, on each defec
 | RI replay | J2, R7, R11 | a write reached from `handle` or `woken` is safe to run twice: a compare-and-set, an op-id guard or a unique key, or an explicit opt-out | C54 to C56; the opt-out is now `repeat: True` |
 | RM machine | J2, J3 | `machine table.column { "a" -> "b" }`: every write names the state it expects and makes a declared move; SQLite triggers refuse any other | C57 to C61 |
 | RP private | J1 | a `private type`'s constructors are made only in its file | C66 |
-| RO outcome | J1 | a match over `CallError` names `Timeout` before a catch-all | not shipped |
+| RO outcome | J1 | a match over `CallError` names `Timeout` before a catch-all | not shipped as written; narrowed into C87 on 25 November 2026 (below) |
 
 Results over the 38: 6 refused at the defect's own line as written (J2, J3, R7, M1, M2, M3); 2 after the code was
 ported into Tape or into the form the rule asks for (J1, R11); R8 cannot be written in Tape at all (no isolate
@@ -66,7 +66,8 @@ fulfillment workflow charged twice, the ledger moved money twice and the KV writ
 ## What did not pay
 
 - **Typed call outcomes as a new rule (RO).** `CallError` already exists, and J1 was in the host, outside the
-  language. RO refused none of the 38, and its strict form flagged five correct arms.
+  language. RO refused none of the 38, and its strict form flagged five correct arms. It came back narrowed, as
+  C87 (next section).
 - **Machine triggers alone** would have missed J3: writing a note on a finished order is not a move. The static half
   of the machine rule is what catches it.
 - **J4** (a wrong meaning given to a value) is not prevented by any rule tried; a type can make it conspicuous, not
@@ -173,6 +174,30 @@ rounds' C11 refusals, that accepts 13 of 28; letting every unnamed argument fill
 accept 27. It was not taken: names are what keep two values of one type from being swapped unseen, and under it
 `f(x, a: 1)` puts x into b and `sub(b, a)` reads the opposite of its order. The refusals left get the exact call in
 their fix.
+
+## No answer is not a refusal: C87
+
+J1 was a transport exception taken for a refusal. RO as first written, "a match over `CallError` names `Timeout`
+before a catch-all", refuses the form LANGUAGE.md section 9 recommends: an arm for `Ok`, one for `Rejected` alone,
+and one for no answer, which is a catch-all over the error. Run over every program in the repository on
+25 November 2026 (the `.tape` files alone and in the groups deployed together, and every `tape` block of the
+Markdown), it refused 27 arms in 15 programs, LANGUAGE.md's own among them, and every one was that form or a
+catch-all that only answers.
+
+The bug is narrower. It is an arm that takes a refusal and no answer together (`Err(error) -> …` or `_ -> …`, with
+no `Rejected` arm above it, and `Timeout` or `Unreachable` still left to it) and acts on the outcome as if it knew it.
+C87 already refused the timer case: such an arm that sets a timer asks for ever, since the same key gets the same
+refusal. It now also refuses such an arm that writes to the database (an INSERT, UPDATE or DELETE) or makes another
+call (`call`, or an interface method with a once key), itself or through what it calls. An `ask` there is a read,
+and asking what happened is what an unknown outcome calls for. Answering the client is allowed: the client sends
+again with the same key, and the second run learns what the first could not.
+
+The arms that take both, whatever they do, are three in three programs (`mcp/test/retry.tape`,
+`service/verify/bench-caller.tape`, `testdata/compare/billing.tape`), and each only answers: a 503, a 504, a 202
+with the row. Narrowed to the arms that act, the rule refuses none of the repository's programs. J1's shape, a
+refund sent on a catch-all that also takes `Timeout`, is refused, and so is a state of failure written there
+(`test/no-answer.ts`, which failed eight of its checks on the rule before). It is one code and not a new one
+because it is one mistake with one fix: give `Rejected` its own arm.
 
 ## Timers: C77 to C80
 

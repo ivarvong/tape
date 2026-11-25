@@ -62,7 +62,7 @@ deleting each of the trace checker's 53 rules in turn left every checker test pa
 
 | Id | Gap | Defect |
 |---|---|---|
-| J1 | G4 | A transport exception was treated as a refusal. |
+| J1 | G4 | A transport exception was treated as a refusal. Its shape in a program, a write or a call on an arm that takes a refusal and no answer together, is C87 since 25 November 2026. |
 | J2 | G8 | Seats were released twice. |
 | J3 | G3 | Stale notes appeared on finished orders. |
 | J4 | G8 | An existing order answered 404 (the phantom 404). |
