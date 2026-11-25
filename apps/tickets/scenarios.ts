@@ -346,6 +346,19 @@ const sleep = (ms: number): Promise<void> =>
     [g1.status, g2.status, Array.isArray(bobs.json) ? bobs.json.map((x: unknown) => fieldsIn(x).id) : null],
     [200, 409, [t]],
   );
+  const r = made(await hold(w, 1, 'ada l', 1));
+  await w.req(`POST /holds/${r.id}/checkout`, { card: 'visa-4242' });
+  const spaced = await w.req('GET /users/ada%20l/tickets'),
+    bad = await w.req('GET /users/ada%2/tickets');
+  T(
+    'a buyer named in the path is percent-decoded after the match: /users/ada%20l/tickets lists ada l\'s; a bad escape is 404',
+    [
+      Array.isArray(spaced.json) ? spaced.json.map((x: unknown) => fieldsIn(x).owner) : null,
+      Array.isArray(spaced.json) ? spaced.json.length : null,
+      bad.status,
+    ],
+    [['ada l'], 1, 404],
+  );
   inv('release, refund, transfer', w);
 }
 

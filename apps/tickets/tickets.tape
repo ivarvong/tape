@@ -14,7 +14,7 @@
 //   POST /holds/<id>/release
 //   POST /holds/<id>/refund
 //   POST /waitlist                       {"key","tier","buyer","qty"}
-//   GET  /users/<buyer>/tickets
+//   GET  /users/<buyer>/tickets          the buyer's name percent-encoded: /users/ada%20l/tickets is ada l's
 //   POST /tickets/<id>/transfer          {"from","to"}
 //   GET  /audit                          every tier, hold, ticket and waitlist row, for a checker   (admin)
 //
@@ -196,7 +196,7 @@ fn handle(raw: View, db: Sql, pay: Remote, clock: Clock, timer: Timer, dice: Ent
     )
     Request(
       method: "GET",
-      path: "/users/" ++ buyer ++ "/tickets"
+      path: "/users/" ++ percent_decoded(buyer) ++ "/tickets"
     ) -> respond_as(status: 200, content: Json)
       |> write_rows(rows: sql_all(
         row: Ticket,

@@ -577,6 +577,7 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Answer | functions return a value (`Outcome`); one function turns it into bytes: `respond(status: …)`, or `respond_as(status: …, content: Json)` for a type, then the body | |
 | Set a response header | `respond(status: 302) \|> header(name: "location", value: url)`, anywhere before or after the body. A name is a token, a value has no CR, LF or NUL; the host refuses those it sets itself (content-type, set-cookie, the security headers) and answers 500 with the reason | |
 | Read a request header | `header_of(request: r, name: "if-none-match")`, an `Option[View]`; the host passes only those it means a program to see | |
+| Read a path segment | bind it in the route, and decode it there: `path: "/users/" ++ percent_decoded(name) ++ "/tickets"`. `path` is as sent, so the route matches the encoded path and a `%2F` stays inside its segment; `percent_decoded` is `None` for a bad escape or bytes that are not UTF-8, and leaves a `+` a `+` (a query is form-encoded: `form_field`) | |
 
 ```diff C83
 -  do wake(after: 5000, key: order.id)

@@ -257,7 +257,8 @@ fn content_type(content: Content) -> View {
 // One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and
 // %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is a
 // `scan` of `&` and `=`, one step per 16 bytes read, plus a few steps per pair passed. Only the value found is
-// decoded.
+// decoded. `+` is a space only in a form or a query: in a path it is a `+`, and a path segment is decoded with
+// `percent_decoded`, which leaves it one.
 //
 //   > form_field(body: "qty=2&buyer=ada+l%C3%B6", name: "buyer")
 //   Some(value: "ada lö")
@@ -319,7 +320,9 @@ fn form_named(raw: View, name: View, at: Int, n: Int) -> Bool {
   }
 }
 
-// Internal: one name or value of a form, `+` and %XX decoded.
+// Internal: one name or value of a form, `+` and %XX decoded. Form encoding, not a path's: `percent_decoded` is
+// the path's, where `+` stays a `+`, and it refuses what this passes through (a bad escape, bytes that are not
+// UTF-8).
 fn form_decoded(raw: View) -> View {
   freeze(buf: form_bytes(out: buf(), raw, at: 0))
 }
@@ -338,6 +341,68 @@ fn form_bytes(out: Buf, raw: View, at: Int) -> Buf {
         at: at + 3
       )
     else -> form_bytes(out: push(buf: out, byte: raw[at]), raw, at: at + 1)
+  }
+}
+
+// A path segment with its percent-encoding undone (RFC 3986): each %XX is the byte XX, hex in either case. Apply it
+// to a segment the route has already bound, as a pattern: `path: "/users/" ++ percent_decoded(name) ++ "/tickets"`.
+// `Request.path` stays as sent, so the route is matched on the encoded path: a `%2F` in a segment cannot become a
+// `/` that moves the match, nor `%2e%2e` a `..`. What comes out may hold `/`, `..`, a space or a NUL, so check it
+// (a refined type) before it names anything. None when a `%` is not followed by two hex digits, and when the bytes
+// are not UTF-8 once decoded: where JavaScript's decodeURIComponent throws. A `+` stays a `+`: it is a space only
+// in form encoding, which `form_field` decodes. Its cost is in steps (LANGUAGE.md section 10): a `scan` for `%`,
+// one step per 16 bytes read, and two steps an escape; then a check that the result is UTF-8, one step per 16 bytes
+// of ASCII and three a character past it. A 1,600-byte segment with no escape takes 200 steps; `%C3%B6` (ö) 100
+// times, 702 (test/percent.ts).
+//
+//   > percent_decoded(text: "ada%20l")
+//   Some(value: "ada l")
+//   > percent_decoded(text: "a+b%2Fc")
+//   Some(value: "a+b/c")
+//   > percent_decoded(text: "l%C3%B6")
+//   Some(value: "lö")
+//   > percent_decoded(text: "100%")
+//   None
+//   > percent_decoded(text: "%zz")
+//   None
+//   > percent_decoded(text: "%C3")
+//   None
+fn percent_decoded(text: View) -> Option[View] {
+  let decoded = match {
+    scan(v: text, at: 0, set: "%") >= len(text) -> text
+    else -> freeze(buf: percent_bytes(out: buf(), text, at: 0))
+  }
+  match {
+    utf8_whole(v: decoded, at: 0) -> Some(value: decoded)
+    else -> None
+  }
+}
+
+// Internal: the loop of percent_decoded, from `at`: the bytes up to the next `%` as they are, then its escape. An
+// escape without two hex digits is written as 255, a byte UTF-8 never holds, so the check after makes it None.
+fn percent_bytes(out: Buf, text: View, at: Int) -> Buf {
+  let p = scan(v: text, at, set: "%")
+  let copied = append(buf: out, view: slice(v: text, from: at, to: p))
+  match {
+    p >= len(text) -> copied
+    p + 2 < len(text)
+      and is_hex(text[p + 1])
+      and is_hex(text[p + 2]) -> percent_bytes(
+        out: push(buf: copied, byte: (hex(text[p + 1]) << 4) | hex(text[p + 2])),
+        text,
+        at: p + 3
+      )
+    else -> push(buf: copied, byte: 255)
+  }
+}
+
+// Internal: is v, from `at`, UTF-8 (RFC 3629)? ASCII is passed 16 bytes at a time (text_run's scan_plain).
+fn utf8_whole(v: View, at: Int) -> Bool {
+  let e = text_run(v, at)
+  match {
+    e >= len(v) -> True
+    v[e] < 128 -> utf8_whole(v, at: e + 1)
+    else -> False
   }
 }
 

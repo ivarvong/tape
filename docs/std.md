@@ -1461,7 +1461,7 @@ The media type a Content is served as. The host writes the Content-Type header f
 fn form_field(body: View, name: View) -> Option[View]
 ```
 
-One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is a `scan` of `&` and `=`, one step per 16 bytes read, plus a few steps per pair passed. Only the value found is decoded.
+One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is a `scan` of `&` and `=`, one step per 16 bytes read, plus a few steps per pair passed. Only the value found is decoded. `+` is a space only in a form or a query: in a path it is a `+`, and a path segment is decoded with `percent_decoded`, which leaves it one.
 
 ```
 > form_field(body: "qty=2&buyer=ada+l%C3%B6", name: "buyer")
@@ -1470,6 +1470,29 @@ Some(value: "ada lö")
 None
 > form_field(body: "x=1&done", name: "done")
 Some(value: "")
+```
+
+### fn percent_decoded
+
+```tape
+fn percent_decoded(text: View) -> Option[View]
+```
+
+A path segment with its percent-encoding undone (RFC 3986): each %XX is the byte XX, hex in either case. Apply it to a segment the route has already bound, as a pattern: `path: "/users/" ++ percent_decoded(name) ++ "/tickets"`. `Request.path` stays as sent, so the route is matched on the encoded path: a `%2F` in a segment cannot become a `/` that moves the match, nor `%2e%2e` a `..`. What comes out may hold `/`, `..`, a space or a NUL, so check it (a refined type) before it names anything. None when a `%` is not followed by two hex digits, and when the bytes are not UTF-8 once decoded: where JavaScript's decodeURIComponent throws. A `+` stays a `+`: it is a space only in form encoding, which `form_field` decodes. Its cost is in steps (LANGUAGE.md section 10): a `scan` for `%`, one step per 16 bytes read, and two steps an escape; then a check that the result is UTF-8, one step per 16 bytes of ASCII and three a character past it. A 1,600-byte segment with no escape takes 200 steps; `%C3%B6` (ö) 100 times, 702 (test/percent.ts).
+
+```
+> percent_decoded(text: "ada%20l")
+Some(value: "ada l")
+> percent_decoded(text: "a+b%2Fc")
+Some(value: "a+b/c")
+> percent_decoded(text: "l%C3%B6")
+Some(value: "lö")
+> percent_decoded(text: "100%")
+None
+> percent_decoded(text: "%zz")
+None
+> percent_decoded(text: "%C3")
+None
 ```
 
 ### fn write_html
