@@ -253,8 +253,9 @@ fn content_type(content: Content) -> View {
 }
 
 // One field of an application/x-www-form-urlencoded body (what an HTML form POSTs), decoded: `+` is a space and
-// %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is one
-// `scan` of `&` and `=`, one step per 16 bytes read. Only the value found is decoded.
+// %XX a byte. None when the form has no such field; the first one when it has several. Finding the field is a
+// `scan` of `&` and `=`, one step per 16 bytes read, plus a few steps per pair passed. Only the value found is
+// decoded.
 //
 //   > form_field(body: "qty=2&buyer=ada+l%C3%B6", name: "buyer")
 //   Some(value: "ada lö")
@@ -267,8 +268,8 @@ fn form_field(body: View, name: View) -> Option[View] {
 }
 
 // Internal: form_field, from the pair that starts at `at`. The next `&` or `=` is `scan`, one step per 16 bytes
-// read, and the pair's name is compared as it is decoded, in place. A lookup makes nothing for the pairs it
-// passes, only the value it finds.
+// read, plus a few steps for the pair, and the pair's name is compared as it is decoded, in place. A lookup
+// makes nothing for the pairs it passes, only the value it finds.
 fn form_from(body: View, name: View, at: Int) -> Option[View] {
   match {
     at > len(body) -> None

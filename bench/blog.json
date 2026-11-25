@@ -1,11 +1,11 @@
 {
   "now": "2026-11-24T12:00:00.000Z",
   "md": {
-    "bytes": 52785,
+    "bytes": 52801,
     "functions": 168
   },
   "blog": {
-    "bytes": 93299,
+    "bytes": 94044,
     "functions": 276
   },
   "render": {

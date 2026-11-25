@@ -1,7 +1,9 @@
-// std form_field finds one field with scan of "&" and "=", one step per 16 bytes read. Reading every field
-// by calling it once a field walks the form again from the start, so that stays quadratic (n = 256 was
-// 460,899 steps, n = 1024 was 7,738,976). One pass over the form, each byte in one scan, is linear in the
-// bytes. The answers are the old walk's: a direct port of it here, and URLSearchParams where a browser agrees.
+// std form_field finds one field with scan of "&" and "=", one step per 16 bytes read, plus a few steps per
+// pair passed. Calling it once a field still walks the form from the start, so n lookups of an n-field form
+// stay about n² (before scan: 460,920 steps at n = 256 and 7,738,996 at n = 1,024; n = 4,096 is still over the
+// 50,000,000-step budget). Memory was already linear; the 1,536-field form used to run out of the request's
+// 64 MB. A separate one-pass walk, each byte in one scan, is linear in the bytes. The answers are the old
+// walk's: a direct port of it here, and URLSearchParams where a browser agrees.
 import '../node25.ts';
 import { interpret } from '../interp.ts';
 import { instantiate } from '../host.ts';
@@ -188,19 +190,11 @@ const interpreted = interpret([...std, PROGRAM]);
 
 const ask = (h: Handler, request: string): string => textOf(h.handle(enc.encode(request)));
 
-// ---- steps: n lookups of n fields. The exponent is the least-squares slope of log(steps) on log(n).
+// ---- one pass over the form (not form_field). The exponent is the least-squares slope of log(steps) on log(n).
 const sweepN = [256, 512, 1024, 2048, 4096];
-app.handle(enc.encode('GET /n/256'));
 const sweep = sweepN.map(n => {
-  const req = enc.encode(`GET /n/${n}`);
-  let ms = Number.POSITIVE_INFINITY;
-  let out = new Uint8Array();
-  for (let k = 0; k < 5; k++) {
-    const t0 = performance.now();
-    out = app.handle(req);
-    ms = Math.min(ms, performance.now() - t0);
-  }
-  return { n, body: textOf(out), steps: stepsOf(app), bytes: app.bytesUsed, ms };
+  const out = app.handle(enc.encode(`GET /n/${n}`));
+  return { n, body: textOf(out), steps: stepsOf(app), bytes: app.bytesUsed };
 });
 const logFit = (rows: readonly { n: number; steps: number }[]): number => {
   const xs = rows.map(r => Math.log(r.n));
@@ -218,61 +212,83 @@ const logFit = (rows: readonly { n: number; steps: number }[]): number => {
   return den === 0 ? NaN : num / den;
 };
 const exponent = logFit(sweep);
-const timeFit = logFit(sweep.map(r => ({ n: r.n, steps: r.ms })));
-console.log('one pass over n fields (n lookups of form_field were n²: 460899 steps at n=256, 7738976 at n=1024)');
+console.log('one pass over n fields (form_field once a field is measured on /each, and stays about n²)');
 for (let i = 0; i < sweep.length; i++) {
   const row = sweep[i];
   const prev = sweep[i - 1];
   if (!row) continue;
   const ratio = prev ? (row.steps / prev.steps).toFixed(3) : '-';
-  const timeRatio = prev && prev.ms > 0 ? (row.ms / prev.ms).toFixed(3) : '-';
-  console.log(
-    `n=${row.n} steps=${row.steps} ms=${row.ms.toFixed(2)} bytes=${row.bytes} body=${row.body} step-ratio=${ratio} time-ratio=${timeRatio}`,
-  );
+  console.log(`n=${row.n} steps=${row.steps} bytes=${row.bytes} body=${row.body} step-ratio=${ratio}`);
 }
-console.log(`fitted step exponent ${exponent.toFixed(4)}, time exponent ${timeFit.toFixed(4)}`);
-for (const row of sweep) same(`every field of a ${row.n}-field form is found`, row.body, String(row.n));
+console.log(`fitted step exponent ${exponent.toFixed(4)}`);
+for (const row of sweep) same(`one pass finds every field of a ${row.n}-field form`, row.body, String(row.n));
 same(
-  `one pass grows linearly in steps across n=256..4096: fitted exponent ${exponent.toFixed(3)} (n lookups were 2.03)`,
+  `one pass grows linearly in steps across n=256..4096: fitted exponent ${exponent.toFixed(3)}`,
   exponent < 1.35 && exponent > 0.7,
   true,
 );
-const ms1024 = sweep[2]?.ms ?? Infinity;
-const ms4096 = sweep[4]?.ms ?? Infinity;
-same(
-  `one pass wall time stays under the square: 4,096 is ${ms4096.toFixed(2)} ms against ${ms1024.toFixed(2)} ms at 1,024 (form_raw's n lookups were 5.05 ms and 91.4 ms). Both are under a millisecond, so the larger one is not always the slower one`,
-  ms4096 < ms1024 * 8 && ms4096 < 5,
-  true,
-);
-const each64 = textOf(app.handle(enc.encode('GET /each/64')));
-same('64 form_field lookups find every field', each64, '64');
 for (let i = 1; i < sweep.length; i++) {
   const prev = sweep[i - 1];
   const row = sweep[i];
   if (!prev || !row) continue;
   same(
-    `doubling the fields from ${prev.n} to ${row.n} multiplies the steps by less than 3 (was about 4)`,
+    `doubling the fields from ${prev.n} to ${row.n} multiplies the one-pass steps by less than 3`,
     row.steps < prev.steps * 3,
     true,
   );
 }
-const at256 = sweep[0];
-const at1024 = sweep[2];
 const at4096 = sweep[4];
-same('n=4096 answers inside the step budget', (at4096?.steps ?? Infinity) < 5_000_000, true);
+same('one pass over 4,096 fields answers inside the step budget', (at4096?.steps ?? Infinity) < 5_000_000, true);
+
+// ---- form_field once a field. Steps stay about n²; memory stays linear, including the 1,536-field form.
+const eachOf = (n: number): { n: number; body: string; steps: number; bytes: number } => {
+  const out = app.handle(enc.encode(`GET /each/${n}`));
+  return { n, body: textOf(out), steps: stepsOf(app), bytes: app.bytesUsed };
+};
+const lookups = [256, 1024, 1536].map(eachOf);
+console.log('form_field once a field (before scan: 460920 steps at n=256, 7738996 at n=1024; n=4096 is trap 2)');
+for (let i = 0; i < lookups.length; i++) {
+  const row = lookups[i];
+  const prev = lookups[i - 1];
+  if (!row) continue;
+  const ratio = prev ? (row.steps / prev.steps).toFixed(3) : '-';
+  console.log(`each n=${row.n} steps=${row.steps} bytes=${row.bytes} body=${row.body} step-ratio=${ratio}`);
+}
+const e256 = lookups[0];
+const e1024 = lookups[1];
+const e1536 = lookups[2];
+for (const row of lookups) same(`${row.n} form_field lookups find every field`, row.body, String(row.n));
+same('256 form_field lookups take 242,912 steps (the byte walk took 460,920)', e256?.steps, 242_912);
+same('256 form_field lookups use 43,120 bytes', e256?.bytes, 43_120);
+same('1,024 form_field lookups take 3,750,252 steps (the byte walk took 7,738,996)', e1024?.steps, 3_750_252);
+same('1,024 form_field lookups use 172,144 bytes', e1024?.bytes, 172_144);
 same(
-  'a form 4 times longer, read 4 times as often, takes at most about 4 times the memory (it took 16)',
-  at256 !== undefined && at1024 !== undefined && at1024.bytes < 5 * at256.bytes,
+  '4× the fields, read with form_field 4× as often, is still about n² (15.4× the steps) and at most about 4× the memory',
+  e256 !== undefined &&
+    e1024 !== undefined &&
+    e1024.steps > e256.steps * 8 &&
+    e1024.steps < e256.steps * 20 &&
+    e1024.bytes < 5 * e256.bytes,
+  true,
+);
+same(
+  'the 1,536-field form (11 KB) that ran out of memory answers in 8,581,244 steps and 262,256 bytes',
+  e1536 !== undefined && e1536.body === '1536' && e1536.steps === 8_581_244 && e1536.bytes === 262_256,
   true,
 );
 // the build without cell reuse answers the same counts
 for (const n of [256, 1536, 4096]) {
   same(
-    `no reuse: every field of a ${n}-field form is found`,
+    `no reuse: one pass over a ${n}-field form finds every field`,
     textOf(other.handle(enc.encode(`GET /n/${n}`))),
     String(n),
   );
 }
+same(
+  'no reuse: the 1,536-field form that ran out of memory answers',
+  textOf(other.handle(enc.encode('GET /each/1536'))),
+  '1536',
+);
 
 // ---- the answers, against URLSearchParams
 const forms: readonly (readonly [string, string])[] = [
