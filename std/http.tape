@@ -396,13 +396,22 @@ private fn percent_bytes(out: Buf, text: View, at: Int) -> Buf {
   }
 }
 
-// Is v, from `at`, UTF-8 (RFC 3629)? ASCII is passed 16 bytes at a time (text_run's scan_plain).
+// Is v, from `at`, UTF-8 (RFC 3629)? ASCII is passed 16 bytes at a time (scan_plain stops at a byte of 128 or
+// more, and at a quote, a backslash or a control byte, which are ASCII and passed one at a time).
 private fn utf8_whole(v: View, at: Int) -> Bool {
-  let e = text_run(v, at)
+  let e = scan_plain(v, at)
   match {
     e >= len(v) -> True
     v[e] < 128 -> utf8_whole(v, at: e + 1)
-    else -> False
+    else -> utf8_next(v, found: utf8_at(v, at: e))
+  }
+}
+
+// utf8_whole past one sequence that is UTF-8; False at one that is not.
+private fn utf8_next(v: View, found: Utf8) -> Bool {
+  match found {
+    Utf8(next) -> utf8_whole(v, at: next)
+    BadUtf8 -> False
   }
 }
 

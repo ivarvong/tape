@@ -5,9 +5,9 @@
 // the same with one change (a byte cut, added, replaced or doubled, a byte that is not UTF-8, cut short), and
 // nesting past 60 (where is_json's record of what is open spills a word) up to 100,000 deep.
 // is_json is right when it is JSON.parse of the bytes read as strict UTF-8. json_member is checked against the
-// member written: the first with the key, its value's text as written; on a changed document, a value found must
-// be the value of the key in the document cut right after it and closed, and a key of an object JSON.parse reads
-// must be found.
+// member written: the last with the key (as JSON.parse and decode take it), its value's text as written; on a
+// changed document, it finds a value exactly when JSON.parse reads an object with the key, and the value it finds
+// is JSON.parse's.
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
@@ -252,45 +252,39 @@ for (let i = 0; i < 1500; i++) {
   const ms = membersOf(1);
   const t = `${ws()}${objectText(ms)}${ws()}`;
   const k = keyOf(pick(KEYS));
-  // the member written first with the key, once unescaped (a key with a lone surrogate is no text a request can
+  // the member written last with the key, once unescaped (a key with a lone surrogate is no text a request can
   // send: its UTF-8 is U+FFFD's, which the key's escape is not)
-  const first = k.isWellFormed() ? ms.find(m => JSON.parse(m.key) === k) : undefined;
+  const first = k.isWellFormed() ? ms.findLast(m => JSON.parse(m.key) === k) : undefined;
   if (first) found++;
   else absent++;
   check('json_member', memberOf(k, enc.encode(t)), got => {
     const want = first ? `some ${first.value}` : 'none';
     return hex(got) === hex(enc.encode(want)) ? null : `gave ${text(got)}, wanted ${want}`;
   });
-  // changed: a value found is the key's in the document cut after it and closed; a key JSON.parse finds, found
+  // changed: a value is found exactly when JSON.parse reads an object with the key, and it is JSON.parse's value
   const doc = changed(t);
   const read = parsed(doc);
   const obj = read.ok ? asObject(read.v) : null;
+  const has = obj !== null && k.isWellFormed() && Object.hasOwn(obj, k);
   check('json_member of a changed document', memberOf(k, doc), got => {
     const said = text(got);
-    if (said === 'none')
-      return obj && k.isWellFormed() && Object.hasOwn(obj, k)
-        ? `none, but JSON.parse finds ${JSON.stringify(k)}`
-        : null;
+    if (said === 'none') return has ? `none, but JSON.parse finds ${JSON.stringify(k)}` : null;
     if (!said.startsWith('some ')) return `gave ${said}`;
+    if (!has) return `${said}, but JSON.parse reads no object with ${JSON.stringify(k)}`;
     const raw = got.subarray(5);
     if (raw.length === 0 || [0x20, 0x09, 0x0a, 0x0d].some(c => c === raw[0] || c === raw.at(-1)))
       return 'the value is empty or has whitespace around it';
     const value = parsed(raw);
     if (!value.ok) return `the value ${said} is not JSON`;
-    for (let at = 0; at + raw.length <= doc.length; at++) {
-      if (hex(doc.subarray(at, at + raw.length)) !== hex(raw)) continue;
-      const cut = parsed(cat(doc.subarray(0, at + raw.length), '}'));
-      const o = cut.ok ? asObject(cut.v) : null;
-      if (o && Object.hasOwn(o, k) && deepEqual(o[k], value.v)) return null;
-    }
-    return `${said} is not the value of ${JSON.stringify(k)} in the document cut after it`;
+    return deepEqual(obj[k], value.v) ? null : `${said} is not JSON.parse's value of ${JSON.stringify(k)}`;
   });
 }
 const M: [string, string, string][] = [
-  ['id', '{"id":1,"id":2}', 'some 1'],
-  ['id', '{"\\u0069d":"a","id":"b"}', 'some "a"'],
+  ['id', '{"id":1,"id":2}', 'some 2'],
+  ['id', '{"\\u0069d":"a","id":"b"}', 'some "b"'],
+  ['id', '{"id": 1} x', 'none'],
   ['id', '{"id" : [1, {"x": 2}] , "n": 3}', 'some [1, {"x": 2}]'],
-  ['id', '{"id": 1, nonsense', 'some 1'],
+  ['id', '{"id": 1, nonsense', 'none'],
   ['n', '{"id": 1, nonsense', 'none'],
   ['id', '{"a": [1,, "id": 1}', 'none'],
   ['id', ' [ {"id": 1} ] ', 'none'],

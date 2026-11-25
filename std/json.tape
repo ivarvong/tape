@@ -387,14 +387,17 @@ fn is_json(text: View) -> Bool {
 
 // The JSON text of the value of member `key` of the object that json holds, without the whitespace around it;
 // None when json is not an object, has no member `key`, or is not JSON up to that member. Keys are compared once
-// unescaped (`"\u0069d"` is `id`). Of two members with the same key the first is taken, and nothing after it is
-// read; decode, like JSON.parse, takes the last. The value is read with decode: `decode(json: raw, as: View)` for
-// a string, `as: Int` for a number, `as: T` for an object.
+// unescaped (`"\u0069d"` is `id`). Of two members with the same key the last is taken, as decode and JSON.parse
+// take it, so a program that reads a body both ways reads one value; the whole object is read, and text after its
+// closing brace is None, as decode refuses it. The value is read with decode: `decode(json: raw, as: View)` for a
+// string, `as: Int` for a number, `as: T` for an object.
 //
 //   > json_member(json: "{\"id\": \"a1\", \"n\": [1, 2] }", key: "n")
 //   Some(value: "[1, 2]")
 //   > json_member(json: "{\"\\u0069d\": 7, \"id\": 8}", key: "id")
-//   Some(value: "7")
+//   Some(value: "8")
+//   > json_member(json: "{\"id\": 7} x", key: "id")
+//   None
 //   > json_member(json: "{\"id\": \"a1\"}", key: "name")
 //   None
 //   > json_member(json: "[{\"id\": 1}]", key: "id")
@@ -402,21 +405,23 @@ fn is_json(text: View) -> Bool {
 fn json_member(json: View, key: View) -> Option[View] {
   let s = json_ws(v: json, at: 0)
   match {
-    s < len(json) and json[s] == 123 -> named_at(v: json, at: json_ws(v: json, at: s + 1), key)
+    s < len(json)
+      and json[s] == 123 -> named_at(v: json, at: json_ws(v: json, at: s + 1), key, found: None)
     else -> None
   }
 }
 
-// A member json_member reads, whose key's opening quote is at `at`.
-private fn named_at(v: View, at: Int, key: View) -> Option[View] {
+// A member json_member reads, whose key's opening quote is at `at`; `found` is the value of the last member named
+// `key` before it.
+private fn named_at(v: View, at: Int, key: View, found: Option[View]) -> Option[View] {
   match {
-    at < len(v) and v[at] == 34 -> named_colon(v, at, key, end: string_close(v, at: at + 1))
+    at < len(v) and v[at] == 34 -> named_colon(v, at, key, end: string_close(v, at: at + 1), found)
     else -> None
   }
 }
 
 // A member whose key's quote is at `at` and ends before `end` (-1: the key is not a string).
-private fn named_colon(v: View, at: Int, key: View, end: Int) -> Option[View] {
+private fn named_colon(v: View, at: Int, key: View, end: Int, found: Option[View]) -> Option[View] {
   match {
     end < 0 -> None
     else -> {
@@ -424,7 +429,14 @@ private fn named_colon(v: View, at: Int, key: View, end: Int) -> Option[View] {
       match {
         colon < len(v) and v[colon] == 58 -> {
           let from = json_ws(v, at: colon + 1)
-          named_value(v, key, hit: key_is(v, at: at + 1, key), from, to: value_end(v, at: from))
+          named_value(
+            v,
+            key,
+            hit: key_is(v, at: at + 1, key),
+            from,
+            to: value_end(v, at: from),
+            found
+          )
         }
         else -> None
       }
@@ -432,15 +444,27 @@ private fn named_colon(v: View, at: Int, key: View, end: Int) -> Option[View] {
   }
 }
 
-// A member's value, from `from` to `to` (-1: not JSON); `hit` when its key is the one asked for.
-private fn named_value(v: View, key: View, hit: Bool, from: Int, to: Int) -> Option[View] {
+// A member's value, from `from` to `to` (-1: not JSON); `hit` when its key is the one asked for. At the object's
+// closing brace, the last value found, when nothing but whitespace follows the brace.
+private fn named_value(
+  v: View,
+  key: View,
+  hit: Bool,
+  from: Int,
+  to: Int,
+  found: Option[View]
+) -> Option[View] {
   match {
     to < 0 -> None
-    hit -> Some(value: slice(v, from, to))
     else -> {
+      let kept = match {
+        hit -> Some(value: slice(v, from, to))
+        else -> found
+      }
       let s = json_ws(v, at: to)
       match {
-        s < len(v) and v[s] == 44 -> named_at(v, at: json_ws(v, at: s + 1), key)
+        s < len(v) and v[s] == 44 -> named_at(v, at: json_ws(v, at: s + 1), key, found: kept)
+        s < len(v) and v[s] == 125 and json_ws(v, at: s + 1) == len(v) -> kept
         else -> None
       }
     }
