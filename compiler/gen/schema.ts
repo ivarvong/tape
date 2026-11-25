@@ -3,6 +3,7 @@
 // lists and nested records, and refined types, whose bounds are read from `self >= n`, `self <= n`, `self > n`,
 // `self < n` joined by `and`.
 import type { Expr } from '../ast.ts';
+import { fieldlessOf, storedText } from '../fieldless.ts';
 import type { Type } from '../types.ts';
 import { scaleOf } from '../types.ts';
 import { adtOf, strip } from './layout.ts';
@@ -24,6 +25,8 @@ export type JsonSchema = {
   maxLength?: number;
   /** a Dec[s] as text: digits, then a point and at most s of them */
   pattern?: string;
+  /** a fieldless sum: the text of each of its constructors */
+  enum?: string[];
 };
 type Place = object | null | undefined;
 
@@ -115,6 +118,9 @@ const object = (L: Layouts, v: Fields, at: Place): JsonSchema => ({
 export function jsonSchema(L: Layouts, t: Type, at: Place): JsonSchema {
   const [item] = t.name === 'List' && t.args.length === 1 ? t.args : [];
   if (item) return field(L, t, at);
+  // a sum whose constructors have no fields is the text of one (compiler/fieldless.ts)
+  const ctors = t.args.length === 0 ? fieldlessOf(L.prog, t.name) : null;
+  if (ctors) return { type: 'string', enum: ctors.map(storedText) };
   const a = adtOf(L, t, at);
   const [only] = a.variants;
   if (a.variants.length === 1 && only) return object(L, only, at);

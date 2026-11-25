@@ -92,8 +92,8 @@ export function migrate(
   return transaction(() => chain.slice(done.length).map(m => runOne(sql, m)));
 }
 
-// Machines (`machine table.column { "from" -> "to" }`, rules.ts C57-C61) as SQLite triggers, the run-time half of
-// the check: a row inserted in a state other than a start state, or an UPDATE that changes the column by a move not
+// Machines (`machine table.column: State { From -> To }`, rules.ts C57-C61; a state is its constructor's text) as
+// SQLite triggers, the run-time half of the check: a row inserted in a state other than a start state, or an UPDATE that changes the column by a move not
 // listed, fails with RAISE(ABORT), and the request's transaction rolls back. Comparisons use IS, so a NULL state is
 // a state like any other (and not a start). `starts`: the start states (the service allows those of every live
 // version); `start` alone when there is one. The triggers do not see DELETE, or a write that does not change the

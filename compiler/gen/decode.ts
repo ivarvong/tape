@@ -145,6 +145,14 @@ function decodeScalar(c: Ctx, base: string, cur: number): number[] {
   return [l];
 }
 
+/** A fieldless sum at the cursor: 8 bytes, the index of its constructor, which the host read from the column's text
+ * (host/memory.ts), in the sum's one slot. */
+function decodeConstructor(c: Ctx, cur: number): number[] {
+  const tag = fresh(c, I32);
+  c.code.push(...get(cur), 0x29, 0, 0, 0xa7, ...set(tag), ...get(cur), ...i32(8), 0x6a, ...set(cur));
+  return [tag];
+}
+
 /** A refined field whose condition fails clears the `ok` local; the first one to fail is the reason. */
 function checkRefined(c: Ctx, fl: Read, mine: number[], ok: number, why: Why): void {
   emitPred(c, fl.type, mine);
@@ -165,6 +173,7 @@ function checkRefined(c: Ctx, fl: Read, mine: number[], ok: number, why: Why): v
 export function decodeFields(c: Ctx, fields: readonly Read[], cur: number, at: Place, ok: number, why: Why): number[] {
   return fields.flatMap(fl => {
     if (fl.type.name === 'Option') return decodeOption(c, fl, cur, at, ok, why);
+    if (c.B.fieldlessIn(fl.type)) return decodeConstructor(c, cur);
     const mine = decodeScalar(c, c.B.strip(fl.type).name, cur);
     if (c.B.types.get(fl.type.name)?.refine) checkRefined(c, fl, mine, ok, why);
     return mine;

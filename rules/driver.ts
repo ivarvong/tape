@@ -47,7 +47,7 @@ export function rules(prog: Program): Problem[] {
   const schemaRead = reading.model.errors.length === 0;
   if (schemaRead) replayRules(reading); // C54-C56, C88
   if (schemaRead) claimRules(reading); // C95
-  commandRules(reading); // C71, C81, C87
+  commandRules(reading); // C71, C87
   if (schemaRead) floorRules(reading); // C73
   guardRules(reading); // C74
   return problems.toSorted((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.code.localeCompare(b.code));

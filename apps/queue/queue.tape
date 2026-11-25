@@ -36,12 +36,14 @@ migration 1 "jobs" {
   CREATE INDEX jobs_lease ON jobs(lease)
 }
 
-machine jobs.state {
-  "ready" -> "leased"
-  "leased" -> "done"
-  "leased" -> "ready"
-  "leased" -> "dead"
-  "dead" -> "ready"
+type JobState { Ready Leased Done Dead }
+
+machine jobs.state: JobState {
+  Ready -> Leased
+  Leased -> Done
+  Leased -> Ready
+  Leased -> Dead
+  Dead -> Ready
 }
 
 invariant "a leased job has a worker and a time its lease ends" {
@@ -93,7 +95,7 @@ type Job { Job(
   id: Int,
   kind: View,
   payload: View,
-  state: View,
+  state: JobState,
   run_at: Int,
   attempts: Int,
   most: Int,
@@ -101,7 +103,7 @@ type Job { Job(
   lease_until: Int,
   error: View
 ) }
-type Stat { Stat(state: View, jobs: Int) }
+type Stat { Stat(state: JobState, jobs: Int) }
 
 type Outcome {
   Shown(status: Int, job: Job)
@@ -144,14 +146,16 @@ export fn woken(db: Sql, clock: Clock, timer: Timer, message: Wake) -> Result[Jo
   let Wake(key) = message
   let Some(value: job) = load(id: key) else -> Err(error: "no such job")
   match job {
-    Job(id, state: "leased", attempts, most, lease_until) if lease_until <= now() -> answer(
+    Job(id, state: Leased, attempts, most, lease_until) if lease_until <= now() -> answer(
       outcome: back(id, attempt: attempts, most, error: "the lease ran out")
     )
-    Job(id, state: "leased", lease_until) -> {
+    Job(id, state: Leased, lease_until) -> {
       do wake(after: lease_until - now(), key: id)
       Ok(value: job)
     }
-    _ -> Ok(value: job)
+    Job(state: Ready) -> Ok(value: job)
+    Job(state: Done) -> Ok(value: job)
+    Job(state: Dead) -> Ok(value: job)
   }
 }
 
@@ -236,7 +240,7 @@ fn ack(id: Int, body: View) -> Outcome {
     attempt
   ) {
     Moved(value) -> Shown(status: 200, job: value)
-    Raced(now: job = Job(state: "done", attempts)) if attempts == attempt -> Shown(status: 200, job)
+    Raced(now: job = Job(state: Done, attempts)) if attempts == attempt -> Shown(status: 200, job)
     Raced(now) -> Problem(status: 409, reason: "this attempt no longer holds the lease")
     NoRow -> Problem(status: 404, reason: "no such job")
   }

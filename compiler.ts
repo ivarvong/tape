@@ -47,7 +47,7 @@
 //   files      Each file is a namespace for its functions. A call finds the function in its own file first, then
 //              in any other file if exactly one defines the name; `text.until(…)` names the file (by its name
 //              without `.tape`) when more than one does. Types and constructors are shared by the whole program.
-//   interfaces `interface Git { read head(Ref) -> Head  write edit_file(Edit) -> Pushed }` names what a capability
+//   interfaces `interface Git { read head(Ref) -> Head  write edit_file(Edit) -> Edited }` names what a capability
 //              can do. A parameter `repo: Git` is such a capability, and `repo.head(send: Ref(ref), within: 2000)`
 //              is the call. A read is sent as `ask`; a write as `call`, so it must carry `once:`. The message
 //              must be the record the interface names, and the result is Result[Reply, CallError].

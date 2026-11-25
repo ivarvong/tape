@@ -1,12 +1,15 @@
 // compiler/gen/sql.ts: sql_exec, sql_all, sql_first and sql_move. A query is a text literal, so the module lists
 // every statement it can run; its parameters are written into a block of 16-byte cells the host reads.
 import type { Arg, Call, TypeAst } from '../ast.ts';
-import { I32, fail, sleb, uleb } from '../common.ts';
+import { I32, fail, sleb, uleb, utf8 } from '../common.ts';
+import { storedText } from '../fieldless.ts';
+import { lc } from '../../rules/syntax.ts';
+import type { QueryEntry } from './module.ts';
 import { sqlModel, tablesOf } from '../../rules/model.ts';
 import { movePlan } from '../../rules/move.ts';
 import { inNames } from '../sqltext.ts';
 import { TAPE_T, analyze } from '../../sql/analyze.ts';
-import type { Expr as SqlExpr, Param, Statement } from '../../sql/ast.ts';
+import type { Analysis, Expr as SqlExpr, Param, Statement } from '../../sql/ast.ts';
 import { tryParse } from '../../sql/parse.ts';
 import { walkSql } from '../../sql/tree.ts';
 import { INT, T, key } from '../types.ts';
@@ -35,11 +38,20 @@ const codeOf = (kind: string): string => (kind === 'subset' ? 'C67' : kind === '
 
 type Column = { name: string; t: string; null: boolean; param?: number; pkNull?: string };
 
-/** One column of the result against the field of the row type it is read into. */
-function checkColumn(qa: Arg, c: Column, f: FlatField, i: number, kinds: string, stop: Stop): void {
+/** One column of the result against the field of the row type it is read into. `ctors`: the field is a fieldless
+ * sum (or an Option of one), whose constructors are stored as text. */
+function checkColumn(
+  qa: Arg,
+  c: Column,
+  f: FlatField,
+  i: number,
+  kinds: string,
+  ctors: readonly string[] | null,
+  stop: Stop,
+): void {
   const opt = f.type.name === 'Option';
   const base = (opt ? f.type.args[0]?.name : undefined) ?? f.type.name;
-  const want = base === 'View' ? 'text' : base === 'Float' ? 'real' : 'int';
+  const want = base === 'View' || ctors ? 'text' : base === 'Float' ? 'real' : 'int';
   if (c.name !== f.name)
     stop(
       qa,
@@ -56,8 +68,8 @@ function checkColumn(qa: Arg, c: Column, f: FlatField, i: number, kinds: string,
       qa,
       'C69',
       `column ${c.name} is ${t === 'int' ? 'an integer' : t === 'text' ? 'text' : t === 'real' ? 'a real number' : t === 'blob' ? 'of no declared type' : t === 'null' ? 'always NULL' : 'of a type the checker cannot tell'}, and field ${f.name} is ${key(f.type)}`,
-      base === 'View'
-        ? 'A View field reads a TEXT column.'
+      base === 'View' || ctors
+        ? `A ${ctors ? `${base} field (a sum whose constructors have no fields)` : 'View field'} reads a TEXT column.`
         : base === 'Float'
           ? 'A Float field reads a REAL column.'
           : 'An Int or Bool field reads an INTEGER column.',
@@ -127,9 +139,31 @@ function check(
       `the query gives ${res.length} column${res.length === 1 ? '' : 's'} (${res.map(x => x.name).join(', ')}) and the row type has ${row.length} field${row.length === 1 ? '' : 's'} (${names.join(', ')})`,
       'Select exactly the fields of the row type, in its order.',
     );
+  const origins = originsOf(tree.ast, a);
   res.forEach((col, i) => {
     const f = row[i];
-    if (f) checkColumn(qa, col, f, i, kinds, stop);
+    if (!f) return;
+    checkColumn(qa, col, f, i, kinds, c.B.fieldlessIn(f.type), stop);
+    const at = origins[i];
+    const m = at && c.B.prog.machines.find(x => lc(x.table) === lc(at.table) && lc(x.column) === lc(at.column));
+    const inner = f.type.name === 'Option' ? f.type.args[0] : f.type;
+    if (m && inner?.name !== m.type)
+      stop(
+        qa,
+        'C69',
+        `column ${col.name} is ${m.table}.${m.column}, the column of machine ${m.table}.${m.column}: ${m.type}, and field ${f.name} is ${key(f.type)}: a state added to the machine would be read as any other value, and a match on it would take it without a word`,
+        `Make the field \`${f.name}: ${f.type.name === 'Option' ? `Option[${m.type}]` : m.type}\`, and match its constructors (\`${m.ctors[0] ?? 'State'}\`, …).`,
+      );
+  });
+}
+
+/** The table and column each item of a statement's result reads, where the item is a column and nothing else. */
+function originsOf(ast: Statement, a: Analysis): ({ table: string; column: string } | null)[] {
+  const items = ast.k === 'select' ? ast.cols : 'returning' in ast ? ast.returning : null;
+  if (!items || items.some(x => x.star)) return [];
+  return items.map(x => {
+    const r = !x.star && x.expr.k === 'col' ? a.refs.get(x.expr) : undefined;
+    return r?.table ? { table: r.table.name, column: r.col.name } : null;
   });
 }
 
@@ -310,6 +344,25 @@ const kindOf = (t: Type): string =>
           ? 't'
           : '';
 
+/** The text of the constructor a fieldless sum's tag names (the one constructor's, with no tag), as a View's two
+ * locals. */
+function ctorText(c: Ctx, ctors: readonly string[], tag: number | undefined): number[] {
+  const p = fresh(c, I32);
+  const n = fresh(c, I32);
+  const put = (ctor: string): number[] => {
+    const [at, len] = c.B.literal(utf8(storedText(ctor)));
+    return [...i32(at), ...set(p), ...i32(len), ...set(n)];
+  };
+  c.code.push(...put(ctors.at(-1) ?? ''));
+  ctors.slice(0, -1).forEach((ctor, i) => {
+    c.code.push(...get(tag ?? 0), ...i32(i), 0x46);
+    open(c, 0x04);
+    c.code.push(...put(ctor));
+    close(c);
+  });
+  return [p, n];
+}
+
 /**
  * Writes the parameters into a new block; gives the block's local (-1 with none) and each one's kind. A cell is 16
  * bytes: an Int, Dec (its count, an INTEGER: 12.30 is 1230 in the database), Bool or Float at 0, a View's pointer
@@ -335,12 +388,14 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
     const { type, locals } = inLocals(c, a.value);
     const t = c.B.strip(type);
     const inner = t.name === 'Option' && t.args[0] ? c.B.strip(t.args[0]) : null;
-    const k = kindOf(inner ?? t);
+    // a fieldless sum is bound as its constructor's text
+    const ctors = c.B.fieldlessIn(t);
+    const k = ctors ? 't' : kindOf(inner ?? t);
     if (k === '')
       fail(
         a,
         'C14',
-        `argument ${a.as ?? a.label} should be Int, Dec, Float, Bool or View, or an Option of one, but is ${key(t)}`,
+        `argument ${a.as ?? a.label} should be Int, Dec, Float, Bool, View or a sum whose constructors have no fields, or an Option of one, but is ${key(t)}`,
         'A query takes numbers, Bools and text, and an Option of one for a value that may be NULL. Pass a field of the record instead: `id: order.id`.',
       );
     let value = locals;
@@ -353,6 +408,7 @@ function bindParams(c: Ctx, e: Call, query: Query): { block: number; kinds: stri
       value = flat.map(s => locals[s] ?? 0);
       c.code.push(...get(block), ...get(locals[0] ?? 0), ...i32(some), 0x46, 0x36, 2, ...uleb(16 * i + 8));
     }
+    if (ctors) value = ctorText(c, ctors, value[0]);
     const at = 16 * i;
     const [v0 = 0, v1 = 0] = value;
     if (k === 'i') c.code.push(...get(block), ...get(v0), 0x37, 0, ...uleb(at));
@@ -383,6 +439,17 @@ function rowOr(
   c.code.push(0x05);
   otherwise();
   close(c);
+}
+
+/** What the host is told of a row type: each field's kind letter and name, and, for a field that is a fieldless
+ * sum, the texts its constructors are stored as, in their order (only when some field is one). */
+function rowEntry(c: Ctx, row: readonly FlatField[]): Pick<QueryEntry, 'row' | 'columns' | 'states'> {
+  const states = row.map(f => c.B.fieldlessIn(f.type)?.map(storedText) ?? null);
+  return {
+    row: row.map(f => c.B.rowKind(f)).join(''),
+    columns: row.map(x => x.name),
+    ...(states.some(x => x !== null) ? { states } : {}),
+  };
 }
 
 type Ran = {
@@ -421,8 +488,7 @@ function emitMove(c: Ctx, e: Call, ran: Ran): Type {
     const id2 = B.queryId({
       sql: plan.select,
       params: plan.params.map(n => ran.kinds[n - 1]).join(''),
-      row: row.map(f => B.rowKind(f)).join(''),
-      columns: row.map(x => x.name),
+      ...rowEntry(c, row),
     });
     const r2 = fresh(c, I32);
     c.code.push(...i32(id2), ...(some ? get(block2) : [0x41, 0]), 0x41, 1, 0x10, 0, 0xfc, 0x03, ...set(r2));
@@ -443,8 +509,7 @@ export function emitSql(c: Ctx, e: Call): Type {
   const id = B.queryId({
     sql: q,
     params: kinds,
-    row: row ? row.map(f => B.rowKind(f)).join('') : null,
-    columns: row ? row.map(x => x.name) : null,
+    ...(row ? rowEntry(c, row) : { row: null, columns: null }),
     ...(query.repeat ? { repeat: true } : {}),
   });
   c.code.push(...i32(id), ...(query.n > 0 ? get(block) : [0x41, 0]), 0x41, rowT ? 1 : 0, 0x10, 0);

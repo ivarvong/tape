@@ -1,7 +1,7 @@
 // write_json writes what decode reads: decode(write_json(v)) is v for every type write_json takes. On generated
 // types (records, several constructors, Option fields, lists, lists of lists, records inside them, Floats) and generated
 // values, compiled and in the reference interpreter: the text written is the one an oracle here writes from the
-// value (an Option field that is None has no key; a type with several constructors is {"Constructor": {…}}), and
+// value (an Option field that is None has no key; a type with several constructors is {"Constructor": {…}}, and one whose constructors have no fields the text of one), and
 // decoding it writes the same text again. Damaged text is refused with the same reason by both.
 import '../node25.ts';
 import { compile } from '../compiler.ts';
@@ -115,6 +115,9 @@ function json(fam: Decl[], v: V): string {
   if (Array.isArray(v)) return `[${v.map(x => json(fam, x)).join(',')}]`;
   if (!isRecord(v)) return json(fam, v.some);
   const decl = fam.find(d => d.ctors.some(c => c.name === v.c));
+  // a type of two constructors or more, none with fields, is the text of its constructor: its name in snake_case
+  if (decl && decl.ctors.length > 1 && decl.ctors.every(c => c.fields.length === 0))
+    return JSON.stringify(v.c.replaceAll(/(?<=.)([A-Z])/g, '_$1').toLowerCase());
   const body = `{${Object.entries(v.f)
     .filter((e): e is [string, V] => e[1] !== undefined)
     .map(([k, x]) => `${JSON.stringify(k)}:${json(fam, x)}`)

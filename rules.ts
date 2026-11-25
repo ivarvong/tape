@@ -34,7 +34,7 @@
 //   C56 replay           an op-id guard names the row the write changes: the same op id sent for another key is
 //                        another write, not a repeat (R11).
 //
-//   C57-C61 machines     `machine table.column { "from" -> "to" … }`: every write of the column makes a declared move,
+//   C57-C61 machines     `machine table.column: State { From -> To … }`: every write of the column makes a declared move,
 //                        from the state its WHERE names; see the section at the end of this file (J2, J3). C70: the
 //                        statements of migrations and schema, which run while the machine's triggers are off, leave
 //                        every row in a declared state.
@@ -62,4 +62,4 @@ export { machinePlan } from './rules/plan.ts';
 export { wayOut } from './rules/timers.ts';
 export { movePlan } from './rules/move.ts';
 export { writeOf } from './rules/writes.ts';
-export { sqlModel, stateFields, tablesOf, treeOf } from './rules/model.ts';
+export { sqlModel, tablesOf, treeOf } from './rules/model.ts';

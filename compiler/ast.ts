@@ -263,9 +263,15 @@ export type FnDecl = At & {
 };
 export type Migration = At & { n: number; name: string; contract: boolean; statements: string[] };
 export type Flag = At & { name: string; type: string; default: bigint | boolean };
+/**
+ * `machine table.column: Type { A -> B … }`. `ctors`: the constructors its moves name, in the order first named;
+ * `states`, `start` and each move's `from` and `to` are their texts, as the column holds them (compiler/fieldless.ts).
+ */
 export type Machine = At & {
   table: string;
   column: string;
+  type: string;
+  ctors: string[];
   start: string | null;
   states: string[];
   moves: { from: string; to: string; line: number }[];

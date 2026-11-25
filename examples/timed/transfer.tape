@@ -21,12 +21,14 @@ migration 1 "transfers" {
   )
 }
 
-machine transfers.state {
-  "withdrawing" -> "depositing"
-  "withdrawing" -> "failed"
-  "depositing" -> "done"
-  "depositing" -> "refunding"
-  "refunding" -> "failed"
+type TransferState { Withdrawing Depositing Failed Done Refunding }
+
+machine transfers.state: TransferState {
+  Withdrawing -> Depositing
+  Withdrawing -> Failed
+  Depositing -> Done
+  Depositing -> Refunding
+  Refunding -> Failed
 }
 
 type Key = View where len(self) >= 1 and len(self) <= 64
@@ -36,7 +38,7 @@ type Transfer { Transfer(
   source: View,
   target: View,
   amount: Int,
-  state: View,
+  state: TransferState,
   tries: Int,
   note: View
 ) }
@@ -134,7 +136,7 @@ fn first(transfer: Transfer) -> Outcome {
 fn advance(found: Option[Transfer]) -> Outcome {
   let Some(value: t) = found else -> Problem(status: 404, reason: "no such transfer")
   match t {
-    Transfer(id, source, amount, state: "withdrawing", tries) -> {
+    Transfer(id, source, amount, state: Withdrawing, tries) -> {
       let Ok(value) = call(
         to: bank,
         method: "withdraw",
@@ -144,13 +146,13 @@ fn advance(found: Option[Transfer]) -> Outcome {
         once: Step(transfer: id, step: "withdraw")
       ) else {
         Err(error: Rejected(reason)) -> shown(
-          found: moved(id, from: "withdrawing", to: "failed", note: reason)
+          found: moved(id, from: Withdrawing, to: Failed, note: reason)
         )
-        Err(error) -> failed(id, state: "withdrawing", tries)
+        Err(error) -> failed(id, state: Withdrawing, tries)
       }
-      advance(found: moved(id, from: "withdrawing", to: "depositing", note: ""))
+      advance(found: moved(id, from: Withdrawing, to: Depositing, note: ""))
     }
-    Transfer(id, target, amount, state: "depositing", tries) -> {
+    Transfer(id, target, amount, state: Depositing, tries) -> {
       let Ok(value) = call(
         to: bank,
         method: "deposit",
@@ -160,13 +162,13 @@ fn advance(found: Option[Transfer]) -> Outcome {
         once: Step(transfer: id, step: "deposit")
       ) else {
         Err(error: Rejected(reason)) -> advance(
-          found: moved(id, from: "depositing", to: "refunding", note: reason)
+          found: moved(id, from: Depositing, to: Refunding, note: reason)
         )
-        Err(error) -> failed(id, state: "depositing", tries)
+        Err(error) -> failed(id, state: Depositing, tries)
       }
-      shown(found: moved(id, from: "depositing", to: "done", note: ""))
+      shown(found: moved(id, from: Depositing, to: Done, note: ""))
     }
-    Transfer(id, source, amount, state: "refunding", tries) -> {
+    Transfer(id, source, amount, state: Refunding, tries) -> {
       let Ok(value) = call(
         to: bank,
         method: "deposit",
@@ -176,16 +178,17 @@ fn advance(found: Option[Transfer]) -> Outcome {
         once: Step(transfer: id, step: "refund")
       ) else {
         // the bank refusing the refund is counted like no answer: failed gives up after its tries
-        Err(error: Rejected(reason)) -> failed(id, state: "refunding", tries)
-        Err(error) -> failed(id, state: "refunding", tries)
+        Err(error: Rejected(reason)) -> failed(id, state: Refunding, tries)
+        Err(error) -> failed(id, state: Refunding, tries)
       }
-      shown(found: moved(id, from: "refunding", to: "failed", note: "refunded"))
+      shown(found: moved(id, from: Refunding, to: Failed, note: "refunded"))
     }
-    _ -> Shown(status: 200, transfer: t)
+    Transfer(state: Failed) -> Shown(status: 200, transfer: t)
+    Transfer(state: Done) -> Shown(status: 200, transfer: t)
   }
 }
 
-fn moved(id: Int, from: View, to: View, note: View) -> Option[Transfer] {
+fn moved(id: Int, from: TransferState, to: TransferState, note: View) -> Option[Transfer] {
   latest(
     id,
     m: sql_move(
@@ -202,7 +205,7 @@ fn moved(id: Int, from: View, to: View, note: View) -> Option[Transfer] {
 
 // A step that did not answer (or was refused while compensating): one more failure, and a timer to try again,
 // or none after the last attempt (the transfer says so, and waits for resume).
-fn failed(id: Int, state: View, tries: Int) -> Outcome {
+fn failed(id: Int, state: TransferState, tries: Int) -> Outcome {
   match sql_move(
     row: Transfer,
     query: "UPDATE transfers SET tries = :tries + 1 WHERE id = :id AND state = :state \
@@ -221,7 +224,7 @@ fn failed(id: Int, state: View, tries: Int) -> Outcome {
   }
 }
 
-fn told(id: Int, state: View, plan: Retry) -> Outcome {
+fn told(id: Int, state: TransferState, plan: Retry) -> Outcome {
   match plan {
     RetryIn(after) -> shown(found: noted(id, state, note: "no answer; again in \(after) ms"))
     GaveUp(tries) -> shown(
@@ -230,7 +233,7 @@ fn told(id: Int, state: View, plan: Retry) -> Outcome {
   }
 }
 
-fn noted(id: Int, state: View, note: View) -> Option[Transfer] {
+fn noted(id: Int, state: TransferState, note: View) -> Option[Transfer] {
   latest(
     id,
     m: sql_move(

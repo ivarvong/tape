@@ -1,7 +1,9 @@
-// Machines (`machine table.column { "from" -> "to" … }`, rules.ts C57-C61, host.ts machineTriggers): each code on
+// Machines (`machine table.column: State { From -> To … }`, rules.ts C57-C61, host.ts machineTriggers): each code on
 // the smallest program that shows it, what the checker accepts, the bug fixtures (experiments/lang/bugs) judged with
 // their machines, the triggers in SQLite (node:sqlite) refusing what the checker would, a race the ported programs
 // now survive, and the machine plan the service uses when versions with and without a machine are live together.
+// Most programs here are written with text states, as before issue 12, and ported line for line by
+// experiments/lang/port-keys.ts portMachines (the type is declared at the end).
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile, parseProgram } from '../compiler.ts';
@@ -9,13 +11,17 @@ import { machinePlan } from '../rules.ts';
 import { integerParams } from '../sql.ts';
 import { instantiate, machineTriggers, machineTriggersIn, installMachines } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
-import { portKeys, portWith } from '../experiments/lang/port-keys.ts';
+import { portKeys, portMachines, portWith } from '../experiments/lang/port-keys.ts';
 import type { Problem } from '../compiler/common.ts';
 import { std } from '../std.ts';
 import { built, finish, same as T, sleep } from './harness.ts';
 const here = (p: string) => new URL(`../${p}`, import.meta.url).pathname,
   read = (p: string) => readFileSync(here(p), 'utf8');
-const build = (text: string) => compile([...std, { name: 'program.tape', text }]);
+const build = (text: string) => compile([...std, { name: 'program.tape', text: portMachines(text) }]);
+const builtP = (text: string) => built(portMachines(text));
+/** The codes of a program as written, not ported to today's machines. */
+const unported = (text: string) =>
+  compile([...std, { name: 'program.tape', text }]).errors.map(e => `${e.code}:${e.line}`);
 /** The first thing refused in a program, which must refuse something. */
 const refused = (text: string): Problem => {
   const [e] = build(text).errors;
@@ -240,17 +246,51 @@ T(
   [['C57:2'], ['C57:2'], ['C57:6']],
 );
 T(
-  'C57: a move to itself, a move twice, no moves, a quote in a state',
+  'C57: a move to itself, a move twice, no moves',
   [
     decl('machine s.state {\n  "a" -> "a"\n}\n'),
     decl('machine s.state {\n  "a" -> "b"\n  "a" -> "b"\n}\n'),
     decl('machine s.state {\n}\n'),
-    decl('machine s.state {\n  "it\'s" -> "b"\n}\n'),
   ],
-  [['C57:2'], ['C57:2'], ['C57:2'], ['C57:2']],
+  [['C57:2'], ['C57:2'], ['C57:2']],
+);
+// the machine's type: declared, its constructors without fields, each a state some move names, and only those
+const typed = (type: string) => decl(`machine s.state: SaleState {\n  Pending -> Paid\n}\n${type}\n`);
+T(
+  'C57: the type is not declared, has fields, has a constructor no move names, or a move names no constructor of it',
+  [
+    typed(''),
+    typed('type SaleState { Pending(at: Int) Paid }'),
+    typed('type SaleState { Pending Paid Declined }'),
+    typed('type SaleState { Pending }\ntype Other { Paid }'),
+    typed('type SaleState { Pending Paid }'),
+  ],
+  [['C57:2'], ['C57:2'], ['C57:2'], ['C57:2'], []],
+);
+T(
+  'C57 says what is wrong with the type',
+  [
+    typed('').length,
+    build(
+      `schema "${S}"\nmachine s.state: SaleState {\n  Pending -> Paid\n}\ntype SaleState { Pending Paid Declined }\nfn handle(raw: View) -> Buf {\n  respond(status: 200)\n}\n`,
+    ).errors[0]?.message,
+  ],
+  [
+    1,
+    'machine s.state: SaleState: Declined is a constructor of SaleState, and no move of the machine names it: a row could hold a state no move reaches or leaves',
+  ],
+);
+T(
+  'P01: a machine names its type, and its moves are constructors',
+  [
+    unported(`schema "${S}"\nmachine s.state {\n  "a" -> "b"\n}\n`),
+    unported(`schema "${S}"\nmachine s.state: S {\n  "a" -> "b"\n}\n`),
+  ],
+  [['P01:2'], ['P01:3']],
 );
 T(
   'P01: the syntax is machine table.column { "from" -> "to" }',
+
   [codes('machine s {\n}\n'), codes('machine s.state {\n  "a" "b"\n}\n')].map(x => x[0]?.split(':')[0]),
   ['P01', 'P01'],
 );
@@ -294,7 +334,7 @@ T(
 );
 const exportedFn = `schema "${S}"\n${M}type Pay { Pay(id: Int, to: View) }\ntype Done { Done(n: Int) }\nexport fn pay(db: Sql, message: Pay) -> Result[Done, View] {\n  Ok(value: Done(n: sql_exec(db, query: "UPDATE s SET state = :to WHERE id = :id AND state = 'pending'", to: message.to, id: message.id)))\n}\n`;
 T('an exported method is checked too, and its message is unknown (C60)', codes(exportedFn), ['C60:9']);
-const r0 = built(moving("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending' RETURNING id AS n"));
+const r0 = builtP(moving("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending' RETURNING id AS n"));
 T(
   'the compile result carries the machine as the host installs it, and the module a machines section',
   [r0.machines, WebAssembly.Module.customSections(new WebAssembly.Module(r0.wasm), 'machines').length],
@@ -314,7 +354,7 @@ T(
     1,
   ],
 );
-const r1 = built(one("UPDATE s SET note = 'x' WHERE id = 1", ''));
+const r1 = builtP(one("UPDATE s SET note = 'x' WHERE id = 1", ''));
 T(
   'a program without a machine has no machines section (its module is as before)',
   [r1.machines, WebAssembly.Module.customSections(new WebAssembly.Module(r1.wasm), 'machines').length],
@@ -331,7 +371,12 @@ T(
 const fx = (f: string) =>
   compile([
     ...std,
-    { name: f, text: portWith(portKeys(read(`experiments/lang/bugs/${f}`).replaceAll(/^private type /gm, 'type '))) },
+    {
+      name: f,
+      text: portMachines(
+        portWith(portKeys(read(`experiments/lang/bugs/${f}`).replaceAll(/^private type /gm, 'type '))),
+      ),
+    },
   ])
     .errors.map(e => `${e.code}:${e.line}`)
     .filter(c => /^C5[7-9]|^C6[01]/.test(c));
@@ -359,7 +404,7 @@ T(
 
 // ---- 3. the triggers, in SQLite
 {
-  const r = built(read('examples/fulfillment.tape')),
+  const r = builtP(read('examples/fulfillment.tape')),
     sql = nodeSql();
   instantiate(new WebAssembly.Module(r.wasm), { sql, name: 'fulfill', services: {} });
   const tryIt = (q: string) => {
@@ -448,7 +493,7 @@ T(
 {
   // a program with a machine run through the host: a write the trigger refuses fails the request and rolls it back
   const text = moving("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending' RETURNING id AS n");
-  const r = built(text),
+  const r = builtP(text),
     sql = nodeSql(),
     a = instantiate(new WebAssembly.Module(r.wasm), { sql, name: 's', services: {} });
   sql.exec("INSERT INTO s(key) VALUES ('k')");
@@ -474,7 +519,7 @@ T(
   // its parts side by side) the sleeps overran it and the purchase answered 504. The race is the same with room.
   const tickets = read('examples/tickets.tape');
   T('tickets: the purchase charges within 50 ms', tickets.includes('amount, within: 50)'), true);
-  const r = built(tickets.replace('amount, within: 50)', 'amount, within: 5000)')),
+  const r = builtP(tickets.replace('amount, within: 50)', 'amount, within: 5000)')),
     sql = nodeSql();
   let release = (): void => {};
   const gate = new Promise<void>(res => {
@@ -515,7 +560,7 @@ T(
   );
 }
 {
-  const r = built(read('examples/orders.tape')),
+  const r = builtP(read('examples/orders.tape')),
     sql = nodeSql();
   let release = (): void => {};
   const gate = new Promise<void>(res => {
@@ -547,7 +592,7 @@ T(
 }
 
 // ---- 5. the machine plan: versions with and without a machine, live together
-const prog = (text: string) => parseProgram([...std, { name: 'program.tape', text }]);
+const prog = (text: string) => parseProgram([...std, { name: 'program.tape', text: portMachines(text) }]);
 const v1 = prog(one("UPDATE s SET state = 'void' WHERE id = 1 AND state = 'paid'", '')),
   v2 = prog(one("UPDATE s SET state = 'paid' WHERE id = 1 AND state = 'pending'"));
 const p12 = machinePlan([
@@ -699,8 +744,8 @@ T(
 );
 {
   // the three outcomes, run: the re-read is derived from the UPDATE and runs only when it changes nothing
-  const text = `schema "${S}"\n${M}type Row { Row(id: Int, state: View) }\nfn handle(raw: View, db: Sql) -> Buf {\n  said(moved: sql_move(db, row: Row, query: "UPDATE s SET state = :state, note = :note WHERE state = 'pending' AND key = :raw RETURNING id, state", state: "paid", note: "n", raw))\n}\nfn said(moved: Move[Row]) -> Buf {\n  match moved {\n    Moved(value: Row(state)) -> append(buf: respond(status: 200), view: "moved " ++ state)\n    Raced(now: Row(state)) -> append(buf: respond(status: 200), view: "raced " ++ state)\n    NoRow -> append(buf: respond(status: 200), view: "none")\n  }\n}\n`;
-  const r = built(text),
+  const text = `schema "${S}"\nmachine s.state: SState {\n  Pending -> Paid\n  Pending -> Declined\n}\ntype SState { Pending Paid Declined }\ntype Row { Row(id: Int, state: SState) }\nfn handle(raw: View, db: Sql) -> Buf {\n  said(moved: sql_move(db, row: Row, query: "UPDATE s SET state = :state, note = :note WHERE state = 'pending' AND key = :raw RETURNING id, state", state: Paid, note: "n", raw))\n}\nfn said(moved: Move[Row]) -> Buf {\n  match moved {\n    Moved(value: Row(state)) -> append(buf: respond(status: 200), view: "moved ") |> write_json(value: state)\n    Raced(now: Row(state)) -> append(buf: respond(status: 200), view: "raced ") |> write_json(value: state)\n    NoRow -> append(buf: respond(status: 200), view: "none")\n  }\n}\n`;
+  const r = builtP(text),
     sql = nodeSql(),
     a = instantiate(new WebAssembly.Module(r.wasm), { sql, name: 's', services: {} });
   sql.exec("INSERT INTO s(key) VALUES ('k')");
@@ -719,7 +764,7 @@ T(
   T(
     'Moved, then Raced with the row as it is now, then NoRow for a key with no row',
     [await run('k'), await run('k'), await run('nope')],
-    ['moved paid', 'raced paid', 'none'],
+    ['moved "paid"', 'raced "paid"', 'none'],
   );
   T(
     'a lost compare-and-set changes nothing',
@@ -744,7 +789,7 @@ T(
   T('V1: a program function that std also names is reached, and its write checked (C54)', all(v1prog), ['C54:6']);
 }
 const fx6 = (f: string) =>
-  compile([...std, { name: f, text: portKeys(read(`experiments/lang/bugs/${f}`)) }])
+  compile([...std, { name: f, text: portMachines(portKeys(read(`experiments/lang/bugs/${f}`))) }])
     .errors.map(e => `${e.code}:${e.line}`)
     .filter(c => /^C6[23]/.test(c));
 T(

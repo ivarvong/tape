@@ -26,6 +26,8 @@ export function valueOf(schema: Schema | undefined, rand: () => number, ctx: Val
   const pick = <T extends string | number | Schema>(xs: readonly T[]): T => pickFrom(rand, xs);
   if (!schema) return null;
   if (schema.oneOf) return valueOf(pick(schema.oneOf), rand, ctx, name);
+  // a sum whose constructors have no fields: the text of one of them
+  if (schema.enum && schema.enum.length > 0) return pick(schema.enum);
   if (schema.type === 'object') {
     const o: { [key: string]: Json } = {};
     for (const [k, v] of Object.entries(schema.properties ?? {}))

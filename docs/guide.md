@@ -324,6 +324,9 @@ decodes as a type with several constructors (`examples/todo.tape`), and the patt
 this is refused (C35). A field of a JSON type is:
 
 - `Int`, `Bool`, `View`, or a refinement of one (`type Qty = Int where self >= 1`);
+- a type of two constructors or more, none with fields (`type Status { Open PartlyPaid }`): the text of one, its
+  name in snake_case (`"open"`, `"partly_paid"`), written so and read back; any other value is refused with
+  `status: expected one of "open", "partly_paid"`;
 - a record of such fields;
 - `List[…]` of any of these, lists of lists included;
 - `Option[…]` of any of these, for a key that may be absent.
@@ -478,7 +481,7 @@ Every build runs the rules in `rules.ts` after type-checking. Each rejects a kin
 | C77 | a machine state that nothing leaves: no write moves a row out of it; or a write that puts a row in a state the program must leave itself (every exit follows a call, or a timer leaves it at a deadline) without setting a timer in the same commit, when no client and no later timer's run comes back for it ([design](design.md#timers-c77-to-c80)) |
 | C78 | a timer that C77 counts, or that a timer's run sets again, whose key is not the row's key: a literal, another row's or table's key, a key computed from the row's (`id + 1`), or the row's key negated when woken reads it as `key` (or the reverse); a table that no timer's run reads by the timer's key; or a key that woken's guards (`key < 0 -> …`, in woken or in a function it passes the key to) send down an arm that does not read it back; and, for a timer set with any write of the table (a move to a final state too: a cancel that leaves refunds to a timer), a key computed from the row's, or one that woken uses only as another table's key ([design](design.md#timers-c77-to-c80)) |
 | C79 | in a timer's run, an outcome of a remote call that leaves the row in a timed state while another outcome moves it out, or an arm that picks the row by a timed state, when some path through it neither moves the row out nor sets the timer again (a call counts only through its own outcomes); a path may end at a `final` constructor (Rejected, Skew, GaveUp) when a request can still move the row and, if it is matched, the value is a `call`'s reply (not an `ask`'s); or at the None of a read that lets a row in that state through ([design](design.md#timers-c77-to-c80)) |
-| C81 | a state named in a pattern on a row (`Hold(state: "x")`) that its machine does not declare: the arm can never be taken. |
+| C97 | a match on a machine's states with an arm that takes every state the arms beside it do not name (`_`, a name, a row pattern that leaves the state out): a state added to the machine would be taken there without a word. Each state gets an arm of its own (section "A machine's states in a match"). |
 | C82 | `do` followed by something that is not a call, or a call whose value is not `Done` (`do sql_exec(…)`: read the count with `let 1 = … else -> …`, or drop it with `let _ = …`). |
 | C83-C85 | a call run for what it does and hidden: bound to a name never read, passed to a parameter never read, or multiplied by 0. Write it as a step: `do call(…)` for a call whose value is Done, `let 1 = sql_exec(…) else -> …` or `let _ = sql_exec(…)` for a count. |
 | C86 | an invariant that is not one SELECT without placeholders over the schema's tables, or a name used twice. |
@@ -509,31 +512,44 @@ and an upload beside such a version says so in `live_failing_rules`.
 
 ## Machines: the moves a status column may make
 
-A table whose rows go through states declares them, and the moves between them; the first state named is where every
-row starts (`examples/fulfillment.tape`, `tickets.tape`, `orders.tape`, `bump.tape`):
+A table whose rows go through states declares them as a type whose constructors have no fields, and the moves
+between them; the first state named is where every row starts (`examples/fulfillment.tape`, `tickets.tape`,
+`orders.tape`, `bump.tape`):
 
 ```
-machine sales.state {
-  "pending" -> "paid"
-  "pending" -> "declined"
+type SaleState { Pending Paid Declined }
+
+machine sales.state: SaleState {
+  Pending -> Paid
+  Pending -> Declined
 }
+
+type Sale { Sale(id: Int, amount: Int, state: SaleState) }
 ```
+
+The column holds each state as its constructor's name in snake_case (`Pending` is `'pending'`, `RefundFailed` is
+`'refund_failed'`), so the SQL keeps writing and comparing those texts, and data stored before the type was reads
+unchanged. A constructor passed to a query is its text, a row read back has the constructor, and a text in the
+column that names none stops the request as its row is read. Constructor names are unique across a program, so two
+machines with a state of one name (a hold refunded, a ticket refunded) give one of them another name, and its text
+with it (`apps/tickets` moved its tickets' `'refunded'` to `'voided'` with a contract migration).
 
 The compiler then reads every query of the program against it:
 
 | Code | Refuses |
 |---|---|
-| C57 | a machine over a table or column the program does not have; a second machine for one column; a move to itself, or twice |
+| C57 | a machine over a table or column the program does not have; a second machine for one column; a move to itself, or twice; a type that is not declared, has a constructor with fields, or has a constructor no move names |
 | C58 | an UPDATE (or an upsert's DO UPDATE) of the table whose WHERE does not name the state it expects: a top-level `AND state = …` or `AND state IN (…)`, not inside an OR. Without one it also writes onto a row another request has moved on (J3: a note on a finished order) |
 | C59 | a move the machine does not declare: for every state the guard accepts and every value written, on every call path; an INSERT that does not start in the first state (by its value or the column's DEFAULT) |
 | C60 | a write of the column the checker cannot read: a state that is not a literal or a parameter that is a literal at every call site, CASE, a subquery, REPLACE, INSERT … SELECT, several rows at once, WITH, a trigger the program declares. Refused, not passed |
 | C61 | a literal compared with the column that is not a state (a misspelt state matches nothing) |
+| C69 | the column read into a field that is not the machine's type (`state: View`): a state added later would be read as any text |
 
-Parameters are traced through call sites one path at a time, so `move(from: "charging", to: "shipping")` and
-`move(from: "shipping", to: "refunding")` are two moves, not four. The program's matches narrow a value on the
-way: in the arm `"canceled" -> …` of `match state` (or `state == "canceled" -> …` in a condition match) state is
-"canceled", and in the arms after it state is not, so `UPDATE … WHERE id = :id AND state = :state` there may move
-from every declared state but canceled. A match on a record's field (`Sub(state: "canceled")`), a state tested
+Parameters are traced through call sites one path at a time, so `move(from: Charging, to: Shipping)` and
+`move(from: Shipping, to: Refunding)` are two moves, not four. The program's matches narrow a value on the
+way: in the arm `Canceled -> …` of `match state` state is "canceled", and in the arms after it state is not, so
+`UPDATE … WHERE id = :id AND state = :state` there may move from every declared state but canceled (a View bound to
+the column is read the same way, by its text literals). A match on a record's field (`Sub(state: Canceled)`), a state tested
 inside a called function, and a copy under another name (`let s = state`) are not followed. DELETE is not
 checked, nor are a migration's own statements.
 
@@ -579,30 +595,32 @@ other program's schema at compile time: a SELECT that cannot run is reported by 
 
 ## A machine's states in a match
 
-A row type read from one table knows the machine on its column. Two things follow.
+A row's field for a machine's column is the machine's type, so a state is a constructor: a misspelt one is no
+constructor at all (C20), where a misspelt text once matched nothing.
 
-A state named in a pattern must be one of the machine's states (C81), as C61 already says of SQL:
-`Hold(state: "confirmd")` is an arm that can never be taken.
-
-A match that names every state needs no default, and one that misses a state says which (C24):
+A match on the states names each one, and one that misses a state says which (C24):
 
 ```
 match hold {
-  Hold(state: "held") -> …
-  Hold(state: "paying") -> charge(hold)
-  Hold(state: "refunding") -> refund_hold(hold)
-  Hold(state: "confirmed") -> ShowHold(status: 200, hold)
-  Hold(state: "expired") -> ShowHold(status: 200, hold)
-  Hold(state: "released") -> ShowHold(status: 200, hold)
-  Hold(state: "refunded") -> ShowHold(status: 200, hold)
+  Hold(state: Held) -> …
+  Hold(state: Paying) -> charge(hold)
+  Hold(state: Refunding) -> refund_hold(hold)
+  Hold(state: Confirmed) -> ShowHold(status: 200, hold)
+  Hold(state: Expired) -> ShowHold(status: 200, hold)
+  Hold(state: Released) -> ShowHold(status: 200, hold)
+  Hold(state: Refunded) -> ShowHold(status: 200, hold)
 }
 ```
 
-Add `"refunded" -> "disputed"` to the machine and this stops compiling with `match does not cover
-Hold(state: "disputed")`, at the timer's run, which is where both bugs the production fault runs found were. A
-default arm (`_`, or `Hold(state)`) is still allowed where "any other state" is what is meant. The set is
-trusted from the machine's triggers: a row whose column holds something else (forced into the data past the
-triggers, or a row value built by hand with a computed state) traps at the match instead of taking a wrong arm.
+Add `Refunded -> Disputed` to the machine (and `Disputed` to the type) and this stops compiling with `match does
+not cover Hold(state: Disputed)`, at the timer's run, which is where both bugs the production fault runs found
+were. A default arm is not allowed where the arms tell states apart (C97): `_`, a name (`Hold(state)`), or a row
+pattern that leaves the state out, beside arms that name states, would take a state added later without a word.
+That was issue 12: `"onsale" -> "paused"` added to the box office's events still compiled, and its page showed a
+paused event as canceled, from an arm `_ ->` beside `"onsale" ->`. A match that does not look at the state at all
+(`Hold(id) -> …` alone) is not refused. To write a state as text, a function matches it (`fn hold_text(state:
+HoldState) -> View`), and `write_json` writes its text. A row whose column holds a text no constructor has (forced
+into the data past the triggers) stops the request as the row is read, instead of taking a wrong arm.
 
 ## Timers: `Timer`, `wake` and `woken`
 

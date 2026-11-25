@@ -20,19 +20,21 @@ migration 1 "requests" {
   )
 }
 
-machine requests.state {
-  "pending" -> "approved"
-  "pending" -> "denied"
-  "pending" -> "escalated"
-  "escalated" -> "approved"
-  "escalated" -> "denied"
+type RequestState { Pending Approved Denied Escalated }
+
+machine requests.state: RequestState {
+  Pending -> Approved
+  Pending -> Denied
+  Pending -> Escalated
+  Escalated -> Approved
+  Escalated -> Denied
 }
 
 flag sla_ms: Int = 14400000
 
 type Key = View where len(self) >= 1 and len(self) <= 64
 type NewRequest { NewRequest(key: Key, approver: View, manager: View) }
-type Req { Req(id: Int, approver: View, manager: View, state: View, due: Int, paged: Int) }
+type Req { Req(id: Int, approver: View, manager: View, state: RequestState, due: Int, paged: Int) }
 type Page { Page(to: View, text: View) }
 type Paged { Paged(at: Int) }
 type PageFor { PageFor(request: Int) }
@@ -114,12 +116,12 @@ fn opened(body: View) -> Outcome {
 fn due(found: Option[Req]) -> Outcome {
   let Some(value: r) = found else -> Problem(status: 404, reason: "no such request")
   match r {
-    Req(id, state: "pending", due) if due <= now() -> escalate(id)
-    Req(id, state: "pending", due) -> {
+    Req(id, state: Pending, due) if due <= now() -> escalate(id)
+    Req(id, state: Pending, due) -> {
       do wake(after: due - now(), key: id)
       later(request: r)
     }
-    Req(id, state: "escalated", due) if due <= now() -> shown(found: latest(
+    Req(id, state: Escalated, due) if due <= now() -> shown(found: latest(
       id,
       m: sql_move(
         row: Req,
@@ -128,12 +130,13 @@ fn due(found: Option[Req]) -> Outcome {
         id
       )
     ))
-    Req(id, state: "escalated", paged: 0) -> page(request: r)
-    Req(id, state: "escalated", due) -> {
+    Req(id, state: Escalated, paged: 0) -> page(request: r)
+    Req(id, state: Escalated, due) -> {
       do wake(after: due - now(), key: id)
       later(request: r)
     }
-    _ -> Shown(status: 200, request: r)
+    Req(state: Approved) -> Shown(status: 200, request: r)
+    Req(state: Denied) -> Shown(status: 200, request: r)
   }
 }
 

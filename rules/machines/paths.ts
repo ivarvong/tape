@@ -6,18 +6,21 @@
 // move(from: "c", to: "d") are the moves a->b and c->d, not every pairing. More than 256 environments for one
 // function count as unknown.
 //
-// The program's own matches narrow a value on the path to a call or a query: in the arm `"canceled" -> …` of
-// `match state` (or `state == "canceled" -> …` of a condition match) state is "canceled", and in the arms after a
+// A state is written in the program as its constructor (`Canceled`, the text 'canceled': compiler/fieldless.ts)
+// or, where a View is bound to the column, as a text literal; both are read as the text.
+// The program's own matches narrow a value on the path to a call or a query: in the arm `Canceled -> …` of
+// `match state` (or `state == Canceled -> …` of a condition match) state is "canceled", and in the arms after a
 // guardless one of them it is not. A value known only to exclude states is, as the state a WHERE compares the
 // column with, each declared state it does not exclude: the column holds only declared states (the triggers). A
 // path whose narrowing contradicts its environment (a "canceled" arm reached with state "active") does not happen.
 // What it does not check: a state compared by a function the value goes through (`is_done(state)`), a match on a
-// record's field (`Sub(state: "canceled")`), or a value that is not a parameter or a name the match binds.
+// record's field (`Sub(state: Canceled)`), or a value that is not a parameter or a name the match binds.
 import { eachPattern, partsOf } from '../../compiler/ast.ts';
 import type { Call, Expr, FnDecl, Match, Pattern, Program } from '../../compiler/ast.ts';
 import type { Expr as SqlExpr, Schema } from '../../sql/ast.ts';
 import type { ProgramSchema } from '../../sql/program.ts';
 import { queriesOf, sqlModel, tablesOf } from '../model.ts';
+import { textOfCtor } from '../../compiler/fieldless.ts';
 import { argFor, dec } from '../syntax.ts';
 import type { CallSite, Query, RuleContext } from '../types.ts';
 
@@ -88,6 +91,7 @@ const isParam = (fn: FnDecl, name: string): boolean => fn.params.some(p => p.nam
 /** A Tape expression's text on one path: a string literal, or a parameter bound on this path. */
 export function textValue(e: Expr | undefined, fn: FnDecl, env: Env, nar: Narrowings | undefined): Known | Impossible {
   if (e?.k === 'str') return dec(e.bytes);
+  if (e?.k === 'ctor') return textOfCtor(e.name, e.args.length);
   if (e?.k !== 'var') return null;
   const base = isParam(fn, e.name) ? (env[e.name] ?? null) : null;
   const n = nar?.get(e.name);
@@ -126,7 +130,11 @@ function add(ctx: Narrowings, name: string, n: Narrowing): Narrowings {
   const both: Narrowing = !had || 'eq' in n ? n : 'eq' in had ? had : { not: [...new Set([...had.not, ...n.not])] };
   return new Map(ctx).set(name, both);
 }
-const literal = (e: Expr): string | null => (e.k === 'str' ? dec(e.bytes) : null);
+const literal = (e: Expr): string | null =>
+  e.k === 'str' ? dec(e.bytes) : e.k === 'ctor' ? textOfCtor(e.name, e.args.length) : null;
+/** The text a pattern says its value is: a text literal, or a constructor of a fieldless sum. */
+const patText = (p: Pattern): string | null =>
+  p.k === 'str' ? dec(p.bytes) : p.k === 'ctor' ? textOfCtor(p.name, p.subs.length) : null;
 /** `name == "text"`, either way round. */
 function equates(c: Expr): [string, string] | null {
   if (c.k !== 'bin' || c.op !== '==') return null;
@@ -143,14 +151,9 @@ function narrowMatch(e: Match, ctx: Narrowings, out: WeakMap<Call, Narrowings>):
   const seen = new Map<string, Set<string>>(); // name -> texts excluded by earlier arms
   for (const a of e.arms) {
     const after = [...seen].reduce((c, [name, not]) => add(c, name, { not: [...not] }), ctx);
+    const said = 'pat' in a ? patText(a.pat) : null;
     const is: [string, string] | null =
-      'pat' in a
-        ? subject !== null && a.pat.k === 'str'
-          ? [subject, dec(a.pat.bytes)]
-          : null
-        : a.cond
-          ? equates(a.cond)
-          : null;
+      'pat' in a ? (subject !== null && said !== null ? [subject, said] : null) : a.cond ? equates(a.cond) : null;
     const inArm = 'pat' in a ? without(after, bound(a.pat)) : after;
     const test = 'pat' in a ? a.guard : a.cond;
     if (test) narrow(test, inArm, out);

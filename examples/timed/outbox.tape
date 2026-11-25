@@ -21,10 +21,12 @@ migration 1 "outbox" {
   )
 }
 
-machine deliveries.state {
-  "pending" -> "delivered"
-  "pending" -> "dead"
-  "dead" -> "pending"
+type DeliveryState { Pending Delivered Dead }
+
+machine deliveries.state: DeliveryState {
+  Pending -> Delivered
+  Pending -> Dead
+  Dead -> Pending
 }
 
 type Key = View where len(self) >= 1 and len(self) <= 64
@@ -33,7 +35,7 @@ type Delivery { Delivery(
   id: Int,
   topic: View,
   body: View,
-  state: View,
+  state: DeliveryState,
   tries: Int,
   round: Int,
   note: View
@@ -115,7 +117,7 @@ fn again(delivery: Delivery) -> Outcome {
 fn send(found: Option[Delivery]) -> Outcome {
   let Some(value: d) = found else -> Problem(status: 404, reason: "no such delivery")
   match d {
-    Delivery(id, topic, body, state: "pending", tries, round) -> sent(
+    Delivery(id, topic, body, state: Pending, tries, round) -> sent(
       id,
       tries,
       reply: call(
@@ -127,15 +129,16 @@ fn send(found: Option[Delivery]) -> Outcome {
         once: Once(delivery: id, round)
       )
     )
-    _ -> Shown(status: 200, delivery: d)
+    Delivery(state: Delivered) -> Shown(status: 200, delivery: d)
+    Delivery(state: Dead) -> Shown(status: 200, delivery: d)
   }
 }
 
 fn sent(id: Int, tries: Int, reply: Result[Posted, CallError]) -> Outcome {
   match reply {
-    Ok(value) -> shown(found: moved(id, to: "delivered", note: ""))
-    Err(error: Rejected(reason)) -> shown(found: moved(id, to: "dead", note: reason))
-    Err(error: Skew(reason)) -> shown(found: moved(id, to: "dead", note: reason))
+    Ok(value) -> shown(found: moved(id, to: Delivered, note: ""))
+    Err(error: Rejected(reason)) -> shown(found: moved(id, to: Dead, note: reason))
+    Err(error: Skew(reason)) -> shown(found: moved(id, to: Dead, note: reason))
     Err(error) -> failed(
       id,
       tried: sql_move(
@@ -169,11 +172,11 @@ fn failed(id: Int, tried: Move[Delivery]) -> Outcome {
 fn decided(id: Int, plan: Retry) -> Outcome {
   match plan {
     RetryIn(after) -> shown(found: noted(id, note: "no answer; again in \(after) ms"))
-    GaveUp(tries) -> shown(found: moved(id, to: "dead", note: "no answer after \(tries) attempts"))
+    GaveUp(tries) -> shown(found: moved(id, to: Dead, note: "no answer after \(tries) attempts"))
   }
 }
 
-fn moved(id: Int, to: View, note: View) -> Option[Delivery] {
+fn moved(id: Int, to: DeliveryState, note: View) -> Option[Delivery] {
   latest(
     id,
     m: sql_move(

@@ -20,9 +20,10 @@ const SCHEMA = [
 const program = (body: string, machine = true): string => `migration 1 "items" {
   ${SCHEMA.join(';\n  ')}
 }
-${machine ? '\nmachine items.state { "open" -> "closed" }\n' : ''}
+${machine ? '\nmachine items.state: ItemState { Open -> Closed }\n' : ''}
+type ItemState { Open Closed }
 type NewItem { NewItem(name: View, region: Option[View], qty: Option[Int]) }
-type Item { Item(id: Int, name: View, region: Option[View], qty: Option[Int], state: View) }
+type Item { Item(id: Int, name: View, region: Option[View], qty: Option[Int], state: ItemState) }
 type Count { Count(n: Int) }
 ${body}`;
 

@@ -2,6 +2,7 @@
 import type { Method, Program, Token, TokenOf, TypeDecl, Variant } from '../ast.ts';
 import { fail, stemOf } from '../common.ts';
 import { SHADOWABLE, claim, clashHint, isStd } from '../shadow.ts';
+import { storedText } from '../fieldless.ts';
 import { splitSql } from '../sqltext.ts';
 import { BUILTIN_TYPES, INTRINSICS } from '../types.ts';
 import { type Cursor, textOf } from './cursor.ts';
@@ -197,30 +198,57 @@ export function invariant(c: Cursor, prog: Program, t: Token): void {
   (prog.invariants ??= []).push({ name, settled, with: others, sql, ...c.at(t) });
 }
 /**
- * `machine table.column { "from" -> "to" … }`: the states a row's column may take and the moves between them. The
- * first state named is where every row starts. The rules check every write of the column against it (C57-C61),
- * and the host installs SQLite triggers made from it (host.ts, machineTriggers).
+ * `machine table.column: State { Pending -> Paid … }`: the states a row's column may take, the constructors of the
+ * fieldless sum `State`, and the moves between them. The column holds each state as its constructor's text
+ * (compiler/fieldless.ts: `Pending` is 'pending'), and so do the machine's `states`, `start` and moves, which the
+ * rules read against the SQL (C57-C61) and the host makes SQLite triggers of (host.ts, machineTriggers). The first
+ * state named is where every row starts.
  */
 export function machine(c: Cursor, prog: Program): void {
-  const HOW = 'A machine is `machine table.column { "from" -> "to" }`.';
+  const HOW =
+    'A machine is `machine table.column: State { From -> To }`, where `type State { From To }` names every state.';
   const table = c.expect('id', undefined, HOW);
   c.expect('op', '.', HOW);
-  const column = c.expect('id', undefined, HOW),
+  const column = c.expect('id', undefined, HOW);
+  if (c.is('op', '{'))
+    fail(
+      c.peek(),
+      'P01',
+      `machine ${table.v}.${column.v} names no type for its states`,
+      `Name the type whose constructors are its states, and write each move with them: \`type ${pascal(column.v)} { Pending Paid }\` and \`machine ${table.v}.${column.v}: ${pascal(column.v)} { Pending -> Paid }\`. The column holds each state as its constructor's name in snake_case ('pending', 'paid'), so the SQL keeps its texts.`,
+    );
+  c.expect('op', ':', HOW);
+  const named = c.expect('Id', undefined, HOW),
     moves: { from: string; to: string; line: number }[] = [],
-    state = (): string => textOf(c.expect('str', undefined, 'A state is a string: `"pending" -> "paid"`.').v);
+    ctors: string[] = [],
+    state = (): string => {
+      const ctor = c.expect('Id', undefined, "A state is a constructor of the machine's type: `Pending -> Paid`.").v;
+      if (!ctors.includes(ctor)) ctors.push(ctor);
+      return storedText(ctor);
+    };
   c.expect('op', '{');
   c.skipNl();
   while (!c.is('op', '}')) {
     const line = c.peek().line,
       from = state();
-    c.expect('op', '->', 'Each line is one move: `"from" -> "to"`.');
+    c.expect('op', '->', 'Each line is one move: `From -> To`.');
     moves.push({ from, to: state(), line });
     c.skipNl();
   }
   c.next();
-  const states = [...new Set(moves.flatMap(m => [m.from, m.to]))];
-  prog.machines.push({ table: table.v, column: column.v, start: states[0] ?? null, states, moves, ...c.at(table) });
+  const states = ctors.map(storedText);
+  prog.machines.push({
+    table: table.v,
+    column: column.v,
+    type: named.v,
+    ctors,
+    start: states[0] ?? null,
+    states,
+    moves,
+    ...c.at(table),
+  });
 }
+const pascal = (s: string): string => s.replaceAll(/(?:^|_)([a-z])/g, (_, x: string) => x.toUpperCase());
 // one method of an interface: `read head(Ref) -> Head`
 function method(c: Cursor): [string, Method, Token] {
   const kind = c.expect('id');

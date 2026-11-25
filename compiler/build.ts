@@ -33,7 +33,6 @@ import { addCapability, key } from './types.ts';
 import type { Type } from './types.ts';
 import { wireSource } from './wire.ts';
 import { rules } from '../rules/driver.ts';
-import { stateFields } from '../rules/model.ts';
 
 export type Source = { readonly name: string; readonly text: string };
 
@@ -105,14 +104,13 @@ function front(sources: readonly Source[]) {
   // program has type-checked, so a type error is shown first
   const ruled = [...rules(prog), ...tidy(prog)];
   const sqlFound: Problem[] = [];
-  const STATES = stateFields(prog);
   const invariants = checkInvariants(prog, sqlFound);
   // an interface's name is a capability type, like Remote, for this build only
   for (const n of prog.interfaces.keys()) addCapability(n);
   const served = serve(prog);
   const WIRE = wireSource(prog);
   if (WIRE.text) parse('wire', WIRE.text, prog);
-  return { prog, ruled, sqlFound, STATES, invariants, served, WIRE };
+  return { prog, ruled, sqlFound, invariants, served, WIRE };
 }
 type Front = ReturnType<typeof front>;
 
@@ -156,7 +154,7 @@ type Parts = { tables: mod.Tables; imports: mod.Imports; callsOf: mod.CallGraph;
 
 /** What the function compiler is given: the program, its layouts, and the tables functions add to. */
 function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omit<Build, 'counters'> {
-  const { prog, WIRE, STATES, sqlFound } = fr;
+  const { prog, WIRE, sqlFound } = fr;
   const { tables, callsOf } = parts;
   const { fns, ctors, types } = prog;
   const find = (n: string, file: string, at?: Place): FnDecl | null => mod.find(prog, n, file, at);
@@ -174,7 +172,7 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
         `cannot pin ${n}: the program declares no such flag`,
         `Pin a flag the program declares${prog.flags.length > 0 ? `: ${prog.flags.map(x => x.name).join(', ')}` : '; it declares none'}.`,
       );
-  const shared = { STATES, WIRE, callsOf, fns, opts, prog, sqlFound, ctors, types, find, fingerprint };
+  const shared = { WIRE, callsOf, fns, opts, prog, sqlFound, ctors, types, find, fingerprint };
   const constants = {
     FLAG_BASE: mod.FLAG_BASE,
     G_COST: mod.G_COST,
@@ -186,7 +184,6 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
     isLinear: layout.isLinear,
     nearest: layout.nearest,
     orderArgs: mod.orderArgs,
-    rowKind: layout.rowKind,
   };
   return {
     ...shared,
@@ -208,6 +205,8 @@ function toolkit(fr: Front, opts: Options, L: layout.Layouts, parts: Parts): Omi
     reads: (f: FnDecl, i: number) =>
       opts.reuse && !(f.owns?.includes(i) ?? false) && ownedParams.get(f.base ?? f.name)?.[i] === false,
     rowOf: (t: Type, at: Place) => layout.rowOf(L, t, at),
+    rowKind: (f: { type: Type }) => layout.rowKind(L, f),
+    fieldlessIn: (t: Type) => layout.fieldlessIn(L, t),
     shapeOf: (t: Type, at: Place, decoding: boolean) => layout.shapeOf(L, t, at, decoding),
     sig: (params: readonly number[], results: readonly number[]) => mod.sig(tables, params, results),
     slotsOf: (t: Type, at?: Place) => layout.slotsOf(L, t, at),

@@ -510,16 +510,17 @@ fn count(found: Option[Count]) -> Buf {
 
   it('machines across versions: the triggers allow what every live version does, are made again on retire, and refuse what they cannot read', async () => {
     const S = `schema "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, state TEXT NOT NULL DEFAULT 'pending')"\n`;
-    const M = 'machine s.state {\n  "pending" -> "paid"\n  "pending" -> "declined"\n}\n';
+    const M =
+      'type SaleState { Pending Paid Declined }\nmachine s.state: SaleState {\n  Pending -> Paid\n  Pending -> Declined\n}\n';
     const routes = (machine: string, lines: readonly string[]): string =>
-      `${S}${machine}fn handle(raw: View, db: Sql) -> Buf {\n  match request(raw) {\n${lines.join('\n')}\n    Request(method: "GET", path: "/triggers") -> respond(status: 200) |> append(view: sql_first(db, row: Text, query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master WHERE type = 'trigger'") |> shown)\n    _ -> respond(status: 404)\n  }\n}\ntype Text { Text(text: View) }\nfn shown(found: Option[Text]) -> View {\n  match found {\n    Some(value: Text(text)) -> text\n    None -> ""\n  }\n}\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\ntype Paid { Paid(id: Int) }\nfn moved(m: Move[Paid]) -> Buf {\n  match m {\n    Moved(value) -> respond(status: 200) |> write_int(value: 1)\n    Raced(now) -> respond(status: 409)\n    NoRow -> respond(status: 404)\n  }\n}\n`;
+      `${S}${machine}fn handle(raw: View, db: Sql) -> Buf {\n  match request(raw) {\n${lines.join('\n')}\n    Request(method: "GET", path: "/triggers") -> respond(status: 200) |> append(view: sql_first(db, row: Text, query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master WHERE type = 'trigger'") |> shown)\n    _ -> respond(status: 404)\n  }\n}\ntype Text { Text(text: View) }\nfn shown(found: Option[Text]) -> View {\n  match found {\n    Some(value: Text(text)) -> text\n    None -> ""\n  }\n}\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\ntype Sold { Sold(id: Int) }\nfn moved(m: Move[Sold]) -> Buf {\n  match m {\n    Moved(value) -> respond(status: 200) |> write_int(value: 1)\n    Raced(now) -> respond(status: 409)\n    NoRow -> respond(status: 404)\n  }\n}\n`;
     const make =
       '    Request(method: "POST", path: "/new/" ++ key) -> done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:key) ON CONFLICT(key) DO NOTHING", key))';
     const pay =
       '    Request(method: "POST", path: "/pay/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\'", key))';
     // with the machine, the compare-and-set is a sql_move (C62): its outcome tells a lost race from a missing row
     const payMove =
-      '    Request(method: "POST", path: "/pay/" ++ key) -> moved(m: sql_move(db, row: Paid, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\' RETURNING id", key))';
+      '    Request(method: "POST", path: "/pay/" ++ key) -> moved(m: sql_move(db, row: Sold, query: "UPDATE s SET state = \'paid\' WHERE key = :key AND state = \'pending\' RETURNING id", key))';
     const voids =
       '    Request(method: "POST", path: "/void/" ++ key) -> done(n: sql_exec(db, query: "UPDATE s SET state = \'void\' WHERE key = :key AND state = \'paid\'", key))';
     const free =

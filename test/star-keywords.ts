@@ -19,9 +19,10 @@ const PROGRAM = `migration 1 "transfers" {
   INSERT INTO transfers(id, "from", "to", "order", state) VALUES (1, 'ann', 'bo', 7, 'open')
 }
 
-machine transfers.state { "open" -> "done" }
+type TransferState { Open Done }
+machine transfers.state: TransferState { Open -> Done }
 
-type Transfer { Transfer(id: Int, from: View, to: View, order: Int, state: View) }
+type Transfer { Transfer(id: Int, from: View, to: View, order: Int, state: TransferState) }
 
 fn handle(raw: View, db: Sql) -> Buf {
   match request(raw).path {
@@ -40,7 +41,14 @@ fn handle(raw: View, db: Sql) -> Buf {
 }
 
 fn line(t: Transfer) -> View {
-  "\\(t.id) \\(t.from)>\\(t.to) \\(t.order) \\(t.state)"
+  "\\(t.id) \\(t.from)>\\(t.to) \\(t.order) \\(state_text(s: t.state))"
+}
+
+fn state_text(s: TransferState) -> View {
+  match s {
+    Open -> "open"
+    Done -> "done"
+  }
 }
 
 fn shown(found: Option[Transfer]) -> Buf {

@@ -4,6 +4,7 @@
 // compiled build words it.
 import type { Program, TypeAst, TypeDecl, Variant } from '../compiler/ast.ts';
 import { unreachable } from '../compiler/ast.ts';
+import { expectedOneOf, fieldlessOf, storedText } from '../compiler/fieldless.ts';
 import { decExpected, elementRefusalOf, refusalOf } from '../compiler/rule.ts';
 import { type Adt, type Buf, type Value, adt, isDec } from './value.ts';
 import { dec, parse, text as decText } from './dec.ts';
@@ -48,6 +49,16 @@ export const recordOf = (prog: Program, name: string, what: string): { decl: Typ
 /** The scale of a Dec type, or of a refinement of one. */
 const scaleIn = (prog: Program, t: TypeAst): number => Number(baseOf(prog, t).args[0]?.name ?? 0);
 const cell = (prog: Program, t: TypeAst, v: Cell): Value => {
+  // a fieldless sum is stored as the text of one of its constructors; any other text stops the request
+  const ctors = t.args.length === 0 ? fieldlessOf(prog, t.name) : null;
+  if (ctors) {
+    const c = typeof v === 'string' ? ctors.find(x => storedText(x) === v) : undefined;
+    if (c === undefined)
+      throw new Error(
+        `${v === null ? 'NULL' : JSON.stringify(v)} in a column read as ${t.name}: ${expectedOneOf(ctors)}`,
+      );
+    return adt(c);
+  }
   const k = kindOf(prog, t);
   if (v === null) throw new Error(`NULL in a column read as ${t.name}`);
   // a Dec is stored as its count
@@ -116,14 +127,25 @@ const notOf = (sh: { kind: Kind; scale: number }): string =>
   `expected ${sh.kind === 'd' ? decExpected(sh.scale) : KIND[sh.kind]}`;
 const SURROGATE = 'expected text without lone surrogates';
 /** What a type is in JSON: a scalar, a list of something, or a record. */
-type Shape = { k: 'scalar'; kind: Kind; scale: number } | { k: 'list'; of: TypeAst } | { k: 'record' };
+type Shape =
+  | { k: 'scalar'; kind: Kind; scale: number }
+  | { k: 'list'; of: TypeAst }
+  | { k: 'record' }
+  | { k: 'fieldless'; ctors: readonly string[] };
 const shapeOf = (prog: Program, t: TypeAst): Shape => {
   const [of] = t.args;
   if (t.name === 'List' && of) return { k: 'list', of };
   const b = baseOf(prog, t).name;
+  const ctors = t.args.length === 0 ? fieldlessOf(prog, t.name) : null;
+  if (ctors) return { k: 'fieldless', ctors };
   return b === 'View' || b === 'Int' || b === 'Float' || b === 'Bool' || b === 'Dec'
     ? { k: 'scalar', kind: kindOf(prog, t), scale: scaleIn(prog, t) }
     : { k: 'record' };
+};
+/** A fieldless sum from the text of one of its constructors, or why not: any other value is refused alike. */
+const ctorAs = (ctors: readonly string[], x: unknown): Got => {
+  const c = typeof x === 'string' ? ctors.find(n => storedText(n) === x) : undefined;
+  return c === undefined ? { why: expectedOneOf(ctors) } : { value: adt(c) };
 };
 // a Dec from a number's text or from text, exactly at its scale
 const scalarOf = (k: Kind, x: unknown, scale: number): Value | null =>
@@ -160,6 +182,8 @@ function valueAs(prog: Program, meets: Meets, t: TypeAst, x: unknown): Got {
   const sh = shapeOf(prog, t);
   if (x === null) return { why: 'null' };
   switch (sh.k) {
+    case 'fieldless':
+      return ctorAs(sh.ctors, x);
     case 'record':
       return recordAs(prog, meets, t.name, x);
     case 'list':
@@ -253,7 +277,9 @@ function fit(
       refined.push({ name: fl.name, type, value });
       continue;
     }
-    if (sh.k === 'list' ? !Array.isArray(x) : !isObject(x))
+    // a fieldless sum is text: any other value is refused as it is checked, other text once the fields are read
+    if (sh.k === 'fieldless' && typeof x !== 'string') return { depth, why: `${fl.name}: ${expectedOneOf(sh.ctors)}` };
+    if (sh.k === 'list' ? !Array.isArray(x) : sh.k === 'record' && !isObject(x))
       return { depth, why: `${fl.name}: expected ${sh.k === 'list' ? 'an array' : 'an object'}` };
     later.push(() => {
       const got = valueAs(prog, meets, type, x);
@@ -291,6 +317,7 @@ export function decode(prog: Program, bytes: Uint8Array, t: TypeAst, meets: Meet
     // RangeError: nested too deep for the reviver
   }
   const [of] = t.args;
+  const top = shapeOf(prog, t);
   const got: Got =
     t.name === 'List' && of
       ? Array.isArray(parsed)
@@ -298,7 +325,9 @@ export function decode(prog: Program, bytes: Uint8Array, t: TypeAst, meets: Meet
         : { why: 'expected an array' }
       : shapeOf(prog, t).k === 'scalar'
         ? valueAs(prog, meets, t, parsed)
-        : recordAs(prog, meets, t.name, parsed);
+        : top.k === 'fieldless'
+          ? ctorAs(top.ctors, parsed)
+          : recordAs(prog, meets, t.name, parsed);
   return 'why' in got ? err(got.why) : adt('Ok', { value: got.value });
 }
 
@@ -306,7 +335,8 @@ const isAdt = (v: Value | undefined): v is Adt => typeof v === 'object' && !(v i
 /**
  * write_json: a value as JSON. A record as an object, its fields in the order they are declared, an Option field
  * that is None left out and one that is Some written as its value; a type with several constructors as
- * {"Constructor": {…}}; a List as an array; Int, Bool and View as themselves. `writeText` writes one text as a
+ * {"Constructor": {…}}, and a type whose constructors have no fields as the text of its constructor ("onsale"); a
+ * List as an array; Int, Bool and View as themselves. `writeText` writes one text as a
  * JSON string (the program's own `write_json_string`).
  */
 export function writeJson(prog: Program, out: Buf, v: Value, writeText: (out: Buf, text: Uint8Array) => void): Buf {
@@ -327,6 +357,8 @@ export function writeJson(prog: Program, out: Buf, v: Value, writeText: (out: Bu
       variant = decl?.variants[made?.vi ?? -1];
     if (!decl || !variant || decl.name === 'Option' || decl.name === 'Result')
       throw new Unsupported(`write_json of ${x.c}`);
+    // a fieldless sum is the text of its constructor
+    if (fieldlessOf(prog, decl.name)) return text(JSON.stringify(storedText(x.c)));
     if (decl.name === 'List') {
       text('[');
       for (let item: Value | undefined = x, first = true; isAdt(item) && item.c === 'Cons'; first = false) {

@@ -17,6 +17,40 @@ export function portKeys(text: string): string {
   return n ? `${out.replace(/\n?$/, '\n')}// added by experiments/lang/port-keys.ts: keys were Ints before C64\ntype OnceKey { OnceKey(n: Int) }\n` : text;
 }
 
+// `machine t.c { "a" -> "b" … }` of then names its type now (issue 12): `machine t.c: TCState { A -> B … }`, each
+// move on the line it was on, and the type is declared at the end, its constructors the states in the order first
+// named, so each is stored as the text it was ('a', 'b'). A machine whose states are not lower-case words is left as
+// it was (the parser refuses it, P01).
+const pascal = (s: string): string => s.replaceAll(/(?:^|_)([a-z])/g, (_m, c: string) => c.toUpperCase());
+export function portMachines(text: string): string {
+  const MACHINE = /^machine ([a-z_]+)\.([a-z_]+) \{\n((?:[ \t]*"[a-z_]+" -> "[a-z_]+"[ \t]*\n)*)\}/gm;
+  // a name of the program's own that a state's constructor now takes (`type Pending { Pending(…) }`) is renamed
+  // `PendingRow` everywhere outside text, where no state was named
+  const states = new Set([...text.matchAll(MACHINE)].flatMap(m => [...(m[3] ?? '').matchAll(/"([a-z_]+)"/g)].map(s => pascal(s[1] ?? ''))));
+  const TOKEN = /("(?:[^"\\]|\\.)*")|\b([A-Z]\w*)\b/g;
+  const clash = new Set([...text.matchAll(TOKEN)].flatMap(m => (m[2] && states.has(m[2]) ? [m[2]] : [])));
+  const renamed =
+    clash.size === 0
+      ? text
+      : text.replaceAll(TOKEN, (m, _s: string | undefined, id: string | undefined) =>
+          id !== undefined && clash.has(id) ? `${id}Row` : m,
+        );
+  const types: string[] = [];
+  const out = renamed.replace(MACHINE, (_m, table: string, column: string, body: string) => {
+    const name = `${pascal(table)}${pascal(column)}`;
+    const named: string[] = [];
+    const moves = body.replaceAll(/"([a-z_]+)" -> "([a-z_]+)"/g, (_x, a: string, b: string) => {
+      for (const s of [a, b]) if (!named.includes(s)) named.push(s);
+      return `${pascal(a)} -> ${pascal(b)}`;
+    });
+    if (named.length > 0 && !types.some(t => t.startsWith(`type ${name} `)))
+      types.push(`type ${name} { ${named.map(pascal).join(' ')} }`);
+    return `machine ${table}.${column}: ${name} {\n${moves}}`;
+  });
+  return types.length === 0
+    ? out
+    : `${out.replace(/\n?$/, '\n')}// added by experiments/lang/port-keys.ts: a machine's states were text before issue 12\n${types.join('\n')}\n`;
+}
 // the pattern json(T(…)) of then is decode now (the compiler refuses the pattern: C35), line for line
 export const portJson = (text: string): string => {
   const types = ['NewTodo', 'Changes'];

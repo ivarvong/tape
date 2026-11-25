@@ -23,22 +23,41 @@ migration 1 "orders" {
   )
 }
 
-machine orders.state {
-  "charging" -> "placed"
-  "charging" -> "declined"
-  "placed" -> "accepted"
-  "placed" -> "refunding"
-  "accepted" -> "picked_up"
-  "picked_up" -> "delivered"
-  "refunding" -> "canceled"
-  "refunding" -> "refund_failed"
+type OrderState {
+  Charging
+  Placed
+  Declined
+  Accepted
+  Refunding
+  PickedUp
+  Delivered
+  Canceled
+  RefundFailed
+}
+
+machine orders.state: OrderState {
+  Charging -> Placed
+  Charging -> Declined
+  Placed -> Accepted
+  Placed -> Refunding
+  Accepted -> PickedUp
+  PickedUp -> Delivered
+  Refunding -> Canceled
+  Refunding -> RefundFailed
 }
 
 flag accept_ms: Int = 300000
 
 type Key = View where len(self) >= 1 and len(self) <= 64
 type NewOrder { NewOrder(key: Key, card: View, amount: Int) }
-type Order { Order(id: Int, card: View, amount: Int, state: View, accept_by: Int, note: View) }
+type Order { Order(
+  id: Int,
+  card: View,
+  amount: Int,
+  state: OrderState,
+  accept_by: Int,
+  note: View
+) }
 type Charge { Charge(card: View, amount: Int) }
 type Charged { Charged(payment: Int) }
 type Refund { Refund(card: View, amount: Int) }
@@ -265,18 +284,23 @@ fn again(found: Option[Order]) -> Outcome {
 fn due(found: Option[Order]) -> Outcome {
   let Some(value: o) = found else -> Problem(status: 404, reason: "no such order")
   match o {
-    Order(state: "charging") -> charge(order: o)
+    Order(state: Charging) -> charge(order: o)
     Order(
       id,
-      state: "placed",
+      state: Placed,
       accept_by
     ) if accept_by <= now() -> cancel(id, why: "not accepted in time")
-    Order(id, state: "placed", accept_by) -> {
+    Order(id, state: Placed, accept_by) -> {
       do wake(after: accept_by - now(), key: id)
       waiting(found: Some(value: o))
     }
-    Order(state: "refunding") -> refund(order: o)
-    _ -> Shown(status: 200, order: o)
+    Order(state: Refunding) -> refund(order: o)
+    Order(state: Declined) -> Shown(status: 200, order: o)
+    Order(state: Accepted) -> Shown(status: 200, order: o)
+    Order(state: PickedUp) -> Shown(status: 200, order: o)
+    Order(state: Delivered) -> Shown(status: 200, order: o)
+    Order(state: Canceled) -> Shown(status: 200, order: o)
+    Order(state: RefundFailed) -> Shown(status: 200, order: o)
   }
 }
 

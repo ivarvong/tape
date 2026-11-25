@@ -57,8 +57,8 @@ export function letPattern(c: Ctx, l: Extract<Let, { pat: Pattern }>): void {
 // of a type with a known set of constructors, or a test that can fail on a type with no such set (a literal,
 // a prefix, a function pattern), which never completes a column.
 
-/** A column's type. `states`: it is a machine's column read into a row, and its states are every value it has. */
-type Column = Type & { states?: string[] };
+/** A column's type. */
+type Column = Type;
 /** One of the constructors a column's values are made with, and the columns its fields add. */
 type Shape = { name: string; fields: { name: string; type: Column }[] };
 /** What a pattern asks of a column: a constructor (with a pattern for some fields), or a test that can fail. */
@@ -67,23 +67,16 @@ const WILD: Pattern = { k: 'any', line: 0, file: '' };
 
 /** The constructors of a column's type, when it has a known set of them. */
 function shapesOf(c: Ctx, t: Column, at: object): Shape[] | null {
-  if (t.states) return t.states.map(s => ({ name: JSON.stringify(s), fields: [] }));
   if (t.name === 'Bool') return ['True', 'False'].map(name => ({ name, fields: [] }));
-  const stated = (f: { name: string; type: Type }): Column => {
-    const states = c.B.STATES.get(`${t.name}.${f.name}`);
-    return states ? { ...f.type, states } : f.type;
-  };
   const adt = c.B.adtOrNull(t, at);
   return adt
-    ? adt.variants.map(v => ({ name: v.name, fields: v.fields.map(f => ({ name: f.name, type: stated(f) })) }))
+    ? adt.variants.map(v => ({ name: v.name, fields: v.fields.map(f => ({ name: f.name, type: f.type })) }))
     : null;
 }
 
 function headOf(c: Ctx, p: Pattern, t: Column, known: boolean): Head | null {
   if (p.k === 'as') return headOf(c, p.pat, t, known);
   if (irrefutable(c, p, t)) return null;
-  if (t.states)
-    return p.k === 'str' && t.states.includes(text(p.bytes)) ? { name: JSON.stringify(text(p.bytes)), subs: [] } : {};
   if (p.k !== 'ctor' || !known) return {};
   return { name: p.name, subs: t.name === 'Bool' ? [] : ctorOf(c, p, t).subs };
 }
@@ -132,6 +125,68 @@ export function uncovered(c: Ctx, rows: readonly Pattern[][], types: readonly Co
   return null;
 }
 
+// ---- C97: a match over a machine's states names each one. Where some arm names a state and another takes the
+// value whatever its state is (`_`, a name, a field left out), that arm takes every state the others do not name,
+// and a state added to the machine too, with no word from the compiler: the defect of issue 12, an event paused
+// shown as canceled. Every column is followed into every constructor an arm names, so a state inside a row inside
+// an Option is read as one at the top.
+
+/** One arm's patterns still to read, and the arm's own pattern, where a finding is said. */
+type Lumped = { readonly pats: readonly Pattern[]; readonly arm: Pattern };
+/** An arm that takes states it does not name, the machine whose states they are, and those states. */
+type Lump = { arm: Pattern; machine: string; type: string; left: string[] };
+
+function lumped(c: Ctx, rows: readonly Lumped[], types: readonly Column[], at: object): Lump | null {
+  const [t, ...rest] = types;
+  if (!t || rows.length === 0) return null;
+  const shapes = shapesOf(c, t, at);
+  const heads = rows.map(r => (r.pats[0] ? headOf(c, r.pats[0], t, shapes !== null) : null));
+  // no arm names a constructor here: nothing is told apart, so nothing is taken in a lump
+  if (!shapes || heads.every(h => !h?.name))
+    return lumped(
+      c,
+      rows.map(r => ({ ...r, pats: r.pats.slice(1) })),
+      rest,
+      at,
+    );
+  const m = t.args.length === 0 ? c.B.prog.machines.find(x => x.type === t.name) : undefined;
+  const any = rows.findIndex((_, i) => !heads[i]);
+  if (m && any >= 0) {
+    const named = new Set(heads.flatMap((h, i) => (h?.name && i < any ? [h.name] : [])));
+    return {
+      arm: rows[any]?.arm ?? WILD,
+      machine: `${m.table}.${m.column}`,
+      type: m.type,
+      left: shapes.map(s => s.name).filter(n => !named.has(n)),
+    };
+  }
+  for (const s of shapes) {
+    const special = rows.flatMap((r, i) => {
+      const h = heads[i];
+      if (h && h.name !== s.name) return [];
+      const field = (f: { name: string }): Pattern => h?.subs?.find(x => x.fl.name === f.name)?.pat ?? WILD;
+      return [{ arm: r.arm, pats: [...s.fields.map(f => (h ? field(f) : WILD)), ...r.pats.slice(1)] }];
+    });
+    const found = lumped(c, special, [...s.fields.map(f => f.type), ...rest], at);
+    if (found) return found;
+  }
+  return null;
+}
+
+function checkStates(c: Ctx, e: Match, subject: Stored): void {
+  if (c.B.prog.machines.length === 0) return;
+  const rows = e.arms.flatMap(a => ('pat' in a && !a.guard ? [{ pats: [a.pat], arm: a.pat }] : []));
+  const found = lumped(c, rows, [subject.type], e);
+  if (!found) return;
+  const { arm, machine, type, left } = found;
+  fail(
+    arm.line ? arm : e,
+    'C97',
+    `this arm takes every state of machine ${machine}: ${type} that the arms above it do not name${left.length > 0 ? ` (${left.join(', ')})` : ''}, and would take a state added to the machine as well, without a word`,
+    `Name the states in arms of their own (${(left.length > 0 ? left : ['State']).map(x => `\`${x}\``).join(', ')}), not with \`_\` or a name: then a state added to ${type} does not compile until each match says what it does.`,
+  );
+}
+
 // ---- match
 
 function checkCovered(c: Ctx, e: Match, subject: Stored): void {
@@ -151,7 +206,7 @@ function checkCovered(c: Ctx, e: Match, subject: Stored): void {
     [subject.type],
     e,
   );
-  if (!missing) return;
+  if (!missing) return checkStates(c, e, subject);
   fail(
     e,
     'C24',

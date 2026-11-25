@@ -27,11 +27,13 @@ migration 1 "runs" {
   )
 }
 
-machine runs.state {
-  "thinking" -> "acting"
-  "acting" -> "thinking"
-  "thinking" -> "done"
-  "thinking" -> "gave_up"
+type RunState { Thinking Acting Done GaveUp }
+
+machine runs.state: RunState {
+  Thinking -> Acting
+  Acting -> Thinking
+  Thinking -> Done
+  Thinking -> GaveUp
 }
 
 type Key = View where len(self) >= 1 and len(self) <= 64
@@ -40,7 +42,7 @@ type Run { Run(
   id: Int,
   prompt: View,
   step: Int,
-  state: View,
+  state: RunState,
   tool: View,
   input: View,
   last: View,
@@ -108,7 +110,7 @@ fn load(id: Int) -> Option[Run] {
 // step leaves; each turn is a commit point at its call.
 fn advance(run: Run) -> Outcome {
   match run {
-    Run(id, step, state: "thinking") if step >= 5 -> show(
+    Run(id, step, state: Thinking) if step >= 5 -> show(
       status: 200,
       found: latest(
         id,
@@ -120,7 +122,7 @@ fn advance(run: Run) -> Outcome {
         )
       )
     )
-    Run(id, prompt, step, last, state: "thinking") -> {
+    Run(id, prompt, step, last, state: Thinking) -> {
       let Ok(value: Proposed(tool, input, answer)) = call(
         to: model,
         method: "think",
@@ -165,7 +167,7 @@ fn advance(run: Run) -> Outcome {
     }
     // The tool's result, or its refusal, is the model's to read at the next step. No answer is not a result: the
     // run stays in `acting`, to send the same call again.
-    Run(id, step, tool, input, state: "acting") -> {
+    Run(id, step, tool, input, state: Acting) -> {
       let Ok(value: Used(output)) = call(
         to: tools,
         method: "tool",
@@ -180,7 +182,8 @@ fn advance(run: Run) -> Outcome {
       }
       next(found: told(id, last: output))
     }
-    _ -> Shown(status: 200, run)
+    Run(state: Done) -> Shown(status: 200, run)
+    Run(state: GaveUp) -> Shown(status: 200, run)
   }
 }
 

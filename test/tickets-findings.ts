@@ -13,11 +13,11 @@ const fromOf = (query: string): Select['from'] => {
   return s.k === 'select' ? s.from : [];
 };
 const prog = (tables: string, body: string, machines = '') =>
-  `migration 1 "t" {\n${tables}\n}\n${machines}\ntype Id { Id(id: Int) }\ntype W { W(id: Int, tier: Int, state: View) }\nfn handle(raw: View, db: Sql) -> Buf {\n${body}\n}\n`;
+  `migration 1 "t" {\n${tables}\n}\n${machines}\ntype Id { Id(id: Int) }\ntype W { W(id: Int, tier: Int, state: View) }\nfn handle(raw: View, db: Sql) -> Buf {\n${body}\n}\ntype HoldState { Held Released }\ntype EventState { Onsale Canceled }\n`;
 const H = `CREATE TABLE events(id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT 'onsale' CHECK (state IN ('onsale', 'canceled')));
   CREATE TABLE holds(id INTEGER PRIMARY KEY, client TEXT NOT NULL UNIQUE, tier INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'held');
   CREATE TABLE tiers(id INTEGER PRIMARY KEY, event INTEGER NOT NULL, left INTEGER NOT NULL CHECK (left >= 0))`;
-const M = `machine holds.state {\n  "held" -> "released"\n}\nmachine events.state {\n  "onsale" -> "canceled"\n}`;
+const M = `machine holds.state: HoldState {\n  Held -> Released\n}\nmachine events.state: EventState {\n  Onsale -> Canceled\n}`;
 
 // ---- 1. a column named `left` (SQLite's JOIN_KW are names)
 T(

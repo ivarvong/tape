@@ -47,25 +47,29 @@ migration 1 "status" {
     ('email', 'Email delivery')
 }
 
-machine components.state {
-  "operational" -> "degraded"
-  "operational" -> "outage"
-  "operational" -> "maintenance"
-  "degraded" -> "operational"
-  "degraded" -> "outage"
-  "outage" -> "degraded"
-  "outage" -> "operational"
-  "maintenance" -> "operational"
+type ComponentState { Operational Degraded Outage Maintenance }
+
+machine components.state: ComponentState {
+  Operational -> Degraded
+  Operational -> Outage
+  Operational -> Maintenance
+  Degraded -> Operational
+  Degraded -> Outage
+  Outage -> Degraded
+  Outage -> Operational
+  Maintenance -> Operational
 }
 
-machine incidents.state {
-  "investigating" -> "identified"
-  "investigating" -> "monitoring"
-  "investigating" -> "resolved"
-  "identified" -> "monitoring"
-  "identified" -> "resolved"
-  "monitoring" -> "identified"
-  "monitoring" -> "resolved"
+type IncidentState { Investigating Identified Monitoring Resolved }
+
+machine incidents.state: IncidentState {
+  Investigating -> Identified
+  Investigating -> Monitoring
+  Investigating -> Resolved
+  Identified -> Monitoring
+  Identified -> Resolved
+  Monitoring -> Identified
+  Monitoring -> Resolved
 }
 
 invariant "an incident is resolved exactly when it says when" {
@@ -93,7 +97,7 @@ type Component { Component(
   id: Int,
   slug: View,
   name: View,
-  state: View,
+  state: ComponentState,
   note: View,
   since: Int,
   until: Int
@@ -103,7 +107,7 @@ type Incident { Incident(
   component: Int,
   title: View,
   impact: View,
-  state: View,
+  state: IncidentState,
   started: Int,
   resolved: Int
 ) }
@@ -113,7 +117,7 @@ type Status { Status(overall: View, components: List[Component], incidents: List
 type Item { Item(id: View, title: View, content_text: View, date_published: View) }
 type Feed { Feed(version: View, title: View, home_page_url: View, items: List[Item]) }
 type Line { Line(id: Int, at: Int, title: View, state: View, body: View) }
-type Ended { Ended(component: Int, state: View) }
+type Ended { Ended(component: Int, state: ComponentState) }
 type Problem { Problem(error: View) }
 
 fn handle(raw: View, db: Sql, clock: Clock, timer: Timer) -> Buf {
@@ -227,7 +231,7 @@ fn shown(moved: Move[Component]) -> Buf {
     Moved(value) -> respond_as(status: 200, content: Json) |> write_json(value)
     Raced(now) -> problem(
       status: 409,
-      error: "\(now.slug) is \(now.state), and cannot move there from it"
+      error: "\(now.slug) is \(component_text(state: now.state)), and cannot move there from it"
     )
     NoRow -> problem(status: 404, error: "no such component")
   }
@@ -327,7 +331,7 @@ fn updated(id: Int, body: View) -> Buf {
     _ -> NoRow
   }
   match moved {
-    Moved(value: i = Incident(state: "resolved")) -> {
+    Moved(value: i = Incident(state: Resolved)) -> {
       do moved_or_not(m: sql_move(
         row: Component,
         query: "UPDATE components SET state = 'operational', note = '', since = :at, until = 0 \
@@ -337,8 +341,21 @@ fn updated(id: Int, body: View) -> Buf {
       ))
       incident_shown(status: 201, found: Some(value: i))
     }
-    Moved(value) -> incident_shown(status: 201, found: Some(value))
-    Raced(now) -> rollback(out: problem(status: 409, error: "incident \(id) is \(now.state)"))
+    Moved(value: value = Incident(state: Investigating)) -> incident_shown(
+      status: 201,
+      found: Some(value)
+    )
+    Moved(value: value = Incident(state: Identified)) -> incident_shown(
+      status: 201,
+      found: Some(value)
+    )
+    Moved(value: value = Incident(state: Monitoring)) -> incident_shown(
+      status: 201,
+      found: Some(value)
+    )
+    Raced(now) -> rollback(
+      out: problem(status: 409, error: "incident \(id) is \(incident_text(state: now.state))")
+    )
     NoRow -> rollback(out: problem(
       status: 400,
       error: "state: identified, monitoring or resolved, of an incident that exists"
@@ -488,9 +505,8 @@ fn banner(state: View) -> View {
 
 fn row(out: Buf, c: Component) -> Buf {
   out
-    |> append(
-      view: "<div class=c><div><span class=dot style=\"background:var(--\(c.state))\"></span>"
-    )
+    |> append(view: "<div class=c><div><span class=dot \
+        style=\"background:var(--\(component_text(state: c.state)))\"></span>")
     |> write_html(text: c.name)
     |> append(view: match c.note {
       "" -> ""
@@ -501,7 +517,8 @@ fn row(out: Buf, c: Component) -> Buf {
       "" -> ""
       _ -> "</div>"
     })
-    |> append(view: "</div><div class=s style=\"color:var(--\(c.state))\">\(c.state)")
+    |> append(view: "</div><div class=s \
+        style=\"color:var(--\(component_text(state: c.state)))\">\(component_text(state: c.state))")
     |> append(view: match c.until > 0 {
       True -> "<div class=meta>until \(iso(ms: c.until))</div>"
       False -> ""
@@ -515,7 +532,8 @@ fn incidents_html(out: Buf, rows: Rows[Incident]) -> Buf {
       out: out
         |> append(view: "<div class=i><b>")
         |> write_html(text: i.title)
-        |> append(view: "</b> <span class=meta>\(i.state) · since \(iso(ms: i.started))</span>"),
+        |> append(view: "</b> <span class=meta>\(incident_text(state: i.state)) · since \
+            \(iso(ms: i.started))</span>"),
       rows: sql_all(
         row: Update,
         query: "SELECT id, incident, state, body, at FROM updates WHERE incident = :id \
@@ -570,5 +588,24 @@ fn two(n: Int) -> View {
   match {
     n < 10 -> "0\(n)"
     else -> "\(n)"
+  }
+}
+
+// The words a state is shown in: the text its column holds.
+fn component_text(state: ComponentState) -> View {
+  match state {
+    Operational -> "operational"
+    Degraded -> "degraded"
+    Outage -> "outage"
+    Maintenance -> "maintenance"
+  }
+}
+
+fn incident_text(state: IncidentState) -> View {
+  match state {
+    Investigating -> "investigating"
+    Identified -> "identified"
+    Monitoring -> "monitoring"
+    Resolved -> "resolved"
   }
 }

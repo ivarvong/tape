@@ -81,9 +81,9 @@ for (const f of [
 // ---- 3. each part on a small program
 const S =
   "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, state TEXT NOT NULL DEFAULT 'pending', note TEXT NOT NULL DEFAULT '')";
-const M = 'machine s.state {\n  "pending" -> "paid"\n  "pending" -> "declined"\n}\n';
+const M = 'machine s.state: SaleState {\n  Pending -> Paid\n  Pending -> Declined\n}\n';
 const prog = (body: string) =>
-  `schema "${S}"\n${M}type N { N(n: Int) }\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n${body}`;
+  `schema "${S}"\n${M}type N { N(n: Int) }\nfn done(n: Int) -> Buf {\n  respond(status: 200) |> write_int(value: n)\n}\n${body}\ntype SaleState { Pending Paid Declined }\n`;
 const ins =
   'fn handle(raw: View, db: Sql) -> Buf {\n  done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:raw) ON CONFLICT(key) DO NOTHING", raw))\n}\n';
 T(

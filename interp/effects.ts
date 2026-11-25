@@ -1,6 +1,7 @@
 // interp/effects.ts: the calls that reach outside the program. Each is asked of the host, with what a log records
 // of it: the statement and its parameters, the call and its message, the timer and its key.
 import { type Arg, type Call, type TypeAst, asType, unreachable } from '../compiler/ast.ts';
+import { storedText } from '../compiler/fieldless.ts';
 import { movePlan, tablesOf } from '../rules.ts';
 import { type Interp, callable, ev, find, meets, run, stop } from './eval.ts';
 import { type CallRequest, type Host, MAX_WAKE_MS, type SqlParam } from './host.ts';
@@ -68,23 +69,26 @@ const json = (it: Interp, v: Value, file: string): Uint8Array =>
 
 // ---- SQL
 const isAdt = (x: Value): x is Adt => typeof x === 'object' && !(x instanceof Uint8Array) && x.k === 'adt';
-// an Option is NULL for None, its value for Some
+// an Option is NULL for None, its value for Some; a constructor of a fieldless sum is its text (the type checker let
+// no other constructor here)
 const sqlParam = (x: Value): SqlParam =>
   isAdt(x) && x.c === 'None'
     ? null
     : isAdt(x) && x.c === 'Some'
       ? sqlParam(x.f['value'] ?? stop('sql: Some without a value'))
-      : x instanceof Uint8Array
-        ? utf8.decode(x)
-        : typeof x === 'boolean'
-          ? x
-            ? 1
-            : 0
-          : typeof x === 'number'
+      : isAdt(x)
+        ? storedText(x.c)
+        : x instanceof Uint8Array
+          ? utf8.decode(x)
+          : typeof x === 'boolean'
             ? x
-            : isDec(x)
-              ? exact(x.m, 'sql')
-              : exact(asInt(x), 'sql');
+              ? 1
+              : 0
+            : typeof x === 'number'
+              ? x
+              : isDec(x)
+                ? exact(x.m, 'sql')
+                : exact(asInt(x), 'sql');
 // p1, p2, … in order
 const sqlParams = (s: Site): SqlParam[] => {
   const out: SqlParam[] = [];

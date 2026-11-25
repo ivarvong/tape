@@ -1,6 +1,7 @@
 // sim/dictionary.ts: words a request can use so that it names something that exists: the text values the
 // programs' own INSERTs seed their tables with, by column name. A request for a card that is not there only ever
 // tests the 404.
+import { storedText } from '../compiler/fieldless.ts';
 const CONSTRAINT = /^(PRIMARY|UNIQUE|CHECK|FOREIGN|CONSTRAINT)$/i;
 const CREATE_TABLE = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(((?:[^()]|\([^()]*\))*)\)/gi;
 const INSERT_VALUES = /INSERT\s+(?:OR\s+\w+\s+)?INTO\s+(\w+)\s*(?:\(([^)]*)\)\s*)?VALUES\s*((?:\([^()]*\)\s*,?\s*)+)/gi;
@@ -48,11 +49,11 @@ export function dictionaryOf(texts: readonly string[]): Dictionary {
         });
       }
     }
-  // the states a machine declares, under its column's name: a request that asks for a state (`{"state": "outage"}`)
+  // the states a machine declares (the texts of its constructors), under its column's name: a request that asks for a state (`{"state": "outage"}`)
   // names one the program knows
   for (const source of texts)
     for (const [, , column = '', moves = ''] of source.matchAll(MACHINE))
-      for (const [, state = ''] of moves.matchAll(/"([^"]*)"/g)) put(column, state);
+      for (const [, ctor = ''] of moves.matchAll(/\b([A-Z]\w*)\b/g)) put(column, storedText(ctor));
   return dict;
 }
-const MACHINE = /^machine\s+(\w+)\.(\w+)\s*\{([^}]*)\}/gm;
+const MACHINE = /^machine\s+(\w+)\.(\w+)\s*:\s*\w+\s*\{([^}]*)\}/gm;

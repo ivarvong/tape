@@ -103,22 +103,6 @@ export function rowTablesOf(queries: readonly Query[]): Map<string, string | nul
   return rowTable;
 }
 
-// "Type.field" -> the states of its machine, for each row type read from one table that has a machine on that
-// column. The compiler uses it to treat such a field as one of a known set (a match that names every state needs
-// no default, and one that misses a state says which).
-export function stateFields(prog: Program): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  if (!prog.machines?.length) return out;
-  const rowTable = rowTablesOf(queriesOf(prog).queries);
-  for (const [type, tb] of rowTable)
-    if (tb)
-      for (const m of prog.machines)
-        if (lc(m.table) === lc(tb)) {
-          const f = prog.types.get(type)?.variants?.[0]?.fields?.find(field => lc(field.name) === lc(m.column));
-          if (f) out.set(`${type}.${f.name}`, m.states);
-        }
-  return out;
-}
 // --- the program's tables, as the rules use them: { cols, pk, uniques (the primary key first), defaults: column →
 // its DEFAULT as SQL text ('reserving', 0, NULL), or null for one that is not a literal }, by table name. Read from
 // sql.ts's schema: schema statements, then migrations, then schema statements again (the order a name's data is

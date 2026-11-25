@@ -22,9 +22,11 @@ schema "CREATE TABLE IF NOT EXISTS sales(id INTEGER PRIMARY KEY, section TEXT NO
 
 // A sale is held as pending until the card is charged; the compiler checks every write of its state against these
 // moves (each from the state its WHERE names), and the host installs SQLite triggers that refuse any other.
-machine sales.state {
-  "pending" -> "paid"
-  "pending" -> "declined"
+type SaleState { Pending Paid Declined }
+
+machine sales.state: SaleState {
+  Pending -> Paid
+  Pending -> Declined
 }
 
 type Qty = Int where self >= 1 and self <= flags.max_per_order
@@ -34,16 +36,16 @@ type Buy { Buy(key: Key, section: View, qty: Qty, card: View) }
 type Price { Price(price: Int) }
 type Held { Held(id: Int, amount: Int) }
 type Ticket { Ticket(id: Int, section: View, qty: Int, amount: Int, code: Int) }
-type Pending { Pending(id: Int, section: View, qty: Int, amount: Int, card: View) }
+type Unpaid { Unpaid(id: Int, section: View, qty: Int, amount: Int, card: View) }
 type Line { Line(section: View, qty: Int, amount: Int) }
 type Tally { Tally(seats: Int, revenue: Int) }
-type Sale { Sale(id: Int, section: View, qty: Int, amount: Int, state: View, card: View) }
+type Sale { Sale(id: Int, section: View, qty: Int, amount: Int, state: SaleState, card: View) }
 type Earlier { Earlier(
   id: Int,
   section: View,
   qty: Int,
   amount: Int,
-  state: View,
+  state: SaleState,
   card: View,
   code: Int
 ) }
@@ -120,11 +122,13 @@ fn buy(body: View) -> Buf {
 fn earlier(found: Option[Earlier], used: Option[Price]) -> Buf {
   match found {
     Some(
-      value: Earlier(id, section, qty, amount, state: "pending", card)
+      value: Earlier(id, section, qty, amount, state: Pending, card)
     ) -> charge(id, section, qty, card, amount, within: 2000)
-    Some(value: Earlier(id, section, qty, amount, state: "paid", code)) -> respond(status: 201)
+    Some(value: Earlier(id, section, qty, amount, state: Paid, code)) -> respond(status: 201)
       |> write_json(value: Ticket(id, section, qty, amount, code))
-    Some(value: Earlier(state)) -> problem(status: 402, reason: "this purchase was " ++ state)
+    Some(
+      value: Earlier(state: Declined)
+    ) -> problem(status: 402, reason: "this purchase was declined")
     None -> unused(used)
   }
 }
@@ -139,9 +143,9 @@ fn unused(used: Option[Price]) -> Buf {
 // The same command as the first attempt (same key), with more time: payments repeats what it answered then.
 fn retry(sale: Int) -> Buf {
   let Some(
-    value: Pending(id, section, qty, amount, card)
+    value: Unpaid(id, section, qty, amount, card)
   ) = sql_first(
-    row: Pending,
+    row: Unpaid,
     query: "SELECT * FROM sales WHERE id = :sale AND state = 'pending'",
     sale
   ) else -> problem(status: 404, reason: "no such pending sale")
@@ -221,9 +225,10 @@ fn ticket(moved: Move[Earlier]) -> Buf {
   match moved {
     Moved(value: Earlier(id, section, qty, amount, code)) -> respond(status: 201)
       |> write_json(value: Ticket(id, section, qty, amount, code))
-    Raced(now: Earlier(id, section, qty, amount, state: "paid", code)) -> respond(status: 201)
+    Raced(now: Earlier(id, section, qty, amount, state: Paid, code)) -> respond(status: 201)
       |> write_json(value: Ticket(id, section, qty, amount, code))
-    Raced(now: Earlier(state)) -> problem(status: 409, reason: "this sale was " ++ state)
+    Raced(now: Earlier(state: Pending)) -> problem(status: 409, reason: "this sale was pending")
+    Raced(now: Earlier(state: Declined)) -> problem(status: 409, reason: "this sale was declined")
     NoRow -> problem(status: 404, reason: "no such pending sale")
   }
 }

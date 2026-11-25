@@ -15,18 +15,20 @@ migration 1 "expenses" {
     client TEXT NOT NULL UNIQUE,
     amount INTEGER NOT NULL CHECK (amount > 0),
     approver TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'paying', 'paid', 'rejected', 'expired', 'failed')),
+    state TEXT NOT NULL DEFAULT 'waiting' CHECK (state IN ('waiting', 'paying', 'paid', 'declined', 'expired', 'failed')),
     deadline INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT ''
   )
 }
 
-machine expenses.state {
-  "waiting" -> "paying"
-  "waiting" -> "rejected"
-  "waiting" -> "expired"
-  "paying" -> "paid"
-  "paying" -> "failed"
+type ExpenseState { Waiting Paying Declined Expired Paid Failed }
+
+machine expenses.state: ExpenseState {
+  Waiting -> Paying
+  Waiting -> Declined
+  Waiting -> Expired
+  Paying -> Paid
+  Paying -> Failed
 }
 
 flag decide_ms: Int = 86400000
@@ -37,12 +39,12 @@ type Expense { Expense(
   id: Int,
   amount: Int,
   approver: View,
-  state: View,
+  state: ExpenseState,
   deadline: Int,
   note: View
 ) }
 type Pay { Pay(amount: Int, ref: View) }
-type Paid { Paid(payment: Int) }
+type Payout { Payout(payment: Int) }
 type PayFor { PayFor(expense: Int) }
 
 type Outcome {
@@ -59,7 +61,7 @@ fn handle(raw: View, db: Sql, payments: Remote, clock: Clock, timer: Timer) -> B
       id,
       m: sql_move(
         row: Expense,
-        query: "UPDATE expenses SET state = 'rejected' WHERE id = :id AND state = 'waiting' \
+        query: "UPDATE expenses SET state = 'declined' WHERE id = :id AND state = 'waiting' \
             RETURNING *",
         id
       )
@@ -113,11 +115,11 @@ fn filed(body: View) -> Outcome {
 fn approve(id: Int) -> Outcome {
   let Some(value: e) = load(id) else -> Problem(status: 404, reason: "no such expense")
   match e {
-    Expense(state: "waiting", deadline) if deadline <= now() -> Problem(
+    Expense(state: Waiting, deadline) if deadline <= now() -> Problem(
       status: 410,
       reason: "the deadline has passed"
     )
-    Expense(state: "waiting") -> {
+    Expense(state: Waiting) -> {
       do wake(after: 5000, key: id)
       paying(moved: sql_move(
         row: Expense,
@@ -126,8 +128,11 @@ fn approve(id: Int) -> Outcome {
         id
       ))
     }
-    Expense(state: "paying") -> pay(expense: e)
-    _ -> Shown(status: 409, expense: e)
+    Expense(state: Paying) -> pay(expense: e)
+    Expense(state: Declined) -> Shown(status: 409, expense: e)
+    Expense(state: Expired) -> Shown(status: 409, expense: e)
+    Expense(state: Paid) -> Shown(status: 409, expense: e)
+    Expense(state: Failed) -> Shown(status: 409, expense: e)
   }
 }
 
@@ -147,14 +152,14 @@ fn pay(expense: Expense) -> Outcome {
       to: payments,
       method: "pay",
       send: Pay(amount, ref: "expense-\(id)"),
-      reply: Paid,
+      reply: Payout,
       within: 2000,
       once: PayFor(expense: id)
     )
   )
 }
 
-fn paid(id: Int, reply: Result[Paid, CallError]) -> Outcome {
+fn paid(id: Int, reply: Result[Payout, CallError]) -> Outcome {
   match reply {
     Ok(value) -> shown(found: latest(
       id,
@@ -195,7 +200,7 @@ fn unknown(id: Int) -> Outcome {
 fn due(found: Option[Expense]) -> Outcome {
   let Some(value: e) = found else -> Problem(status: 404, reason: "no such expense")
   match e {
-    Expense(id, state: "waiting", deadline) if deadline <= now() -> shown(found: latest(
+    Expense(id, state: Waiting, deadline) if deadline <= now() -> shown(found: latest(
       id,
       m: sql_move(
         row: Expense,
@@ -204,12 +209,15 @@ fn due(found: Option[Expense]) -> Outcome {
         id
       )
     ))
-    Expense(id, state: "waiting", deadline) -> {
+    Expense(id, state: Waiting, deadline) -> {
       do wake(after: deadline - now(), key: id)
       later(expense: e)
     }
-    Expense(state: "paying") -> pay(expense: e)
-    _ -> Shown(status: 200, expense: e)
+    Expense(state: Paying) -> pay(expense: e)
+    Expense(state: Declined) -> Shown(status: 200, expense: e)
+    Expense(state: Expired) -> Shown(status: 200, expense: e)
+    Expense(state: Paid) -> Shown(status: 200, expense: e)
+    Expense(state: Failed) -> Shown(status: 200, expense: e)
   }
 }
 

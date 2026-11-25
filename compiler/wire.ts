@@ -8,6 +8,8 @@
 // and for each record type that is not one flat constructor (`written`):
 //   wire_write_T(out, value)  the object, field by field: an Option field that is None has no key, and a type with
 //                             several constructors is {"Constructor": {…}}, the form json_as_T reads first
+// A type whose constructors have no fields is none of these: it is the text of its constructor ("onsale",
+// compiler/fieldless.ts), read by json_as_T from a string and checked as a field by json_check_T.
 // decode calls json_decode_T; write_json calls wire_write_T. A field is: Int, Bool, View (or a refinement); a record; List[…] of those; Option[…] of
 // any. What decode accepts and the reasons it gives are those of the host's decode before it (JSON.parse, then the
 // shape), with numbers read exactly (std/json.tape json_int). The code calls std's functions by their qualified names
@@ -15,6 +17,7 @@
 // (shadow.ts CORE), so a program's own max, push or List does not take their place.
 import { asType, partsOf } from './ast.ts';
 import type { Expr, Program, TypeAst, Variant } from './ast.ts';
+import { expectedOneOf, fieldlessOf, storedText } from './fieldless.ts';
 import { decExpected, elementRefusalOf, refusalOf } from './rule.ts';
 
 /** What a field is in JSON: a scalar, a record, a list of one of those, or any of them that may be absent. */
@@ -61,6 +64,7 @@ function tops(prog: Program): TypeAst[] {
 }
 
 export function wireSource(prog: Program): Wire {
+  const fieldless = (n: string): readonly string[] | null => fieldlessOf(prog, n);
   const types = prog.types,
     memo = new Map<string, boolean>(),
     text = (t: TypeAst): string => (t.args.length > 0 ? `${t.name}[${t.args.map(text).join(', ')}]` : t.name);
@@ -169,6 +173,7 @@ export function wireSource(prog: Program): Wire {
     [...decodable].filter(
       n =>
         nested.has(n) ||
+        fieldless(n) !== null ||
         (!types.get(n)?.file.startsWith('std/') &&
           ((types.get(n)?.variants.length ?? 0) > 1 || fieldKinds(n).some(k => k?.k === 'opt'))),
     ),
@@ -198,9 +203,12 @@ export function wireSource(prog: Program): Wire {
           ? 4
           : code(k.of);
   const refined = (t: TypeAst): boolean => !!types.get(t.name)?.refine;
-  // the check of a field (or a list item, named "value") of kind k, as json_check or, for a Float, json_check_float
+  // the check of a field (or a list item, named "value") of kind k, as json_check or, for a Float, json_check_float,
+  // or for a fieldless sum its own json_check_T: text, or else the reason that names its constructors' texts
   const check = (k: WireKind, found: string, name: string, optional: boolean, depth: number): string => {
     const one = k.k === 'opt' ? k.of : k;
+    if (one.k === 'rec' && fieldless(one.name))
+      return `json_check_${one.name}(found: ${found}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`;
     if (one.k === 's' && one.base === 'Dec')
       return `json.json_check_dec(found: ${found}, scale: ${one.scale ?? 0}, name: "${name}", optional: ${optional ? 'True' : 'False'}, depth: ${depth})`;
     return one.k === 's' && one.base === 'Float'
@@ -258,6 +266,8 @@ export function wireSource(prog: Program): Wire {
   function item(k: WireKind): string {
     const m = mangle(k.t);
     return once(`json_item_${m}`, () => {
+      if (k.k === 'rec' && fieldless(k.name))
+        return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match ${check(k, 'Some(value: item)', 'value', false, 0)} {\n    Json_Hit -> json_as_${k.name}(obj: item)\n    Json_Miss(why) -> Err(error: json.json_plain(error: why))\n  }\n}\n`;
       if (k.k === 'rec')
         return `fn json_item_${m}(item: Json_Tree) -> Result[${text(k.t)}, View] {\n  match {\n    json.json_is_object(item) -> json_as_${k.name}(obj: item)\n    json.json_is_null(item) -> Err(error: "null")\n    else -> Err(error: "expected an object")\n  }\n}\n`;
       const read =
@@ -294,8 +304,23 @@ export function wireSource(prog: Program): Wire {
     }
     return stop('an Option of a scalar is read, not decoded');
   };
+  // a fieldless sum: the text of one of its constructors (compiler/fieldless.ts), from any JSON value, which is
+  // checked as a field's kind is (json_check_T) and then named (json_as_T)
+  const ctorText = (n: string, ctors: readonly string[]): void => {
+    const why = said(expectedOneOf(ctors));
+    out.push(
+      `fn json_decode_${n}(json: View) -> Result[${n}, View] {\n  match json.json_whole(v: json) {\n    Ok(value) -> json_as_${n}(obj: value)\n    Err(error) -> Err(error)\n  }\n}\n`,
+      `fn json_as_${n}(obj: Json_Tree) -> Result[${n}, View] {\n  match obj {\n${ctors.map(c => `    Json_Str(text: "${storedText(c)}") -> Ok(value: ${c})\n`).join('')}    _ -> Err(error: "${why}")\n  }\n}\n`,
+      `fn json_check_${n}(found: Option[Json_Tree], name: View, optional: Bool, depth: Int) -> Json_Fit {\n  match found {\n    Some(value: Json_Str) -> Json_Hit\n    Some(value: Json_Null) -> json.json_check(found, kind: 0, name, optional, depth)\n    Some -> Json_Miss(depth, why: name ++ ": ${why}")\n    None -> json.json_check(found, kind: 0, name, optional, depth)\n  }\n}\n`,
+    );
+  };
   for (const n of decodable) {
     const d = types.get(n) ?? stop(`no type ${n}`);
+    const ctors = fieldless(n);
+    if (ctors) {
+      ctorText(n, ctors);
+      continue;
+    }
     const kindsOf = (v: Variant): WireKind[] =>
       v.fields.map(f => kind(f.type, false, new Set()) ?? stop(`${v.name}.${f.name} cannot be JSON`));
     out.push(
@@ -446,6 +471,13 @@ export function wireSource(prog: Program): Wire {
   for (const n of written) {
     const d = types.get(n) ?? stop(`no type ${n}`),
       [only] = d.variants;
+    if (fieldless(n)) {
+      // the text of its constructor, a JSON string
+      out.push(
+        `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n  match value {\n${d.variants.map(v => `    ${v.name} -> json.json_append(out, view: "\\"${storedText(v.name)}\\"")`).join('\n')}\n  }\n}\n`,
+      );
+      continue;
+    }
     if (d.variants.length === 1 && only) {
       out.push(
         `fn wire_write_${n}(out: Buf, value: ${n}) -> Buf {\n${only.fields.length > 0 ? `  let ${bound(only)} = value\n` : ''}${object(only, 'out')}\n}\n`,

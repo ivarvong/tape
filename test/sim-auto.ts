@@ -109,13 +109,15 @@ ok(
   INSERT INTO jobs(id) VALUES (1)
 }
 
-machine jobs.state {
-  "queued" -> "running"
-  "running" -> "done"
+type JobState { Queued Running Done }
+
+machine jobs.state: JobState {
+  Queued -> Running
+  Running -> Done
 }
 
 type Change { Change(state: View) }
-type Job { Job(id: Int, state: View) }
+type Job { Job(id: Int, state: JobState) }
 
 fn handle(raw: View, db: Sql) -> Buf {
   match request(raw) {

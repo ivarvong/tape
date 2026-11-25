@@ -28,9 +28,9 @@ const want: Record<string, readonly [string, string]> = {
   '1b': ['C78', "UPDATE holds SET state = 'held', note = :reason"],
   '1c': ['C78', 'INSERT INTO holds(client, tier, buyer, qty, amount, expires) VALUES'],
   '2a': ['C79', 'Err(error) -> unknown(id, n: tries)'],
-  '2b': ['C79', 'Hold(id, state: "held", expires) -> {'],
+  '2b': ['C79', 'Hold(id, state: Held, expires) -> {'],
   '2c': ['C79', 'RetryIn(after) -> {\n      shown_hold(found: load_hold(id))'],
-  '2d': ['C79', 'Hold(state: "refunding") -> ShowHold'],
+  '2d': ['C79', 'Hold(state: Refunding) -> ShowHold'],
   '3a': ['C77', "UPDATE holds SET state = 'refunding'"],
   '3b': ['C77', "UPDATE holds SET state = 'refunding'"],
   '3c': ['C77', "UPDATE holds SET state = 'refunding'"],
@@ -233,8 +233,8 @@ fn handle(raw: View, clock: Clock) -> Buf {
     edit(outbox, [
       ...CLOCK,
       [
-        '  )\n}\n\nmachine deliveries.state',
-        '  );\n  CREATE TABLE stamps(delivery INTEGER PRIMARY KEY, at INTEGER NOT NULL)\n}\n\nmachine deliveries.state',
+        '  )\n}\n\ntype DeliveryState',
+        '  );\n  CREATE TABLE stamps(delivery INTEGER PRIMARY KEY, at INTEGER NOT NULL)\n}\n\ntype DeliveryState',
       ],
       ['        failed: tries\n', '        failed: stamped(id, tries)\n'],
       ['fn decided(', `fn stamped(id: Int, tries: Int) -> Int {\n  ${stamp}${gives}\n}\n\nfn decided(`],

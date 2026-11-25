@@ -274,11 +274,11 @@ T(
 
 // ---- 3. C59 reads the program's matches
 const M = (arm: string) => `schema "CREATE TABLE subs (id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT 'trialing')"
-machine subs.state {
-  "trialing" -> "active"
-  "past_due" -> "active"
-  "trialing" -> "canceled"
-  "active" -> "canceled"
+machine subs.state: SubState {
+  Trialing -> Active
+  PastDue -> Active
+  Trialing -> Canceled
+  Active -> Canceled
 }
 fn handle(raw: View, db: Sql) -> Buf {
   match request(raw) {
@@ -295,6 +295,7 @@ ${arm}
 fn done(n: Int) -> Buf {
   respond(status: 200) |> write_int(value: n)
 }
+type SubState { Trialing Active PastDue Canceled }
 `;
 const W = `done(n: sql_exec(query: "UPDATE subs SET state = 'active' WHERE id = :id AND state = :state", id, state))`;
 const c59 = (src: string) =>
@@ -361,6 +362,23 @@ T(
     c59(M(`    "canceled" -> respond(status: 409)\n    _ -> ${set}`)),
     ['C60'],
   );
+}
+// a state passed as its constructor is its text, and an arm that names a constructor narrows as a text arm does
+{
+  const typed = (arms: string) =>
+    M(arms)
+      .replace('settle(id, state: "canceled")', 'settle(id, state: Canceled)')
+      .replace('    Request(path: "/b/" ++ decimal(id), body) -> settle(id, state: body)\n', '')
+      .replace('fn settle(id: Int, state: View)', 'fn settle(id: Int, state: SubState)');
+  const rest = ['Trialing', 'Active', 'PastDue'].map(s => `    ${s} -> ${W}`).join('\n');
+  T(
+    'a constructor arm narrows: Canceled answers 409, the other states move to active',
+    codes(typed(`    Canceled -> respond(status: 409)\n${rest}`)).filter(
+      c => !c.startsWith('C62') && !c.startsWith('C77'),
+    ),
+    [],
+  );
+  T('… and Canceled -> active, passed as a constructor, is C59', c59(typed(`    Canceled -> ${W}\n${rest}`)), ['C59']);
 }
 
 // ---- a constructor named like one std keeps for itself (Malformed, in std/json.tape's JsonStep), in another of the

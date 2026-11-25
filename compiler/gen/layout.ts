@@ -4,6 +4,7 @@ import type { Program, TypeAst, TypeDecl } from '../ast.ts';
 import { F64, I32, I64, fail } from '../common.ts';
 import { BUILTIN_TYPES, CAPABILITIES, T, key, scaleOf } from '../types.ts';
 import type { Type } from '../types.ts';
+import { fieldlessOf, storedText } from '../fieldless.ts';
 import type { Wire, WireKind } from '../wire.ts';
 
 /** Where a type was written, when the thing at hand says (a type made by the compiler does not). */
@@ -267,25 +268,38 @@ export function adtOf(L: Layouts, t: Type, at: Place): Adt {
   return decl.boxed ? boxed(L, t, decl, map) : flat(L, t, decl, map);
 }
 
-// A row type: one constructor whose fields are Int, Bool or View, or Option of one of those for a column that
-// may be NULL (sql.ts decides which may: the checker refuses Int for a nullable column, and Option for one that
-// never is).
-// A Dec is its count in a row: an INTEGER (`i`), at the field's scale.
+// A row type: one constructor whose fields are Int, Dec, Float, Bool, View or a fieldless sum, or Option of one of
+// those for a column that may be NULL (sql.ts decides which may: the checker refuses Int for a nullable column, and
+// Option for one that never is).
+// A Dec is its count in a row: an INTEGER (`i`), at the field's scale. A fieldless sum (`e`) is a TEXT column, the
+// text of one of its constructors (compiler/fieldless.ts): the host writes which one it is, as an integer, and
+// stops the request on any other text, as it does on a NULL where the field is not an Option.
 const SCALAR: Readonly<Record<string, string>> = { Int: 'i', Dec: 'i', Float: 'f', Bool: 'b', View: 't' };
-const scalar = (name: string | undefined): string | undefined =>
-  name !== undefined && Object.hasOwn(SCALAR, name) ? SCALAR[name] : undefined;
-export const rowKind = (f: { type: Type }): string | undefined =>
-  f.type.name === 'Option' ? scalar(f.type.args[0]?.name)?.toUpperCase() : scalar(f.type.name);
+const scalar = (L: Layouts, t: Type | undefined): string | undefined =>
+  t === undefined
+    ? undefined
+    : Object.hasOwn(SCALAR, t.name)
+      ? SCALAR[t.name]
+      : t.args.length === 0 && fieldlessOf(L.prog, t.name)
+        ? 'e'
+        : undefined;
+export const rowKind = (L: Layouts, f: { type: Type }): string | undefined =>
+  f.type.name === 'Option' ? scalar(L, f.type.args[0])?.toUpperCase() : scalar(L, f.type);
+/** The constructors of a type that is a fieldless sum, or of the one an Option holds; null for any other. */
+export function fieldlessIn(L: Layouts, t: Type): readonly string[] | null {
+  const one = t.name === 'Option' ? t.args[0] : t;
+  return one && one.args.length === 0 ? fieldlessOf(L.prog, one.name) : null;
+}
 
 export function rowOf(L: Layouts, t: Type, at: Place): FlatAdt {
   const a = adtOrNull(L, t, at);
   const only = a?.variants.length === 1 ? a.variants[0] : undefined;
-  if (!a || a.boxed || !only?.fields.every(f => rowKind(f) !== undefined))
+  if (!a || a.boxed || !only?.fields.every(f => rowKind(L, f) !== undefined))
     return refuse(
       at,
       'C09',
       `${key(t)} cannot be a row type`,
-      "A row type has one constructor whose fields are Int, Bool or View (or Option[Int], Option[Bool], Option[View] for a column that may be NULL), in the order of the query's columns.",
+      "A row type has one constructor whose fields are Int, Dec, Float, Bool, View or a sum whose constructors have no fields (stored as text), or an Option of one for a column that may be NULL, in the order of the query's columns.",
     );
   return a;
 }
@@ -298,7 +312,8 @@ function jsonKind(L: Layouts, ft: Type, decoding: boolean): { kind: string; opti
   // a Dec in JSON is `d` and its scale: text with exactly that many digits after the point
   const one = (x: Type | undefined): string | undefined => {
     const s = x ? scaleOf(strip(L, x)) : null;
-    return s !== null ? `d${s}` : x ? scalar(strip(L, x).name) : undefined;
+    const name = x ? strip(L, x).name : '';
+    return s !== null ? `d${s}` : Object.hasOwn(SCALAR, name) ? SCALAR[name] : undefined;
   };
   const own = one(ft);
   if (own !== undefined) return { kind: own, optional: false };
@@ -323,7 +338,10 @@ export function shapeOf(L: Layouts, t: Type, at: Place, decoding: boolean): Shap
 export const isLinear = (t: Type): boolean => t.name === 'Buf';
 
 function describeKind(L: Layouts, k: WireKind, at: Place): Described {
-  if (k.k === 's') return { kind: k.base === 'Dec' ? `d${k.scale ?? 0}` : scalar(k.base) };
+  if (k.k === 's') return { kind: k.base === 'Dec' ? `d${k.scale ?? 0}` : SCALAR[k.base] };
+  // a fieldless sum is the text of one of its constructors
+  const ctors = k.k === 'rec' ? fieldlessOf(L.prog, k.name) : null;
+  if (ctors) return { kind: 'e', of: { variants: ctors.map(storedText) } };
   if (k.k === 'rec') return { kind: 'o', of: describe(L, T(k.name), at) };
   if (k.k === 'list') return { kind: 'l', of: describeKind(L, k.of, at) };
   return { ...describeKind(L, k.of, at), optional: true };

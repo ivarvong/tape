@@ -1,9 +1,9 @@
-// rules/commands.ts: what a program's matches say about the replies it handles and the rows it reads (C71, C81, C87).
-import { eachExpr, eachPattern, patternsIn } from '../compiler/ast.ts';
+// rules/commands.ts: what a program's matches say about the replies it handles and the rows it reads (C71, C87).
+import { eachExpr } from '../compiler/ast.ts';
 import type { Call, Expr, FnDecl, Match, Pattern, Program } from '../compiler/ast.ts';
 import { conjunctsOf } from '../sql/tree.ts';
 import { rowTablesOf } from './model.ts';
-import { dec, lc } from './syntax.ts';
+import { lc } from './syntax.ts';
 import type { Query, Reading, RuleTable, Write } from './types.ts';
 import { predicateOn, writeOf } from './writes.ts';
 
@@ -123,32 +123,6 @@ function refusalsAsked(r: Reading): void {
       eachExpr(f.body, m => {
         if (m.k === 'match' && isReply(f, m.subject)) check(m);
       });
-}
-
-// ---- C81: a state named in a pattern on a row is one of its machine's states (C61 says the same of SQL)
-
-function patternStates({ prog, bad }: Reading, rowTable: ReadonlyMap<string, string | null>): void {
-  const seenAt = new Set<string>();
-  const check = (o: Pattern): void => {
-    const tb = o.k === 'ctor' ? rowTable.get(o.name) : null;
-    if (o.k !== 'ctor' || !tb) return;
-    for (const m of prog.machines.filter(x => lc(x.table) === lc(tb)))
-      for (const sb of o.subs) {
-        if (lc(sb.field) !== lc(m.column) || sb.pat.k !== 'str') continue;
-        const v = dec(sb.pat.bytes);
-        const key = `${sb.pat.file}:${sb.pat.line}:${v}`;
-        if (m.states.includes(v) || seenAt.has(key)) continue;
-        seenAt.add(key);
-        bad(
-          'C81',
-          sb.pat.line ? sb.pat : o,
-          `"${v}" is matched against ${m.table}.${m.column}, but it is not one of the states of machine ${m.table}.${m.column} (${m.states.map(x => `"${x}"`).join(', ')}): this arm can never be taken`,
-          "Name one of the machine's states, or add the state to the machine.",
-        );
-      }
-  };
-  for (const f of prog.fns.values())
-    if (own(f)) eachExpr(f.body, e => patternsIn(e).forEach(p => eachPattern(p, check)));
 }
 
 // ---- C71: a command built from a row names that row in its key (and, after a move, what the move wrote)
@@ -317,6 +291,6 @@ function commandKeys(r: Reading, rowTable: ReadonlyMap<string, string | null>): 
 export function commandRules(r: Reading): void {
   const rowTable = rowTablesOf(r.queries);
   refusalsAsked(r);
-  patternStates(r, rowTable);
+
   commandKeys(r, rowTable);
 }

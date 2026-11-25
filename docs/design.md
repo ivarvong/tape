@@ -49,7 +49,7 @@ Seven rules were prototyped as a checker pass and run, each alone, on each defec
 | RQ qualified | M1 | a query over two or more tables qualifies every column | C52 |
 | RS one schema | M3 | `schema` and migrations are not mixed | C53 |
 | RI replay | J2, R7, R11 | a write reached from `handle` or `woken` is safe to run twice: a compare-and-set, an op-id guard or a unique key, or an explicit opt-out | C54 to C56; the opt-out is now `repeat: True` |
-| RM machine | J2, J3 | `machine table.column { "a" -> "b" }`: every write names the state it expects and makes a declared move; SQLite triggers refuse any other | C57 to C61 |
+| RM machine | J2, J3 | `machine table.column { "a" -> "b" }` (since issue 12 `machine table.column: State { A -> B }`, its states a type): every write names the state it expects and makes a declared move; SQLite triggers refuse any other | C57 to C61; C97 for a match on the states |
 | RP private | J1 | a `private type`'s constructors are made only in its file | C66 |
 | RO outcome | J1 | a match over `CallError` names `Timeout` before a catch-all | not shipped as written; narrowed into C87 on 25 November 2026 (below) |
 

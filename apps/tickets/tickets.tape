@@ -95,30 +95,55 @@ migration 4 "sweep waits" {
   ALTER TABLE events ADD COLUMN waits INTEGER NOT NULL DEFAULT 0
 }
 
-machine events.state {
-  "onsale" -> "canceled"
+// A ticket of a refunded order was 'refunded', as the order is. A state is a constructor now, stored as its text,
+// and constructors are unique across a program: the hold's Refunded keeps its text, and the ticket's is Voided.
+migration 5 "voided tickets" contract {
+  UPDATE tickets SET state = 'voided' WHERE state <> 'valid'
 }
 
-machine holds.state {
-  "held" -> "paying"
-  "held" -> "expired"
-  "held" -> "released"
-  "paying" -> "held"
-  "paying" -> "confirmed"
-  "paying" -> "unresolved"
-  "confirmed" -> "refunding"
-  "refunding" -> "refunded"
-  "refunding" -> "refund_failed"
-  "refunding" -> "refund_unresolved"
+type EventState { Onsale Canceled }
+
+machine events.state: EventState {
+  Onsale -> Canceled
 }
 
-machine tickets.state {
-  "valid" -> "refunded"
+type HoldState {
+  Held
+  Paying
+  Expired
+  Released
+  Confirmed
+  Unresolved
+  Refunding
+  Refunded
+  RefundFailed
+  RefundUnresolved
 }
 
-machine waitlist.state {
-  "waiting" -> "offered"
-  "waiting" -> "dropped"
+machine holds.state: HoldState {
+  Held -> Paying
+  Held -> Expired
+  Held -> Released
+  Paying -> Held
+  Paying -> Confirmed
+  Paying -> Unresolved
+  Confirmed -> Refunding
+  Refunding -> Refunded
+  Refunding -> RefundFailed
+  Refunding -> RefundUnresolved
+}
+
+type TicketState { Valid Voided }
+
+machine tickets.state: TicketState {
+  Valid -> Voided
+}
+
+type WaitlistState { Waiting Offered Dropped }
+
+machine waitlist.state: WaitlistState {
+  Waiting -> Offered
+  Waiting -> Dropped
 }
 
 flag hold_seconds: Int = 300
@@ -139,7 +164,7 @@ type Checkout { Checkout(card: Key) }
 type WaitReq { WaitReq(key: Key, tier: Int, buyer: Buyer, qty: Qty) }
 type Transfer { Transfer(from: Buyer, to: Buyer) }
 
-type Event { Event(id: Int, name: View, starts: View, state: View) }
+type Event { Event(id: Int, name: View, starts: View, state: EventState) }
 type Tier { Tier(id: Int, event: Int, name: View, price: Int, capacity: Int, left: Int) }
 type Hold { Hold(
   id: Int,
@@ -147,14 +172,14 @@ type Hold { Hold(
   buyer: View,
   qty: Int,
   amount: Int,
-  state: View,
+  state: HoldState,
   card: View,
   attempt: Int,
   expires: Int,
   note: View
 ) }
-type Ticket { Ticket(id: Int, hold: Int, seat: Int, owner: View, state: View) }
-type Wait { Wait(id: Int, tier: Int, buyer: View, qty: Int, state: View, hold: Int) }
+type Ticket { Ticket(id: Int, hold: Int, seat: Int, owner: View, state: TicketState) }
+type Wait { Wait(id: Int, tier: Int, buyer: View, qty: Int, state: WaitlistState, hold: Int) }
 type Price { Price(price: Int) }
 type Count { Count(n: Int) }
 type Id { Id(id: Int) }
@@ -165,7 +190,7 @@ type Finished { Finished(done: View) }
 type Charge { Charge(card: View, amount: Int, ref: View) }
 type Charged { Charged(payment: Int) }
 type Refund { Refund(card: View, amount: Int, ref: View) }
-type Refunded { Refunded(payment: Int) }
+type RefundMade { RefundMade(payment: Int) }
 // A charge's once key is the hold and the attempt: a declined card is a finished command, so paying again with
 // another card is a new one (the same key with another message would be answered skew, an unknown outcome).
 type PayFor { PayFor(hold: Int, attempt: Int) }
@@ -428,28 +453,42 @@ fn checkout(id: Int, body: View) -> Outcome {
   }
   let Some(value: hold) = load_hold(id) else -> Problem(status: 404, reason: "no such hold")
   match hold {
-    Hold(state: "held", expires) if expires <= now() -> Problem(
+    Hold(state: Held, expires) if expires <= now() -> Problem(
       status: 410,
       reason: "this hold has expired"
     )
-    Hold(state: "held") -> paying(moved: sql_move(
+    Hold(state: Held) -> paying(moved: sql_move(
       row: Hold,
       query: "UPDATE holds SET state = 'paying', card = :card, attempt = attempt + 1, tries = 0 \
           WHERE id = :id AND state = 'held' RETURNING *",
       card,
       id
     ))
-    Hold(state: "paying") -> charge(hold)
-    Hold(state: "confirmed") -> ShowHold(status: 200, hold)
-    Hold(state) -> Problem(status: 409, reason: "this hold is " ++ state)
+    Hold(state: Paying) -> charge(hold)
+    Hold(state: Confirmed) -> ShowHold(status: 200, hold)
+    Hold(state: Expired) -> Problem(status: 409, reason: "this hold is expired")
+    Hold(state: Released) -> Problem(status: 409, reason: "this hold is released")
+    Hold(state: Unresolved) -> Problem(status: 409, reason: "this hold is unresolved")
+    Hold(state: Refunding) -> Problem(status: 409, reason: "this hold is refunding")
+    Hold(state: Refunded) -> Problem(status: 409, reason: "this hold is refunded")
+    Hold(state: RefundFailed) -> Problem(status: 409, reason: "this hold is refund_failed")
+    Hold(state: RefundUnresolved) -> Problem(status: 409, reason: "this hold is refund_unresolved")
   }
 }
 
 fn paying(moved: Move[Hold]) -> Outcome {
   match moved {
     Moved(value) -> charge(hold: value)
-    Raced(now: hold = Hold(state: "paying")) -> charge(hold)
-    Raced(now) -> ShowHold(status: 409, hold: now)
+    Raced(now: hold = Hold(state: Paying)) -> charge(hold)
+    Raced(now: now = Hold(state: Held)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: Expired)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: Released)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: Confirmed)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: Unresolved)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: Refunding)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: Refunded)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: RefundFailed)) -> ShowHold(status: 409, hold: now)
+    Raced(now: now = Hold(state: RefundUnresolved)) -> ShowHold(status: 409, hold: now)
     NoRow -> Problem(status: 404, reason: "no such hold")
   }
 }
@@ -736,7 +775,7 @@ type Woke { Woke(status: Int, what: View) }
 
 fn summary(outcome: Outcome) -> Woke {
   match outcome {
-    ShowHold(status, hold: Hold(id, state)) -> Woke(status, what: "hold \(id) \(state)")
+    ShowHold(status, hold: Hold(id, state)) -> Woke(status, what: "hold \(id) \(hold_text(state))")
     Problem(status, reason) -> Woke(status, what: reason)
     Reported(status, what) -> Woke(status, what)
     ShowEvent(status) -> Woke(status, what: "event")
@@ -747,25 +786,25 @@ fn summary(outcome: Outcome) -> Woke {
 fn due(found: Option[Hold]) -> Outcome {
   let Some(value: hold) = found else -> Problem(status: 404, reason: "no such hold")
   match hold {
-    Hold(id, state: "held", expires) if expires <= now() -> ended(moved: sql_move(
+    Hold(id, state: Held, expires) if expires <= now() -> ended(moved: sql_move(
       row: Hold,
       query: "UPDATE holds SET state = 'expired' WHERE id = :id AND state = 'held' RETURNING *",
       id
     ))
-    Hold(id, state: "held", expires) -> {
+    Hold(id, state: Held, expires) -> {
       do wake(after: expires - now(), key: id)
       ShowHold(status: 200, hold)
     }
-    Hold(state: "paying") -> charge(hold)
-    Hold(state: "refunding") -> refund_hold(hold)
+    Hold(state: Paying) -> charge(hold)
+    Hold(state: Refunding) -> refund_hold(hold)
     // every state is named: a state added to the machine does not compile until the timer's run says what it does
-    Hold(state: "confirmed") -> ShowHold(status: 200, hold)
-    Hold(state: "expired") -> ShowHold(status: 200, hold)
-    Hold(state: "released") -> ShowHold(status: 200, hold)
-    Hold(state: "refunded") -> ShowHold(status: 200, hold)
-    Hold(state: "refund_failed") -> ShowHold(status: 200, hold)
-    Hold(state: "unresolved") -> ShowHold(status: 200, hold)
-    Hold(state: "refund_unresolved") -> ShowHold(status: 200, hold)
+    Hold(state: Confirmed) -> ShowHold(status: 200, hold)
+    Hold(state: Expired) -> ShowHold(status: 200, hold)
+    Hold(state: Released) -> ShowHold(status: 200, hold)
+    Hold(state: Refunded) -> ShowHold(status: 200, hold)
+    Hold(state: RefundFailed) -> ShowHold(status: 200, hold)
+    Hold(state: Unresolved) -> ShowHold(status: 200, hold)
+    Hold(state: RefundUnresolved) -> ShowHold(status: 200, hold)
   }
 }
 
@@ -792,14 +831,34 @@ fn refund(id: Int) -> Outcome {
 
 fn refund_again(found: Option[Hold]) -> Outcome {
   match found {
-    Some(value: hold = Hold(state: "refunding")) -> refund_hold(hold)
-    Some(value: hold = Hold(state: "refunded")) -> ShowHold(status: 200, hold)
-    Some(value: Hold(state)) -> Problem(
-      status: 409,
-      reason: "only a confirmed order can be refunded; this one is " ++ state
-    )
+    Some(value: hold) -> refundable(hold, state: hold.state)
     None -> Problem(status: 404, reason: "no such hold")
   }
+}
+
+// A refund asked again: one begun goes on, one done is shown, and a hold in any other state was never paid for.
+// The match is on the state, not on the row: a hold raced out of confirmed is refunding or past it, so the arms
+// for the states before it are never taken from a timer's run, and they set no timer.
+fn refundable(hold: Hold, state: HoldState) -> Outcome {
+  match state {
+    Refunding -> refund_hold(hold)
+    Refunded -> ShowHold(status: 200, hold)
+    Held -> unrefundable(state)
+    Paying -> unrefundable(state)
+    Expired -> unrefundable(state)
+    Released -> unrefundable(state)
+    Confirmed -> unrefundable(state)
+    Unresolved -> unrefundable(state)
+    RefundFailed -> unrefundable(state)
+    RefundUnresolved -> unrefundable(state)
+  }
+}
+
+fn unrefundable(state: HoldState) -> Outcome {
+  Problem(
+    status: 409,
+    reason: "only a confirmed order can be refunded; this one is " ++ hold_text(state)
+  )
 }
 
 fn refund_hold(hold: Hold) -> Outcome {
@@ -811,7 +870,7 @@ fn refund_hold(hold: Hold) -> Outcome {
       to: pay,
       method: "refund",
       send: Refund(card, amount, ref: "hold-\(id)"),
-      reply: Refunded,
+      reply: RefundMade,
       within: 2000,
       once: RefundFor(hold: id)
     )
@@ -834,7 +893,7 @@ fn refund_refused(moved: Move[Hold]) -> Outcome {
   }
 }
 
-fn refunded(id: Int, tries: Int, reply: Result[Refunded, CallError]) -> Outcome {
+fn refunded(id: Int, tries: Int, reply: Result[RefundMade, CallError]) -> Outcome {
   match reply {
     Ok(value) -> settled(moved: sql_move(
       row: Hold,
@@ -904,7 +963,7 @@ fn settled(moved: Move[Hold]) -> Outcome {
   match moved {
     Moved(value: hold = Hold(id, tier, qty)) -> {
       let tickets = sql_exec(
-        query: "UPDATE tickets SET state = 'refunded' WHERE hold = :id AND state = 'valid'",
+        query: "UPDATE tickets SET state = 'voided' WHERE hold = :id AND state = 'valid'",
         id
       )
       let 1 = sql_exec(
@@ -1152,7 +1211,7 @@ fn event_json(out: Buf, event: Event) -> Buf {
     |> append(view: ",\"starts\":")
     |> write_json_string(text: starts)
     |> append(view: ",\"state\":")
-    |> write_json_string(text: state)
+    |> write_json(value: state)
     |> append(view: ",\"tiers\":")
     |> write_rows(
       rows: sql_all(row: Tier, query: "SELECT * FROM tiers WHERE event = :id ORDER BY id", id)
@@ -1258,17 +1317,27 @@ fn waited_page(outcome: Outcome) -> Buf {
   match outcome {
     ShowWait(
       status,
-      wait: Wait(state: "offered", hold)
+      wait: Wait(state: Offered, hold)
     ) -> hold_page(status, found: load_hold(id: hold))
-    ShowWait(status, wait: Wait(buyer)) -> page_top(status, title: "On the waitlist")
-      |> append(view: "<p>You are on the waitlist. When seats come back, the first in line gets a \
-          hold of their own: look for it on ")
-      |> me_link(buyer)
-      |> append(view: ".</p>")
-      |> page_end
+    ShowWait(status, wait: Wait(state: Waiting, buyer)) -> waiting_page(status, buyer)
+    ShowWait(status, wait: Wait(state: Dropped, buyer)) -> waiting_page(status, buyer)
     Problem(status, reason) -> message_page(status, title: "Not on the waitlist", text: reason)
-    _ -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
+    ShowEvent -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
+    ShowHold -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
+    ShowTicket -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
+    ShowTier -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
+    Reported -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
+    Undo -> message_page(status: 500, title: "Not on the waitlist", text: "unexpected")
   }
+}
+
+fn waiting_page(status: Int, buyer: View) -> Buf {
+  page_top(status, title: "On the waitlist")
+    |> append(view: "<p>You are on the waitlist. When seats come back, the first in line gets a \
+        hold of their own: look for it on ")
+    |> me_link(buyer)
+    |> append(view: ".</p>")
+    |> page_end
 }
 
 fn after_page(outcome: Outcome) -> Buf {
@@ -1336,29 +1405,32 @@ fn home(out: Buf) -> Buf {
 
 fn page_events(out: Buf, rows: Rows[Event]) -> Buf {
   match next(rows) {
-    Next(value: Event(id, name, starts, state), rest) -> page_events(
-      out: out
-        |> append(view: "<h2>")
-        |> write_html(text: name)
-        |> append(view: "</h2><p class=note>")
-        |> write_html(text: starts)
+    Next(
+      value: Event(id, name, starts, state),
+      rest
+    ) -> page_events(out: out |> append(view: "<h2>") |> write_html(text: name) |> append(
+      view: "</h2><p class=note>"
+    ) |> write_html(
+      text: starts
+    )
         |> append(view: " &middot; \
             \(event_state(state))</p><table><tr><th>Tier</th><th>Price</th><th>Left</th><th></th></tr>")
-        |> page_tiers(
-          rows: sql_all(row: Tier, query: "SELECT * FROM tiers WHERE event = :id ORDER BY id", id),
-          open: state == "onsale"
-        )
-        |> append(view: "</table>"),
-      rows: rest
-    )
+        |> page_tiers(rows: sql_all(
+          row: Tier,
+          query: "SELECT * FROM tiers WHERE event = :id ORDER BY id",
+          id
+        ), open: match state {
+          Onsale -> True
+          Canceled -> False
+        }) |> append(view: "</table>"), rows: rest)
     End -> out
   }
 }
 
-fn event_state(state: View) -> View {
+fn event_state(state: EventState) -> View {
   match state {
-    "onsale" -> "on sale"
-    _ -> "<span class=bad>canceled: every order is refunded</span>"
+    Onsale -> "on sale"
+    Canceled -> "<span class=bad>canceled: every order is refunded</span>"
   }
 }
 
@@ -1413,7 +1485,7 @@ fn hold_page(status: Int, found: Option[Hold]) -> Buf {
     |> append(view: ", ")
     |> money(cents: amount)
     |> append(view: ". State: <b>")
-    |> write_html(text: state)
+    |> write_html(text: hold_text(state))
     |> append(view: "</b>.</p>")
     |> hold_note(note)
     |> hold_actions(hold)
@@ -1433,23 +1505,29 @@ fn hold_note(out: Buf, note: View) -> Buf {
 fn hold_actions(out: Buf, hold: Hold) -> Buf {
   let Hold(id, state, expires) = hold
   match state {
-    "held" -> out
+    Held -> out
       |> append(view: "<p>Held for \((expires - now()) / 1000) more seconds.</p><form method=post \
           action=\"pay?id=\(id)\"><select name=card><option value=visa-4242>visa-4242 (has \
           funds)</option><option value=amex-0005>amex-0005 (has funds)</option><option \
           value=poor-0002>poor-0002 (declines)</option></select> <button>Pay</button></form> \
           <form method=post action=\"release?id=\(id)\"><button>Release</button></form>")
-    "paying" -> out
+    Paying -> out
       |> append(view: "<p>The payment is being confirmed. <a href=\"hold?id=\(id)\">Reload</a> to \
           see how it ended.</p>")
-    "confirmed" -> out
+    Confirmed -> out
       |> append(view: "<p>Paid. Your tickets are below.</p>")
       |> ticket_rows(rows: sql_all(
         row: Ticket,
         query: "SELECT * FROM tickets WHERE hold = :id ORDER BY seat",
         id
       ))
-    _ -> out
+    Expired -> out
+    Released -> out
+    Unresolved -> out
+    Refunding -> out
+    Refunded -> out
+    RefundFailed -> out
+    RefundUnresolved -> out
   }
 }
 
@@ -1461,13 +1539,13 @@ fn ticket_rows(out: Buf, rows: Rows[Ticket]) -> Buf {
         |> append(view: "<p>Ticket \(id), seat \(seat), held by ")
         |> write_html(text: owner)
         |> append(view: " (")
-        |> write_html(text: state)
+        |> write_html(text: ticket_text(state))
         |> append(view: ")</p>")
     })
 }
 
-type Mine { Mine(id: Int, seat: Int, state: View, event: View, tier: View) }
-type MyHold { MyHold(id: Int, qty: Int, state: View, tier: View) }
+type Mine { Mine(id: Int, seat: Int, state: TicketState, event: View, tier: View) }
+type MyHold { MyHold(id: Int, qty: Int, state: HoldState, tier: View) }
 
 fn me_page(status: Int, buyer: View) -> Buf {
   page_top(status, title: "Tickets of " ++ buyer)
@@ -1510,18 +1588,18 @@ fn my_tickets(out: Buf, buyer: View, rows: Rows[Mine]) -> Buf {
     })
 }
 
-fn give_form(out: Buf, id: Int, buyer: View, state: View) -> Buf {
+fn give_form(out: Buf, id: Int, buyer: View, state: TicketState) -> Buf {
   match state {
-    "valid" -> out
+    Valid -> out
       |> append(
         view: "<form method=post action=\"give?id=\(id)\"><input type=hidden name=from value=\""
       )
       |> write_html(text: buyer)
       |> append(view: "\"><input name=to placeholder=\"give to\" required maxlength=40> \
           <button>Transfer</button></form>")
-    _ -> out
+    Voided -> out
       |> append(view: "<span class=note>")
-      |> write_html(text: state)
+      |> write_html(text: ticket_text(state))
       |> append(view: "</span>")
   }
 }
@@ -1534,7 +1612,7 @@ fn my_holds(out: Buf, rows: Rows[MyHold]) -> Buf {
         |> append(view: "<p><a href=\"hold?id=\(id)\">Hold \(id)</a>: \(qty) &times; ")
         |> write_html(text: tier)
         |> append(view: ", ")
-        |> write_html(text: state)
+        |> write_html(text: hold_text(state))
         |> append(view: "</p>")
     })
 }
@@ -1548,7 +1626,7 @@ type HoldRow { HoldRow(
   buyer: View,
   qty: Int,
   amount: Int,
-  state: View,
+  state: HoldState,
   card: View,
   attempt: Int,
   expires: Int,
@@ -1607,6 +1685,29 @@ invariant "no sweep waits more often than its retry policy allows" {
 
 invariant "a canceled event has no paid hold and nobody waiting" settled {
   SELECT t.id AS tier FROM tiers AS t JOIN events AS e ON e.id = t.event WHERE e.state = 'canceled' AND (EXISTS (SELECT 1 FROM holds AS h WHERE h.tier = t.id AND h.state = 'confirmed') OR EXISTS (SELECT 1 FROM waitlist AS w WHERE w.tier = t.id AND w.state = 'waiting'))
+}
+
+// The words a state is shown in: the text its column holds.
+fn hold_text(state: HoldState) -> View {
+  match state {
+    Held -> "held"
+    Paying -> "paying"
+    Expired -> "expired"
+    Released -> "released"
+    Confirmed -> "confirmed"
+    Unresolved -> "unresolved"
+    Refunding -> "refunding"
+    Refunded -> "refunded"
+    RefundFailed -> "refund_failed"
+    RefundUnresolved -> "refund_unresolved"
+  }
+}
+
+fn ticket_text(state: TicketState) -> View {
+  match state {
+    Valid -> "valid"
+    Voided -> "voided"
+  }
 }
 
 // Across two programs: what pay's ledger holds for a hold, against the hold. Only the simulator has both programs'

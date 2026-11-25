@@ -226,7 +226,7 @@ export const DIAGNOSTICS = {
   },
   C57: {
     meaning:
-      'A machine over a table or column the program does not have, a second machine for one column, or a move to itself or listed twice.',
+      'A machine over a table or column the program does not have, a second machine for one column, a move to itself or listed twice, or a type that is not its states: not declared, not a sum of constructors without fields, or with a constructor no move names.',
   },
   C58: {
     meaning:
@@ -274,7 +274,7 @@ export const DIAGNOSTICS = {
   },
   C69: {
     meaning:
-      "A query whose columns or values do not fit the program's types: a column count, name, type or NULL that the row type does not match, a value of the wrong kind, a NULL compared with `=`, or a write read as a row without RETURNING.",
+      "A query whose columns or values do not fit the program's types: a column count, name, type or NULL that the row type does not match, a machine's column read into a field that is not the machine's type, a value of the wrong kind, a NULL compared with `=`, or a write read as a row without RETURNING.",
   },
   C70: {
     meaning:
@@ -317,9 +317,6 @@ export const DIAGNOSTICS = {
     meaning:
       'A constructor declared `final` made where a second run may decide otherwise: on the way to it, a condition reads the clock in a way that can flip, or the reply of an `ask`.',
   },
-  C81: {
-    meaning: 'A state named in a pattern on a row that its machine does not declare. The arm can never be taken.',
-  },
   C82: {
     meaning:
       "`do` before something that is not a call, or a call whose value is not Done. `do` runs a call for what it does: wake, or a function that returns Done. Any other value says something (sql_exec's count of rows changed, an Option, a Result, a Move): read it, as `let 1 = sql_exec(…) else -> …`, or drop it on purpose with `let _ = …`.",
@@ -359,6 +356,10 @@ export const DIAGNOSTICS = {
   C95: {
     meaning:
       "An UPDATE a request reaches that takes a row chosen by what it changes (the next job that is ready, by a query or a subquery), with nothing that keys it to the request: sent again, the request takes a second row. Write the client's key into the row and read it back first, or claim an op id.",
+  },
+  C97: {
+    meaning:
+      "A match on a machine's states with an arm that takes the states the arms beside it do not name (`_`, a name, a row pattern that leaves the state out). A state added to the machine would be taken there without a word; each state gets an arm of its own.",
   },
   C99: {
     meaning:

@@ -1,6 +1,7 @@
 // check.ts: build-time check of a compiled module's SQL against its own schema, using SQLite itself (node:sqlite).
 // Every statement must prepare against the schema; a query's result columns must be the row type's fields, in
-// order, by name; and a column's declared type must fit the field (INTEGER for Int and Bool, TEXT for View).
+// order, by name; and a column's declared type must fit the field (INTEGER for Int and Bool, TEXT for View and for
+// a sum whose constructors have no fields).
 import './node25.ts';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 
@@ -48,7 +49,8 @@ export function checkQueries({ queries, schema, migrations = [] }: Checked): str
         problems.push(
           `column ${i + 1} is \`${c.name}\` but the row type's field ${i + 1} is \`${named[i]}\`; name the column with AS or reorder: ${q.sql}`,
         );
-      const want = row[i]?.toLowerCase() === 't' ? 'TEXT' : 'INTEGER';
+      // a fieldless sum (e) is stored as its constructor's text
+      const want = ['t', 'e'].includes(row[i]?.toLowerCase() ?? '') ? 'TEXT' : 'INTEGER';
       if (c.type && c.type.toUpperCase() !== want)
         problems.push(`column \`${c.name}\` is declared ${c.type} but field \`${named[i]}\` needs ${want}: ${q.sql}`);
     });

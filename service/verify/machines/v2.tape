@@ -2,9 +2,11 @@
 schema "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, state \
     TEXT NOT NULL DEFAULT 'pending')"
 
-machine s.state {
-  "pending" -> "paid"
-  "pending" -> "declined"
+type SaleState { Pending Paid Declined }
+
+machine s.state: SaleState {
+  Pending -> Paid
+  Pending -> Declined
 }
 
 type Text { Text(text: View) }
@@ -16,17 +18,17 @@ fn handle(raw: View, db: Sql) -> Buf {
     )
     Request(method: "POST", path: "/pay/" ++ key) -> moved(m: sql_move(
       db,
-      row: Paid,
+      row: Sold,
       query: "UPDATE s SET state = 'paid' WHERE key = :key AND state = 'pending' RETURNING id",
       key
     ))
     Request(method: "GET", path: "/triggers") -> respond(status: 200)
       |> append(view: sql_first(
-      db,
-      row: Text,
-      query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master \
-          WHERE type = 'trigger'"
-    ) |> shown)
+        db,
+        row: Text,
+        query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master \
+            WHERE type = 'trigger'"
+      ) |> shown)
     _ -> respond(status: 404)
   }
 }
@@ -43,9 +45,9 @@ fn done(n: Int) -> Buf {
 }
 
 // the compare-and-set is a sql_move (C62): Moved, Raced (another request moved the row first) or NoRow
-type Paid { Paid(id: Int) }
+type Sold { Sold(id: Int) }
 
-fn moved(m: Move[Paid]) -> Buf {
+fn moved(m: Move[Sold]) -> Buf {
   match m {
     Moved(value) -> respond(status: 200) |> write_int(value: 1)
     Raced(now) -> respond(status: 409)

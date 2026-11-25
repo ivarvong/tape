@@ -112,9 +112,9 @@ export const THEMES: Theme[] = [
   },
   {
     id: 'state-machines',
-    title: 'Machines and compare-and-set (C59-C63, C81)',
+    title: 'Machines and compare-and-set (C59-C63, C97)',
     change: 'sql_move and machine refusals show the WHERE to write',
-    codes: [{ code: /^C59$/ }, { code: /^C6[0-3]$/ }, { code: /^C81$/ }],
+    codes: [{ code: /^C59$/ }, { code: /^C6[0-3]$/ }, { code: /^C97$/ }],
     feedback: /machine|sql_move|C6[0-3]|C59/i,
     prior: ['apps/queue/FRICTION.md #2, #4 (true positives that made the program better)'],
   },

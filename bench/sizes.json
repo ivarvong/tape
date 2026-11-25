@@ -1,122 +1,122 @@
 {
   "bench/money.tape": {
-    "bytes": 32774,
+    "bytes": 32846,
     "functions": 123
   },
   "bench/suite/crud.tape": {
-    "bytes": 32728,
-    "functions": 118
+    "bytes": 33027,
+    "functions": 120
   },
   "bench/suite/ledger.tape": {
-    "bytes": 32943,
-    "functions": 119
+    "bytes": 33221,
+    "functions": 121
   },
   "bench/suite/webhook.tape": {
-    "bytes": 33188,
+    "bytes": 33311,
     "functions": 118
   },
   "corpus/blog.tape": {
-    "bytes": 97411,
-    "functions": 278
+    "bytes": 97696,
+    "functions": 277
   },
   "corpus/md.tape": {
-    "bytes": 52901,
+    "bytes": 52906,
     "functions": 168
   },
   "examples/bump.tape": {
-    "bytes": 35234,
+    "bytes": 35417,
     "functions": 121
   },
   "examples/cart.tape": {
-    "bytes": 28827,
+    "bytes": 28899,
     "functions": 114
   },
   "examples/counter.tape": {
-    "bytes": 6022,
+    "bytes": 6043,
     "functions": 19
   },
   "examples/csv.tape": {
-    "bytes": 9240,
+    "bytes": 9256,
     "functions": 38
   },
   "examples/fulfillment.tape": {
-    "bytes": 59965,
-    "functions": 152
+    "bytes": 61155,
+    "functions": 155
   },
   "examples/git.tape": {
-    "bytes": 11266,
+    "bytes": 11282,
     "functions": 32
   },
   "examples/hello.tape": {
-    "bytes": 4675,
+    "bytes": 4696,
     "functions": 18
   },
   "examples/inventory.tape": {
-    "bytes": 30291,
-    "functions": 110
+    "bytes": 30575,
+    "functions": 112
   },
   "examples/kv.tape": {
-    "bytes": 31039,
+    "bytes": 31060,
     "functions": 80
   },
   "examples/ledger.tape": {
-    "bytes": 29870,
-    "functions": 100
+    "bytes": 30177,
+    "functions": 102
   },
   "examples/orders.tape": {
-    "bytes": 33285,
-    "functions": 111
+    "bytes": 33672,
+    "functions": 116
   },
   "examples/payments.tape": {
-    "bytes": 29910,
-    "functions": 110
+    "bytes": 30179,
+    "functions": 112
   },
   "examples/ratelimit.tape": {
-    "bytes": 4888,
+    "bytes": 4909,
     "functions": 18
   },
   "examples/shipping.tape": {
-    "bytes": 28320,
-    "functions": 101
+    "bytes": 28617,
+    "functions": 103
   },
   "examples/shortener.tape": {
-    "bytes": 28368,
+    "bytes": 28445,
     "functions": 99
   },
   "examples/stats.tape": {
-    "bytes": 5017,
+    "bytes": 5033,
     "functions": 35
   },
   "examples/stock.tape": {
-    "bytes": 25449,
+    "bytes": 25521,
     "functions": 92
   },
   "examples/tickets.tape": {
-    "bytes": 45157,
-    "functions": 129
+    "bytes": 46231,
+    "functions": 134
   },
   "examples/todo-decode.tape": {
-    "bytes": 32824,
-    "functions": 114
+    "bytes": 33081,
+    "functions": 116
   },
   "examples/todo-handparsed.tape": {
-    "bytes": 22806,
+    "bytes": 22822,
     "functions": 81
   },
   "examples/todo.tape": {
-    "bytes": 39552,
-    "functions": 141
+    "bytes": 39820,
+    "functions": 143
   },
   "examples/trap.tape": {
-    "bytes": 1111,
+    "bytes": 1127,
     "functions": 4
   },
   "examples/webhook.tape": {
-    "bytes": 28206,
+    "bytes": 28283,
     "functions": 108
   },
   "examples/words.tape": {
-    "bytes": 10738,
+    "bytes": 10754,
     "functions": 35
   }
 }

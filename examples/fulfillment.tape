@@ -64,15 +64,17 @@ migration 4 "client keys" {
 
 // The workflow drawn above, as the compiler checks it: every write of orders.state makes one of these moves, from
 // the state its WHERE names (rules.ts, C57-C61), and the host installs SQLite triggers that refuse any other.
-machine orders.state {
-  "reserving" -> "charging"
-  "reserving" -> "failed"
-  "charging" -> "shipping"
-  "charging" -> "releasing"
-  "shipping" -> "done"
-  "shipping" -> "refunding"
-  "refunding" -> "releasing"
-  "releasing" -> "failed"
+type OrderState { Reserving Charging Failed Shipping Releasing Done Refunding }
+
+machine orders.state: OrderState {
+  Reserving -> Charging
+  Reserving -> Failed
+  Charging -> Shipping
+  Charging -> Releasing
+  Shipping -> Done
+  Shipping -> Refunding
+  Refunding -> Releasing
+  Releasing -> Failed
 }
 
 type Qty = Int where self >= 1 and self <= 10
@@ -86,7 +88,7 @@ type Order { Order(
   card: View,
   address: View,
   amount: Int,
-  state: View,
+  state: OrderState,
   label: Int,
   note: View,
   stall: View,
@@ -216,7 +218,7 @@ fn start(wait: Int, order: Result[NewOrder, View]) -> Outcome {
 // transition leaves.
 fn advance(wait: Int, found: Option[Order]) -> Outcome {
   match found {
-    Some(value: Order(id, sku, qty, state: "reserving")) -> {
+    Some(value: Order(id, sku, qty, state: Reserving)) -> {
       let Ok(value: Reserved(price)) = call(
         to: inventory,
         method: "reserve",
@@ -227,9 +229,9 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
       ) else {
         Err(error: Rejected(reason)) -> show(
           status: 409,
-          found: move(id, from: "reserving", to: "failed", note: reason)
+          found: move(id, from: Reserving, to: Failed, note: reason)
         )
-        Err(error) -> stalled(id, state: "reserving", step: "inventory.reserve", error)
+        Err(error) -> stalled(id, state: Reserving, step: "inventory.reserve", error)
       }
       advance(
         wait,
@@ -243,7 +245,7 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         ))
       )
     }
-    Some(value: Order(id, card, amount, state: "charging")) -> {
+    Some(value: Order(id, card, amount, state: Charging)) -> {
       let Ok(value) = call(
         to: payments,
         method: "charge",
@@ -254,13 +256,13 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
       ) else {
         Err(error: Rejected(reason)) -> advance(
           wait,
-          found: move(id, from: "charging", to: "releasing", note: reason)
+          found: move(id, from: Charging, to: Releasing, note: reason)
         )
-        Err(error) -> stalled(id, state: "charging", step: "payments.charge", error)
+        Err(error) -> stalled(id, state: Charging, step: "payments.charge", error)
       }
-      advance(wait, found: move(id, from: "charging", to: "shipping", note: ""))
+      advance(wait, found: move(id, from: Charging, to: Shipping, note: ""))
     }
-    Some(value: Order(id, sku, qty, address, state: "shipping")) -> {
+    Some(value: Order(id, sku, qty, address, state: Shipping)) -> {
       let Ok(value: Shipped(label)) = call(
         to: shipping,
         method: "label",
@@ -271,9 +273,9 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
       ) else {
         Err(error: Rejected(reason)) -> advance(
           wait,
-          found: move(id, from: "shipping", to: "refunding", note: reason)
+          found: move(id, from: Shipping, to: Refunding, note: reason)
         )
-        Err(error) -> stalled(id, state: "shipping", step: "shipping.label", error)
+        Err(error) -> stalled(id, state: Shipping, step: "shipping.label", error)
       }
       advance(
         wait,
@@ -287,7 +289,7 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
       )
     }
     // Compensation: the note keeps the reason the workflow turned back.
-    Some(value: Order(id, card, amount, state: "refunding")) -> {
+    Some(value: Order(id, card, amount, state: Refunding)) -> {
       let Ok(value) = call(
         to: payments,
         method: "refund",
@@ -299,11 +301,11 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         // a compensation that is refused stalls like one with no answer: stalled stops after its retries
         Err(error: refusal = Rejected(reason)) -> stalled(
           id,
-          state: "refunding",
+          state: Refunding,
           step: "payments.refund",
           error: refusal
         )
-        Err(error) -> stalled(id, state: "refunding", step: "payments.refund", error)
+        Err(error) -> stalled(id, state: Refunding, step: "payments.refund", error)
       }
       advance(
         wait,
@@ -315,7 +317,7 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         ))
       )
     }
-    Some(value: Order(id, sku, qty, state: "releasing")) -> {
+    Some(value: Order(id, sku, qty, state: Releasing)) -> {
       let Ok(value) = call(
         to: inventory,
         method: "release",
@@ -326,11 +328,11 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
       ) else {
         Err(error: refusal = Rejected(reason)) -> stalled(
           id,
-          state: "releasing",
+          state: Releasing,
           step: "inventory.release",
           error: refusal
         )
-        Err(error) -> stalled(id, state: "releasing", step: "inventory.release", error)
+        Err(error) -> stalled(id, state: Releasing, step: "inventory.release", error)
       }
       show(
         status: 200,
@@ -342,8 +344,8 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
         ))
       )
     }
-    Some(value: order = Order(state: "done")) -> Shown(status: 201, order)
-    Some(value: order) -> Shown(status: 200, order)
+    Some(value: order = Order(state: Done)) -> Shown(status: 201, order)
+    Some(value: order = Order(state: Failed)) -> Shown(status: 200, order)
     None -> Problem(status: 404, reason: "no such order")
   }
 }
@@ -351,7 +353,7 @@ fn advance(wait: Int, found: Option[Order]) -> Outcome {
 // One transition: from the state the step belonged to, to the next. Nothing changes if the order has moved on.
 // When another request moved the order first (a retry racing this one), the order as it is now: the workflow
 // carries on from there, and its steps' keys make anything sent again harmless.
-fn move(id: Int, from: View, to: View, note: View) -> Option[Order] {
+fn move(id: Int, from: OrderState, to: OrderState, note: View) -> Option[Order] {
   latest(moved: sql_move(
     row: Order,
     query: "UPDATE orders SET state = :to, note = :note, stall = '', retries = 0, steps = steps + \
@@ -367,7 +369,7 @@ fn move(id: Int, from: View, to: View, note: View) -> Option[Order] {
 // tried again later, by a timer (retrying); a refusal while compensating (a refund or a release turned down) is
 // not, as it needs a person. Each write happens only while the order is still in that state: another request
 // may have finished the step meanwhile (a retry racing this one), and then the order is shown as that request left it.
-fn stalled(id: Int, state: View, step: View, error: CallError) -> Outcome {
+fn stalled(id: Int, state: OrderState, step: View, error: CallError) -> Outcome {
   match error {
     Timeout -> retrying(id, why: step ++ " did not answer in time", found: failed_again(id, state))
     Unreachable -> retrying(id, why: step ++ " is unreachable", found: failed_again(id, state))
@@ -380,7 +382,7 @@ fn stalled(id: Int, state: View, step: View, error: CallError) -> Outcome {
 }
 
 // One more failure in a row of the order's current step.
-fn failed_again(id: Int, state: View) -> Move[Order] {
+fn failed_again(id: Int, state: OrderState) -> Move[Order] {
   sql_move(
     row: Order,
     repeat: True,
@@ -415,7 +417,7 @@ fn waiting(decided: Retry) -> View {
   }
 }
 
-fn noted(id: Int, state: View, stall: View) -> Option[Order] {
+fn noted(id: Int, state: OrderState, stall: View) -> Option[Order] {
   latest(moved: sql_move(
     row: Order,
     query: "UPDATE orders SET stall = :stall WHERE id = :id AND state = :state RETURNING *",

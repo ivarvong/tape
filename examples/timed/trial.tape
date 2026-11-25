@@ -17,11 +17,13 @@ migration 1 "trials" {
   )
 }
 
-machine trials.state {
-  "trial" -> "reminded"
-  "trial" -> "paid"
-  "reminded" -> "paid"
-  "reminded" -> "expired"
+type TrialState { Trial Reminded Paid Expired }
+
+machine trials.state: TrialState {
+  Trial -> Reminded
+  Trial -> Paid
+  Reminded -> Paid
+  Reminded -> Expired
 }
 
 flag remind_ms: Int = 604800000
@@ -29,13 +31,13 @@ flag trial_ms: Int = 1209600000
 
 type Key = View where len(self) >= 1 and len(self) <= 64
 type NewTrial { NewTrial(key: Key, email: View) }
-type Trial { Trial(id: Int, email: View, state: View, ends: Int) }
+type Signup { Signup(id: Int, email: View, state: TrialState, ends: Int) }
 type Email { Email(to: View, template: View) }
 type Sent { Sent(message: View) }
 type Reminder { Reminder(trial: Int) }
 
 type Outcome {
-  Shown(status: Int, trial: Trial)
+  Shown(status: Int, trial: Signup)
   Problem(status: Int, reason: View)
 }
 
@@ -45,7 +47,7 @@ fn handle(raw: View, db: Sql, mail: Remote, clock: Clock, timer: Timer) -> Buf {
     Request(method: "POST", path: "/trials/" ++ decimal(id) ++ "/pay") -> shown(found: latest(
       id,
       m: sql_move(
-        row: Trial,
+        row: Signup,
         query: "UPDATE trials SET state = 'paid' WHERE id = :id AND state \
             IN ('trial', 'reminded') RETURNING *",
         id
@@ -63,7 +65,7 @@ export fn woken(
   clock: Clock,
   timer: Timer,
   message: Wake
-) -> Result[Trial, View] {
+) -> Result[Signup, View] {
   let Wake(key) = message
   match due(found: load(id: key)) {
     Shown(trial) -> Ok(value: trial)
@@ -71,8 +73,8 @@ export fn woken(
   }
 }
 
-fn load(id: Int) -> Option[Trial] {
-  sql_first(row: Trial, query: "SELECT * FROM trials WHERE id = :id", id)
+fn load(id: Int) -> Option[Signup] {
+  sql_first(row: Signup, query: "SELECT * FROM trials WHERE id = :id", id)
 }
 
 fn started(body: View) -> Outcome {
@@ -80,7 +82,7 @@ fn started(body: View) -> Outcome {
     Err(error) -> Problem(status: 400, reason: error)
   }
   let Some(value: t) = sql_first(
-    row: Trial,
+    row: Signup,
     query: "INSERT INTO trials(client, email, ends) VALUES (:key, :email, :ends) \
         ON CONFLICT(client) DO NOTHING RETURNING *",
     key,
@@ -88,7 +90,7 @@ fn started(body: View) -> Outcome {
     ends: now() + flags.trial_ms
   ) else {
     None -> shown(
-      found: sql_first(row: Trial, query: "SELECT * FROM trials WHERE client = :key", key)
+      found: sql_first(row: Signup, query: "SELECT * FROM trials WHERE client = :key", key)
     )
   }
   do wake(after: flags.remind_ms, key: t.id)
@@ -97,10 +99,10 @@ fn started(body: View) -> Outcome {
 
 // The timer's run: a trial is reminded (and its end is a timer); a reminded trial past its end expires (one not
 // yet due is waited for again); a paid or expired one is left as it is.
-fn due(found: Option[Trial]) -> Outcome {
+fn due(found: Option[Signup]) -> Outcome {
   let Some(value: t) = found else -> Problem(status: 404, reason: "no such trial")
   match t {
-    Trial(id, email, state: "trial") -> reminded(
+    Signup(id, email, state: Trial) -> reminded(
       id,
       reply: call(
         to: mail,
@@ -111,20 +113,21 @@ fn due(found: Option[Trial]) -> Outcome {
         once: Reminder(trial: id)
       )
     )
-    Trial(id, state: "reminded", ends) if ends <= now() -> shown(found: latest(
+    Signup(id, state: Reminded, ends) if ends <= now() -> shown(found: latest(
       id,
       m: sql_move(
-        row: Trial,
+        row: Signup,
         query: "UPDATE trials SET state = 'expired' WHERE id = :id AND state = 'reminded' \
             RETURNING *",
         id
       )
     ))
-    Trial(id, state: "reminded", ends) -> {
+    Signup(id, state: Reminded, ends) -> {
       do wake(after: ends - now(), key: id)
       later(trial: t)
     }
-    _ -> Shown(status: 200, trial: t)
+    Signup(state: Paid) -> Shown(status: 200, trial: t)
+    Signup(state: Expired) -> Shown(status: 200, trial: t)
   }
 }
 
@@ -135,7 +138,7 @@ fn reminded(id: Int, reply: Result[Sent, CallError]) -> Outcome {
       found: latest(
         id,
         m: sql_move(
-          row: Trial,
+          row: Signup,
           query: "UPDATE trials SET state = 'reminded' WHERE id = :id AND state = 'trial' \
               RETURNING *",
           id
@@ -148,7 +151,7 @@ fn reminded(id: Int, reply: Result[Sent, CallError]) -> Outcome {
       found: latest(
         id,
         m: sql_move(
-          row: Trial,
+          row: Signup,
           query: "UPDATE trials SET state = 'reminded' WHERE id = :id AND state = 'trial' \
               RETURNING *",
           id
@@ -162,13 +165,16 @@ fn reminded(id: Int, reply: Result[Sent, CallError]) -> Outcome {
   }
 }
 
-fn ending(id: Int, found: Option[Trial]) -> Outcome {
+fn ending(id: Int, found: Option[Signup]) -> Outcome {
   match found {
-    Some(value: t = Trial(state: "reminded", ends)) -> {
+    Some(value: t = Signup(state: Reminded, ends)) -> {
       do wake(after: ends - now(), key: id)
       later(trial: t)
     }
-    _ -> shown(found)
+    Some(value: Signup(state: Trial)) -> shown(found)
+    Some(value: Signup(state: Paid)) -> shown(found)
+    Some(value: Signup(state: Expired)) -> shown(found)
+    None -> shown(found)
   }
 }
 
@@ -176,11 +182,11 @@ fn later_reminder(id: Int) -> Outcome {
   shown(found: load(id))
 }
 
-fn later(trial: Trial) -> Outcome {
+fn later(trial: Signup) -> Outcome {
   Shown(status: 200, trial)
 }
 
-fn latest(id: Int, m: Move[Trial]) -> Option[Trial] {
+fn latest(id: Int, m: Move[Signup]) -> Option[Signup] {
   match m {
     Moved(value) -> Some(value)
     Raced(now) -> Some(now)
@@ -188,7 +194,7 @@ fn latest(id: Int, m: Move[Trial]) -> Option[Trial] {
   }
 }
 
-fn shown(found: Option[Trial]) -> Outcome {
+fn shown(found: Option[Signup]) -> Outcome {
   let Some(value: t) = found else -> Problem(status: 404, reason: "no such trial")
   Shown(status: 200, trial: t)
 }

@@ -34,14 +34,16 @@ migration 1 "subs" {
   ) WITHOUT ROWID
 }
 
-machine subs.state {
-  "trialing" -> "active"
-  "trialing" -> "past_due"
-  "active" -> "past_due"
-  "past_due" -> "active"
-  "trialing" -> "canceled"
-  "active" -> "canceled"
-  "past_due" -> "canceled"
+type SubState { Trialing Active PastDue Canceled }
+
+machine subs.state: SubState {
+  Trialing -> Active
+  Trialing -> PastDue
+  Active -> PastDue
+  PastDue -> Active
+  Trialing -> Canceled
+  Active -> Canceled
+  PastDue -> Canceled
 }
 
 type Key = View where len(self) >= 1 and len(self) <= 64
@@ -50,7 +52,7 @@ type Sub { Sub(
   id: Int,
   card: View,
   price: Int,
-  state: View,
+  state: SubState,
   paid_through: Int,
   charging: Int,
   invoices: Int
@@ -155,14 +157,14 @@ fn renew(sub: Sub, period: Int) -> Outcome {
       id,
       card,
       price,
-      state: "canceled",
+      state: Canceled,
       paid_through,
       charging
     ) if charging > paid_through -> charged(
       id,
       period: charging,
       price,
-      state: "canceled",
+      state: Canceled,
       reply: call(
         to: payments,
         method: "charge",
@@ -172,36 +174,41 @@ fn renew(sub: Sub, period: Int) -> Outcome {
         once: Period(sub: id, period: charging)
       )
     )
-    Sub(state: "canceled") -> Shown(status: 409, sub)
+    Sub(state: Canceled) -> Shown(status: 409, sub)
     Sub(paid_through) if paid_through >= period -> Shown(status: 200, sub)
-    Sub(id, state) -> {
-      let Moved(value: Sub(card, price)) = sql_move(
-        row: Sub,
-        query: "UPDATE subs SET charging = :period WHERE id = :id AND state = :state \
-            RETURNING *, (SELECT count(*) FROM invoices WHERE sub = subs.id) AS invoices",
-        period,
-        id,
-        state
-      ) else {
-        Raced(now) -> Shown(status: 409, sub: now)
-        NoRow -> missing()
-      }
-      charged(
-        id,
-        period,
-        price,
-        state,
-        reply: call(
-          to: payments,
-          method: "charge",
-          send: Charge(card, amount: price),
-          reply: Charged,
-          within: 50,
-          once: Period(sub: id, period)
-        )
-      )
-    }
+    Sub(id, state: Trialing) -> bill(id, period, state: Trialing)
+    Sub(id, state: Active) -> bill(id, period, state: Active)
+    Sub(id, state: PastDue) -> bill(id, period, state: PastDue)
   }
+}
+
+// The period written down (and committed: a call is a commit point) before its charge goes out.
+fn bill(id: Int, period: Int, state: SubState) -> Outcome {
+  let Moved(value: Sub(card, price)) = sql_move(
+    row: Sub,
+    query: "UPDATE subs SET charging = :period WHERE id = :id AND state = :state \
+        RETURNING *, (SELECT count(*) FROM invoices WHERE sub = subs.id) AS invoices",
+    period,
+    id,
+    state
+  ) else {
+    Raced(now) -> Shown(status: 409, sub: now)
+    NoRow -> missing()
+  }
+  charged(
+    id,
+    period,
+    price,
+    state,
+    reply: call(
+      to: payments,
+      method: "charge",
+      send: Charge(card, amount: price),
+      reply: Charged,
+      within: 50,
+      once: Period(sub: id, period)
+    )
+  )
 }
 
 // The charge's outcome, written only from the state the subscription was in when it was sent. Invoiced; the
@@ -211,7 +218,7 @@ fn charged(
   id: Int,
   period: Int,
   price: Int,
-  state: View,
+  state: SubState,
   reply: Result[Charged, CallError]
 ) -> Outcome {
   match reply {
@@ -232,7 +239,7 @@ fn charged(
         once: Receipt(sub: id, period)
       ) else -> show(status: 202, found: load(id))
       match state {
-        "canceled" -> show(
+        Canceled -> show(
           status: 200,
           found: latest(
             id,
@@ -246,21 +253,9 @@ fn charged(
             )
           )
         )
-        _ -> show(
-          status: 200,
-          found: latest(
-            id,
-            moved: sql_move(
-              row: Sub,
-              query: "UPDATE subs SET state = 'active', paid_through = max(paid_through, :period) \
-                  WHERE id = :id AND state = :state RETURNING *, (SELECT count(*) FROM invoices \
-                  WHERE sub = subs.id) AS invoices",
-              period,
-              id,
-              state
-            )
-          )
-        )
+        Trialing -> activated(id, period, state)
+        Active -> activated(id, period, state)
+        PastDue -> activated(id, period, state)
       }
     }
     Err(error: Rejected(reason)) -> show(
@@ -280,6 +275,25 @@ fn charged(
     Err(error: Skew(reason)) -> Problem(status: 502, reason)
     Err(error) -> show(status: 202, found: load(id))
   }
+}
+
+// A charge settled for a subscription that was not canceled: it is active, paid to the period.
+fn activated(id: Int, period: Int, state: SubState) -> Outcome {
+  show(
+    status: 200,
+    found: latest(
+      id,
+      moved: sql_move(
+        row: Sub,
+        query: "UPDATE subs SET state = 'active', paid_through = max(paid_through, :period) \
+            WHERE id = :id AND state = :state RETURNING *, (SELECT count(*) FROM invoices \
+            WHERE sub = subs.id) AS invoices",
+        period,
+        id,
+        state
+      )
+    )
+  )
 }
 
 fn latest(id: Int, moved: Move[Sub]) -> Option[Sub] {

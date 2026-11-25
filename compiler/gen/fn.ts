@@ -32,7 +32,6 @@ export type Build = Imports & {
   G_COST: number;
   G_UNDO: number;
   SIMJSON: { replies: Record<string, unknown>; decodes: Record<string, unknown> };
-  STATES: Map<string, string[]>;
   WIRE: Wire;
   adtOf: (t: Type, at: Place) => Adt;
   adtOrNull: (t: Type, at: Place) => Adt | null;
@@ -67,6 +66,8 @@ export type Build = Imports & {
   recursive: Set<string>;
   resolve: (ast: Type, map?: ReadonlyMap<string, Type>) => Type;
   rowKind: (f: { type: Type }) => string | undefined;
+  /** the constructors of a fieldless sum (or of the one an Option holds), stored as their texts; null for another type */
+  fieldlessIn: (t: Type) => readonly string[] | null;
   rowOf: (t: Type, at: Place) => FlatAdt;
   shapeOf: (t: Type, at: Place, decoding: boolean) => Shape;
   sig: (params: readonly number[], results: readonly number[]) => number;

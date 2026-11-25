@@ -2,8 +2,10 @@
 //
 // ABI: env.sql(query id, params pointer, mode) -> f64. Params are 16 bytes each: an i64 (Int, Bool) or a pointer
 // and a length (text). mode 0 returns the rows written. mode 1 returns a pointer to: u32 row count, 4 bytes of
-// padding, then every cell in row order: Int and Bool as an i64, text as a u32 length and the UTF-8 bytes. The
-// module's `queries` section gives each statement's parameter kinds and row shape; cells are checked against it.
+// padding, then every cell in row order: Int and Bool as an i64, text as a u32 length and the UTF-8 bytes, and a
+// fieldless sum's text (kind e) as the i64 index of the constructor it names among the query's `states` for that
+// field. The module's `queries` section gives each statement's parameter kinds and row shape; cells are checked
+// against it.
 // JSON is decoded by the module itself (std/json.tape, compiler/wire.ts).
 import type { Cell, Flags, SqlParam } from './log.ts';
 import { cellText } from './log.ts';
@@ -11,7 +13,15 @@ import { cellText } from './log.ts';
 /** The part of a module's exports the host writes through. */
 export type Mem = { readonly memory: WebAssembly.Memory; readonly alloc: (size: number) => number };
 /** A statement as the module lists it. `run`: its text with each Int and Bool parameter read as an integer. */
-export type Query = { sql: string; params: string; row: string | null; columns: string[] | null; run?: string };
+export type Query = {
+  sql: string;
+  params: string;
+  row: string | null;
+  columns: string[] | null;
+  /** for each field of kind e or E, the texts of its type's constructors, in their order */
+  states?: (readonly string[] | null)[];
+  run?: string;
+};
 export type FlagDecl = { name: string; type: string; default: number | boolean; at: number; pinned?: unknown };
 
 // ignoreBOM: true keeps a leading U+FEFF (EF BB BF) in the text, where it is a character of the View; the default
@@ -199,11 +209,23 @@ function writeCell(
   o: number,
   v: Cell,
   kind: string | undefined,
+  states: readonly string[] | null | undefined,
   wrong: (should: string, is: string) => Error,
 ): number {
   const flag = isOption(kind) ? 8 : 0;
   if (flag > 0) setInt64(d, o, v === null ? 0 : 1);
   if (flag > 0 && v === null) return flag;
+  if (kind === 'e' || kind === 'E') {
+    // the text of one of the constructors, written as which one it is
+    const i = typeof v === 'string' && states ? states.indexOf(v) : -1;
+    if (i < 0)
+      throw wrong(
+        `one of ${(states ?? []).map(x => JSON.stringify(x)).join(', ')}`,
+        typeof v === 'string' ? JSON.stringify(v) : v === null ? 'NULL' : cellText(v),
+      );
+    setInt64(d, o + flag, i);
+    return flag + 8;
+  }
   if (isText(kind)) {
     if (typeof v !== 'string') throw wrong('text', v === null ? 'NULL' : typeof v);
     return flag + writeText(d, mem, o + flag, v);
@@ -229,6 +251,7 @@ export function writeRows(m: Mem, q: Query, rows: readonly Cell[][]): number {
   const wrong = (should: string, is: string): Error =>
     new Error(`sql: column ${q.columns?.[c]} should be ${should} but is ${is}: ${q.sql}`);
   let o = ptr + 8;
-  for (const r of rows) for (c = 0; c < r.length; c++) o += writeCell(d, u, o, r[c] ?? null, row[c], wrong);
+  for (const r of rows)
+    for (c = 0; c < r.length; c++) o += writeCell(d, u, o, r[c] ?? null, row[c], q.states?.[c], wrong);
   return ptr;
 }

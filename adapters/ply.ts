@@ -7,7 +7,7 @@
 // Interface (see examples/bump.tape):
 //   read  head(Ref) -> Head                 the commit a branch points at
 //   read  read_file(ReadFile) -> File       a text file, up to `maxBytes`
-//   write edit_file(Edit) -> Pushed         replace exactly one occurrence and push
+//   write edit_file(Edit) -> Edited         replace exactly one occurrence and push
 //
 // A write must say which head it expects and what time to stamp, so the commit it makes is a function of the
 // message alone. That is what makes sending it again safe: if the branch has already moved to a commit whose

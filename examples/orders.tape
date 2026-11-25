@@ -16,12 +16,14 @@ schema "CREATE TABLE IF NOT EXISTS orders(id INTEGER PRIMARY KEY, item TEXT NOT 
 
 // An order waits as pending for its stock; the compiler checks every write of its state against these moves (each
 // from the state its WHERE names), and the host installs SQLite triggers that refuse any other.
-machine orders.state {
-  "pending" -> "confirmed"
-  "pending" -> "refused"
+type OrderState { Pending Confirmed Refused }
+
+machine orders.state: OrderState {
+  Pending -> Confirmed
+  Pending -> Refused
 }
 
-type Order { Order(id: Int, item: View, state: View) }
+type Order { Order(id: Int, item: View, state: OrderState) }
 type Key = View where len(self) >= 1 and len(self) <= 64
 type ForOrder { ForOrder(order: Int) }
 type NewOrder { NewOrder(key: Key, item: View) }
@@ -65,9 +67,9 @@ fn place(body: View) -> Buf {
 // The same key again: a pending order is sent to stock again (same once key); a settled one is shown as it stands.
 fn again(found: Option[Order]) -> Buf {
   match found {
-    Some(value: order = Order(state: "pending")) -> reserve(order)
-    Some(value: order = Order(state: "confirmed")) -> shown(status: 200, order)
-    Some(value: Order(state)) -> problem(status: 409, reason: "this order was " ++ state)
+    Some(value: order = Order(state: Pending)) -> reserve(order)
+    Some(value: order = Order(state: Confirmed)) -> shown(status: 200, order)
+    Some(value: Order(state: Refused)) -> problem(status: 409, reason: "this order was refused")
     None -> problem(status: 422, reason: "the key was already used for another order")
   }
 }

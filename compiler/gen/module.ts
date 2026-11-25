@@ -363,6 +363,8 @@ export type QueryEntry = {
   params: string;
   row: string | null;
   columns: string[] | null;
+  /** for each field of the row that is a fieldless sum (kind `e` or `E`), the texts its constructors are stored as */
+  states?: (string[] | null)[];
   run: string;
   /** a write the program says is meant to apply again each time it runs (`repeat: True`) */
   repeat?: true;

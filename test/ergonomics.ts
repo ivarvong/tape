@@ -301,19 +301,20 @@ T(
     ],
   ];
   for (const [name, qs, want] of C74) T(`C74 ${name}`, only(codes(prog(st, ...qs)), 'C74'), want);
+  const declared = codes(
+    prog(
+      st,
+      "UPDATE s SET state = 'paid' WHERE k = :by",
+      "UPDATE s SET state = 'void' WHERE k = :by AND state = 'paid'",
+    ).replace(
+      'type N',
+      'type SState { New Paid Void }\nmachine s.state: SState {\n  New -> Paid\n  Paid -> Void\n}\ntype N',
+    ),
+  );
   T(
     'C74 is left to C58 when a machine declares the column',
-    only(
-      codes(
-        prog(
-          st,
-          "UPDATE s SET state = 'paid' WHERE k = :by",
-          "UPDATE s SET state = 'void' WHERE k = :by AND state = 'paid'",
-        ).replace('type N', 'machine s.state {\n  "new" -> "paid"\n  "paid" -> "void"\n}\ntype N'),
-      ),
-      'C74',
-    ),
-    [],
+    [only(declared, 'C74'), only(declared, 'C58').length > 0],
+    [[], true],
   );
 }
 
@@ -333,15 +334,15 @@ T(
     {
       program: 'billing',
       file: 'testdata/compare/billing.tape',
-      from: 'once: Period(sub: id, period)))\n    }',
-      to: 'once: decimal_text(value: id)))\n    }',
+      from: 'once: Period(sub: id, period)))\n}',
+      to: 'once: decimal_text(value: id)))\n}',
       what: 'the charge keyed by subscription, not by period',
     },
     {
       program: 'agent',
       file: 'testdata/compare/agent.tape',
-      from: '    Run(id, step, tool, input, state: "acting") -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: AtStep(run: id, step))',
-      to: '    Run(id, prompt, step, tool, input, state: "acting") -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: prompt ++ "/" ++ decimal_text(value: step))',
+      from: '    Run(id, step, tool, input, state: Acting) -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: AtStep(run: id, step))',
+      to: '    Run(id, prompt, step, tool, input, state: Acting) -> {\n      let Ok(value: Used(output)) = call(to: tools, method: "tool", send: Use(tool, input), reply: Used, within: 50, once: prompt ++ "/" ++ decimal_text(value: step))',
       what: 'the tool call keyed by prompt and step: two runs of one prompt share it',
     },
   ];

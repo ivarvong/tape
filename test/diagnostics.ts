@@ -77,7 +77,7 @@ const FIXTURES: readonly (readonly [code: string, program: string, options?: { e
   ],
   [
     'C70',
-    'migration 1 "sales" {\n  CREATE TABLE s(id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT \'pending\')\n}\nmigration 2 "fix" contract {\n  UPDATE s SET state = \'payed\' WHERE id = 1\n}\nmachine s.state {\n  "pending" -> "paid"\n}\nfn handle(raw: View, db: Sql) -> Buf {\n  respond(status: 200) |> write_int(value: sql_exec(db, query: "SELECT count(*) FROM s"))\n}\n',
+    'migration 1 "sales" {\n  CREATE TABLE s(id INTEGER PRIMARY KEY, state TEXT NOT NULL DEFAULT \'pending\')\n}\nmigration 2 "fix" contract {\n  UPDATE s SET state = \'payed\' WHERE id = 1\n}\ntype SaleState { Pending Paid }\nmachine s.state: SaleState {\n  Pending -> Paid\n}\nfn handle(raw: View, db: Sql) -> Buf {\n  respond(status: 200) |> write_int(value: sql_exec(db, query: "SELECT count(*) FROM s"))\n}\n',
   ],
 ];
 for (const [code, program, options] of FIXTURES) {

@@ -1,4 +1,4 @@
-// `do` steps, invariants, the state named in a pattern (C81), and the three older ways `do` replaces (C83-C85).
+// `do` steps, invariants, a machine's states named in a pattern (C24, C97), and the three older ways `do` replaces (C83-C85).
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
@@ -34,11 +34,13 @@ const jars = `migration 1 "jars" {
   INSERT INTO purse(id) VALUES (1)
 }
 
-machine jars.state {
-  "open" -> "sealed"
+type JarState { Open Sealed }
+
+machine jars.state: JarState {
+  Open -> Sealed
 }
 
-type Jar { Jar(id: Int, state: View) }
+type Jar { Jar(id: Int, state: JarState) }
 type Purse { Purse(id: Int, coins: Int) }
 
 fn handle(raw: View, db: Sql) -> Buf {
@@ -68,9 +70,9 @@ fn broken() -> Buf {
 
 fn shown(found: Option[Jar], purse: Option[Purse]) -> Buf {
   match found {
-    Some(value: Jar(state: "open")) -> respond(status: 200) |> append(view: "open ") |> write_int(value: coins_of(purse))
-    Some(value: Jar(state: "sealed")) -> respond(status: 200) |> append(view: "sealed")
-    _ -> respond(status: 404)
+    Some(value: Jar(state: Open)) -> respond(status: 200) |> append(view: "open ") |> write_int(value: coins_of(purse))
+    Some(value: Jar(state: Sealed)) -> respond(status: 200) |> append(view: "sealed")
+    None -> respond(status: 404)
   }
 }
 
@@ -186,31 +188,42 @@ ok(
   })(),
 );
 ok(
-  'C81: a state in a pattern that the machine does not have',
-  codes(build(swap(`Jar(state: "sealed")`, `Jar(state: "seeled")`))) === 'C81',
-  build(swap(`Jar(state: "sealed")`, `Jar(state: "seeled")`)).errors?.[0]?.message.slice(0, 90),
+  'a state misspelt in a pattern is no constructor (C81 is gone: a state is a constructor)',
+  codes(build(swap(`Jar(state: Sealed)`, `Jar(state: Seeled)`))) === 'C20',
+  codes(build(swap(`Jar(state: Sealed)`, `Jar(state: Seeled)`))),
 );
-ok('C81 does not fire on a state the machine has', !build(jars).errors?.length);
+ok('the program compiles', !build(jars).errors?.length, codes(build(jars)));
+ok(
+  'C97: the catch-all that takes a state the arms above do not name',
+  codes(build(jars)) === '' &&
+    build(
+      swap(
+        '    None -> respond(status: 404)\n  }\n}\n\nfn coins_of',
+        '    _ -> respond(status: 404)\n  }\n}\n\nfn coins_of',
+      ),
+    ).errors[0]?.code === 'C97',
+);
 // a machine's states are a known set in a match
 {
-  const all = swap(
-    '    _ -> respond(status: 404)\n  }\n}\n\nfn coins_of',
-    '    None -> respond(status: 404)\n  }\n}\n\nfn coins_of',
-  );
+  const all = jars;
   const full = build(all);
   ok('a match that names every state needs no default', !full.errors?.length, codes(full));
   const less = build(
-    all.replace('    Some(value: Jar(state: "sealed")) -> respond(status: 200) |> append(view: "sealed")\n', ''),
+    all.replace('    Some(value: Jar(state: Sealed)) -> respond(status: 200) |> append(view: "sealed")\n', ''),
   );
   ok(
     'C24: a state the match misses is named',
-    codes(less) === 'C24' && less.errors[0]?.message === 'match does not cover Some(value: Jar(state: "sealed"))',
+    codes(less) === 'C24' && less.errors[0]?.message === 'match does not cover Some(value: Jar(state: Sealed))',
     less.errors[0]?.message,
   );
-  const more = build(all.replace('"open" -> "sealed"', '"open" -> "sealed"\n  "sealed" -> "buried"'));
+  const more = build(
+    all
+      .replace('Open -> Sealed', 'Open -> Sealed\n  Sealed -> Buried')
+      .replace('{ Open Sealed }', '{ Open Sealed Buried }'),
+  );
   ok(
     'C24: a state added to the machine breaks the match that does not name it',
-    codes(more) === 'C24' && /Jar\(state: "buried"\)/.test(more.errors[0]?.message ?? ''),
+    codes(more) === 'C24' && /Jar\(state: Buried\)/.test(more.errors[0]?.message ?? ''),
     more.errors[0]?.message,
   );
   if (full.wasm !== null) {
@@ -229,7 +242,8 @@ ok('C81 does not fire on a state the machine has', !build(jars).errors?.length);
       sql.exec(`DROP TRIGGER "${cellText(n.name)}"`);
     sql.exec("UPDATE jars SET state = 'smashed'");
     ok(
-      'a state forced into the data past the triggers traps at the match: no wrong arm is taken',
+      'a state forced into the data past the triggers stops the request as its row is read: no wrong arm is taken',
+
       req('GET /jar').startsWith('threw '),
       req('GET /jar'),
     );

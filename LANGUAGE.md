@@ -115,7 +115,7 @@ failing that, a long text is carried over lines. Comments and the SQL of a migra
 | `Buf` | bytes being written. It has one owner: a function that is handed a `Buf` uses it once (C25) |
 | `Rows[T]` | the rows of a query, folded with `fold_rows`, or read one at a time with `next`. Not a `List`: no list of the rows is made |
 | `Sql` `Remote` `Clock` `Entropy` `Timer` | capabilities: only ever parameters, never stored or returned |
-| `type T { A(x: Int)  B }` | a sum of constructors, each with named fields. `type T[P] { … }` takes type parameters |
+| `type T { A(x: Int)  B }` | a sum of constructors, each with named fields. `type T[P] { … }` takes type parameters. A sum of two or more constructors, none with fields (`type EventState { Onsale PartlyRefunded }`; one constructor with none is a record with no fields, `{}` in JSON), is stored as text: each constructor as its name in snake_case (`Onsale` is `onsale`, `PartlyRefunded` is `partly_refunded`), in a column (section 7), in a query's value, and in JSON |
 | `type Key = View where len(self) >= 1` | a refined type: a base type and a condition. A value has it only after a pattern or a decode proved the condition. It stands wherever its base type is asked, and so does an `Option`, `List` or `Result` of it (`Option[Delay]` where `Option[Int]` is asked); a function goes the other way in what it takes (`Fn[Int, X]` is an `Fn[Delay, X]`), and any other type of it is only itself. `… else "lowercase letters, digits and -"` is what decode's 400 says of a value for which the condition does not hold (section 6) |
 | `interface Git { read head(Ref) -> Head }` | what a capability bound by the host can be asked |
 
@@ -320,8 +320,10 @@ fn emptied(id: Int, balance: Int) -> Int {
 // emptied(4, 1) is -1
 ```
 
-A pattern on a row's machine column (section 7) may name only declared states (C81), and a match that names every
-state needs no `_` arm.
+A match on a machine's states (section 7), where they are told apart, names each state in an arm of its own: an arm
+that takes the value whatever its state, `_`, a name, or a row pattern that leaves the state out, after or beside
+arms that name states, is refused (C97), so a state added to the machine fails to compile at every match that
+would otherwise take it without a word. A match that names too few is C24.
 
 ## 6. Effects
 
@@ -360,6 +362,11 @@ In JSON a View is a string, escaped as `JSON.stringify` escapes one. A View is b
 have no JSON: `write_json` writes U+FFFD for each maximal part of them, as a WHATWG decoder (`TextDecoder`) reads
 the same bytes, so what it writes is always JSON, and `decode` of it gives the text with those parts replaced. A
 View that is UTF-8 comes back as it was.
+
+A sum whose constructors have no fields is, in a query and in JSON, the text of its constructor (section 3): bound
+to a query as that TEXT, read from a TEXT column (any other text in the column stops the request, as a NULL does
+where the field is not an `Option`), written by `write_json` as the string (`"onsale"`, not `{"Onsale": {}}`),
+and decoded from it: any other value is `state: expected one of "onsale", "canceled"`.
 
 **Why decode refuses.** `decode`'s `Err` is one line, the same from every host, made to be sent back as a 400
 as it is: `<path>: <problem>`. The path names the value from the top, a field by its name and an element by its
@@ -402,7 +409,8 @@ View, …capabilities) -> Buf` serves requests. `woken` serves timers.
 | Declaration | States |
 |---|---|
 | `migration 1 "name" { SQL }` | the tables. Migrations only add (C51); one marked `contract` may remove. A column read into a field that is not an `Option` is never NULL: declare it NOT NULL. SQLite lets a PRIMARY KEY column hold NULL too, unless it is an `INTEGER PRIMARY KEY` (the rowid; not `DESC`) or its table is `WITHOUT ROWID` or `STRICT`, so `id TEXT PRIMARY KEY NOT NULL` (C69) |
-| `machine orders.state { "a" -> "b" }` | the moves a column may make. Every write of the column is checked against them, and the host installs triggers that refuse any other |
+| `machine orders.state: OrderState { Paying -> Paid }` | the moves a column may make, between the constructors of a sum whose constructors have no fields (`type OrderState { Paying Paid }`): each is a state, every one is named by a move, and the first named is where a row starts (C57). The column holds each state as its constructor's text (section 3: `'paying'`), so the SQL compares and sets those texts; a row type's field read from the column is that type, not `View` (C69). Every write of the column is checked against the moves, and the host installs triggers that refuse any other |
+| a column read into a sum whose constructors have no fields | the text of one of them: any other text stops the request, as a NULL does where the field is not an `Option` |
 | `invariant "name" { SELECT … }` | rows that must not exist: the SELECT returns what is wrong. Checked after every commit by `tape sim`, and by `app.invariants()` in the host |
 | `invariant "name" settled { … }` | the same, once nothing is in flight and every timer has run |
 | `invariant "name" with other { … }` | reads another program's tables as `other.table`; only the simulator runs it |
@@ -424,9 +432,11 @@ migration 1 "orders" {
   )
 }
 
-machine orders.state {
-  "paying" -> "paid"
-  "paying" -> "failed"
+type OrderState { Paying Paid Failed }
+
+machine orders.state: OrderState {
+  Paying -> Paid
+  Paying -> Failed
 }
 
 invariant "a paid order carries no failure note" {
@@ -440,7 +450,7 @@ invariant "no order is left paying" settled {
 type Key = View where len(self) >= 1 and len(self) <= 64
 type Amount = Int where self >= 1 and self <= 1000000
 type NewOrder { NewOrder(key: Key, amount: Amount) }
-type Order { Order(id: Int, amount: Int, state: View, note: View) }
+type Order { Order(id: Int, amount: Int, state: OrderState, note: View) }
 type Charge { Charge(order: Int, amount: Int) }
 type Charged { Charged(payment: Int) }
 type ForOrder { ForOrder(order: Int) }
@@ -492,7 +502,7 @@ fn place(body: View) -> Outcome {
 
 fn charge(order: Order) -> Outcome {
   match order {
-    Order(id, amount, state: "paying") -> {
+    Order(id, amount, state: Paying) -> {
       let Ok(value: Charged) = call(
         to: payments,
         method: "charge",
@@ -519,7 +529,8 @@ fn charge(order: Order) -> Outcome {
         id
       ))
     }
-    _ -> Shown(status: 200, order)
+    Order(state: Paid) -> Shown(status: 200, order)
+    Order(state: Failed) -> Shown(status: 200, order)
   }
 }
 
@@ -561,9 +572,9 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | Job | The form | Otherwise |
 |---|---|---|
 | Ask whether an Option holds a value | `title != None` (`let True = title != None or done != None else -> …` for a body with something in it); to use the value, `let Some(value: t) = title else -> …` | C19 for two Options compared or `<` |
-| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); an `Option` field that is absent or `null` is `None`. Its `Err` is `<path>: missing`, `null` or `expected <what>` (section 6), ready to send as a 400. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected an integer")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
+| Read a JSON body | `decode(json: body, as: T)`, then `let Ok(value: T(…)) = … else { Err(error) -> … }`. A body that may be one of several shapes is a type with several constructors; a body that is an array is `as: List[T]`. A key the type does not name is left unread (clients send more than a service reads); an `Option` field that is absent or `null` is `None`. Its `Err` is `<path>: missing`, `null` or `expected <what>` (section 6), ready to send as a 400. Of several constructors, decode takes the one the body's only key names, `{"Sets": {…}}`, as `write_json` writes it; else the one that has all its fields among the keys and names the most of them. A type whose constructors have no fields is read from the text of one, `"paying"` (section 3), and refused with `<path>: expected one of "paying", "paid", "failed"`. The module reads the JSON itself (std/json.tape), and reads a number exactly from its text. An `Int` field takes a JSON number whose value is a whole number from -9007199254740991 to 9007199254740991 (±(2^53 - 1)), so `1e3` is 1000 and `2.0` is 2, but `1.0000000000000000001` is not a whole number; one outside that range is refused, with `Err("<field>: expected an integer")`, never rounded. Send a larger value as text until exact large-integer JSON, the whole 64-bit range, comes | C35 |
 | Read JSON of any shape | `is_json(text: body)` says whether the bytes are JSON, building nothing; `json_member(json: body, key: "id")` is the JSON text of one top-level member's value (`Option[View]`, the first member of that key), to read with `decode(json: raw, as: View)`, `as: Int` or `as: T` | |
-| Write JSON | `write_json(value: …)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`; a `List` is an array. `write_rows(rows: …)` for the rows of a query | C09 |
+| Write JSON | `write_json(value: …)`: what `decode` reads back, so `decode(json: written, as: T)` is the value again. A record is an object in the order of its fields; an `Option` field that is `None` has no key, `Some(value)` is its value; a type with several constructors is `{"Constructor": {…}}`, and one whose constructors have no fields is the text of its constructor, `"paid"`; a `List` is an array. `write_rows(rows: …)` for the rows of a query | C09 |
 | Write a list of computed items | `write_json(value: map(list, by: fn(item: T) -> Line { … }))`: a record type for the items, never a Buf kept in one (C08); `fold` again for a total, `join(list: …, sep: …)` for text | C08 |
 | Put values in text | a hole, `"\(n) of \(total)"`; `out |> append(view: …)` to grow a Buf piece by piece in a loop | C19 |
 | Hold money, or any number with a fixed count of decimals | `Dec[s]`, with literals at its scale (`12.30`) | C14 |
@@ -577,9 +588,10 @@ made to the program above by `test/definition.ts`; each must be refused with the
 | List the rows of a query | `sql_all(row: T, query: …) \|> fold_rows(from: out, by: fn(out: Buf, row: T) -> Buf { … })`, or a total in `from`; `write_rows(rows: …)` for JSON. A list of the rows is a fold into `Cons`, then `reverse` | |
 | Go on with one case, leave with the rest | `let P = e else { … }` | |
 | Make a row on a POST | the client's key in a `UNIQUE` column, `ON CONFLICT(key) DO NOTHING`, and the same key again answers with what the first made; a create meant to make a new row on each call (no client key) says so with `repeat: True` | C55 |
-| Give a row a status | a `machine`, and `sql_move` whose WHERE names the state it moves from | C59, C63 |
+| Give a row a status | a type whose constructors are the states (`type OrderState { Paying Paid Failed }`), a `machine orders.state: OrderState` of the moves, the row's field of that type (`state: OrderState`), and `sql_move` whose WHERE names the state it moves from. A match on the state names each one, so a state added to the machine does not compile until every match says what it does | C57, C59, C63, C69, C97 |
 | Change a number in a row | a compare-and-set, an op-id guard, a write after a step that claims an op id (`let 1 = sql_exec(query: "INSERT … ON CONFLICT DO NOTHING") else …`: a second run inserts nothing and leaves; the write may be in a function every call of which comes after the claim), or `repeat: True` on the call when every attempt should count | C54 |
-| Pass a value to a query | `:name` in the query, and an argument of that name. A Bool is bound as 1 or 0 and read back from an INTEGER column (`done INTEGER NOT NULL DEFAULT 0`, `WHERE done = :done`); an Int is INTEGER, a View TEXT, a Float REAL; an `Option` of one is NULL for `None` | C11, C13, C32 |
+| Pass a value to a query | `:name` in the query, and an argument of that name. A Bool is bound as 1 or 0 and read back from an INTEGER column (`done INTEGER NOT NULL DEFAULT 0`, `WHERE done = :done`); an Int is INTEGER, a View TEXT, a Float REAL, a constructor of a type whose constructors have no fields the TEXT it is stored as (`Paid` is 'paid', section 7); an `Option` of one is NULL for `None`
+ | C11, C13, C32 |
 | Filter by a value that may be absent | an `Option` argument, NULL for `None`, and the query says what None means: `WHERE (:region IS NULL OR region = :region)` for no filter, `WHERE region IS :region` for the rows whose region is NULL. An Option compared with `=` and never asked `IS NULL` is refused, since `= NULL` takes no row; into a NOT NULL column, too | C69 |
 | Take from a quantity | `SET n = n - :qty WHERE … AND n >= :qty` | C73 |
 | Take the next one (a lease, a free seat) | write the client's key into the row the claim takes (`SET lease = :key`), and before choosing, read the row that key already holds (`SELECT … WHERE lease = :key`) and answer with it | C95 |
@@ -645,9 +657,10 @@ made to the program above by `test/definition.ts`; each must be refused with the
 -        within: 2000,
 ```
 
-```diff C81
--    Order(id, amount, state: "paying") -> {
-+    Order(id, amount, state: "payin") -> {
+```diff C97
+-    Order(state: Paid) -> Shown(status: 200, order)
+-    Order(state: Failed) -> Shown(status: 200, order)
++    _ -> Shown(status: 200, order)
 ```
 
 ```diff C86

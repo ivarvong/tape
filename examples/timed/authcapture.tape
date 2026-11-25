@@ -19,24 +19,33 @@ migration 1 "payments" {
   )
 }
 
-machine payments.state {
-  "authorizing" -> "authorized"
-  "authorizing" -> "declined"
-  "authorized" -> "capturing"
-  "authorized" -> "voiding"
-  "capturing" -> "captured"
-  "capturing" -> "authorized"
-  "voiding" -> "voided"
-  "voiding" -> "void_failed"
+type PaymentState { Authorizing Authorized Declined Capturing Voiding Captured Voided VoidFailed }
+
+machine payments.state: PaymentState {
+  Authorizing -> Authorized
+  Authorizing -> Declined
+  Authorized -> Capturing
+  Authorized -> Voiding
+  Capturing -> Captured
+  Capturing -> Authorized
+  Voiding -> Voided
+  Voiding -> VoidFailed
 }
 
 flag void_ms: Int = 604800000
 
 type Key = View where len(self) >= 1 and len(self) <= 64
 type NewPayment { NewPayment(key: Key, card: View, amount: Int) }
-type Payment { Payment(id: Int, card: View, amount: Int, state: View, void_at: Int, note: View) }
+type Payment { Payment(
+  id: Int,
+  card: View,
+  amount: Int,
+  state: PaymentState,
+  void_at: Int,
+  note: View
+) }
 type Auth { Auth(card: View, amount: Int) }
-type Authorized { Authorized(auth: Int) }
+type Authorization { Authorization(auth: Int) }
 type Ref { Ref(amount: Int) }
 type Done { Done(ok: Int) }
 type Step { Step(payment: Int, step: View) }
@@ -102,14 +111,14 @@ fn authorize(payment: Payment) -> Outcome {
       to: gateway,
       method: "authorize",
       send: Auth(card, amount),
-      reply: Authorized,
+      reply: Authorization,
       within: 2000,
       once: Step(payment: id, step: "authorize")
     )
   )
 }
 
-fn authorized(id: Int, reply: Result[Authorized, CallError]) -> Outcome {
+fn authorized(id: Int, reply: Result[Authorization, CallError]) -> Outcome {
   match reply {
     Ok(value) -> {
       do wake(after: flags.void_ms, key: id)
@@ -157,7 +166,7 @@ fn pending(found: Option[Payment]) -> Outcome {
 fn capture(id: Int) -> Outcome {
   let Some(value: p) = load(id) else -> Problem(status: 404, reason: "no such payment")
   match p {
-    Payment(state: "authorized") -> {
+    Payment(state: Authorized) -> {
       do wake(after: 5000, key: id)
       capturing(moved: sql_move(
         row: Payment,
@@ -166,8 +175,13 @@ fn capture(id: Int) -> Outcome {
         id
       ))
     }
-    Payment(state: "capturing") -> captured(payment: p)
-    _ -> Shown(status: 409, payment: p)
+    Payment(state: Capturing) -> captured(payment: p)
+    Payment(state: Authorizing) -> Shown(status: 409, payment: p)
+    Payment(state: Declined) -> Shown(status: 409, payment: p)
+    Payment(state: Voiding) -> Shown(status: 409, payment: p)
+    Payment(state: Captured) -> Shown(status: 409, payment: p)
+    Payment(state: Voided) -> Shown(status: 409, payment: p)
+    Payment(state: VoidFailed) -> Shown(status: 409, payment: p)
   }
 }
 
@@ -299,15 +313,18 @@ fn voided(id: Int, reply: Result[Done, CallError]) -> Outcome {
 fn due(found: Option[Payment]) -> Outcome {
   let Some(value: p) = found else -> Problem(status: 404, reason: "no such payment")
   match p {
-    Payment(state: "authorizing") -> authorize(payment: p)
-    Payment(state: "authorized", void_at) if void_at <= now() -> voiding(payment: p)
-    Payment(id, state: "authorized", void_at) -> {
+    Payment(state: Authorizing) -> authorize(payment: p)
+    Payment(state: Authorized, void_at) if void_at <= now() -> voiding(payment: p)
+    Payment(id, state: Authorized, void_at) -> {
       do wake(after: void_at - now(), key: id)
       held(found: Some(value: p))
     }
-    Payment(state: "capturing") -> captured(payment: p)
-    Payment(state: "voiding") -> void(payment: p)
-    _ -> Shown(status: 200, payment: p)
+    Payment(state: Capturing) -> captured(payment: p)
+    Payment(state: Voiding) -> void(payment: p)
+    Payment(state: Declined) -> Shown(status: 200, payment: p)
+    Payment(state: Captured) -> Shown(status: 200, payment: p)
+    Payment(state: Voided) -> Shown(status: 200, payment: p)
+    Payment(state: VoidFailed) -> Shown(status: 200, payment: p)
   }
 }
 

@@ -1,6 +1,7 @@
 // rules/timers.ts: a row put in a state the program must leave itself has a timer that comes back for it
 // (C77-C79, C87).
 import type { Call, CondArm, Expr, FnDecl, Machine, Match, PatArm, Pattern } from '../compiler/ast.ts';
+import { storedText, textOfCtor } from '../compiler/fieldless.ts';
 import { conjunctsOf, walkSql } from '../sql.ts';
 import type { Col, Exists, In, Expr as SqlExpr, Statement, TableRef } from '../sql/ast.ts';
 import { analysisOf } from './model.ts';
@@ -464,7 +465,7 @@ export function wayOut(m: Machine, ctx: MachineContext, writes: ReadonlyMap<Quer
     const given = q.args[v.n];
     const b = given?.k === 'var' ? bindsOf(q.fn).get(given) : undefined;
     const a = given?.k === 'var' ? (b?.k === 'let' ? b.value : null) : given;
-    return a?.k === 'str' ? dec(a.bytes) : null;
+    return a?.k === 'str' ? dec(a.bytes) : a?.k === 'ctor' ? textOfCtor(a.name, a.args.length) : null;
   };
   // a WHERE read as a tree (AND, OR, NOT, parentheses): { set, exact }; a condition not on the column lets every
   // state through (inexact), and NOT of an inexact one does too, so the set is never smaller than the truth
@@ -1296,8 +1297,9 @@ export function wayOut(m: Machine, ctx: MachineContext, writes: ReadonlyMap<Quer
     if (pt.k === 'as') return stateOfPat(pt.pat);
     if (pt.k !== 'ctor') return null;
     for (const sb of pt.subs) {
-      if (rowTypes.has(pt.name) && lc(sb.field) === lc(m.column) && sb.pat.k === 'str')
-        return { S: dec(sb.pat.bytes), type: pt.name };
+      // the state a row pattern names: its constructor (`Hold(state: Held)`), the text 'held'
+      const named = sb.pat.k === 'ctor' && m.ctors.includes(sb.pat.name) ? storedText(sb.pat.name) : null;
+      if (rowTypes.has(pt.name) && lc(sb.field) === lc(m.column) && named !== null) return { S: named, type: pt.name };
       const inner = stateOfPat(sb.pat);
       if (inner) return inner;
     }

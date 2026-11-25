@@ -11,7 +11,7 @@ const codes = (text: string): string[] =>
 const t = readFileSync(`${R}examples/fulfillment.tape`, 'utf8');
 export const fulfillmentMutants: Record<string, readonly [string, string]> = {
   'F1 a timed-out step is not tried again': ['Timeout -> retrying(id, why: step ++ " did not answer in time", found: failed_again(id, state))', 'Timeout -> show(status: 202, found: noted(id, state, stall: step))'],
-  'F2 a failed refund is noted, not tried again': ['Err(error) -> stalled(id, state: "refunding", step: "payments.refund", error)', 'Err(error) -> show(status: 502, found: noted(id, state: "refunding", stall: "refund failed"))'],
+  'F2 a failed refund is noted, not tried again': ['Err(error) -> stalled(id, state: Refunding, step: "payments.refund", error)', 'Err(error) -> show(status: 502, found: noted(id, state: Refunding, stall: "refund failed"))'],
   'F3 the retry timer keyed 7': ['retry_later(timer, key: id,', 'retry_later(timer, key: 7,'],
 };
 if (import.meta.url === `file://${process.argv[1]}`) {

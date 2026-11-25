@@ -7,7 +7,7 @@
 interface Git {
   read head(Ref) -> Head
   read read_file(ReadFile) -> File
-  write edit_file(Edit) -> Pushed
+  write edit_file(Edit) -> Edited
 }
 
 type Ref { Ref(ref: View) }
@@ -23,13 +23,15 @@ type Edit { Edit(
   time: Int,
   expected: View
 ) }
-type Pushed { Pushed(commit: View, noop: Bool) }
+type Edited { Edited(commit: View, noop: Bool) }
 
 // A bump waits as pending until the push is answered; the compiler checks every write of its state against these
 // moves (each from the state its WHERE names), and the host installs SQLite triggers that refuse any other.
-machine bumps.state {
-  "pending" -> "pushed"
-  "pending" -> "refused"
+type BumpState { Pending Pushed Refused }
+
+machine bumps.state: BumpState {
+  Pending -> Pushed
+  Pending -> Refused
 }
 
 schema "CREATE TABLE IF NOT EXISTS bumps(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, find \
@@ -39,7 +41,7 @@ schema "CREATE TABLE IF NOT EXISTS bumps(id INTEGER PRIMARY KEY, key TEXT NOT NU
 type Key = View where len(self) >= 1 and len(self) <= 64
 type Bump { Bump(key: Key, from: View, to: View) }
 type Intent { Intent(id: Int, find: View, replace: View, expected: View, time: Int) }
-type BumpState { BumpState(id: Int, state: View) }
+type Bumped { Bumped(id: Int, state: BumpState) }
 type ForBump { ForBump(bump: Int) }
 
 fn handle(raw: View, db: Sql, clock: Clock, repo: Git) -> Buf {
@@ -115,7 +117,7 @@ fn retry(id: Int) -> Buf {
 // The edit is a command with the bump's key: sent again, the repository answers what it did the first time.
 fn edit(intent: Intent) -> Buf {
   let Intent(id, find, replace, expected, time) = intent
-  let Ok(value: Pushed(commit)) = repo.edit_file(
+  let Ok(value: Edited(commit)) = repo.edit_file(
     send: Edit(
       ref: "main",
       path: "VERSION",
@@ -131,7 +133,7 @@ fn edit(intent: Intent) -> Buf {
     Err(error: Rejected(reason)) -> refused(
       reason,
       moved: sql_move(
-        row: BumpState,
+        row: Bumped,
         query: "UPDATE bumps SET state = 'refused' WHERE id = :id AND state = 'pending' \
             RETURNING *",
         id
@@ -146,7 +148,7 @@ fn edit(intent: Intent) -> Buf {
   pushed(
     commit,
     moved: sql_move(
-      row: BumpState,
+      row: Bumped,
       query: "UPDATE bumps SET state = 'pushed' WHERE id = :id AND state = 'pending' RETURNING *",
       id
     )
@@ -154,7 +156,7 @@ fn edit(intent: Intent) -> Buf {
 }
 
 // Pushed, whether this request moved the bump or a retry racing it did (both heard the same stored reply).
-fn pushed(commit: View, moved: Move[BumpState]) -> Buf {
+fn pushed(commit: View, moved: Move[Bumped]) -> Buf {
   match moved {
     NoRow -> problem(status: 404, reason: "no such pending bump")
     _ -> respond(status: 200)
@@ -164,7 +166,7 @@ fn pushed(commit: View, moved: Move[BumpState]) -> Buf {
   }
 }
 
-fn refused(reason: View, moved: Move[BumpState]) -> Buf {
+fn refused(reason: View, moved: Move[Bumped]) -> Buf {
   match moved {
     NoRow -> problem(status: 404, reason: "no such pending bump")
     _ -> problem(status: 409, reason)
