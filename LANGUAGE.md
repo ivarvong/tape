@@ -772,27 +772,49 @@ A program says what must hold, and what must hold in the end (`settled`), and is
 
 A request may take 50,000,000 steps. A step of that budget (not a step of a body, section 4) is one entry into a
 recursive function, a function that can reach itself through the calls it makes: each time it is called, and each
-time it calls itself again as its result. A call of any other function is free however much it computes, and so is a
-built-in, except `scan(v:, at:, set:)` and `scan_plain(v:, at:)`, which cost one step per 16 bytes read, rounded
-up. A read is every byte from `at` through the one it stops on, or from `at` to the end when none of the set is
-there; `at` equal to `len(v)` reads nothing. `scan_plain(v:, at:)` is `scan(v:, at:, set:)` of the bytes that end
-a JSON string's plain run (below 32, 128 or more, a quote or a backslash). The standard library's recursive
-functions count like the program's own: the byte scans behind `request()`,
-`until`, `after` and `decimal` take a few steps per byte. So a request's steps depend on its bytes and on the arms
-tried before the one that answers it, and a route's count can change while the route does not: an arm added above it,
-or a function made recursive by a call added elsewhere. In a program with two `GET` arms and a 404 fallback, one more
-`GET` arm on top added 4 steps to every request below it, and a path 12 bytes longer cost 59 more. `fold` over
-`range(from:, to:)` takes one step a number and one more, as over a list that long, and none to make the list, which
-is never made: summing `range(from: 0, to: 1000)` takes 1001 steps and no memory, where the same fold of a list made
-first takes 2002 and 24 bytes a number. `fold_rows` over a query's rows is the same: one step a row and one more,
-and `write_rows` is that fold. Steps are a count of reductions, as in Erlang, not a time. They are the cost
-measure all the same: on Workers a program's clock moves only across I/O, so nothing inside a run (`now()`, a span's
-duration) can time its work.
+time it calls itself again as its result. A call of any other function is free however much it computes, but what it
+calls is not. A built-in that reads or writes a number of bytes the program decides costs one step per 16 of them,
+rounded up; one that does a fixed amount of work in the module costs nothing, and one that asks the host for it
+costs the steps the host's work takes, a fixed number measured against an entry. The priced ones are these. `append(buf:, view:)`
+costs the bytes of `view`, so a text with holes costs each text and each View it holds, `a ++ b` the bytes of both,
+and a body copied into an answer its length. `scan(v:, at:, set:)` and `scan_plain(v:, at:)` cost the bytes they
+read: every byte from `at` through the one they stop on, or from `at` to the end when none of the set is there; `at`
+equal to `len(v)` reads nothing. `scan_plain(v:, at:)` is `scan(v:, at:, set:)` of the bytes that end a JSON
+string's plain run (below 32, 128 or more, a quote or a backslash). `parse_float(text:)` costs the bytes of
+`text`, and when `text` is not a plain decimal of at most 2^53 in its digits and 22 after the point (the empty text
+included), which the host reads, one step more a byte and 64 for the call. `write_float(out:, value:)`, and so a
+Float in a hole or in JSON, costs 128: the host writes its digits. `len`, `slice`, `freeze`, `size`, `buf`, `push`
+and the other numbers' built-ins are a fixed amount of work in the module, and a hole's Int or Dec is std's
+`write_int` or `write_units`, which count as std does; they are free. An effect's bytes (a query's, a call's, a fetch's, a secret's) are the host's work and in
+the log, not steps. The charge is made before the work, so a count past the budget stops the request before the
+bytes are read or copied. The standard library's recursive functions count like the program's own: the byte scans
+behind `request()`, `until`, `after` and `decimal` take a few steps per byte. So a request's steps depend on its bytes
+and on the arms tried before the one that answers it, and a route's count can change while the route does not: an
+arm added above it, or a function made recursive by a call added elsewhere. In a program with two `GET` arms and a
+404 fallback, one more `GET` arm on top added 2 steps to a request for the exact path below it, and a path 12 bytes
+longer cost 55 more. Steps do not claim that the order of a match's arms is free: an arm is tried in the order
+written, and its cost is counted where it is tried. `fold` over `range(from:, to:)` takes one step a number and one
+more, as over a list that long, and none to make the list, which is never made: summing `range(from: 0, to: 1000)`
+takes 1001 steps and no memory, where the same fold of a list made first takes 2002 and 24 bytes a number.
+`fold_rows` over a query's rows is the same: one step a row and one more, and `write_rows` is that fold.
 
-This definition is step version 2. The compiler builds that number into every module and reports it beside every
+Steps are two things. They bound a request: past the budget it stops, so every request ends, the same on every
+engine. And they are its cost, measured against time: on the bench suite (`node bench/suite/steps.ts`, Node 25,
+the default build, the least of 25 runs in each of two), an entry took 1.0 ns as a loop and 2.4 ns as a call that
+returns, and 16 bytes took 0.34 ns to append, 0.48 ns to scan and 0.72 ns to scan_plain, so a step of bytes takes
+0.15 to 0.7 of an entry's time. The host's read in `parse_float` took 5.4 ns a byte, which is why it costs a step a
+byte. The host's calls are priced at the cheapest call measured, in entries of 2.33 to 2.53 ns, rounded to a power of
+two: `write_float` took 301 to 690 ns (of 1/7 the least, 119 to 136 entries: 128), and `parse_float`'s call, its
+bytes taken off, 155 to 227 ns (61 to 97 entries: 64); the module's own read of a plain decimal, 11 ns for 9 bytes,
+is its step per 16. A step of the four workloads with no SQL (csv, trace, md, words) took 1.1 to 4.4 ns. A query's time is
+SQLite's and is not in steps. Steps are a count of reductions, as in Erlang, not a time, and the count is what a
+request is measured by: on Workers a program's clock moves only across I/O, so nothing inside a run (`now()`, a
+span's duration) can time its work.
+
+This definition is step version 3. The compiler builds that number into every module and reports it beside every
 step count (`step_version` on a run and in its log, `tape.step_version` on its span), so a count from one version is not read as a count from another. The number changes only when what a step
 counts changes. `test/step-version.ts` holds each version's counts and fails when the compiler's are not the
-current version's.
+current version's. Version 2 priced only `scan` and `scan_plain`; version 1 priced no built-in.
 
 A request may also hold 80,000 units of recursion: a call of a recursive function holds, until it returns, 12 units
 and one for each value its frame keeps (its parameters and the values it names, a record one for each of its

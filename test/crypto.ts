@@ -306,7 +306,11 @@ const stepsOf = (fn: string, ...args: number[]): number => {
 };
 const blocks = (n: number): number => Math.floor((n + 72) / 64);
 const sha = (n: number): number => 66 * blocks(n) + 1;
-const hmac = (n: number): number => 2 * 65 + sha(64 + n) + sha(96);
+// step version 3: the two digests' inputs are appended, the data (a step per 16 bytes) and the inner digest (32
+// bytes, 2 steps); under version 2 that was free and these were 2 * 65 + sha(64 + n) + sha(96)
+const hmac = (n: number): number => 2 * 65 + sha(64 + n) + sha(96) + Math.ceil(n / 16) + 2;
+// the steps `check` takes to make a mac that differs at byte i: its two appends, of i bytes and of 31 - i
+const made = (i: number): number => (i < 0 ? 0 : Math.ceil(i / 16) + Math.ceil((31 - i) / 16));
 const edges = [0, 1, 55, 56, 63, 64, 119, 120, 1000, 10000];
 console.log(`  sha256 steps at ${edges.join(', ')} bytes: ${edges.map(n => stepsOf('digest', n)).join(', ')}`);
 same(
@@ -328,7 +332,7 @@ same(
 );
 same(
   'hmac_sha256_verify: hmac_sha256 and 33 steps, for the right mac and for one that differs at byte 0, 1, 15 or 31',
-  [-1, 0, 1, 15, 31].map(i => stepsOf('check', i)),
+  [-1, 0, 1, 15, 31].map(i => stepsOf('check', i) - made(i)),
   [-1, 0, 1, 15, 31].map(() => 2 * hmac(4) + 33), // check makes the right mac first, then verify makes it again
 );
 same(

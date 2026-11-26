@@ -32,9 +32,10 @@ fn sha256(data: View) -> View {
 }
 
 // The HMAC-SHA-256 of `data` under `key` (RFC 2104): 32 bytes. A key longer than the 64-byte block is hashed
-// first, as the RFC says. Its cost is 65 steps for each of the two padded keys and the steps of its two digests,
-// of 64 + len(data) bytes and then of 96 (133 steps): 396 steps for up to 55 bytes of data, and 66 more for each
-// further 64 bytes; a key longer than 64 bytes adds the steps of its own digest. It copies the data once.
+// first, as the RFC says. Its cost is 65 steps for each of the two padded keys, the steps of its two digests, of
+// 64 + len(data) bytes and then of 96 (133 steps), and its copies of the data and of the inner digest, a step per
+// 16 bytes: 398 steps and one per 16 bytes of data for up to 55 bytes, and 66 more for each further 64 bytes; a key
+// longer than 64 bytes adds the steps of its own digest. It copies the data once.
 //
 //   > hex(bytes: hmac_sha256(key: "Jefe", data: "what do ya want for nothing?"))
 //   "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843"

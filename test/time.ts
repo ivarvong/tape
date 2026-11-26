@@ -224,11 +224,14 @@ for (const ms of [0n, -1n, INT_MIN, INT_MAX, at('2026-11-25T14:03:07.123Z')])
     fn(ms);
     steps.push(stepsOf(costly) - before);
   }
-// at 0, -1, the least Int, the largest and 2026-11-25T14:03:07.123Z: civil, rfc3339, http_date
+// at 0, -1, the least Int, the largest and 2026-11-25T14:03:07.123Z: civil, rfc3339, http_date. Under step version
+// 2 these were [0, 10, 8, 0, 17, 12, 0, 20, 16, 0, 20, 16, 0, 15, 10]: the digits alone. Version 3 adds a step for
+// each append of at most 16 bytes, the texts and Views of the two holes and the padding the parts are joined with
+// (an append's fixed cost is about an entry's, bench/suite/steps.ts): 18 more for today in each
 same(
-  'civil costs no steps; rfc3339 and http_date about one a digit they write (decimal_text): 20 and 16 for today',
+  'civil costs no steps; rfc3339 and http_date a step a digit they write (decimal_text) and one a piece they join: 33 and 28 for today',
   steps,
-  [0, 10, 8, 0, 17, 12, 0, 20, 16, 0, 20, 16, 0, 15, 10],
+  [0, 36, 30, 0, 31, 26, 0, 40, 34, 0, 40, 32, 0, 33, 28],
 );
 
 finish();

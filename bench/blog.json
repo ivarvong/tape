@@ -1,36 +1,36 @@
 {
   "now": "2026-11-24T12:00:00.000Z",
-  "step_version": 2,
+  "step_version": 3,
   "md": {
-    "bytes": 55093,
+    "bytes": 56546,
     "functions": 176
   },
   "blog": {
-    "bytes": 101098,
+    "bytes": 104142,
     "functions": 283
   },
   "render": {
-    "steps": 63515,
+    "steps": 65482,
     "bytes": 119984
   },
   "put": {
-    "steps": 88022,
+    "steps": 90792,
     "bytes": 170568
   },
   "get": {
-    "steps": 234,
+    "steps": 1124,
     "bytes": 103832
   },
   "body": {
-    "steps": 174,
+    "steps": 1011,
     "bytes": 89048
   },
   "index": {
-    "steps": 151,
+    "steps": 228,
     "bytes": 38600
   },
   "feed": {
-    "steps": 223,
+    "steps": 1117,
     "bytes": 105880
   }
 }

@@ -48,6 +48,34 @@ fn read() -> Int {
   }
 }
 `;
+// Version 3 prices what a built-in copies or reads: append of 100 computed bytes is 7 steps, of a 17-byte literal 2,
+// of the empty one none; a text with holes is its appends and std's write_int. parse_float reads 9 bytes of a plain
+// decimal in the module, 1 step; 40 bytes with 29 places are read by the host as well, 3, 40 and the host call's 64.
+// write_float's digits are the host's: 128 a call, and the append of what it wrote is not charged again.
+const APPEND = `fn copied() -> Int {
+  let text = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123"
+  let out = buf() |> append(view: slice(text, from: 0, to: 100)) |> append(view: "0123456789abcdef!") |> append(view: "")
+  len(freeze(out))
+}
+`;
+const HOLE = `fn holed(n: Int) -> Int {
+  len("the number \\(n) is written between two texts")
+}
+`;
+const WRITE = `fn wrote() -> Int {
+  len(freeze(buf() |> write_float(value: 1f / 7f) |> write_float(value: 2.5f)))
+}
+`;
+const PARSE = `fn parsed() -> Int {
+  whole(text: "1234567890.12345678901234567890123456789") + whole(text: "12345.678")
+}
+fn whole(text: View) -> Int {
+  match parse_float(text) {
+    Some(value) -> trunc(value)
+    None -> -1
+  }
+}
+`;
 const GET = `fn handle(raw: View) -> Response {
   match request(raw) {
     Request(method: Get, path: "/") -> buf() |> append(view: "ok") |> respond(status: 200)
@@ -62,6 +90,11 @@ type Sample = {
   readonly helper: number;
   readonly fact: number;
   readonly json: number;
+  // the programs of version 3: a row before it did not record them
+  readonly append?: number;
+  readonly hole?: number;
+  readonly parse?: number;
+  readonly write?: number;
 };
 type Recorded = Sample & { readonly inlineOffMatches: boolean };
 const COUNTS = {
@@ -69,6 +102,20 @@ const COUNTS = {
   // got {"fold":1001,"tail":101,"helper":101,"fact":10,"json":48}, wanted json 47 (test/step-version.ts on that commit)
   1: { fold: 1001, tail: 101, helper: 101, fact: 10, json: 47, inlineOffMatches: true },
   2: { fold: 1001, tail: 101, helper: 101, fact: 10, json: 48, inlineOffMatches: true },
+  // version 3. Under version 2 (5c36a87) the four new programs were {"append":0,"hole":6,"parse":0,"write":0}: the hole's
+  // 6 are write_int's digits, one entry each, and its two texts (11 and 29 bytes) add 1 and 2 now
+  3: {
+    fold: 1001,
+    tail: 101,
+    helper: 101,
+    fact: 10,
+    json: 48,
+    append: 9,
+    hole: 9,
+    parse: 108,
+    write: 256,
+    inlineOffMatches: true,
+  },
 } satisfies Record<StepVersion, Recorded>;
 
 function stepsOf(text: string, fn: string, args: readonly bigint[], options: Partial<Options>): number {
@@ -88,17 +135,23 @@ const measure = (options: Partial<Options> = {}): Sample => ({
   helper: stepsOf(HELPER, 'up', [0n], options),
   fact: stepsOf(FACT, 'fact', [10n], options),
   json: stepsOf(JSON_READ, 'read', [], options),
+  append: stepsOf(APPEND, 'copied', [], options),
+  hole: stepsOf(HOLE, 'holed', [123456n], options),
+  parse: stepsOf(PARSE, 'parsed', [], options),
+  write: stepsOf(WRITE, 'wrote', [], options),
 });
 
-const want = COUNTS[STEP_VERSION];
+const { inlineOffMatches, ...want } = COUNTS[STEP_VERSION];
 const got = measure();
+// a row compares the programs it recorded
+const recorded = (s: Sample): Record<string, number | undefined> =>
+  Object.fromEntries(Object.entries(s).filter(([k]) => Object.hasOwn(want, k)));
 same(
   `steps of step version ${STEP_VERSION} (a metering change appends a definition and records its counts; it does not edit this row)`,
-  got,
-  { fold: want.fold, tail: want.tail, helper: want.helper, fact: want.fact, json: want.json },
+  recorded(got),
+  want,
 );
-if (want.inlineOffMatches)
-  same('inlining and the local step counter leave these step counts unchanged', measure(OFF), got);
+if (inlineOffMatches) same('inlining and the local step counter leave these step counts unchanged', measure(OFF), got);
 const versions = STEP_DEFINITIONS.map(d => d.version);
 ok(
   'step versions are 1, 2, 3, … in the order appended, none skipped or repeated',

@@ -238,12 +238,12 @@ const BUILT_INS: BuiltIn[] = [
   {
     name: 'write_float',
     sig: 'write_float(out: Buf, value: Float) -> Buf',
-    doc: 'Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\\(x)"`, writes).',
+    doc: 'Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\\(x)"`, writes). 128 steps: the host writes the digits (LANGUAGE.md section 10).',
   },
   {
     name: 'parse_float',
     sig: 'parse_float(text: View) -> Option[Float]',
-    doc: 'The Float nearest the number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number in the syntax of JSON, as `parse_dec` reads one (not `""`, white space, `+1`, `.5`, `5.`, `05`, `0x1F` or `Infinity`). decode reads a Float field with it.',
+    doc: 'The Float nearest the number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number in the syntax of JSON, as `parse_dec` reads one (not `""`, white space, `+1`, `.5`, `5.`, `05`, `0x1F` or `Infinity`). decode reads a Float field with it. One step per 16 bytes of `text`, rounded up, and when it is not a plain decimal of at most 2^53 in its digits and 22 after the point, which the host reads, one a byte more and 64 for the call (LANGUAGE.md section 10).',
   },
   {
     name: 'scan_plain',
@@ -256,7 +256,11 @@ const BUILT_INS: BuiltIn[] = [
     doc: 'The first position at or after `at` whose byte is one of `set`; `len(v)` when none is. `set` is a text literal: its bytes, escapes included (`\\n` is byte 10), and a character\'s UTF-8 bytes are each members (`"é"` is bytes 195 and 169). The same byte twice is one member. Reads 16 bytes at a time (Wasm SIMD when the set has at most 16 bytes, or the JSON set of `scan_plain(v:, at:)`). One step per 16 bytes read, rounded up: every byte from `at` through the one it stops on, or from `at` to the end when it does not stop; `at` equal to `len(v)` reads nothing and costs nothing. `at` outside 0 to `len(v)` traps (trap 3).',
   },
   { name: 'push', sig: 'push(buf: Buf, byte: Int) -> Buf', doc: 'Appends one byte.' },
-  { name: 'append', sig: 'append(buf: Buf, view: View) -> Buf', doc: 'Appends text.' },
+  {
+    name: 'append',
+    sig: 'append(buf: Buf, view: View) -> Buf',
+    doc: 'Appends text. One step per 16 bytes appended, rounded up (LANGUAGE.md section 10).',
+  },
   { name: 'freeze', sig: 'freeze(buf: Buf) -> View', doc: 'The bytes written so far, as a View.' },
   { name: 'size', sig: 'size(buf: Buf) -> Int', doc: 'The number of bytes written so far.' },
   {

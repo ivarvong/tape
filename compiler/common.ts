@@ -60,6 +60,9 @@ export const DEFAULTS = {
   owningCopies: true,
   // for test/ownership.ts only: ownership read by rounds of every function, as it was, the worklist's oracle
   ownershipRounds: false,
+  // for bench/suite/steps.ts only: false leaves append, parse_float and write_float uncharged, step version 2's count of a version 3
+  // module, so the two counts of one run can be set against its time
+  priceCopies: true,
   exports: ['handle'],
   rules: true,
 };

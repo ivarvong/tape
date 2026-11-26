@@ -1,11 +1,14 @@
 // compiler/step-version.ts: which step accounting this compiler builds. A step count is comparable only with
 // another count of the same version. Version 1 counts one entry into a recursive function, after inlining; a call
 // of any other function is free (LANGUAGE.md section 10). Version 2 is that, plus one step per 16 bytes a scan
-// reads. Append the next definition when that changes, and record its counts in test/step-version.ts. A
+// reads. Version 3 is version 2 with every built-in that reads or writes a number of bytes the program decides priced
+// as scan is, one step per 16 rounded up: append (and so text with holes, `++` and std's write_text) and parse_float,
+// beside scan and scan_plain. Append the next definition when that changes, and record its counts in test/step-version.ts. A
 // definition's meaning is not edited in place.
 export const STEP_DEFINITIONS = [
   { version: 1, unit: 'recursive-entry' },
   { version: 2, unit: 'recursive-entry+scan' },
+  { version: 3, unit: 'recursive-entry+bytes' },
 ] as const;
 export type StepDefinition = (typeof STEP_DEFINITIONS)[number];
 export type StepVersion = StepDefinition['version'];

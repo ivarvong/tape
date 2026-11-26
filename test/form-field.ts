@@ -256,9 +256,11 @@ const e256 = lookups[0];
 const e1024 = lookups[1];
 const e1536 = lookups[2];
 for (const row of lookups) same(`${row.n} form_field lookups find every field`, row.body, String(row.n));
-same('256 form_field lookups take 242,915 steps (the byte walk took 460,920)', e256?.steps, 242_915);
+// step version 3 adds 3 steps a field to each count: the form's two appends a field ("&f", "=1") and the name
+// looked up, "f\(i)" (242,915, 3,750,255 and 8,581,247 under version 2)
+same('256 form_field lookups take 243,683 steps (the byte walk took 460,920)', e256?.steps, 243_683);
 same('256 form_field lookups use 43,208 bytes', e256?.bytes, 43_208);
-same('1,024 form_field lookups take 3,750,255 steps (the byte walk took 7,738,996)', e1024?.steps, 3_750_255);
+same('1,024 form_field lookups take 3,753,327 steps (the byte walk took 7,738,996)', e1024?.steps, 3_753_327);
 same('1,024 form_field lookups use 172,232 bytes', e1024?.bytes, 172_232);
 same(
   '4× the fields, read with form_field 4× as often, is still about n² (15.4× the steps) and at most about 4× the memory',
@@ -270,8 +272,8 @@ same(
   true,
 );
 same(
-  'the 1,536-field form (11 KB) that ran out of memory answers in 8,581,247 steps and 262,344 bytes',
-  e1536 !== undefined && e1536.body === '1536' && e1536.steps === 8_581_247 && e1536.bytes === 262_344,
+  'the 1,536-field form (11 KB) that ran out of memory answers in 8,585,855 steps and 262,344 bytes',
+  e1536 !== undefined && e1536.body === '1536' && e1536.steps === 8_585_855 && e1536.bytes === 262_344,
   true,
 );
 // the build without cell reuse answers the same counts

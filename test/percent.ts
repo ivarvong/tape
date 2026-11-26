@@ -196,8 +196,18 @@ const wide = stepsFor('%C3%B6'.repeat(100)) - base;
 console.log(
   `  steps above an empty segment: 1,600 ASCII bytes ${plain}, 100 escapes ${escaped}, 100 escaped ö ${wide}`,
 );
-same('1,600 bytes of ASCII and no escape: two scans, each 16 bytes a step', plain, 200);
-same('100 escapes of ASCII: two steps an escape (the loop and its scan), and the check of 300 bytes', escaped, 209);
-same('100 escaped two-byte characters: two steps an escape, and three a character in the check', wide, 702);
+// each count also holds the handler's copy of the value into its answer, a step per 16 bytes (step version 3): 100
+// for the 1,600 bytes, 7 for the 100, 13 for the 200; the decoder's own counts are docs/std.md's 200, 209 and 702
+same('1,600 bytes of ASCII and no escape: two scans, each 16 bytes a step, and the copy out', plain, 200 + 100);
+same(
+  '100 escapes of ASCII: two steps an escape (the loop and its scan), and the check of 300 bytes, and the copy out',
+  escaped,
+  209 + 7,
+);
+same(
+  '100 escaped two-byte characters: two steps an escape, and three a character in the check, and the copy out',
+  wide,
+  702 + 13,
+);
 
 finish();

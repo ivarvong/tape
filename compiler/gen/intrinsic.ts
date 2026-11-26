@@ -13,7 +13,7 @@ import { decodeRow, emitDecode } from './decode.ts';
 import { emitSql } from './sql.ts';
 import { emitFloatIntrinsic } from './float.ts';
 import { emitDecIntrinsic } from './dec.ts';
-import { emitByteScan } from './scan.ts';
+import { chargeBytes, chargeEach, chargeKnown, chargeSteps, emitByteScan } from './scan.ts';
 import { JSON_PLAIN, byteSet } from '../byteset.ts';
 
 /** A call of an intrinsic with its arguments in the order of its parameters. */
@@ -95,6 +95,12 @@ function append(u: Use): Type {
   if (text.k === 'interp') return c.emit(written(c, text, argAt(u, 0).value), BUF, false);
   const h = bufArg(u, 0);
   const [ptr, len] = view(u, 1);
+  // the bytes it copies, priced before the copy: a literal's count is known now (LANGUAGE.md section 10)
+  if (c.B.opts.priceCopies && text.k === 'str') chargeKnown(c, text.bytes.length);
+  else if (c.B.opts.priceCopies) {
+    c.code.push(...get(len));
+    chargeBytes(c);
+  }
   const end = [...get(h), ...ld(0), ...get(h), ...ld(4), 0x6a];
   const longer = [...get(h), ...get(h), ...ld(4), ...get(len), 0x6a, ...st(4)];
   const reserved = [...get(h), ...get(len), 0x10, ...uleb(c.B.RESERVE)];
@@ -127,6 +133,16 @@ function answerBody(u: Use): Type {
   return BUF;
 }
 
+/**
+ * The steps of the two built-ins that call the host for a fixed amount of work (LANGUAGE.md section 10, step version
+ * 3), from bench/suite/steps.ts: ns a call over ns an entry as a call that returns (2.33 to 2.53 ns), at the cheapest
+ * call measured, so steps never say more time than a call took, rounded to the nearest power of two. write_float's
+ * float_text took 301 to 690 ns, of 1/7 the least (301 to 318 ns, 119 to 136 entries): 128. parse_float's float_of,
+ * its step a byte taken off, took 155 to 227 ns, of "1e5" the least (61 to 70 entries): 64.
+ */
+export const FLOAT_TEXT_STEPS = 128;
+export const FLOAT_OF_STEPS = 64;
+
 /** write_float(out, value): the shortest digits that read back as the Float, as the host writes them (u32 length,
  * then the bytes), appended. */
 function writeFloat(u: Use): Type {
@@ -136,6 +152,8 @@ function writeFloat(u: Use): Type {
 /** The Buf in local h with the text of the Float in local x appended, on the stack. */
 function appendFloat(c: Ctx, h: number, x: number): void {
   const text = fresh(c, I32);
+  // the host writes the digits: a fixed charge, before the call
+  if (c.B.opts.priceCopies) chargeSteps(c, FLOAT_TEXT_STEPS);
   c.code.push(...get(x), 0x10, ...uleb(c.B.FLOAT_TEXT_IMPORT), ...set(text));
   const len = [...get(text), ...ld(0)];
   const end = [...get(h), ...ld(0), ...get(h), ...ld(4), 0x6a];
@@ -517,16 +535,28 @@ function scanBytes(u: Use, mask: readonly number[]): Type {
 function parseFloat(u: Use): Type {
   const { c } = u;
   const [p, n] = view(u, 0);
+  // the bytes it reads, priced before it reads them (LANGUAGE.md section 10): one step per 16 the module reads, and
+  // one a byte when the host reads them too, which takes as long a byte as an entry (bench/suite/steps.ts)
+  if (c.B.opts.priceCopies) {
+    c.code.push(...get(n));
+    chargeBytes(c);
+  }
   const x = fresh(c, F64);
   const opt = T('Option', FLOAT);
   const adt = c.B.adtOf(opt, u.e);
   const which = (name: string): number => adt.variants.findIndex(v => v.name === name);
   // the module's own reading of a plain decimal (compiler/math/decimal.ts), NaN when it is not one; then the host's
-  const fast = [...get(p), ...get(n), 0x10, ...uleb(mathIndex(c.B, 'parse_decimal')), 0x22, ...uleb(x)];
-  const host = [...get(p), ...get(n), 0x10, ...uleb(c.B.FLOAT_OF_IMPORT), ...set(x)];
-  const read = [...fast, ...get(x), 0x62, 0x04, 0x40, ...host, 0x0b];
+  c.code.push(...get(p), ...get(n), 0x10, ...uleb(mathIndex(c.B, 'parse_decimal')), 0x22, ...uleb(x), ...get(x), 0x62);
+  open(c, 0x04);
+  // the host's read: a step a byte, and its call's fixed charge
+  if (c.B.opts.priceCopies) {
+    c.code.push(...get(n), 0x41, ...sleb(FLOAT_OF_STEPS), 0x6a);
+    chargeEach(c);
+  }
+  c.code.push(...get(p), ...get(n), 0x10, ...uleb(c.B.FLOAT_OF_IMPORT), ...set(x));
+  close(c);
   // then whether it is finite: x - x is 0 (NaN for NaN and the infinities)
-  c.code.push(...read, ...get(x), ...get(x), 0xa1, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0x61);
+  c.code.push(...get(x), ...get(x), 0xa1, 0x44, 0, 0, 0, 0, 0, 0, 0, 0, 0x61);
   open(c, 0x04, adt.slots);
   buildVariant(c, adt, which('Some'), [x]);
   c.code.push(0x05);

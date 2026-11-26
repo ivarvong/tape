@@ -550,7 +550,7 @@ The larger of two Ints, two Decs of one scale, or two Floats.
 write_float(out: Buf, value: Float) -> Buf
 ```
 
-Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\(x)"`, writes).
+Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (what a hole, `"\(x)"`, writes). 128 steps: the host writes the digits (LANGUAGE.md section 10).
 
 ### builtin parse_float
 
@@ -558,7 +558,7 @@ Appends the shortest digits that read back as the Float: `0.1`, `1e+21`, `5` (wh
 parse_float(text: View) -> Option[Float]
 ```
 
-The Float nearest the number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number in the syntax of JSON, as `parse_dec` reads one (not `""`, white space, `+1`, `.5`, `5.`, `05`, `0x1F` or `Infinity`). decode reads a Float field with it.
+The Float nearest the number `text` (`"0.1"`, `"-2.5e3"`), correctly rounded, the same everywhere; `None` when it is not finite (`"1e400"`) or `text` is not a number in the syntax of JSON, as `parse_dec` reads one (not `""`, white space, `+1`, `.5`, `5.`, `05`, `0x1F` or `Infinity`). decode reads a Float field with it. One step per 16 bytes of `text`, rounded up, and when it is not a plain decimal of at most 2^53 in its digits and 22 after the point, which the host reads, one a byte more and 64 for the call (LANGUAGE.md section 10).
 
 ### builtin scan_plain
 
@@ -590,7 +590,7 @@ Appends one byte.
 append(buf: Buf, view: View) -> Buf
 ```
 
-Appends text.
+Appends text. One step per 16 bytes appended, rounded up (LANGUAGE.md section 10).
 
 ### builtin freeze
 
@@ -2244,7 +2244,7 @@ The SHA-256 digest of `data`: 32 bytes. Its cost is 66 steps for each 64-byte bl
 fn hmac_sha256(key: View, data: View) -> View
 ```
 
-The HMAC-SHA-256 of `data` under `key` (RFC 2104): 32 bytes. A key longer than the 64-byte block is hashed first, as the RFC says. Its cost is 65 steps for each of the two padded keys and the steps of its two digests, of 64 + len(data) bytes and then of 96 (133 steps): 396 steps for up to 55 bytes of data, and 66 more for each further 64 bytes; a key longer than 64 bytes adds the steps of its own digest. It copies the data once.
+The HMAC-SHA-256 of `data` under `key` (RFC 2104): 32 bytes. A key longer than the 64-byte block is hashed first, as the RFC says. Its cost is 65 steps for each of the two padded keys, the steps of its two digests, of 64 + len(data) bytes and then of 96 (133 steps), and its copies of the data and of the inner digest, a step per 16 bytes: 398 steps and one per 16 bytes of data for up to 55 bytes, and 66 more for each further 64 bytes; a key longer than 64 bytes adds the steps of its own digest. It copies the data once.
 
 ```
 > hex(bytes: hmac_sha256(key: "Jefe", data: "what do ya want for nothing?"))

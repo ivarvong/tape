@@ -123,7 +123,7 @@ function stopsByte(b: number, kind: Kind): number[] {
 
 /**
  * The bytes read: from `at` through the stopping byte, or from `at` to `i` when `i` is the length. One step per 16,
- * rounded up. Added to the step count, then a count past the limit stops the request.
+ * rounded up (chargeBytes).
  */
 function charge(c: Ctx, at32: number, i: number, n: number): void {
   if (!c.B.opts.reductions) return;
@@ -131,12 +131,54 @@ function charge(c: Ctx, at32: number, i: number, n: number): void {
   open(c, 0x04, [I32]);
   c.code.push(...get(i), ...get(at32), 0x6b, ...i32(1), 0x6a, 0x05, ...get(i), ...get(at32), 0x6b);
   close(c);
+  chargeBytes(c);
+}
+
+/**
+ * The price of a built-in that reads or writes n bytes (LANGUAGE.md section 10, step version 3): the i32 count of
+ * bytes on the stack, one step per 16, rounded up, added to the step count; then a count past the limit stops the
+ * request (trap 2), as an entry into a recursive function does. Taken off the stack. The amount is computed, so it
+ * is not the entry compiler/gen/meter.ts rewrites into a local.
+ */
+export function chargeBytes(c: Ctx): void {
+  if (!c.B.opts.reductions) {
+    c.code.push(0x1a);
+    return;
+  }
+  c.code.push(...i32(15), 0x6a, ...i32(4), 0x76, 0xad);
+  added(c);
+}
+
+/** The i32 count of bytes on the stack, one step each: parse_float's price when the host reads its text. */
+export function chargeEach(c: Ctx): void {
+  if (!c.B.opts.reductions) {
+    c.code.push(0x1a);
+    return;
+  }
+  c.code.push(0xad);
+  added(c);
+}
+
+/**
+ * chargeBytes of a count known when the program is compiled: ceil(n / 16) steps, nothing for none. The constant comes
+ * before the count it is added to, so the sequence is never the `global.get; i64.const 1; i64.add` of an entry that
+ * compiler/gen/meter.ts rewrites.
+ */
+export function chargeKnown(c: Ctx, bytes: number): void {
+  chargeSteps(c, Math.ceil(bytes / 16));
+}
+
+/** A fixed number of steps, known when the program is compiled (a host call's price), nothing for none; the
+ * constant first, as chargeKnown's is. */
+export function chargeSteps(c: Ctx, steps: number): void {
+  if (!c.B.opts.reductions || steps === 0) return;
+  c.code.push(0x42, ...sleb(steps));
+  added(c);
+}
+
+/** The i64 on the stack added to the step count, then a count past the limit stops the request. */
+function added(c: Ctx): void {
   c.code.push(
-    ...i32(15),
-    0x6a,
-    ...i32(4),
-    0x76,
-    0xad,
     0x23,
     ...uleb(c.B.G_COST),
     0x7c,

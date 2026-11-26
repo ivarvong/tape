@@ -239,6 +239,26 @@ fn walk(raw: View) -> Int {
   visit(raw, at: 0)
 }
 
+// step version 3: append and parse_float are priced as scan is, by the bytes
+fn copy(raw: View) -> Int {
+  len(freeze(buf() |> append(view: raw)))
+}
+
+fn literal(raw: View) -> Int {
+  len(freeze(buf() |> append(view: "0123456789abcdef!")))
+}
+
+fn holed(raw: View) -> Int {
+  len("<${BS}(raw)>")
+}
+
+fn float(raw: View) -> Int {
+  match parse_float(text: raw) {
+    Some(value) -> trunc(value)
+    None -> -1
+  }
+}
+
 fn visit(v: View, at: Int) -> Int {
   let e = scan(v, at, set: "b")
   match {
@@ -273,12 +293,37 @@ const STEP_CASES: StepCase[] = [
   { fn: 'walk', bytes: Uint8Array.of(97), value: '1', steps: 2 },
   { fn: 'walk', bytes: Uint8Array.of(98), value: '1', steps: 3 },
   { fn: 'walk', bytes: Uint8Array.of(98, 120, 98), value: '3', steps: 5 },
+  { fn: 'copy', bytes: fill(0), value: '0', steps: 0 },
+  { fn: 'copy', bytes: fill(16), value: '16', steps: 1 },
+  { fn: 'copy', bytes: fill(17), value: '17', steps: 2 },
+  { fn: 'literal', bytes: fill(0), value: '17', steps: 2 },
+  { fn: 'holed', bytes: fill(0), value: '2', steps: 2 },
+  { fn: 'holed', bytes: fill(16), value: '18', steps: 3 },
+  // read in the module: a step per 16 bytes; read by the host as well (it is not a plain decimal, the empty text
+  // included): a step a byte more and 64 for the call
+  { fn: 'float', bytes: new TextEncoder().encode('12.5'), value: '12', steps: 1 },
+  { fn: 'float', bytes: new TextEncoder().encode('1x'), value: '-1', steps: 3 + 64 },
+  { fn: 'float', bytes: fill(0), value: '-1', steps: 64 },
   { fn: 'past', bytes: fill(0), value: 'trap 3', steps: 0 },
   { fn: 'minus', bytes: fill(3), value: 'trap 3', steps: 0 },
   { fn: 'plain_past', bytes: fill(2), value: 'trap 3', steps: 0 },
   { fn: 'plain_minus', bytes: fill(0), value: 'trap 3', steps: 0 },
 ];
-const STEP_EXPORTS = ['go', 'plain', 'empty_set', 'at_end', 'past', 'minus', 'plain_past', 'plain_minus', 'walk'];
+const STEP_EXPORTS = [
+  'go',
+  'plain',
+  'empty_set',
+  'at_end',
+  'past',
+  'minus',
+  'plain_past',
+  'plain_minus',
+  'walk',
+  'copy',
+  'literal',
+  'holed',
+  'float',
+];
 type Exports = WebAssembly.Instance['exports'];
 const globalOf = (ex: Exports, name: string): WebAssembly.Global => {
   const g = ex[name];
@@ -308,7 +353,8 @@ function instance(text: string, exports: string[], o: Partial<Options> = {}): Ex
   const r = compile([...std, { name: 'steps.tape', text }], { ...o, exports });
   if (!r.wasm) throw new Error(r.errors.map(e => `${e.code}:${e.line} ${e.message}`).join('; '));
   return new WebAssembly.Instance(new WebAssembly.Module(r.wasm), {
-    env: { float_text: (): number => 0, float_of: (): number => 0 },
+    // the host reads none of these texts as a number
+    env: { float_text: (): number => 0, float_of: (): number => NaN },
   }).exports;
 }
 const stepBuilds: [string, Partial<Options>][] = [
@@ -337,6 +383,12 @@ same('a scan that reads a byte passes a limit of 0', runInt(limit0, 'go', fill(1
 const limit1 = instance(steps, STEP_EXPORTS, { reductionLimit: 1 });
 same('16 bytes read is one step, inside a limit of 1', runInt(limit1, 'go', fill(16)), { value: '16', steps: 1 });
 same('17 bytes read is two steps, past a limit of 1', runInt(limit1, 'go', fill(17)).value, 'trap 2');
+same('16 bytes copied is one step, inside a limit of 1', runInt(limit1, 'copy', fill(16)), { value: '16', steps: 1 });
+same('17 bytes copied is two steps, past a limit of 1', runInt(limit1, 'copy', fill(17)).value, 'trap 2');
+same('with the step count off, a long copy costs nothing', runInt(free, 'copy', fill(100)), {
+  value: '100',
+  steps: 0,
+});
 
 const stepIt = interpret([...std, { name: 'steps.tape', text: steps }]);
 let stepInterp = 0;

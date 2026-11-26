@@ -105,14 +105,14 @@ mode.
 The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"`:
 
 ```json
-{ "ok": true, "diagnostics": [], "step_version": 1,
+{ "ok": true, "diagnostics": [], "step_version": 3,
   "results": [{
     "request": "GET /hello/ada", "status": 200, "content_type": "text/plain; charset=utf-8",
     "body": "Hello again, ada #2!", "body_bytes": 20, "truncated": false, "error": null,
     "effects": [{ "kind": "sql",
                   "query": "INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n",
                   "params": { ":name": "ada" }, "rows_returned": 1, "rows": [[2]] }],
-    "replayed": true, "steps": 77, "memory_bytes": 128,
+    "replayed": true, "steps": 96, "memory_bytes": 216,
     "trace": "handle\n  ✓ hello.tape:9  Request(method: \"GET\", path: \"/hello/\" ++ name) if len(name) > 0 -> greet(\n      sql INSERT INTO greeted(name, n) VALUES (:name, 1) ON CONFLICT(name) DO UPDATE SET n = n + 1 RETURNING n  :name=\"ada\" -> [[2]]\ngreet\n  ✗ hello.tape:25  Some(value: Count(n)) if n == 1 -> …\n  ✓ hello.tape:26  Some(value: Count(n)) -> …" }] }
 ```
 
@@ -169,7 +169,9 @@ The second result of `["GET /hello/ada", "GET /hello/ada"]` with `trace: "lines"
 - `steps` is the reductions the request used, out of Tape's 50,000,000. A step is one entry into a recursive
   function (each call, and each call of itself as its result), std's included: the byte scans behind `request()` take
   a few a byte, so an arm added above a route, or a longer path, changes its count. A call of a non-recursive function
-  is free, except `scan(v:, at:, set:)` and `scan_plain(v:, at:)`, which cost one step per 16 bytes read.
+  is free, but a built-in that reads or writes bytes is not: `append` (and so a text with holes and `++`), `scan`,
+  `scan_plain` and `parse_float` cost one step per 16 bytes, `parse_float` a step a byte and 64 more when the host
+  reads its text, and `write_float` (a Float in a hole) 128, the host's call.
   `step_version` is on the answer, one for the call (the same number on `test` and `compile`, and on a run that
   did not compile). It changes only when what a step counts changes, so two counts are comparable only
   when their versions are equal. Steps are the per-request cost. On Workers the clock moves only across I/O, so a
