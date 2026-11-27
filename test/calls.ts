@@ -2,7 +2,18 @@
 import '../node25.ts';
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
-import { answerText, instantiate, isCall, isHead, replay, responseOf, spans, traceOf } from '../host.ts';
+import {
+  answerText,
+  callRows,
+  instantiate,
+  isCall,
+  isHead,
+  putCall,
+  replay,
+  responseOf,
+  spans,
+  traceOf,
+} from '../host.ts';
 import type { Effect, Head, Service, ServiceOptions, Timers } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
@@ -408,11 +419,7 @@ const post = (item: string, key: string) =>
     text(await app.run(retry(3))),
     '201\n{"id":3,"item":"lamp","state":"confirmed"}',
   );
-  T(
-    'and reserved nothing more',
-    [left('lamp'), stockSql.exec('SELECT count(*) FROM _calls').raw().toArray()[0]?.[0]],
-    [0, 3],
-  );
+  T('and reserved nothing more', [left('lamp'), callRows(stockApp.store).length], [0, 3]);
   T('a second retry finds no pending order', text(await app.run(retry(3))).slice(0, 3), '404');
   T(
     'states',
@@ -445,11 +452,7 @@ const post = (item: string, key: string) =>
     { method: 'remaining', fingerprint: stockBuild.methods[1]?.fingerprint ?? '' },
     bytes('{"item":"desk"}'),
   );
-  T(
-    'a read stores nothing',
-    [text(read1.body), stockSql.exec('SELECT count(*) FROM _calls').raw().toArray()[0]?.[0]],
-    ['{"remaining":4}', 4],
-  );
+  T('a read stores nothing', [text(read1.body), callRows(stockApp.store).length], ['{"remaining":4}', 4]);
   T(
     'a bad message is skew, with the reason: the two sides disagree on it, and nothing ran (a refusal is a value of the error type)',
     await stockApp
@@ -719,7 +722,7 @@ fn stamp(out: Buf, roll: Int) -> Buf {
       [c.status, /was used before for another reserve message/.test(text(c.body)), left('lamp')],
       ['skew', true, 2],
     );
-    sql.exec(`INSERT INTO _calls(key, status, body) VALUES ('old/reserve/7', 'ok', '{"item":"desk","remaining":9}')`);
+    putCall(callee.store, 'old/reserve/7', { status: 'ok', body: '{"item":"desk","remaining":9}', message: null });
     const d = await callee.serve({ ...meta, key: 'old/reserve/7' }, bytes('{"item":"lamp"}'));
     T(
       'a row stored before messages were kept (message NULL) is replayed as before',
@@ -732,20 +735,14 @@ fn stamp(out: Buf, roll: Int) -> Buf {
     const sql = nodeSql();
     sql.exec('CREATE TABLE _calls(key TEXT PRIMARY KEY, status TEXT NOT NULL, body TEXT NOT NULL)');
     sql.exec(`INSERT INTO _calls VALUES ('k', 'ok', 'x')`);
-    instantiate(stockModule, { sql });
+    const moved = instantiate(stockModule, { sql });
     T(
-      'the _calls table of an older object gains its message column; its rows stay',
+      "an older object's _calls rows move into the host store, with message absent, and the SQL table is gone",
       [
-        sql
-          .exec("SELECT name FROM pragma_table_info('_calls')")
-          .toArray()
-          .map(r => r.name),
-        sql
-          .exec('SELECT key, message FROM _calls')
-          .toArray()
-          .map(r => [r.key, r.message]),
+        callRows(moved.store).map(r => [r.key, r.status, r.body, r.message]),
+        sql.exec("SELECT name FROM sqlite_master WHERE name = '_calls'").toArray(),
       ],
-      [['key', 'status', 'body', 'message'], [['k', null]]],
+      [[['k', 'ok', 'x', null]], []],
     );
   }
   // ---- a family of Remotes: remote(of, index) names member <family>-<index>, chosen at run time
@@ -833,9 +830,11 @@ export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, Refusal] {
         [w.charges(), x.status, text(x.body), y.status, text(y.body), y.effects],
         [1, 'ok', '{"n":1}', 'ok', '{"n":1}', undefined],
       );
-      T('and the key holds that reply', w.sql.exec('SELECT status, body FROM _calls').raw().toArray(), [
-        ['ok', '{"n":1}'],
-      ]);
+      T(
+        'and the key holds that reply',
+        callRows(w.app.store).map(r => [r.status, r.body]),
+        [['ok', '{"n":1}']],
+      );
     }
     {
       // the first run fails as its last stretch commits (a storage error): its first stretch, the charge, stands, as
@@ -865,18 +864,14 @@ export fn pay(db: Sql, bank: Remote, message: Pay) -> Result[Done, Refusal] {
       const [x, y] = await Promise.all([failed(w.app.serve(meta, body, tx)), w.app.serve(meta, body, tx), twice()]);
       T(
         'the first run fails after its call: the waiting send runs the key and gets its reply',
-        [x, y.status, text(y.body), w.charges(), w.sql.exec('SELECT status FROM _calls').raw().toArray()],
+        [x, y.status, text(y.body), w.charges(), callRows(w.app.store).map(r => [r.status])],
         ['SQLITE_BUSY: injected', 'ok', '{"n":1}', 2, [['ok']]],
       );
     }
     {
       // a claim no run holds (its object reset while it waited): the key runs again
       const w = world();
-      w.sql.exec(
-        `INSERT INTO _calls(key, status, body, message) VALUES (?1, 'pending', 'gone', ?2)`,
-        meta.key,
-        '{"who":"bob"}',
-      );
+      putCall(w.app.store, meta.key, { status: 'pending', body: 'gone', message: '{"who":"bob"}' });
       const a = w.app.serve(meta, body);
       await w.release();
       const x = await a;

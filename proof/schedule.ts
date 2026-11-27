@@ -9,7 +9,7 @@
 // explore({ keys: false }) removes the idempotency keys; the explorer must then find a violation.
 import { readFileSync } from 'node:fs';
 import { compile } from '../compiler.ts';
-import { NO_TIMERS, TimedOut, answerText, instantiate, replay, responseOf } from '../host.ts';
+import { NO_TIMERS, TimedOut, answerText, callRows, instantiate, replay, responseOf } from '../host.ts';
 import type { Effect, Service, ServiceOptions, Served } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import { std } from '../std.ts';
@@ -185,7 +185,7 @@ async function overlap(prefix: readonly number[]): Promise<{ taken: string[]; wr
       if (choose(COMMIT) === 1) {
         // a stretch after the first (it charged nothing and leaves a row for the key; clearing a claim leaves none):
         // the charge made before its call stands, and the key runs again
-        if (runs() === before && sql.exec('SELECT 1 FROM _calls').toArray().length > 0) extra++;
+        if (runs() === before && callRows(callee.store).length > 0) extra++;
         throw new Busy('SQLITE_BUSY: injected at commit');
       }
       return r;
@@ -210,9 +210,9 @@ async function overlap(prefix: readonly number[]): Promise<{ taken: string[]; wr
   const last = await send();
   const replies = [...(await Promise.all(sends)), last],
     wrong: string[] = [];
-  const [stored] = sql.exec('SELECT status, body FROM _calls').raw().toArray();
-  const storedText = stored ? `${cellText(stored[0])} ${cellText(stored[1])}` : 'none';
-  if (stored?.[0] === 'pending') wrong.push('a claim is left');
+  const [stored] = callRows(callee.store);
+  const storedText = stored ? `${stored.status} ${stored.body}` : 'none';
+  if (stored?.status === 'pending') wrong.push('a claim is left');
   for (const r of replies)
     if (r instanceof Error) {
       if (!(r instanceof Busy)) wrong.push(`a send failed: ${r.message}`);

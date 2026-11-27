@@ -3,6 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { world, sources } from './world.ts';
 import type { Answer, World } from './world.ts';
+import { deleteWake } from '../../host.ts';
 import { cellText } from '../../host/log.ts';
 
 type Result = { name: string; ok: boolean; got: unknown; want: unknown };
@@ -558,7 +559,7 @@ const waitsOf = (w: World): unknown => {
   const w = await fresh();
   const h = made(await hold(w, 1, 'lost', 1));
   w.sql.exec(`UPDATE holds SET state = 'paying' WHERE id = ${h.id}`);
-  w.sql.exec(`DELETE FROM _wakes WHERE key = ${h.id}`);
+  deleteWake(w.app.store, h.id);
   await w.req('POST /events/1/cancel');
   let sweeps = 0;
   for (let i = 0; i < 1000 && w.app.next() !== null; i++) {

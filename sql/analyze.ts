@@ -9,7 +9,7 @@ import type { Analysis, ResultColumn, Schema, Statement } from './ast.ts';
 import { type AnalyzeOptions, Check } from './check/context.ts';
 import { select } from './check/query.ts';
 import { alter, createIndex, createTable, del, insert, update } from './check/statement.ts';
-import { tokenize } from './tokens.ts';
+import { internalSqlName, tokenize } from './tokens.ts';
 
 export { type AnalyzeOptions, TAPE_T } from './check/context.ts';
 
@@ -33,8 +33,11 @@ function check(k: Check, ast: Statement): ResultColumn[] | null {
     case 'alter':
       alter(k, ast);
       return null;
-    case 'drop':
+    case 'drop': {
+      const hidden = internalSqlName(ast.name);
+      if (hidden) k.err('name', hidden, ast);
       return null;
+    }
     default:
       return unreachable(ast, 'statement');
   }

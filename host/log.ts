@@ -106,7 +106,7 @@ export type FetchEffect = {
 export type SecretEffect = { secret: string; version: number | null };
 export type NowEffect = { now: number };
 export type RandomEffect = { random: number };
-/** `undone`: a timer its run's rollback(out) or trap undid (its row in _wakes was rolled back; host/run.ts, markUndone) */
+/** `undone`: a timer its run's rollback(out) or trap undid (its host-store row was rolled back; host/run.ts, markUndone) */
 export type WakeEffect = { wake: number; after: number; due: number; undone?: true };
 export type Effect = Head | SqlEffect | CallEffect | FetchEffect | SecretEffect | NowEffect | RandomEffect | WakeEffect;
 

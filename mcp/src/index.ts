@@ -20,6 +20,7 @@ import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
+import hostStore from '../../host/store.ts?erased';
 import hostFailure from '../../host/failure.ts?erased';
 import hostProblem from '../../host/problem.ts?erased';
 import hostSecrets from '../../host/secrets.ts?erased';
@@ -49,6 +50,7 @@ const MODULES = {
   'host/memory.js': hostMemory,
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
+  'host/store.js': hostStore,
   'host/failure.js': hostFailure,
   'host/problem.js': hostProblem,
   'host/secrets.js': hostSecrets,

@@ -3,7 +3,7 @@
 // SQLite would refuse (a table made twice, a column added twice, a NOT NULL column added with no default …).
 import { unreachable } from '../compiler/ast.ts';
 import type { Affinity, ColDef, Column, Schema, Statement, Table, Unique } from './ast.ts';
-import { lc } from './tokens.ts';
+import { internalSqlName, lc } from './tokens.ts';
 
 export function affinity(type: string | null | undefined): Affinity {
   const u = (type ?? '').toUpperCase();
@@ -50,6 +50,8 @@ export function applyToSchema(sc: Schema, ast: Statement): string | null {
   const colIn = (t: Table, c: string): Column | undefined => t.cols.find(x => lc(x.name) === lc(c));
   switch (ast.k) {
     case 'create_table': {
+      const hidden = internalSqlName(ast.table);
+      if (hidden) return hidden;
       if (T(ast.table)) return ast.ifNot ? null : `table ${ast.table} already exists`;
       const cols = ast.cols.map(columnOf),
         seen = new Set<string>();
@@ -108,6 +110,8 @@ export function applyToSchema(sc: Schema, ast: Statement): string | null {
       return null;
     }
     case 'create_index': {
+      const hidden = internalSqlName(ast.table) ?? internalSqlName(ast.name);
+      if (hidden) return hidden;
       if (sc.indexes.has(lc(ast.name)) || T(ast.name)) return ast.ifNot ? null : `index ${ast.name} already exists`;
       const t = T(ast.table);
       if (!t) return `no such table: ${ast.table}`;
@@ -126,6 +130,8 @@ export function applyToSchema(sc: Schema, ast: Statement): string | null {
       return null;
     }
     case 'alter': {
+      const hidden = internalSqlName(ast.table);
+      if (hidden) return hidden;
       const t = T(ast.table);
       if (!t) return `no such table: ${ast.table}`;
       if (ast.action === 'rename_table') {
@@ -182,6 +188,8 @@ export function applyToSchema(sc: Schema, ast: Statement): string | null {
     }
     case 'drop': {
       if (ast.what === 'table') {
+        const hidden = internalSqlName(ast.name);
+        if (hidden) return hidden;
         const t = T(ast.name);
         if (!t) return ast.ifExists ? null : `no such table: ${ast.name}`;
         sc.tables.delete(lc(ast.name));

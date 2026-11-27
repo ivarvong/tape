@@ -19,7 +19,7 @@ import type {
   Upsert,
 } from '../ast.ts';
 import { applyToSchema, cloneSchema, columnOf } from '../schema.ts';
-import { lc } from '../tokens.ts';
+import { internalSqlName, lc } from '../tokens.ts';
 import { AFF_T, type Check, type Stack, TY, colType, isNumber, show, sourceOf } from './context.ts';
 import { resultColumn, select, ty } from './query.ts';
 
@@ -48,9 +48,14 @@ function store(k: Check, table: TableFacts, col: ColFacts, v: Stored, how: strin
 }
 // the table a statement writes: one the program has, and not SQLite's own
 function target(k: Check, name: string, at: { s: number }): TableFacts | null {
+  const hidden = internalSqlName(name);
+  if (hidden) {
+    k.err('name', hidden, at);
+    return null;
+  }
   const t = k.table(name);
   if (!t) k.err('name', `no such table: ${name}`, at);
-  else if (t.builtin) k.err('name', `${name} is SQLite's own table: it may be read, not written`, at);
+  else if (t.builtin) k.err('name', `${name} is not in a program's Sql`, at);
   return t && !t.builtin ? t : null;
 }
 function returning(k: Check, list: ResultCol[] | null, t: TableFacts, frame: Frame): ResultColumn[] | null {
