@@ -60,7 +60,18 @@ import {
 import type { FlagDecl, Mem, Query } from './memory.ts';
 import { direct } from './schema.ts';
 import type { Transaction } from './schema.ts';
-import { cellText } from './log.ts';
+import {
+  deleteCall,
+  deleteWake,
+  dueWakes,
+  getCall,
+  getWake,
+  nextWakeDue,
+  putCall,
+  putWake,
+  storeFor,
+} from './store.ts';
+import type { HostStore } from './store.ts';
 
 const enc = new TextEncoder();
 // a leading U+FEFF is kept: it is part of the bytes (host/memory.ts)
@@ -175,6 +186,8 @@ export type Observed = {
 };
 export type LinkOptions = {
   sql?: Sql;
+  /** the host's bookkeeping; a memory store is made when this is omitted */
+  store?: HostStore;
   /** false: nothing is logged (not for handlers that make calls) */
   log?: boolean;
   /** a log to answer from: nothing is performed */
@@ -216,7 +229,11 @@ type Linked = {
   readonly BUILD: string;
   readonly C: CallDecl[];
   readonly M: Method[];
-  readonly o: Required<Omit<LinkOptions, 'sql' | 'timers'>> & { sql: Sql | undefined; timers: Timers };
+  readonly o: Required<Omit<LinkOptions, 'sql' | 'timers' | 'store'>> & {
+    sql: Sql | undefined;
+    timers: Timers;
+    store: HostStore;
+  };
   /** the secrets this run has read, in order, for keeping their values out of what it logs */
   read: Read;
   readonly live: boolean;
@@ -238,6 +255,7 @@ type Linked = {
 };
 
 const sqlOf = (L: Linked): Sql => L.o.sql ?? fail('this module was linked without a database');
+const storeOf = (L: Linked): HostStore => L.o.store;
 function fail(message: string): never {
   throw new Error(message);
 }
@@ -514,7 +532,7 @@ function ask(L: Linked, kind: number): number {
 
 // env.wake(key, after): a timer. The host calls this program's `woken` with Wake(key) once `after` ms have
 // passed. Logged ({ wake, after, due }) so a replay sees the same answer; when it is first set, it is written to
-// _wakes in the request's own transaction, so it is kept exactly when the request's writes are. Setting a key
+// the host store in the request's own transaction, so it is kept exactly when the request's writes are. Setting a key
 // again moves its time. The run that set it is remembered, so the woken run joins that trace.
 function wake(L: Linked, key: number, after: number): number {
   if (!Number.isSafeInteger(key)) throw new RangeError(`wake: key ${key} is not an integer within ±2^53`);
@@ -522,13 +540,12 @@ function wake(L: Linked, key: number, after: number): number {
   const set = (): WakeEffect => {
     const e = { wake: key, after: ms, due: Date.now() + ms };
     if (L.live)
-      sqlOf(L).exec(
-        'INSERT INTO _wakes(key, due, trace, span) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key) DO UPDATE SET due = excluded.due, trace = excluded.trace, span = excluded.span, tries = 0',
-        key,
-        e.due,
-        L.span?.trace ?? null,
-        L.span?.span ?? hex(8),
-      );
+      putWake(storeOf(L), key, {
+        due: e.due,
+        trace: L.span?.trace ?? null,
+        span: L.span?.span ?? hex(8),
+        tries: 0,
+      });
     return e;
   };
   const e =
@@ -668,7 +685,7 @@ function attempt(L: Linked, given: Uint8Array | null): Uint8Array<ArrayBuffer> {
 }
 
 // A rollback(out), or a trap, undoes the writes of the stretch it ends: those after the run's last call (the earlier
-// stretches were committed before their calls). Each SQL write there, and each timer set there (its row in _wakes is
+// stretches were committed before their calls). Each SQL write there, and each timer set there (its row in the host store is
 // in the same transaction), is marked `undone` in the live run's log, so the log, its trace and every view of it say
 // it did not stay. A read is not marked; a clock read or a random draw undoes nothing.
 const WRITE = /\b(INSERT|UPDATE|DELETE|REPLACE)\b/i;
@@ -841,9 +858,9 @@ const answerOf = (out: Uint8Array): { status: Status; body: Uint8Array } => ({
 // command is a bug in the caller, which a replay would hide). A row stored before messages were kept (message
 // NULL) is replayed. A `pending` row is a claim (below), and its body names the run that holds it.
 function storedReply(L: Linked, key: string, method: string, message: string): Served | { claim: string } | null {
-  const [seen] = sqlOf(L).exec('SELECT status, body, message FROM _calls WHERE key = ?1', key).raw().toArray();
+  const seen = getCall(storeOf(L), key);
   if (!seen) return null;
-  const [status, body, before] = seen;
+  const { status, body, message: before } = seen;
   if (typeof before === 'string' && before !== message)
     return {
       status: 'skew',
@@ -851,8 +868,8 @@ function storedReply(L: Linked, key: string, method: string, message: string): S
         `the key ${key} was used before for another ${method} message (${before.length > 200 ? `${before.slice(0, 200)}…` : before}); a key names one command, so this one (${message.length > 200 ? message.slice(0, 200) + '…' : message}) did not run (the first may have)`,
       ),
     };
-  if (cellText(status) === PENDING) return { claim: cellText(body) };
-  return { status: cellText(status), body: enc.encode(cellText(body)) };
+  if (status === PENDING) return { claim: body };
+  return { status, body: enc.encode(body) };
 }
 
 // A run of a keyed method claims its key: a `pending` row goes in the transaction of the run's first stretch, so it
@@ -944,17 +961,8 @@ async function runServed(
   c: Claim | null,
 ): Promise<Served> {
   const { withinMs = Infinity, trace = null } = req;
-  const sql = sqlOf(L);
   const put = (status: string, body: string): void => {
-    if (c)
-      sql.exec(
-        'INSERT INTO _calls(key, status, body, message) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(key) DO UPDATE SET ' +
-          'status = excluded.status, body = excluded.body, message = excluded.message',
-        c.key,
-        status,
-        body,
-        c.message,
-      );
+    if (c) putCall(storeOf(L), c.key, { status, body, message: c.message });
   };
   const store = (out: Uint8Array): void => {
     const a = answerOf(out);
@@ -968,11 +976,15 @@ async function runServed(
       first = false;
       return r;
     });
-  const mine = 'FROM _calls WHERE key = ?1 AND status = ?2 AND body = ?3';
   const clear = (): void => {
     try {
-      if (c && sql.exec(`SELECT 1 ${mine}`, c.key, PENDING, c.claim).toArray().length > 0)
-        transaction(() => sql.exec(`DELETE ${mine}`, c.key, PENDING, c.claim));
+      if (c) {
+        const row = getCall(storeOf(L), c.key);
+        if (row && row.status === PENDING && row.body === c.claim)
+          transaction(() => {
+            deleteCall(storeOf(L), c.key);
+          });
+      }
     } catch {
       // the claim stays; no run holds it, so the next send of the key runs it
     }
@@ -1032,16 +1044,15 @@ async function wakeDue(
   }: { transaction?: Transaction; now?: number; transient?: (err: unknown) => boolean } = {},
 ): Promise<Woken | null> {
   const m = L.M.find(x => x.name === 'woken') ?? fail('this program exports no woken');
-  const sql = sqlOf(L);
-  const [row] = sql.exec('SELECT due, trace, span, tries FROM _wakes WHERE key = ?1', key).toArray();
-  const due = Number(row?.['due']);
-  if (!row || due > now) return null;
-  const span = cellText(row['span']);
+  const row = getWake(storeOf(L), key);
+  if (!row || row.due > now) return null;
+  const { due, span } = row;
   const gone = (): void => {
-    sql.exec('DELETE FROM _wakes WHERE key = ?1 AND span = ?2', key, span);
+    const held = getWake(storeOf(L), key);
+    if (held && held.span === span) deleteWake(storeOf(L), key);
   };
   try {
-    const trace = typeof row['trace'] === 'string' ? { trace: row['trace'], parent: span } : null;
+    const trace = typeof row.trace === 'string' ? { trace: row.trace, parent: span } : null;
     const ran = await runLogged(L, enc.encode(JSON.stringify({ key })), { transaction, method: m, done: gone, trace });
     if (L.undone) transaction(gone);
     const [head] = ran.effects;
@@ -1051,12 +1062,14 @@ async function wakeDue(
     // a run cut short keeps its timer: it is woken again
     if (isCut(err)) throw err;
     if (transient(err)) {
-      const tries = Number(row['tries'] ?? 0),
+      const tries = row.tries,
         wait = Math.min(WAKE_RETRY.first * 2 ** Math.min(tries, 30), WAKE_RETRY.most);
       try {
-        transaction(() =>
-          sql.exec('UPDATE _wakes SET due = ?1, tries = tries + 1 WHERE key = ?2 AND span = ?3', now + wait, key, span),
-        );
+        transaction(() => {
+          const nowRow = getWake(storeOf(L), key);
+          if (nowRow && nowRow.span === span)
+            putWake(storeOf(L), key, { ...nowRow, due: now + wait, tries: nowRow.tries + 1 });
+        });
       } catch {
         // storage is still failing: the timer stays as it was, due, and is tried when the host next runs due timers
       }
@@ -1068,13 +1081,11 @@ async function wakeDue(
 /** Timers. due: the keys whose time has come, oldest first. next: the earliest time set, or null. */
 function dueKeys(L: Linked, now: number): number[] {
   if (!L.M.some(x => x.name === 'woken')) return [];
-  const rows = sqlOf(L).exec('SELECT key FROM _wakes WHERE due <= ?1 ORDER BY due, key', now).toArray();
-  return rows.map(r => Number(r['key']));
+  return dueWakes(storeOf(L), now);
 }
 function nextDue(L: Linked): number | null {
   if (!L.M.some(x => x.name === 'woken')) return null;
-  const due = sqlOf(L).exec('SELECT min(due) AS due FROM _wakes').toArray()[0]?.['due'];
-  return due === null || due === undefined ? null : Number(due);
+  return nextWakeDue(storeOf(L));
 }
 
 function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
@@ -1091,6 +1102,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
     name = null,
   } = options;
   const { sink = null, heap = null, random = null, timers = REAL_TIMERS, observe = null } = options;
+  const store = storeFor(options.sql, options.store);
   const { secrets = null, http = null } = options;
   const holder: { L: Linked | null } = { L: null };
   let names: Map<number, string> | null = null;
@@ -1124,6 +1136,7 @@ function linked(module: WebAssembly.Module, options: LinkOptions): Linked {
       observe,
       secrets,
       http,
+      store,
     },
     read: [],
     live: !recorded,
@@ -1172,8 +1185,9 @@ export function link(module: WebAssembly.Module, options: LinkOptions = {}) {
     handle: (bytes: Uint8Array | null): Uint8Array<ArrayBuffer> => handle(L, bytes),
     /** handle inside a transaction: f => ctx.storage.transactionSync(f). rollback(out) undoes the writes and still answers. */
     handleIn(transaction: Transaction, bytes: Uint8Array): Uint8Array<ArrayBuffer> {
+      const tx = storeOf(L).transact(transaction);
       try {
-        return transaction(() => handle(L, bytes));
+        return tx(() => handle(L, bytes));
       } catch (err) {
         if (err instanceof Undo) return err.out;
         // a trap: the transaction rolled back what this run wrote
@@ -1181,11 +1195,12 @@ export function link(module: WebAssembly.Module, options: LinkOptions = {}) {
         throw err;
       }
     },
-    runLogged: (bytes: Uint8Array, o?: RunOptions): Promise<Ran> => runLogged(L, bytes, o),
+    runLogged: (bytes: Uint8Array, o?: RunOptions): Promise<Ran> =>
+      runLogged(L, bytes, { ...o, transaction: storeOf(L).transact(o?.transaction ?? direct) }),
     run: async (bytes: Uint8Array, o?: RunOptions): Promise<Uint8Array<ArrayBuffer>> =>
-      (await runLogged(L, bytes, o)).out,
+      (await runLogged(L, bytes, { ...o, transaction: storeOf(L).transact(o?.transaction ?? direct) })).out,
     serve: (req: ServeRequest, bytes: Uint8Array, o?: { transaction?: Transaction }): Promise<Served> =>
-      serve(L, req, bytes, o),
+      serve(L, req, bytes, { transaction: storeOf(L).transact(o?.transaction ?? direct) }),
     invariants: ({ settled = false }: { settled?: boolean } = {}): Broken[] => invariants(L, module, settled),
     declared: (): Declared[] => declaredIn(module),
     due: (now = Date.now()): number[] => dueKeys(L, now),
@@ -1193,7 +1208,8 @@ export function link(module: WebAssembly.Module, options: LinkOptions = {}) {
     wake: (
       key: number,
       o?: { transaction?: Transaction; now?: number; transient?: (err: unknown) => boolean },
-    ): Promise<Woken | null> => wakeDue(L, key, o),
+    ): Promise<Woken | null> => wakeDue(L, key, { ...o, transaction: storeOf(L).transact(o?.transaction ?? direct) }),
+    store: storeOf(L),
   };
 }
 export type App = ReturnType<typeof link>;

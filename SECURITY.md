@@ -16,6 +16,18 @@ Please include what you found, how to reproduce it (a program, a request, a comm
   for, one account or name reaching another's data or programs, or a way around a limit in
   [`docs/service.md`](docs/service.md#limits).
 
+## The program's Sql
+
+A program's `Sql` capability reaches only the tables that program created. The host keeps keyed replies, timers,
+applied migrations and the effect log in the same Durable Object's key-value storage (`ctx.storage.kv`), which the
+SQL API cannot read (the hidden `_cf_KV` table). In Node and the browser the same bookkeeping lives in a store the
+program's connection never sees. Writes to that store and to the program's SQL commit or roll back together
+(`transactionSync` in workerd). `sqlite_*` catalog tables are not in a program's Sql (C68). A program may create a
+table named `_calls` or `_wakes`; that table is only its own data, not the host's.
+
+Objects that still have host tables in SQLite copy those rows into the store and drop the tables the first time the
+new host opens them.
+
 ## Known and not yet fixed
 
 These are listed in [`STATUS.md`](STATUS.md#known-limitations); there is no need to report them again:

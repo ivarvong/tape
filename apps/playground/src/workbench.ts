@@ -8,7 +8,7 @@
 import { compile } from '../../../compiler.ts';
 import type { Built, Refused, Source } from '../../../compiler.ts';
 import type { Problem } from '../../../compiler/common.ts';
-import { framed, instantiate, isCall, isHead, responseOf, traceOf } from '../../../host.ts';
+import { framed, instantiate, isCall, isHead, responseOf, traceOf, wakeRows } from '../../../host.ts';
 import type { Header } from '../../../host.ts';
 import type { App, Cell, Effect, Flags, Service, ServiceOptions, ServiceReply } from '../../../host.ts';
 import { isEffect } from '../../../host/log.ts';
@@ -398,15 +398,8 @@ export class Workbench {
   /** The timers that are set, by program: key and due time. */
   timers(): { program: string; key: number; due: number }[] {
     return [...this.slots.values()].flatMap(s => {
-      if (!s.db || !s.built?.methods.some(m => m.name === 'woken')) return [];
-      try {
-        return s.db
-          .exec('SELECT key, due FROM _wakes ORDER BY due, key')
-          .toArray()
-          .map(r => ({ program: s.name, key: Number(r['key']), due: Number(r['due']) }));
-      } catch {
-        return [];
-      }
+      if (!s.app || !s.built?.methods.some(m => m.name === 'woken')) return [];
+      return wakeRows(s.app.store).map(w => ({ program: s.name, key: w.key, due: w.due }));
     });
   }
 

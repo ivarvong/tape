@@ -8,7 +8,18 @@ import { inflateSync } from 'node:zlib';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { compile } from '../compiler.ts';
-import { instantiate, isCall, isHead, isSql, migrate, replay, spans, traceOf } from '../host.ts';
+import {
+  getMigrations,
+  instantiate,
+  isCall,
+  isHead,
+  isSql,
+  migrate,
+  replay,
+  setMigrations,
+  spans,
+  traceOf,
+} from '../host.ts';
 import type { Effect, Service } from '../host.ts';
 import { checkQueries } from '../check.ts';
 import { nodeSql } from '../nodesql.ts';
@@ -214,10 +225,7 @@ type Note`,
   );
   T(
     'migrations: each recorded once, with its hash',
-    sql
-      .exec('SELECT version, name, hash FROM schema_migrations ORDER BY version')
-      .toArray()
-      .map(r => [r.version, r.name, r.hash]),
+    getMigrations(a2.store).map(r => [r.version, r.name, r.hash]),
     v2.migrations.map(x => [x.n, x.name, x.hash]),
   );
   const edited = mk(v2src.replace('body TEXT NOT NULL UNIQUE)', 'body TEXT NOT NULL UNIQUE, extra TEXT)'));
@@ -259,7 +267,7 @@ type Note`,
     };
     const tryRun = (r: Built): unknown => {
       try {
-        return migrate(sql, r.migrations).map(x => [x.migrate, x.removed ?? []]);
+        return migrate(sql, a2.store, r.migrations).map(x => [x.migrate, x.removed ?? []]);
       } catch (e) {
         return messageOf(e).split(',')[0];
       }
@@ -303,14 +311,17 @@ type Note`,
       tryRun(removing("DELETE FROM notes WHERE body = 'nothing'")),
       [[3, []]],
     );
-    sql.exec('DELETE FROM schema_migrations WHERE version = 3');
+    setMigrations(
+      a2.store,
+      getMigrations(a2.store).filter(row => row.version !== 3),
+    );
     T(
       'migrations: a contract may remove, and says what it removed',
       tryRun(removing('DROP INDEX notes_pinned;\n  ALTER TABLE notes DROP COLUMN pinned', true)),
       [[3, ['notes.pinned']]],
     );
   }
-  T('migrations: migrate itself, again: nothing to do', migrate(sql, v2.migrations), []);
+  T('migrations: migrate itself, again: nothing to do', migrate(sql, a2.store, v2.migrations), []);
 }
 
 // ---- tape.ts, the command line: compile, run, effect log, trace

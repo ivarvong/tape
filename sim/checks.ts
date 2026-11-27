@@ -64,7 +64,7 @@ export function declared(world: World, settled: boolean): string[] {
 }
 
 const OWN_TABLES =
-  "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_%' ESCAPE '\\' AND name <> 'schema_migrations' ORDER BY name";
+  "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name";
 export type Rows = Record<string, string[]>;
 /** Every row of every table the programs made, as text, by `program.table`. */
 export function rowsOf(world: World): Rows {

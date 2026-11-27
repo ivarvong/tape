@@ -9,6 +9,7 @@ import hostLog from '../../host/log.ts?erased';
 import hostMemory from '../../host/memory.ts?erased';
 import hostRun from '../../host/run.ts?erased';
 import hostSchema from '../../host/schema.ts?erased';
+import hostStore from '../../host/store.ts?erased';
 import hostFailure from '../../host/failure.ts?erased';
 import hostProblem from '../../host/problem.ts?erased';
 import hostSecrets from '../../host/secrets.ts?erased';
@@ -57,6 +58,7 @@ const HOST_PARTS = {
   'host/memory.js': hostMemory,
   'host/run.js': hostRun,
   'host/schema.js': hostSchema,
+  'host/store.js': hostStore,
   'host/failure.js': hostFailure,
   'host/problem.js': hostProblem,
   'host/secrets.js': hostSecrets,
@@ -1066,7 +1068,7 @@ export class Name extends DurableObject {
     );
     return true;
   }
-  // ---- Retention of trace records (RUNTIME-SPEC R-RET-6). The tables pruned here and the data's _tape_log are read
+  // ---- Retention of trace records (RUNTIME-SPEC R-RET-6). The tables pruned here and the data's request log are read
   // only by the trace, log and OTLP routes and the request view, never to answer a request (test/retention.test.ts
   // checks the readers), so a prune changes no answer.
   #keepMade = false;

@@ -2,9 +2,11 @@
 // at most once, and its machines, as triggers.
 import type { Sql } from './log.ts';
 import { cellText } from './log.ts';
+import type { HostStore, Transaction } from './store.ts';
+import { appendMigration, getMigrations, storeSavepoint } from './store.ts';
 
 // Migrations: `migration N "name" { sql }` blocks, in order, each hashed with every one before it. The object
-// keeps schema_migrations(version, name, hash, applied_at); migrate runs the ones it has not, in order, in one
+// keeps applied migrations in the host store (not in the program's Sql); migrate runs the ones it has not, in order, in one
 // transaction, and returns them as effects ({ migrate, name, hash, statements, ms }). A stored migration whose hash
 // differs from the chain's (it was edited after it ran, or the chains diverged) stops everything: it throws and
 // runs nothing. A chain shorter than the stored one is an older program's, and runs nothing.
@@ -19,19 +21,18 @@ export type Migrated = {
   removed?: string[];
   ms: number;
 };
-export type Transaction = <T>(f: () => T) => T;
-/** No transaction: the stretch just runs. */
-export const direct: Transaction = f => f();
+export type { Transaction } from './store.ts';
+export { direct } from './store.ts';
 
 /**
  * The program's tables and columns as "table.column": what a migration may take away. Tables whose names begin
- * with _ (the host's _calls, the service's logs) and SQLite's own are not the program's.
+ * SQLite's own tables and the Durable Object KV table are not the program's.
  */
 export const columns = (sql: Sql): Set<string> =>
   new Set(
     sql
       .exec(
-        "SELECT m.name || '.' || p.name AS c FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND substr(m.name, 1, 1) <> '_' AND m.name NOT LIKE 'sqlite%' AND m.name <> 'schema_migrations'",
+        "SELECT m.name || '.' || p.name AS c FROM sqlite_master m, pragma_table_info(m.name) p WHERE m.type = 'table' AND m.name NOT LIKE 'sqlite%' AND m.name NOT LIKE '_cf_%'",
       )
       .toArray()
       .map(r => cellText(r['c'])),
@@ -44,29 +45,13 @@ export const removedBy = (before: ReadonlySet<string>, after: ReadonlySet<string
 export const removalError = (m: { n: number; name: string }, gone: readonly string[]): string =>
   `migration ${m.n} "${m.name}" removes ${gone.join(', ')}, which a version still running may read or write; mark it \`contract\` (migration ${m.n} "${m.name}" contract { … }) so it waits until those versions are retired`;
 
-// Outside a Durable Object (which passes f => ctx.storage.transactionSync(f)), a savepoint makes the run all or nothing.
-const savepoint =
-  (sql: Sql): Transaction =>
-  f => {
-    sql.exec('SAVEPOINT tape_migrate');
-    try {
-      const r = f();
-      sql.exec('RELEASE tape_migrate');
-      return r;
-    } catch (e) {
-      sql.exec('ROLLBACK TO tape_migrate');
-      sql.exec('RELEASE tape_migrate');
-      throw e;
-    }
-  };
-
-function runOne(sql: Sql, m: Link): Migrated {
+function runOne(sql: Sql, store: HostStore, m: Link): Migrated {
   const began = Date.now();
   const before = columns(sql);
   for (const st of m.statements) sql.exec(st);
   const removed = removedBy(before, columns(sql));
   if (removed.length > 0 && !m.contract) throw new Error(removalError(m, removed));
-  sql.exec('INSERT INTO schema_migrations VALUES (?1, ?2, ?3, ?4)', m.n, m.name, m.hash, Date.now());
+  appendMigration(store, { version: m.n, name: m.name, hash: m.hash, applied_at: Date.now() });
   const { name, hash, contract, statements } = m;
   const took = { ms: Date.now() - began };
   return { migrate: m.n, name, hash, contract, statements, ...(removed.length > 0 ? { removed } : {}), ...took };
@@ -74,22 +59,19 @@ function runOne(sql: Sql, m: Link): Migrated {
 
 export function migrate(
   sql: Sql,
+  store: HostStore,
   chain: readonly Link[],
-  { transaction = savepoint(sql) }: { transaction?: Transaction } = {},
+  { transaction = storeSavepoint(sql, store) }: { transaction?: Transaction } = {},
 ): Migrated[] {
-  sql.exec(
-    'CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, hash TEXT NOT NULL, applied_at INTEGER NOT NULL)',
-  );
-  const done = sql.exec('SELECT version, name, hash FROM schema_migrations ORDER BY version').toArray();
+  const done = getMigrations(store);
   done.forEach((d, i) => {
     const mine = chain[i];
-    const hash = cellText(d['hash']);
-    if (!mine || (mine.n === d['version'] && mine.hash === hash)) return;
+    if (!mine || (mine.n === d.version && mine.hash === d.hash)) return;
     throw new Error(
-      `migration ${cellText(d['version'])} "${cellText(d['name'])}" diverged: it ran with hash ${hash.slice(0, 12)}, this program's is ${mine.hash.slice(0, 12)}. Applied migrations are append-only: add a new one instead of editing it.`,
+      `migration ${d.version} "${d.name}" diverged: it ran with hash ${d.hash.slice(0, 12)}, this program's is ${mine.hash.slice(0, 12)}. Applied migrations are append-only: add a new one instead of editing it.`,
     );
   });
-  return transaction(() => chain.slice(done.length).map(m => runOne(sql, m)));
+  return transaction(() => chain.slice(done.length).map(m => runOne(sql, store, m)));
 }
 
 // Machines (`machine table.column: State { From -> To }`, rules.ts C57-C61; a state is its constructor's text) as

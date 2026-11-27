@@ -2,6 +2,9 @@
 import type { SqlToken } from './ast.ts';
 
 export const lc = (s: string | null | undefined): string => (s ?? '').toLowerCase();
+/** A name the program's Sql cannot reach: SQLite's catalogs and the Durable Object's hidden KV table. */
+export const internalSqlName = (name: string): string | null =>
+  /^(sqlite_|_cf_)/i.test(name) ? `${name} is not in a program's Sql` : null;
 /** `subset`: SQL that SQLite takes and tape does not. `syntax`: not SQL. The others are found by the checker. */
 export type SqlErrorKind = 'syntax' | 'subset' | 'name' | 'type' | 'arity' | (string & Record<never, never>);
 export class SqlError extends Error {

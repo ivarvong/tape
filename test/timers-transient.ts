@@ -3,7 +3,7 @@
 // cut removed the timer, so a transient SQLITE_BUSY lost the work for good (lab_notebook repros/wakeloss.ts).
 import '../node25.ts';
 import { compile } from '../compiler.ts';
-import { instantiate } from '../host.ts';
+import { deleteWake, instantiate, wakeRows } from '../host.ts';
 import { transientAtEdge, transientBetween } from '../host/failure.ts';
 import { WAKE_RETRY } from '../host/run.ts';
 import { nodeSql } from '../nodesql.ts';
@@ -30,11 +30,9 @@ const sql = nodeSql();
 const app = instantiate(new WebAssembly.Module(r.wasm), { sql });
 app.handleIn(f => sql.transaction(f), new TextEncoder().encode('POST /\n'));
 const wakes = (): [number, number][] =>
-  sql
-    .exec('SELECT key, due FROM _wakes ORDER BY key')
-    .raw()
-    .toArray()
-    .map(([k, d]) => [Number(k), Number(d)]);
+  wakeRows(app.store)
+    .toSorted((a, b) => a.key - b.key)
+    .map(w => [w.key, w.due]);
 const hits = (): number => Number(sql.exec('SELECT coalesce(sum(n), 0) FROM hits').raw().toArray()[0]?.[0]);
 let busy = 0;
 const flaky = <R>(f: () => R): R =>
@@ -96,7 +94,7 @@ T('and its timer is removed', wakes(), []);
 
 // a transient failure of the bookkeeping itself (moving the timer later) leaves the timer due; nothing is lost
 app.handleIn(f => sql.transaction(f), new TextEncoder().encode('POST /\n'));
-sql.exec('DELETE FROM _wakes WHERE key = 13');
+deleteWake(app.store, 13);
 busy = 2;
 T('the run and its rescheduling both fail', await wake(7, Date.now() + 1), 'SQLITE_BUSY: database is locked');
 T('the timer stays, still due', wakes().length === 1 && (wakes()[0]?.[1] ?? Infinity) <= Date.now() + 1, true);

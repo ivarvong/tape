@@ -2,8 +2,6 @@
 schema "CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, state \
     TEXT NOT NULL DEFAULT 'pending')"
 
-type Text { Text(text: View) }
-
 fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(method: Post, path: "/new/" ++ key) -> done(
@@ -25,22 +23,7 @@ fn handle(raw: View, db: Sql) -> Response {
       query: "UPDATE s SET state = 'void' WHERE key = :key AND state = 'paid'",
       key
     ))
-    Request(method: Get, path: "/triggers") -> buf()
-      |> append(view: sql_first(
-        db,
-        row: Text,
-        query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master \
-            WHERE type = 'trigger'"
-      ) |> shown)
-      |> respond(status: 200)
     _ -> empty(status: 404)
-  }
-}
-
-fn shown(found: Option[Text]) -> View {
-  match found {
-    Some(value: Text(text)) -> text
-    None -> ""
   }
 }
 

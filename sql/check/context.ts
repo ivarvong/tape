@@ -72,22 +72,6 @@ export function unify(ts: readonly Pick<Ty, 't'>[]): Unified {
 /** `mixed` read as a type: nothing is known of the value. */
 export const settled = (t: Unified): TyName => (t === 'mixed' ? 'any' : t);
 
-// sqlite_master, which a program may read (to list its triggers, its tables)
-const MASTER: TableFacts = {
-  name: 'sqlite_master',
-  cols: ['type', 'name', 'tbl_name', 'rootpage', 'sql'].map((n): ColFacts => ({
-    name: n,
-    type: n === 'rootpage' ? 'INT' : 'TEXT',
-    aff: n === 'rootpage' ? 'int' : 'text',
-    notNull: false,
-  })),
-  pk: [],
-  uniques: [],
-  checks: [],
-  rowid: null,
-  withoutRowid: false,
-  builtin: true,
-};
 const ROWID_NAME = /^(rowid|oid|_rowid_)$/i;
 export const isRowidName = (name: string): boolean => ROWID_NAME.test(name);
 export const rowidAs = (name: string): ColFacts => ({ name, aff: 'int', notNull: true, rowid: true });
@@ -133,7 +117,7 @@ export class Check {
     return this.src.slice(n.s, n.e);
   }
   table(name: string): TableFacts | undefined {
-    return this.schema.tables.get(lc(name)) ?? (/^sqlite_(master|schema)$/i.test(name) ? MASTER : undefined);
+    return this.schema.tables.get(lc(name));
   }
   /** note what a column name resolved to */
   resolved(e: Col, r: Ref): Ref {

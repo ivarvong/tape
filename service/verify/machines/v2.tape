@@ -9,8 +9,6 @@ machine s.state: SaleState {
   Pending -> Declined
 }
 
-type Text { Text(text: View) }
-
 fn handle(raw: View, db: Sql) -> Response {
   match request(raw) {
     Request(method: Post, path: "/new/" ++ key) -> done(
@@ -22,22 +20,7 @@ fn handle(raw: View, db: Sql) -> Response {
       query: "UPDATE s SET state = 'paid' WHERE key = :key AND state = 'pending' RETURNING id",
       key
     ))
-    Request(method: Get, path: "/triggers") -> buf()
-      |> append(view: sql_first(
-        db,
-        row: Text,
-        query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master \
-            WHERE type = 'trigger'"
-      ) |> shown)
-      |> respond(status: 200)
     _ -> empty(status: 404)
-  }
-}
-
-fn shown(found: Option[Text]) -> View {
-  match found {
-    Some(value: Text(text)) -> text
-    None -> ""
   }
 }
 

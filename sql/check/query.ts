@@ -2,7 +2,7 @@
 import { unreachable } from '../../compiler/ast.ts';
 import type { ColFacts, Expr, Frame, ResultCol, ResultColumn, Select, Source, TableRef, Ty } from '../ast.ts';
 import { affinity } from '../schema.ts';
-import { lc } from '../tokens.ts';
+import { internalSqlName, lc } from '../tokens.ts';
 import {
   AFF_T,
   type Check,
@@ -247,6 +247,11 @@ function fromSource(k: Check, r: TableRef, outer: Stack): Source | null {
       notNull: !c.null,
     }));
     return { name: null, alias: r.alias, table: null, cols, nullable: false };
+  }
+  const hidden = internalSqlName(r.name);
+  if (hidden) {
+    k.err('name', hidden, r);
+    return null;
   }
   const t = k.table(r.name);
   if (!t) k.err('name', `no such table: ${r.name}`, r);

@@ -11,7 +11,7 @@
 //
 // A module with exported methods is a callee: await app.serve({ method, fingerprint, key, withinMs }, bytes,
 // { transaction }) checks the fingerprint (answering skew, and running nothing, when the two sides differ),
-// answers a repeated key from its `_calls` table, and otherwise runs the method and stores the reply in the same
+// answers a repeated key from the host store (not from the program's Sql), and otherwise runs the method and stores the reply in the same
 // transaction. `key` is set for a command (`call ... once:`): the caller's `name`, the method and the program's
 // key; the callee runs a key at most once and repeats its stored reply (to a send while it runs, once it has one).
 //
@@ -24,6 +24,8 @@ import type { Effect, Sql, TraceEvent } from './host/log.ts';
 import type { SecretStore } from './host/secrets.ts';
 import { dropMachines, installMachines, migrate } from './host/schema.ts';
 import type { Link, MachineSpec, Migrated } from './host/schema.ts';
+import { importHostTables, storeFor } from './host/store.ts';
+import type { HostStore } from './host/store.ts';
 
 export { storageKind, transientAtEdge, transientBetween } from './host/failure.ts';
 export { PROBLEM_TYPE, TITLES, isProblem, problemBytes, problemOf, titleOf } from './host/problem.ts';
@@ -81,6 +83,32 @@ export {
   removedBy,
 } from './host/schema.ts';
 export type { MachineSpec, Migrated, Transaction } from './host/schema.ts';
+export {
+  appendMigration,
+  callRows,
+  deleteCall,
+  deleteWake,
+  durableStore,
+  getCall,
+  getLog,
+  getMigrations,
+  getWake,
+  importHostTables,
+  logStats,
+  logsSince,
+  memoryStore,
+  storeFor,
+  nextWakeDue,
+  pruneLogs,
+  putCall,
+  putWake,
+  recordLog,
+  setMigrations,
+  requestHeads,
+  updateLogEffects,
+  wakeRows,
+} from './host/store.ts';
+export type { CallRecord, HostLogRow, HostStore, MigrationRow, WakeRecord } from './host/store.ts';
 
 // A program's answer is a Response (std/http.tape): `handle` gives that value, and the function the compiler
 // generates around it (compiler/gen/answer.ts) writes it in a frame, which responseOf reads. A program writes no
@@ -289,31 +317,18 @@ export type InstantiateOptions = Omit<LinkOptions, 'recorded' | 'trace' | 'heap'
    * to leave the triggers as they are, when the host has installed them)
    */
   machines?: readonly MachineSpec[] | false | undefined;
+  /** the host's bookkeeping; a memory store is made when this is omitted */
+  store?: HostStore | undefined;
 };
 
-/** The host's own tables: replies to keyed commands, so a repeated key is answered without running again; timers. */
-function ownTables(sql: Sql, module: WebAssembly.Module): void {
-  const methods = listed<{ name: string }>(module, 'methods');
-  if (methods.length > 0) {
-    sql.exec(
-      'CREATE TABLE IF NOT EXISTS _calls(key TEXT PRIMARY KEY, status TEXT NOT NULL, body TEXT NOT NULL, message TEXT)',
-    );
-    // an object made before messages were kept: add the column (its old rows stay NULL, and are replayed as before)
-    if (sql.exec("SELECT 1 FROM pragma_table_info('_calls') WHERE name = 'message'").toArray().length === 0)
-      sql.exec('ALTER TABLE _calls ADD COLUMN message TEXT');
-  }
-  if (methods.some(m => m.name === 'woken')) {
-    sql.exec(
-      'CREATE TABLE IF NOT EXISTS _wakes(key INTEGER PRIMARY KEY, due INTEGER NOT NULL, trace TEXT, span TEXT NOT NULL, tries INTEGER NOT NULL DEFAULT 0)',
-    );
-    // an object made before failed runs were retried: add the count of storage failures in a row (0 for its rows)
-    if (sql.exec("SELECT 1 FROM pragma_table_info('_wakes') WHERE name = 'tries'").toArray().length === 0)
-      sql.exec('ALTER TABLE _wakes ADD COLUMN tries INTEGER NOT NULL DEFAULT 0');
-  }
-}
-
 /** The module's schema statements and migrations run on the database, with its machines' triggers put back after. */
-function prepare(sql: Sql, module: WebAssembly.Module, { migrations, machines }: InstantiateOptions): Migrated[] {
+function prepare(
+  sql: Sql,
+  store: HostStore,
+  module: WebAssembly.Module,
+  { migrations, machines }: InstantiateOptions,
+): Migrated[] {
+  importHostTables(sql, store);
   const own =
     machines === false || (migrations === false && machines === undefined)
       ? null
@@ -321,21 +336,21 @@ function prepare(sql: Sql, module: WebAssembly.Module, { migrations, machines }:
   if (own) dropMachines(sql);
   for (const s of listed<string>(module, 'schema')) sql.exec(s);
   const chain = migrations === false ? [] : (migrations ?? listed<Link>(module, 'migrations'));
-  const migrated = chain.length > 0 ? migrate(sql, chain) : [];
+  const migrated = chain.length > 0 ? migrate(sql, store, chain) : [];
   if (own) installMachines(sql, own);
-  ownTables(sql, module);
   return migrated;
 }
 
 export function instantiate(
   module: WebAssembly.Module,
   options: InstantiateOptions = {},
-): App & { migrated: Migrated[] } {
+): App & { migrated: Migrated[]; store: HostStore } {
   const { sql, log, services, name, sink, random, timers, observe, secrets, http } = options;
-  const migrated = sql ? prepare(sql, module, options) : [];
-  const given = { sql, log, services, name, sink, random, timers, observe, secrets, http };
+  const store = storeFor(sql, options.store);
+  const migrated = sql ? prepare(sql, store, module, options) : [];
+  const given = { sql, log, services, name, sink, random, timers, observe, secrets, http, store };
   const set = Object.fromEntries(Object.entries(given).filter(([, v]) => v !== undefined));
-  return Object.assign(link(module, set), { migrated });
+  return Object.assign(link(module, set), { migrated, store });
 }
 
 /** What a replay reads beside its log: the secrets, by the versions the log names. */

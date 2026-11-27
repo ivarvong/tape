@@ -11,6 +11,7 @@ import fulfillment from '../../examples/fulfillment.tape?raw';
 import { docOf } from '../jepsen/traces.ts';
 import type { Attr, RawEvent, RawResource, RawSpan } from '../jepsen/traces.ts';
 import { anyone, at, call, fields, got, json, list, num, pause, roomy, text } from './help.ts';
+import { Name } from '../src/name.ts';
 import type { Fields } from '../jepsen/json.ts';
 import type { Init } from './help.ts';
 
@@ -518,7 +519,17 @@ fn count(found: Option[Count]) -> Response {
     const M =
       'type SaleState { Pending Paid Declined }\nmachine s.state: SaleState {\n  Pending -> Paid\n  Pending -> Declined\n}\n';
     const routes = (machine: string, lines: readonly string[]): string =>
-      `${S}${machine}fn handle(raw: View, db: Sql) -> Response {\n  match request(raw) {\n${lines.join('\n')}\n    Request(method: Get, path: "/triggers") -> buf() |> append(view: sql_first(db, row: Text, query: "SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master WHERE type = 'trigger'") |> shown) |> respond(status: 200)\n    _ -> empty(status: 404)\n  }\n}\ntype Text { Text(text: View) }\nfn shown(found: Option[Text]) -> View {\n  match found {\n    Some(value: Text(text)) -> text\n    None -> ""\n  }\n}\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\ntype Sold { Sold(id: Int) }\nfn moved(m: Move[Sold]) -> Response {\n  match m {\n    Moved(value) -> buf() |> write_int(value: 1) |> respond(status: 200)\n    Raced(now) -> empty(status: 409)\n    NoRow -> empty(status: 404)\n  }\n}\n`;
+      `${S}${machine}fn handle(raw: View, db: Sql) -> Response {\n  match request(raw) {\n${lines.join('\n')}\n    _ -> empty(status: 404)\n  }\n}\nfn done(n: Int) -> Response {\n  buf() |> write_int(value: n) |> respond(status: 200)\n}\ntype Sold { Sold(id: Int) }\nfn moved(m: Move[Sold]) -> Response {\n  match m {\n    Moved(value) -> buf() |> write_int(value: 1) |> respond(status: 200)\n    Raced(now) -> empty(status: 409)\n    NoRow -> empty(status: 404)\n  }\n}\n`;
+    // Trigger SQL is host state (sqlite_master is not in a program's Sql). The data facet holds it; Name's SQLite does not.
+    const triggerSql = (published = 'ivar/mach'): Promise<string> => {
+      const cut = published.indexOf('/');
+      const account = published.slice(0, cut);
+      const name = published.slice(cut + 1);
+      return runInDurableObject(env.NAMES.get(env.NAMES.idFromName(published)), o => {
+        if (!(o instanceof Name)) throw new TypeError('not a Name');
+        return o.data(account, name).triggerSql();
+      });
+    };
     const make =
       '    Request(method: Post, path: "/new/" ++ key) -> done(n: sql_exec(db, query: "INSERT INTO s(key) VALUES (:key) ON CONFLICT(key) DO NOTHING", key))';
     const pay =
@@ -539,8 +550,8 @@ fn count(found: Option[Count]) -> Response {
     expect([
       (await answered('/v/1/new/a', { method: 'POST' }))[0],
       await answered('/v/1/pay/a', { method: 'POST' }),
-      await answered('/v/1/triggers'),
-    ]).toEqual([200, [200, '1'], [200, '']]);
+      await triggerSql(),
+    ]).toEqual([200, [200, '1'], '']);
     // v2 declares the machine, which has no void: v1's move is allowed while v1 is live, and listed
     const untyped = await call('/ivar/mach', { method: 'POST', body: routes(M, [make, pay]) });
     expect([untyped.status, codes(at(await json(untyped), 'errors'))]).toEqual([400, ['C62']]);
@@ -563,7 +574,7 @@ fn count(found: Option[Count]) -> Response {
       [1, ['C59']],
       [2, 'passes'],
     ]);
-    const [, both] = await answered('/v/2/triggers');
+    const both = await triggerSql();
     expect([both.includes('NEW."state" IS \'paid\''), both.includes('NEW."state" IS \'void\'')]).toEqual([true, true]);
     expect(await answered('/v/1/void/a', { method: 'POST' })).toEqual([200, '1']); // not broken
     // v2's typed compare-and-set: Moved, then Raced for the same row, then NoRow for a key with no row
@@ -584,7 +595,7 @@ fn count(found: Option[Count]) -> Response {
     // is refused by the data check
     const retired = await call('/ivar/mach/v/1', { method: 'DELETE' });
     expect([retired.status, list(at(await json(retired), 'machines', 'installed')).length]).toEqual([200, 2]);
-    const [, only] = await answered('/v/2/triggers');
+    const only = await triggerSql();
     expect([only.includes('NEW."state" IS \'paid\''), only.includes("'void'")]).toEqual([true, false]); // made again without v1's move
     const v4 = await call('/ivar/mach', {
       method: 'POST',

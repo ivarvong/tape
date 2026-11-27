@@ -203,7 +203,7 @@ export type Ty = { t: TyName; null: boolean; param?: number; pkNull?: string };
 export type ColFacts = { name: string; aff: Affinity; notNull: boolean; rowid?: true } & Partial<
   Pick<Column, 'type' | 'default' | 'pk' | 'checks'>
 >;
-/** A table as the checker reads it. `builtin`: SQLite's own (sqlite_master), which may be read and not written. */
+/** A table as the checker reads it. `builtin`: reserved (unused now that sqlite_* is unreachable from program Sql). */
 export type TableFacts = Omit<Table, 'cols' | 'strict'> & { cols: ColFacts[]; strict?: boolean; builtin?: true };
 /**
  * Something a column name can come from: a table of FROM, a subquery in FROM, the table an INSERT or UPDATE

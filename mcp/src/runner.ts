@@ -11,7 +11,7 @@
 // request every timer due by then runs, oldest first (`woken`, as a result of its own), so a test can step past a
 // window or a retry delay. The host reads Date.now() (host/run.ts: now, wake and the due check), so the clock is
 // Date.now itself, replaced for the length of the run; runs in one isolate are taken one at a time for that.
-import { TimedOut, fixedSecrets, framed, instantiate, isEffect, replay, stubHttp, traceOf } from './host.ts';
+import { TimedOut, fixedSecrets, framed, instantiate, isEffect, replay, stubHttp, traceOf, wakeRows } from './host.ts';
 import type { App, Effect, HttpClient, SecretStore, Service, ServiceReply, StubAnswer, TraceEvent } from './host.ts';
 import { loadSqlite, nodeSql, sqliteReady } from './sqlite.ts';
 import type { InitSqlJs, NodeSql, SqlJs } from './sqlite.ts';
@@ -284,14 +284,7 @@ async function wokenRun(app: App, db: NodeSql, key: number, due: number, start: 
 }
 
 /** The timers set, each key with when it is due. */
-const dueTimes = (db: NodeSql): Map<number, number> => {
-  try {
-    const rows = db.exec('SELECT key, due FROM _wakes ORDER BY due, key').toArray();
-    return new Map(rows.map(r => [Number(r['key']), Number(r['due'])]));
-  } catch {
-    return new Map();
-  }
-};
+const dueTimes = (app: App): Map<number, number> => new Map(wakeRows(app.store).map(w => [w.key, w.due]));
 
 /** The run again from its log, through the traced build: what the line trace is made of. */
 function lineTrace(
@@ -363,7 +356,7 @@ async function runEach(
         // every timer due by now, oldest first; one a woken sets that is due already runs too
         for (let key = app.due(now)[0]; key !== undefined && fired < MAX_WOKEN; key = app.due(now)[0]) {
           fired++;
-          runs.push(await wokenRun(app, db, key, dueTimes(db).get(key) ?? now, start, now));
+          runs.push(await wokenRun(app, db, key, dueTimes(app).get(key) ?? now, start, now));
         }
       }
       const bytes = enc.encode(request),
@@ -399,7 +392,9 @@ async function runEach(
       program_bytes: memoryIn(app.exports)?.buffer.byteLength ?? 0,
       sqlite_bytes: sqliteMemory?.buffer.byteLength ?? 0,
     };
-    return own ? { ok: true, runs, timers: { fired, pending: dueTimes(db).size }, memory } : { ok: true, runs, memory };
+    return own
+      ? { ok: true, runs, timers: { fired, pending: dueTimes(app).size }, memory }
+      : { ok: true, runs, memory };
   } finally {
     db.close();
   }

@@ -370,7 +370,9 @@ argument is C13, an argument with no name in the query is C11, and a `?` is C32.
 with the names numbered in the order they first appear (`?1`, `?2`), and that is the form the effect log shows.
 
 SQL is checked at compile time against the program's tables: names, the type of each value against where it is
-used, and the row type's fields against the columns (`*` means the row type's fields, by name). A Float is given
+used, and the row type's fields against the columns (`*` means the row type's fields, by name). A program's `Sql`
+does not reach the host's bookkeeping (keyed replies, timers, applied migrations, the effect log) or SQLite's
+catalogs (`sqlite_master`, `sqlite_schema`, and other `sqlite_*` names): those are not in the program's tables. A Float is given
 to a query as a number, which SQLite keeps as REAL, and a REAL column reads into a Float field (a cell that is
 not a finite number stops the request). In JSON a Float is a number: decoded from one that is finite (text, and
 `1e400`, are refused: `r: expected a number`), and written in the shortest digits that read back as it.

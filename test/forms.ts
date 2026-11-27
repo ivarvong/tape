@@ -12,7 +12,7 @@ import { readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { std } from '../std.ts';
 import type { Options } from '../compiler.ts';
-import { TimedOut, instantiate, isHead, isWake, replay } from '../host.ts';
+import { TimedOut, instantiate, isHead, isWake, replay, wakeRows } from '../host.ts';
 import { nodeSql } from '../nodesql.ts';
 import type { Effect, Head, Service, Transaction } from '../host.ts';
 import { answered, bare, built, call, finish, messageOf, moduleOf, objectIn, same as T } from './harness.ts';
@@ -681,7 +681,10 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     const r = await app.runLogged(enc.encode(t.trim()), { transaction: tx });
     return { ...r, text: answered(r.out) };
   };
-  const pending = () => sql.exec('SELECT key, due FROM _wakes ORDER BY key').toArray();
+  const pending = () =>
+    wakeRows(app.store)
+      .map(w => ({ key: w.key, due: w.due }))
+      .toSorted((a, b) => a.key - b.key);
   /** When the timer a run set is due. */
   const dueOf = (effects: readonly Effect[]): number => effects.find(isWake)?.due ?? Number.NaN;
   T(
@@ -703,7 +706,7 @@ export fn woken(db: Sql, timer: Timer, message: Wake) -> Result[Done, View] {
     ['202\n', 250, ['wake', 'after', 'due'], true],
   );
   T(
-    'timer: it is kept in _wakes, and is not due yet',
+    'timer: it is kept in the host store, and is not due yet',
     [pending().map(r => r.key), app.due(), app.next() === dueOf(set.effects)],
     [[7], [], true],
   );

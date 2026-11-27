@@ -650,12 +650,11 @@ function, and no syntax. The compiler holds it together: a program that can reac
 A program that never calls it gets no `env.wake` import, so its module is the same as before.
 
 A timer is an effect, recorded on the tape like the time or a call: `{ "wake": 1, "after": 1000, "due": … }`. A
-replay answers `wake` from the log and sets nothing. The host keeps timers in the program's SQLite (`_wakes`, one
-row per key), written in the same transaction as the request's writes, so a timer exists exactly when the request
+replay answers `wake` from the log and sets nothing. The host keeps timers in the host store (the same Durable Object's key-value storage, not the program's Sql), written in the same transaction as the request's writes, so a timer exists exactly when the request
 that set it committed: a rollback or a trap drops it. Setting a key again moves its time. In the service, the
 earliest timer becomes the name's Durable Object alarm; the alarm runs every due `woken` through the latest
 version, logged like a request and traced as a child span of the run that set it, so the two are one trace. A
-timer's row is removed in the same transaction as its run's last writes: a run cut short (the object reset while it
+timer is removed in the same transaction as its run's last writes: a run cut short (the object reset while it
 waited on a call) is woken again, and each run carries on from the data. A run that traps is recorded and not
 retried: it would trap again. A run that fails on a storage error such as `SQLITE_BUSY` keeps its timer, set for
 later by a wait that doubles with each such failure in a row (1 s, 2 s, … up to 15 minutes), so it too runs at least
@@ -774,7 +773,7 @@ migration 3 "drop the old index" contract {
 
 The compiler bakes the chain into the module, each migration hashed with every one before it, and checks the
 queries against the schema at the end of the chain. `instantiate` applies the missing ones in one transaction and
-records them in `schema_migrations(version, name, hash, applied_at)`. Applied migrations are append-only: a stored
+records them in the host store. Applied migrations are append-only: a stored
 hash that differs from the program's (an edited migration) stops the program before anything runs. A migration
 that removes a table or column must be marked `contract`, because a version still running may depend on what it
 removes. That is judged by what the migration did, comparing the tables and columns before and after it runs, not

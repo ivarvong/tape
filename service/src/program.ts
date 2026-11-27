@@ -1,6 +1,7 @@
 // program.ts: the Dynamic Worker for one name's data. The supervisor (Name, in index.ts) loads it with every live
 // version's builds (versions.js, generated) and runs its Program class as the name's one facet, "data": a child
-// Durable Object whose SQLite holds the program's tables, schema_migrations and every request's effect log, shared
+// Durable Object whose SQLite holds the program's tables. Host bookkeeping (keyed replies, timers, applied
+// migrations, the effect log) lives in the same object's key-value storage, outside the program's Sql. Shared
 // by all live versions. Before the first request it runs the migrations env.PLAN.apply lists (the latest version's
 // chain, up to any contract migration that is held), as one transaction, recorded like a request. env.CALLS reaches
 // other programs in the same account; env.SELF names this object, so its command keys are the same in every version.
@@ -18,12 +19,26 @@ import {
   machineTriggersIn,
   isEffect,
   isHead,
+  durableStore,
+  getLog,
+  getMigrations,
+  getWake,
+  importHostTables,
+  logStats,
+  logsSince,
+  nextWakeDue,
+  pruneLogs,
+  recordLog,
+  requestHeads as storeRequestHeads,
+  updateLogEffects,
+  wakeRows,
 } from './host.ts';
 import { redactedText } from './host.ts';
 import type {
   App,
   Effect,
   Header,
+  HostStore,
   HttpAnswer,
   HttpRequest,
   MachineSpec,
@@ -72,8 +87,6 @@ export type Env = {
   };
 };
 
-const LOG =
-  'CREATE TABLE IF NOT EXISTS _tape_log(id TEXT PRIMARY KEY, version INTEGER NOT NULL, request BLOB NOT NULL, effects TEXT NOT NULL, at INTEGER NOT NULL)';
 const dec = new TextDecoder(),
   enc = new TextEncoder();
 type Fields = Readonly<Record<string, unknown>>;
@@ -299,7 +312,6 @@ const withHead = (effects: readonly Effect[], more: Partial<RunHead>): Entry[] =
   const [head, ...rest] = effects;
   return head && isHead(head) ? [{ ...head, ...more }, ...rest] : [...effects];
 };
-const bytesOf = (v: unknown): Uint8Array => (v instanceof ArrayBuffer ? new Uint8Array(v) : new Uint8Array(0));
 /** A stored log's entries. */
 const logOf = (text: unknown): Entry[] => {
   const list: unknown = JSON.parse(textOf(text));
@@ -424,18 +436,21 @@ const checkPrepared = (
   };
 };
 /** The migration already run on this data whose hash is not the candidate's, as a problem. */
-const editedMigration = (sql: Sql, candidate: number, chain: Chain): { done: number; problem: CheckProblem | null } => {
-  const done = sql.exec('SELECT version, name, hash FROM schema_migrations ORDER BY version').toArray();
+const editedMigration = (
+  store: HostStore,
+  candidate: number,
+  chain: Chain,
+): { done: number; problem: CheckProblem | null } => {
+  const done = getMigrations(store);
   const at = done.findIndex((d, i) => chain[i] !== undefined && chain[i].hash !== d.hash),
     bad = done[at];
   if (!bad) return { done: done.length, problem: null };
-  const version = numberOf(bad.version);
   return {
     done: done.length,
     problem: {
       version: candidate,
-      migration: version,
-      reason: `migration ${version} "${textOf(bad.name)}" ran on this data with hash ${textOf(bad.hash).slice(0, 12)}; v${candidate}'s is ${chain[at]?.hash.slice(0, 12) ?? ''}. Applied migrations are append-only: add a new one instead of editing it.`,
+      migration: bad.version,
+      reason: `migration ${bad.version} "${bad.name}" ran on this data with hash ${bad.hash.slice(0, 12)}; v${candidate}'s is ${chain[at]?.hash.slice(0, 12) ?? ''}. Applied migrations are append-only: add a new one instead of editing it.`,
     },
   };
 };
@@ -475,6 +490,7 @@ function scrubbed<T>(v: T, held: readonly StoredSecret[]): T {
 }
 
 export class Program extends DurableObject<Env> {
+  readonly #store: HostStore;
   readonly #apps = new Map<number, App>();
   /** this name's secrets, every version kept, as its object held them when the run in hand began */
   #held: StoredSecret[] = [];
@@ -499,7 +515,7 @@ export class Program extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     const { sql } = ctx.storage;
-    sql.exec(LOG);
+    this.#store = durableStore(ctx.storage.kv);
     // The machine triggers (host.ts, installMachines) are dropped while the schema statements and migrations run (a
     // migration may rebuild a table, or drop a column a trigger names), then made again from the plan: the machines
     // of every live version, with the moves the versions that do not declare them make (rules.ts, machinePlan).
@@ -507,10 +523,11 @@ export class Program extends DurableObject<Env> {
       const plan = env.PLAN,
         at = Date.now();
       ctx.storage.transactionSync(() => {
+        importHostTables(sql, this.#store);
         dropMachines(sql);
         schemaFirst(sql);
       });
-      const applied = migrate(sql, plan.apply, { transaction: f => ctx.storage.transactionSync(f) });
+      const applied = migrate(sql, this.#store, plan.apply, { transaction: f => ctx.storage.transactionSync(f) });
       if (applied.length > 0) {
         const head: MigrationsHead = {
           migrations: true,
@@ -539,11 +556,17 @@ export class Program extends DurableObject<Env> {
   machines(): { installed: string[] } | { error: string } | null {
     return this.#machines;
   }
+  /** The CREATE TRIGGER text now in this data. sqlite_master is not in a program's Sql; the host reads it here. */
+  triggerSql(): string {
+    const row = this.ctx.storage.sql
+      .exec("SELECT coalesce(group_concat(sql, ' ; '), '') AS text FROM sqlite_master WHERE type = 'trigger'")
+      .toArray()[0];
+    const text = row === undefined ? undefined : row['text'];
+    return typeof text === 'string' ? text : '';
+  }
   /** How many migrations this data has had. */
   #migrated(): number {
-    const { sql } = this.ctx.storage;
-    const has = numberOf(sql.exec("SELECT count(*) AS n FROM sqlite_master WHERE name = 'schema_migrations'").one().n);
-    return has > 0 ? numberOf(sql.exec('SELECT count(*) AS n FROM schema_migrations').one().n) : 0;
+    return getMigrations(this.#store).length;
   }
   // the version's program, on this object's data; refused while its migrations are not all applied
   app(version: number): App {
@@ -570,6 +593,7 @@ export class Program extends DurableObject<Env> {
     );
     const app = instantiate(b.plain, {
       sql: this.ctx.storage.sql,
+      store: this.#store,
       name: this.env.SELF,
       services,
       secrets: this.#secrets,
@@ -580,16 +604,7 @@ export class Program extends DurableObject<Env> {
     return app;
   }
   record(version: number, request: Uint8Array, effects: readonly Entry[]): string {
-    const id = crypto.randomUUID();
-    this.ctx.storage.sql.exec(
-      'INSERT INTO _tape_log VALUES (?1, ?2, ?3, ?4, ?5)',
-      id,
-      version,
-      request,
-      JSON.stringify(effects),
-      Date.now(),
-    );
-    return id;
+    return recordLog(this.#store, version, request, JSON.stringify(effects));
   }
   /** A run's log, written in its transaction: made on the first stretch, replaced on each one after. */
   #logger(version: number, bytes: Uint8Array, more: Partial<RunHead> = {}): Logger {
@@ -604,22 +619,13 @@ export class Program extends DurableObject<Env> {
           ...(failed ? { failed } : {}),
         });
         if (id === null) id = this.record(version, bytes, list);
-        else this.ctx.storage.sql.exec('UPDATE _tape_log SET effects = ?2 WHERE id = ?1', id, JSON.stringify(list));
+        else updateLogEffects(this.#store, id, JSON.stringify(list));
       },
     };
   }
   // The first bytes of some runs' requests (GET /:account/:name/requests reads who they were for)
   requestHeads(ids: readonly string[]): Record<string, string> {
-    if (ids.length === 0) return {};
-    const rows = this.ctx.storage.sql
-      .exec(
-        `SELECT id, substr(request, 1, 4096) AS head FROM _tape_log WHERE id IN (${ids.map(() => '?').join(',')})`,
-        ...ids,
-      )
-      .toArray();
-    return Object.fromEntries(
-      rows.map(r => [textOf(r.id), typeof r.head === 'string' ? r.head : dec.decode(bytesOf(r.head))]),
-    );
+    return storeRequestHeads(this.#store, ids);
   }
   migration(): { id: string } | { error: string } | null {
     return this.#migration;
@@ -627,17 +633,12 @@ export class Program extends DurableObject<Env> {
   // The runs of one trace in this program's log (ids, oldest first), from `since` on: for a supervisor that lost
   // its record of a call, the run is still found by its trace.
   findRuns(trace: string, since = 0): { id: string; parent: string | null }[] {
-    return this.ctx.storage.sql
-      .exec(
-        'SELECT id, effects FROM _tape_log WHERE at >= ?1 AND effects LIKE ?2 ORDER BY at',
-        since,
-        `%"trace":"${trace}"%`,
-      )
-      .toArray()
+    return logsSince(this.#store, since)
+      .filter(r => r.effects.includes(`"trace":"${trace}"`))
       .flatMap(r => {
         const [head] = logOf(r.effects);
         const at = head && 'trace' in head ? head : null;
-        return at?.trace === trace ? [{ id: textOf(r.id), parent: at.parent ?? null }] : [];
+        return at?.trace === trace ? [{ id: r.id, parent: at.parent ?? null }] : [];
       });
   }
   // The upload check: would this data, as it stands, take the candidate version? In one transaction that is rolled
@@ -662,11 +663,8 @@ export class Program extends DurableObject<Env> {
     ];
     try {
       rolledBack(this.ctx.storage, () => {
-        sql.exec(
-          'CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, hash TEXT NOT NULL, applied_at INTEGER NOT NULL)',
-        );
         dropMachines(sql);
-        const { done, problem } = editedMigration(sql, candidate, chain);
+        const { done, problem } = editedMigration(this.#store, candidate, chain);
         if (problem) problems.push(problem);
         // again after the migrations
         for (const [, list] of own) tryAll(list, st => sql.exec(st).toArray());
@@ -916,18 +914,7 @@ export class Program extends DurableObject<Env> {
   }
   // R-RET-6: the log of all but the newest n requests is deleted; the count and the newest time removed
   pruneLog(n: number): { deleted: number; at: number | null } {
-    const { sql } = this.ctx.storage;
-    const [cut] = sql
-      .exec(
-        'SELECT rowid AS r FROM _tape_log WHERE rowid > (SELECT max(rowid) FROM _tape_log) - ?1 ORDER BY rowid LIMIT 1',
-        n,
-      )
-      .toArray();
-    if (!cut) return { deleted: 0, at: null };
-    const at = numberOf(cut.r);
-    const gone = sql.exec('SELECT count(*) AS c, max(at) AS at FROM _tape_log WHERE rowid < ?1', at).one();
-    if (numberOf(gone.c) > 0) sql.exec('DELETE FROM _tape_log WHERE rowid < ?1', at);
-    return { deleted: numberOf(gone.c), at: typeof gone.at === 'number' ? gone.at : null };
+    return pruneLogs(this.#store, n);
   }
   // R-UPG-2: op ids an older shard program stored in table ops (migration 2), which the current one does not read:
   // how many, and how many are timed op ids the current program would accept again (t at or after now - window -
@@ -969,34 +956,19 @@ export class Program extends DurableObject<Env> {
   }
   // what this name's data holds: the SQLite size and the request log's share of it
   storageUse(): { bytes: number; log_rows: number; log_bytes: number } {
-    const { sql } = this.ctx.storage;
-    const [log] = sql
-      .exec('SELECT count(*) AS rows, coalesce(sum(length(request) + length(effects)), 0) AS bytes FROM _tape_log')
-      .toArray();
-    return { bytes: sql.databaseSize, log_rows: numberOf(log?.rows), log_bytes: numberOf(log?.bytes) };
+    const log = logStats(this.#store);
+    return { bytes: this.ctx.storage.sql.databaseSize, log_rows: log.rows, log_bytes: log.bytes };
   }
   // Timers (wake): the earliest time one is set for, the ones set, and running the ones that are due. The program's
-  // own host keeps them in _wakes, in the same transactions as its writes; the supervisor turns the earliest into
+  // own host keeps them in the host store, in the same transactions as its writes; the supervisor turns the earliest into
   // this name's Durable Object alarm. Only the latest version runs a woken program; when it exports no `woken`,
   // the timers wait (and arm nothing) until a version that does.
   nextWake(): number | null {
     if (V.get(this.env.PLAN.latest)?.woken !== true) return null;
-    try {
-      const { due } = this.ctx.storage.sql.exec('SELECT min(due) AS due FROM _wakes').one();
-      return typeof due === 'number' ? due : null;
-    } catch {
-      return null;
-    }
+    return nextWakeDue(this.#store);
   }
   wakesSet(): { key: number; due: number }[] {
-    try {
-      return this.ctx.storage.sql
-        .exec('SELECT key, due FROM _wakes ORDER BY due, key')
-        .toArray()
-        .map(r => ({ key: numberOf(r.key), due: numberOf(r.due) }));
-    } catch {
-      return [];
-    }
+    return wakeRows(this.#store).map(w => ({ key: w.key, due: w.due }));
   }
   /** Run one timer that is due. As for a request (fetch): the log is written in the transaction of each stretch's
    * writes, marked partial until the last, so a woken run cut short while it waited on a call (its object reset)
@@ -1006,8 +978,8 @@ export class Program extends DurableObject<Env> {
   async #wakeOne(app: App, version: number, key: number, faulty = false): Promise<WokenRun | null> {
     const began = Date.now(),
       bytes = enc.encode(JSON.stringify({ key }));
-    const [row] = this.ctx.storage.sql.exec('SELECT due FROM _wakes WHERE key = ?1', key).toArray();
-    const woke: Woke = { key, due: typeof row?.due === 'number' ? row.due : null };
+    const row = getWake(this.#store, key);
+    const woke: Woke = { key, due: row === undefined ? null : row.due };
     const log = this.#logger(version, bytes, { woke });
     let fault = faulty;
     const transaction: Transaction = f =>
@@ -1056,22 +1028,20 @@ export class Program extends DurableObject<Env> {
   // read secrets is replayed with the versions its log names, and every string of the view has each value the name
   // holds written `[secret <name>]`.
   async view(id: string): Promise<RequestView | null> {
-    const [row] = this.ctx.storage.sql.exec('SELECT version FROM _tape_log WHERE id = ?1', id).toArray();
+    const row = getLog(this.#store, id);
     if (!row) return null;
-    await this.#loadSecrets(numberOf(row.version));
-    return scrubbed(this.#view(id), V.get(numberOf(row.version))?.secrets === true ? this.#held : []);
+    await this.#loadSecrets(row.version);
+    return scrubbed(this.#view(id), V.get(row.version)?.secrets === true ? this.#held : []);
   }
   #view(id: string): RequestView | null {
-    const [row] = this.ctx.storage.sql
-      .exec('SELECT version, request, effects, at FROM _tape_log WHERE id = ?1', id)
-      .toArray();
+    const row = getLog(this.#store, id);
     if (!row) return null;
     const effects = logOf(row.effects),
       [head, ...steps] = effects,
-      version = numberOf(row.version),
+      version = row.version,
       b = V.get(version),
-      sent = bytesOf(row.request);
-    const base = { id, version, at: numberOf(row.at), effects, source: b?.source ?? '', queries: b?.queries ?? [] };
+      sent = row.request;
+    const base = { id, version, at: row.at, effects, source: b?.source ?? '', queries: b?.queries ?? [] };
     const asText = { ...base, request: dec.decode(sent), error: null };
     if (isCheckHead(head)) return { ...asText, ...checkView(head, steps) };
     if (isMigrationsHead(head))
